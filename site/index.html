@@ -136,7 +136,7 @@ async function load(){
   sourceState("mexc-candle-state",c&&c.status==="OK"?"REÇU":"INDISPONIBLE",!!(c&&c.status==="OK"));$("mexc-candle-detail").textContent=c&&c.status==="OK"?String(c.closed_candles_used||"?")+" chandelles terminées · "+date(i&&i.last_closed_candle_at):(c&&c.reason)||"Pas de chandelles exploitables";
   sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Prix "+price(k.last)+" USDT · "+date(k.observed_at):(k&&k.reason)||"Comparaison indépendante indisponible";
   renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Rapport généré : "+date(d.generated_at);
- }catch(err){if(reportGeneratedAt)currentGeneratedAt=reportGeneratedAt;clearMarketView(reportGeneratedAt,reportAgeMs,freshnessState);setWaiting(err.message||"Impossible de lire le rapport · ATTENDRE");}
+ }catch(err){if(reportGeneratedAt)currentGeneratedAt=reportGeneratedAt;clearMarketView(reportGeneratedAt,reportAgeMs,freshnessState==="stale"?"stale":"invalid");setWaiting(err.message||"Impossible de lire le rapport · ATTENDRE");}
  finally{button.disabled=false;button.textContent="↻ Actualiser";}
 }
 $("refresh").addEventListener("click",load);load();
