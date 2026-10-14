@@ -59,14 +59,14 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
 
 (async () => {
   const absentRoot = fakeEnvironment(undefined);
-  const absentController = realtime.mount(absentRoot);
+  const absentController = rt.mount(absentRoot);
   assert.match(absentController.state.mexc.status, /RECONNEXION/);
   assert.match(absentRoot.elements["realtime-status"].textContent, /ATTENDRE/);
   absentController.stop();
 
   FakeSocket.instances = [];
   const root = fakeEnvironment(FakeSocket);
-  const controller = realtime.mount(root);
+  const controller = rt.mount(root);
   await Promise.resolve(); await Promise.resolve();
   assert.equal(FakeSocket.instances.length, 2, "both public feeds attempt a connection");
   const mexcSocket = FakeSocket.instances[0], kucoinSocket = FakeSocket.instances[1];
@@ -81,6 +81,5 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
   root.runTimeout(1000);
   assert.equal(FakeSocket.instances.length, 3, "closed MEXC socket reconnects after backoff");
   controller.stop();
+  process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });
-
-process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");
