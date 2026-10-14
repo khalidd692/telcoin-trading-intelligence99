@@ -1,60 +1,95 @@
-name: TEL market monitor
+name: TEL market monitor and website
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: telcoin-market-monitor
   cancel-in-progress: true
 
 jobs:
-  monitor:
+  monitor-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-        name: Checkout
-      - uses: actions/setup-python@v5
-        name: Set up Python
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Collect public market data
-        run: python -m src.monitor --output report.json
+        id: collect
+        continue-on-error: true
+        run: python -m src.monitor --output site/report.json
+      - name: Ensure fail-closed report exists
+        if: always()
+        run: |
+          if [ ! -s site/report.json ]; then
+            python - <<'PY'
+            import json
+            from datetime import datetime, timezone
+            d = {
+                "schema_version": 1,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "symbol": "TELUSDT",
+                "mode": "READ_ONLY_ALERTS",
+                "status": "ATTENDRE",
+                "sources": {
+                    "mexc_ticker": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"},
+                    "mexc_candles": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"},
+                    "kucoin_level1": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"}
+                },
+                "checks": [{"name": "Collection pipeline", "status": "FAIL", "reason": "No valid report produced; fail-closed"}],
+                "indicators": None,
+                "error": "No market report was produced by the collector.",
+                "disclaimer": "Read-only monitoring. No orders. No profitability claims."
+            }
+            with open("site/report.json", "w", encoding="utf-8") as f:
+                json.dump(d, f, indent=2, ensure_ascii=False)
+            PY
+          fi
       - name: Write run summary
         if: always()
         run: |
-          if [ -f report.json ]; then
-            python - <<'PY'
-            import json, os
-            d=json.load(open("report.json", encoding="utf-8"))
-            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
-                f.write("# TEL/USDT market monitor\n\n")
-                f.write(f"- **Status:** {d.get('status','UNKNOWN')}\n")
-                f.write(f"- **Generated:** {d.get('generated_at','unknown')}\n")
-                t=d.get('sources',{}).get('mexc_ticker',{})
-                if t.get('last') is not None:
-                    f.write(f"- **MEXC last:** {t['last']} USDT\n")
-                    f.write(f"- **Spread:** {t.get('spread_pct','unknown')}%\n")
-                if d.get('error'): f.write(f"- **Error:** {d['error']}\n")
-                for c in d.get('checks',[]):
-                    f.write(f"- {c.get('status')}: {c.get('name')} — {c.get('reason', c.get('value_pct',''))}\n")
-                f.write("\n> Read-only monitoring; no orders; SURVEILLER is not a buy signal.\n")
-            PY
-          else
-            echo "# TEL/USDT market monitor" >> "$GITHUB_STEP_SUMMARY"
-            echo "ATTENDRE — no report was produced." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload JSON report
-        if: always() && hashFiles('report.json') != ''
-        uses: actions/upload-artifact@v4
+          python - <<'PY'
+          import json, os
+          d=json.load(open("site/report.json", encoding="utf-8"))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("# TEL/USDT market monitor\n\n")
+              f.write(f"- **Status:** {d.get('status','UNKNOWN')}\n")
+              f.write(f"- **Generated:** {d.get('generated_at','unknown')}\n")
+              t=d.get('sources',{}).get('mexc_ticker',{})
+              if t.get('last') is not None:
+                  f.write(f"- **MEXC last:** {t['last']} USDT\n")
+                  f.write(f"- **Spread:** {t.get('spread_pct','unknown')}%\n")
+              if d.get('error'): f.write(f"- **Error:** {d['error']}\n")
+              for c in d.get('checks',[]):
+                  f.write(f"- {c.get('status')}: {c.get('name')} — {c.get('reason', c.get('value_pct',''))}\n")
+              f.write("\n> Read-only monitoring; no orders; SURVEILLER is not a buy signal.\n")
+          PY
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
         with:
-          name: telcoin-market-report
-          path: report.json
-          retention-days: 14
+          enablement: true
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
