@@ -57,7 +57,7 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <div class="source-row"><div><div class="source-name">KuCoin · vérification indépendante</div><div class="source-detail" id="kucoin-detail">Aucune observation chargée</div></div><span class="source-state fail" id="kucoin-state">INCONNU</span></div></article>
 <article class="panel"><div class="panel-head"><div><h3>Contrôles de qualité</h3><div class="caption">Un échec impose l’attente</div></div></div><div id="checks"><div class="source-row"><div><div class="source-name">Rapport de collecte</div><div class="source-detail">En attente du premier rapport</div></div><span class="source-state fail">INCONNU</span></div></div><div class="caption" id="report-error" style="margin-top:12px"></div></article></section>
 <aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment, le contexte BTC et les analyses multi-unités ne sont pas encore intégrés à cette version.</div></aside>
-<footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Rapport généré : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
+<footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Collecte UTC : inconnue</span><span id="report-age">Âge des données : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
 </div>
 <script>
 (function(){
@@ -87,11 +87,24 @@ function renderChecks(checks){
  if(!Array.isArray(checks)||!checks.length){host.innerHTML='<div class="source-row"><div><div class="source-name">Contrôles</div><div class="source-detail">Aucun contrôle rapporté</div></div><span class="source-state fail">INCONNU</span></div>';return;}
  host.innerHTML=checks.map(function(c){var ok=c.status==="PASS",detail=c.reason||(c.value_pct!==undefined?"Valeur : "+fmt(c.value_pct,4)+" %":"Résultat du contrôle");return '<div class="source-row"><div><div class="source-name">'+String(c.name||"Contrôle").replace(/[&<>"]/g,"")+'</div><div class="source-detail">'+String(detail).replace(/[&<>"]/g,"")+'</div></div><span class="source-state '+(ok?"pass":"fail")+'">'+(ok?"OK":"ÉCHEC")+'</span></div>';}).join("");
 }
+function clearMarketView(){
+ ["last-price","change-24h","spread","volume-24h","ema12","ema26","ema50","rsi","atr","atr-pct","vol-ratio"].forEach(function(id){$(id).textContent="—";});
+ $("price-time").textContent="Aucune observation fraîche disponible";$("spread-foot").textContent="Pas de cotations disponibles";
+ drawChart(null);sourceState("mexc-ticker-state","INDISPONIBLE",false);sourceState("mexc-candle-state","INDISPONIBLE",false);sourceState("kucoin-state","INDISPONIBLE",false);
+ $("mexc-ticker-detail").textContent="Aucune observation fraîche chargée";$("mexc-candle-detail").textContent="Aucune clôture fraîche chargée";$("kucoin-detail").textContent="Aucune observation fraîche chargée";
+ $("generated").textContent="Collecte UTC : inconnue";$("report-age").textContent="Âge des données : inconnu";
+}
 async function load(){
  var button=$("refresh");button.disabled=true;button.textContent="Chargement…";
  try{
   var response=await fetch("./report.json?t="+Date.now(),{cache:"no-store"});if(!response.ok)throw new Error("Rapport indisponible (HTTP "+response.status+")");
-  var d=await response.json(),t=d.sources&&d.sources.mexc_ticker,c=d.sources&&d.sources.mexc_candles,k=d.sources&&d.sources.kucoin_level1,i=d.indicators,status=d.status||"ATTENDRE",passed=status==="SURVEILLER";
+  var d=await response.json(),generatedMs=Date.parse(d.generated_at),reportAgeMs=Date.now()-generatedMs;
+  if(d.schema_version!==1||d.symbol!=="TELUSDT"||d.mode!=="READ_ONLY_ALERTS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.sources||!Array.isArray(d.checks)||!Number.isFinite(generatedMs))throw new Error("Schéma de rapport invalide · ATTENDRE");
+  if(reportAgeMs < -60000 || reportAgeMs > 20*60*1000)throw new Error("Rapport périmé ou horodatage incohérent · ATTENDRE");
+  var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER";
+  if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker MEXC invalide · ATTENDRE");
+  if(k&&k.status==="OK"&&(!Number.isFinite(Number(k.last))||Number(k.last)<=0||!Number.isFinite(Date.parse(k.observed_at))))throw new Error("Ticker KuCoin invalide · ATTENDRE");
+  $("report-age").textContent="Âge des données : "+Math.max(0,Math.floor(reportAgeMs/1000))+" s";
   $("main-status").className="status "+(passed?"ok":"");$("main-status").innerHTML="<span>●</span><span>"+(passed?"SURVEILLER · contrôles passés":"ATTENDRE · données à vérifier")+"</span>";
   $("header-state").textContent=passed?"Contrôles passés":"Surveillance prudente";$("header-dot").style.background=passed?"var(--green)":"var(--amber)";
   $("last-price").textContent=t?price(t.last):"—";$("price-time").textContent=t&&t.observed_at?"Observation "+date(t.observed_at):"Aucune observation disponible";
@@ -104,9 +117,12 @@ async function load(){
   sourceState("mexc-candle-state",c&&c.status==="OK"?"REÇU":"INDISPONIBLE",!!(c&&c.status==="OK"));$("mexc-candle-detail").textContent=c&&c.status==="OK"?String(c.closed_candles_used||"?")+" chandelles terminées · "+date(i&&i.last_closed_candle_at):(c&&c.reason)||"Pas de chandelles exploitables";
   sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Prix "+price(k.last)+" USDT · "+date(k.observed_at):(k&&k.reason)||"Comparaison indépendante indisponible";
   renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Rapport généré : "+date(d.generated_at);
- }catch(err){$("main-status").className="status";$("main-status").innerHTML="<span>●</span><span>ATTENDRE · rapport absent</span>";$("header-state").textContent="Rapport indisponible";$("report-error").textContent=err.message||"Impossible de lire le rapport";}
+ }catch(err){clearMarketView();$("main-status").className="status";$("main-status").innerHTML="<span>●</span><span>ATTENDRE · rapport absent ou périmé</span>";$("header-state").textContent="Rapport indisponible";$("header-dot").style.background="var(--amber)";$("report-error").textContent=err.message||"Impossible de lire le rapport";renderChecks([]);}
  finally{button.disabled=false;button.textContent="↻ Actualiser";}
 }
 $("refresh").addEventListener("click",load);load();
+// Collection runs every 15 minutes; poll for its next published snapshot once per minute.
+window.setInterval(load,60*1000);
 })();
 </script></body></html>
+
