@@ -14,6 +14,7 @@ from typing import Any
 SYMBOL = "TELUSDT"
 TIMEOUT_SECONDS = 10
 MAX_SPREAD_PCT = 0.50
+MAX_REPORT_AGE_SECONDS = 20 * 60
 USER_AGENT = "telcoin-trading-intelligence/0.1 (read-only public market data)"
 
 
@@ -122,10 +123,30 @@ def kucoin_price() -> dict[str, float]:
     if not isinstance(data, dict) or data.get("code") != "200000" or not isinstance(data.get("data"), dict):
         raise DataUnavailable("unexpected KuCoin response")
     d = data["data"]
-    return {
+    result = {
         "last": number(d.get("price"), "KuCoin last"),
         "bid": number(d.get("bestBid"), "KuCoin bid"),
         "ask": number(d.get("bestAsk"), "KuCoin ask"),
+    }
+    if result["ask"] < result["bid"]:
+        raise DataUnavailable("KuCoin ask below bid")
+    return result
+
+
+def fallback_report(reason: str) -> dict[str, Any]:
+    """Return a schema-valid, fail-closed report when collection cannot complete."""
+    return {
+        "schema_version": 1, "generated_at": utc_now().isoformat(),
+        "symbol": SYMBOL, "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
+        "sources": {
+            "mexc_ticker": {"status": "UNAVAILABLE", "reason": reason},
+            "mexc_candles": {"status": "UNAVAILABLE", "reason": reason},
+            "kucoin_level1": {"status": "UNAVAILABLE", "reason": reason},
+        },
+        "checks": [{"name": "Collection pipeline", "status": "FAIL", "reason": reason}],
+        "indicators": None, "error": reason,
+        "interpretation": "Rapport de secours. Fail-closed : ATTENDRE.",
+        "disclaimer": "Read-only monitoring. No orders. No profitability claims.",
     }
 
 
@@ -144,7 +165,7 @@ def build_report() -> dict[str, Any]:
         # MEXC kline timestamps mark candle OPEN time; evaluate freshness at candle CLOSE.
         latest_ts = candles[-1][0] / 1000 + 900
         age = max(0, int(time.time() - latest_ts))
-        if age > 1200:
+        if age > MAX_REPORT_AGE_SECONDS:
             raise DataUnavailable(f"latest closed candle stale ({age}s)")
         true_ranges = [
             max(candles[i][2] - candles[i][3],
@@ -198,11 +219,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="report.json")
     args = parser.parse_args()
-    report = build_report()
+    try:
+        report = build_report()
+    except Exception as exc:  # Keep a usable fail-closed artifact for unexpected errors too.
+        report = fallback_report(f"unexpected collector error: {type(exc).__name__}")
     Path(args.output).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
+    # ATTENDRE is a valid report, but a critical data-quality failure must fail the workflow.
+    return 0 if report.get("status") == "SURVEILLER" else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

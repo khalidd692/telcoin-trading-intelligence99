@@ -3,25 +3,27 @@ name: TEL market monitor and website
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "7,22,37,52 * * * *"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
 concurrency:
-  group: telcoin-market-monitor
-  cancel-in-progress: true
+  group: telcoin-market-monitor-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   monitor-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
-      name: github-pages
+      name: ${{ github.event_name == 'pull_request' && 'test' || 'github-pages' }}
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
@@ -35,12 +37,41 @@ jobs:
       - name: Collect public market data
         id: collect
         continue-on-error: true
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: python -m src.monitor --output site/report.json
       - name: Ensure fail-closed report exists
-        if: always()
         run: |
-          if [ ! -s site/report.json ]; then
-            printf '%s\n' '{"schema_version":1,"generated_at":null,"symbol":"TELUSDT","mode":"READ_ONLY_ALERTS","status":"ATTENDRE","sources":{"mexc_ticker":{"status":"UNAVAILABLE","reason":"Collector did not return a report"},"mexc_candles":{"status":"UNAVAILABLE","reason":"Collector did not return a report"},"kucoin_level1":{"status":"UNAVAILABLE","reason":"Collector did not return a report"}},"checks":[{"name":"Collection pipeline","status":"FAIL","reason":"No valid report produced; fail-closed"}],"indicators":null,"error":"No market report was produced by the collector.","disclaimer":"Read-only monitoring. No orders. No profitability claims."}' > site/report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.monitor import fallback_report
+
+          path = Path("site/report.json")
+          valid = False
+          if path.is_file() and path.stat().st_size:
+              try:
+                  report = json.loads(path.read_text(encoding="utf-8"))
+                  valid = (isinstance(report, dict)
+                           and report.get("schema_version") == 1
+                           and report.get("symbol") == "TELUSDT"
+                           and report.get("status") in {"SURVEILLER", "ATTENDRE"})
+              except (OSError, UnicodeError, json.JSONDecodeError):
+                  pass
+          if not valid:
+              path.write_text(json.dumps(
+                  fallback_report("Collector produced no valid schema-v1 report."),
+                  indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Commit the exact published report to main
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/report.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Refresh published TEL/USDT market report [skip ci]"
+            git push origin HEAD:main
           fi
       - name: Add report reference to summary
         if: always()
@@ -50,12 +81,21 @@ jobs:
           echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
       - name: Enable and read GitHub Pages configuration
         uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           enablement: true
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           path: site
       - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Mark failed collection as workflow failure
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.collect.outcome != 'success'
+        run: |
+          echo "Market collection failed; the fail-closed ATTENDRE report was published."
+          exit 1
+
