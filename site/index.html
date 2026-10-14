@@ -133,7 +133,7 @@ async function load(){
   if(d.schema_version!==1||d.symbol!=="TELUSDT"||d.mode!=="READ_ONLY_ALERTS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.sources||!Array.isArray(d.checks)||!Number.isFinite(generatedMs))throw new Error("Schéma de rapport invalide · ATTENDRE");
   if(reportAgeMs < -60000 || reportAgeMs > 20*60*1000)throw new Error("Rapport périmé ou horodatage incohérent · ATTENDRE");
   if(d.status==="SURVEILLER"&&(!["mexc_ticker","mexc_candles","kucoin_level1"].every(function(key){return d.sources[key]&&d.sources[key].status==="OK";})||!d.indicators||d.checks.some(function(check){return check.status!=="PASS";})))throw new Error("Rapport SURVEILLER incomplet ou incohérent · ATTENDRE");
-  var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER";
+  var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER"&&!window.TelcoinRealtime;
   if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker MEXC invalide · ATTENDRE");
   if(k&&k.status==="OK"&&(!Number.isFinite(Number(k.last))||Number(k.last)<=0||!Number.isFinite(Date.parse(k.observed_at))))throw new Error("Ticker KuCoin invalide · ATTENDRE");
   currentGeneratedAt=d.generated_at;reportExpired=false;window.telcoinReportIsFresh=true;window.telcoinReportStatus=d.status;window.telcoinReportChecksPass=d.checks.every(function(check){return check.status==="PASS";});window.telcoinIndicators=i||null;updateReportAge();
