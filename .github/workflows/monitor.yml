@@ -63,25 +63,12 @@ jobs:
                 json.dump(d, f, indent=2, ensure_ascii=False)
             PY
           fi
-      - name: Write run summary
+      - name: Add report reference to summary
         if: always()
         run: |
-          python - <<'PY'
-          import json, os
-          d=json.load(open("site/report.json", encoding="utf-8"))
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
-              f.write("# TEL/USDT market monitor\n\n")
-              f.write(f"- **Status:** {d.get('status','UNKNOWN')}\n")
-              f.write(f"- **Generated:** {d.get('generated_at','unknown')}\n")
-              t=d.get('sources',{}).get('mexc_ticker',{})
-              if t.get('last') is not None:
-                  f.write(f"- **MEXC last:** {t['last']} USDT\n")
-                  f.write(f"- **Spread:** {t.get('spread_pct','unknown')}%\n")
-              if d.get('error'): f.write(f"- **Error:** {d['error']}\n")
-              for c in d.get('checks',[]):
-                  f.write(f"- {c.get('status')}: {c.get('name')} — {c.get('reason', c.get('value_pct',''))}\n")
-              f.write("\n> Read-only monitoring; no orders; SURVEILLER is not a buy signal.\n")
-          PY
+          echo "# TEL/USDT market dashboard" >> "$GITHUB_STEP_SUMMARY"
+          echo "The report and actual source checks are shown on the deployed dashboard." >> "$GITHUB_STEP_SUMMARY"
+          echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
