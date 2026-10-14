@@ -1,0 +1,60 @@
+name: TEL market monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telcoin-market-monitor
+  cancel-in-progress: true
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout
+      - uses: actions/setup-python@v5
+        name: Set up Python
+        with:
+          python-version: "3.12"
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Collect public market data
+        run: python -m src.monitor --output report.json
+      - name: Write run summary
+        if: always()
+        run: |
+          if [ -f report.json ]; then
+            python - <<'PY'
+            import json, os
+            d=json.load(open("report.json", encoding="utf-8"))
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                f.write("# TEL/USDT market monitor\n\n")
+                f.write(f"- **Status:** {d.get('status','UNKNOWN')}\n")
+                f.write(f"- **Generated:** {d.get('generated_at','unknown')}\n")
+                t=d.get('sources',{}).get('mexc_ticker',{})
+                if t.get('last') is not None:
+                    f.write(f"- **MEXC last:** {t['last']} USDT\n")
+                    f.write(f"- **Spread:** {t.get('spread_pct','unknown')}%\n")
+                if d.get('error'): f.write(f"- **Error:** {d['error']}\n")
+                for c in d.get('checks',[]):
+                    f.write(f"- {c.get('status')}: {c.get('name')} — {c.get('reason', c.get('value_pct',''))}\n")
+                f.write("\n> Read-only monitoring; no orders; SURVEILLER is not a buy signal.\n")
+            PY
+          else
+            echo "# TEL/USDT market monitor" >> "$GITHUB_STEP_SUMMARY"
+            echo "ATTENDRE — no report was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload JSON report
+        if: always() && hashFiles('report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: telcoin-market-report
+          path: report.json
+          retention-days: 14
