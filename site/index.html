@@ -24,6 +24,7 @@ h2{margin:0;font-size:clamp(25px,4vw,36px);letter-spacing:-.04em;line-height:1.1
 .notice{border:1px solid #31415a;background:#101a2a;border-radius:12px;padding:14px 16px;color:#b1bfd4;font-size:12px;display:flex;gap:12px;align-items:flex-start}.notice strong{color:#e6edf8}.notice-icon{font-size:17px;line-height:1.2}
 footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-size:10px;margin-top:22px;flex-wrap:wrap}.mono{font-variant-numeric:tabular-nums}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:800px){.shell{padding:16px 14px 28px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.middle,.lower{grid-template-columns:1fr}.intro{align-items:flex-start;flex-direction:column}.status{align-self:flex-start}.panel{padding:15px}.head-actions .live{display:none}}
+.realtime{margin:0 0 14px;border-color:#31506b}.realtime-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.rt-card{border:1px solid #202c40;border-radius:11px;padding:12px;background:#0b1320;min-width:0}.rt-label{color:var(--muted);font-size:11px}.rt-value{font-size:18px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:5px;overflow-wrap:anywhere}.rt-detail{color:var(--muted);font-size:10px;margin-top:5px}.rt-reason{margin-top:12px;color:#c3cee0;font-size:12px}.rt-state{font-size:10px;font-weight:800;color:var(--amber)}.rt-state.pass{color:var(--green)}.trend-context{margin-top:8px;color:#b6c4d8;font-size:11px}@media(max-width:800px){.realtime-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:420px){.rt-card{padding:10px}.rt-value{font-size:15px}}
 @media(max-width:420px){.brand h1{font-size:12px}.brand p{font-size:11px}.logo{width:38px;height:38px}.metrics{gap:9px}.metric-value{font-size:22px}.metric-foot{font-size:10px}.panel-head{margin-bottom:12px}}
 </style>
 </head>
@@ -32,6 +33,14 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <div class="head-actions"><div class="live"><span class="dot" id="header-dot"></span><span id="header-state">Vérification des données</span></div><button id="refresh">↻ Actualiser</button></div></header>
 <div class="eyebrow">TABLEAU DE BORD / TEL-USDT</div>
 <section class="intro"><div><h2>Vue du marché</h2><p class="sub">Rapport REST périodique (collecte environ toutes les 15 min). Il n’y a pas de flux WebSocket direct : l’actualisation visuelle ne signifie pas qu’un nouveau prix vient d’arriver.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
+<section class="panel realtime" aria-labelledby="live-title">
+<div class="panel-head"><div><h3 id="live-title">Flux publics en direct</h3><div class="caption">Les valeurs changent uniquement sur événement réellement reçu ; toute source manquante impose ATTENDRE.</div></div><span id="realtime-status" class="status">ATTENDRE · initialisation des flux</span></div>
+<div class="realtime-grid">
+<div class="rt-card"><div class="rt-label">MEXC · dernier trade TEL/USDT</div><div class="rt-value" id="rt-mexc-last">—</div><div class="rt-detail" id="rt-mexc-book">Bid/Ask indisponibles</div><div class="rt-detail" id="rt-mexc-detail">En attente d’un événement réel</div><div class="rt-detail rt-state" id="rt-mexc-state">CONNEXION</div><div class="rt-detail" id="rt-mexc-move">Variation depuis le tick précédent : —</div></div>
+<div class="rt-card"><div class="rt-label">KuCoin · dernier trade TEL-USDT</div><div class="rt-value" id="rt-kucoin-last">—</div><div class="rt-detail" id="rt-kucoin-book">Bid/Ask indisponibles</div><div class="rt-detail" id="rt-kucoin-detail">En attente d’un événement réel</div><div class="rt-detail rt-state" id="rt-kucoin-state">CONNEXION</div><div class="rt-detail" id="rt-kucoin-move">Variation depuis le tick précédent : —</div></div>
+<div class="rt-card"><div class="rt-label">Spread MEXC (bid/ask live)</div><div class="rt-value" id="rt-spread">—</div><div class="rt-detail">Contrôle existant : 0,50 % max</div></div>
+<div class="rt-card"><div class="rt-label">Divergence des derniers trades</div><div class="rt-value" id="rt-divergence">—</div><div class="rt-detail">Contrôle existant : 1,0 % max</div></div></div>
+<div id="wait-reasons" class="rt-reason">Attente des trames MEXC, KuCoin et du rapport d’indicateurs.</div><div id="trend-context" class="trend-context">Indicateurs historiques absents ou périmés ; tendance indisponible.</div></section>
 <section class="grid metrics">
 <article class="panel"><div class="metric-label"><span>Dernier prix MEXC</span><span class="tag">TEL/USDT</span></div><div class="metric-value" id="last-price">—</div><div class="metric-foot" id="price-time">En attente du rapport de marché</div></article>
 <article class="panel"><div class="metric-label"><span>Variation 24 h</span><span>↕</span></div><div class="metric-value" id="change-24h">—</div><div class="metric-foot">Variation publiée par MEXC</div></article>
@@ -59,6 +68,7 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment, le contexte BTC et les analyses multi-unités ne sont pas encore intégrés à cette version.</div></aside>
 <footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Collecte UTC : inconnue</span><span id="report-age">Âge des données : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
 </div>
+<script src="./realtime.js"></script>
 <script>
 (function(){
 "use strict";
@@ -88,11 +98,14 @@ function renderChecks(checks){
  host.innerHTML=checks.map(function(c){var ok=c.status==="PASS",detail=c.reason||(c.value_pct!==undefined?"Valeur : "+fmt(c.value_pct,4)+" %":"Résultat du contrôle");return '<div class="source-row"><div><div class="source-name">'+String(c.name||"Contrôle").replace(/[&<>"]/g,"")+'</div><div class="source-detail">'+String(detail).replace(/[&<>"]/g,"")+'</div></div><span class="source-state '+(ok?"pass":"fail")+'">'+(ok?"OK":"ÉCHEC")+'</span></div>';}).join("");
 }
 var currentGeneratedAt=null,reportExpired=false;
+window.telcoinReportIsFresh=false;window.telcoinReportStatus="ATTENDRE";window.telcoinReportChecksPass=false;window.telcoinIndicators=null;
 function setWaiting(message){
+ window.telcoinReportIsFresh=false;window.telcoinReportStatus="ATTENDRE";window.telcoinReportChecksPass=false;window.telcoinIndicators=null;if(window.TelcoinRealtime)window.TelcoinRealtime.refresh();
  $("main-status").className="status";$("main-status").innerHTML="<span>●</span><span>ATTENDRE · rapport absent, invalide ou périmé</span>";
  $("header-state").textContent="Rapport périodique · ATTENDRE";$("header-dot").style.background="var(--amber)";$("report-error").textContent=message||"Rapport non disponible · ATTENDRE";renderChecks([]);
 }
 function clearMarketView(generatedAt,ageMs,freshnessState){
+ window.telcoinReportIsFresh=false;window.telcoinIndicators=null;if(window.TelcoinRealtime)window.TelcoinRealtime.refresh();
  reportExpired=true;
  ["last-price","change-24h","spread","volume-24h","ema12","ema26","ema50","rsi","atr","atr-pct","vol-ratio"].forEach(function(id){$(id).textContent="—";});
  $("price-time").textContent="Aucune observation fraîche disponible";$("spread-foot").textContent="Pas de cotations disponibles";
@@ -106,7 +119,7 @@ function updateReportAge(){
  if(!currentGeneratedAt)return;
  var ageMs=Date.now()-Date.parse(currentGeneratedAt);
  if(!Number.isFinite(ageMs)||ageMs < -60000){if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"invalid");setWaiting("Horodatage du rapport incohérent · ATTENDRE");}return;}
- if(ageMs>20*60*1000){if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"stale");setWaiting("Rapport périmé (> 20 min) · ATTENDRE");}else $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · PÉRIMÉ";return;}
+ if(ageMs>20*60*1000){window.telcoinReportIsFresh=false;if(window.TelcoinRealtime)window.TelcoinRealtime.refresh();if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"stale");setWaiting("Rapport périmé (> 20 min) · ATTENDRE");}else $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · PÉRIMÉ";return;}
  if(reportExpired){$("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · NON VALIDÉ";return;}
  $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s";
 }
@@ -123,7 +136,7 @@ async function load(){
   var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER";
   if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker MEXC invalide · ATTENDRE");
   if(k&&k.status==="OK"&&(!Number.isFinite(Number(k.last))||Number(k.last)<=0||!Number.isFinite(Date.parse(k.observed_at))))throw new Error("Ticker KuCoin invalide · ATTENDRE");
-  currentGeneratedAt=d.generated_at;reportExpired=false;updateReportAge();
+  currentGeneratedAt=d.generated_at;reportExpired=false;window.telcoinReportIsFresh=true;window.telcoinReportStatus=d.status;window.telcoinReportChecksPass=d.checks.every(function(check){return check.status==="PASS";});window.telcoinIndicators=i||null;updateReportAge();
   $("main-status").className="status "+(passed?"ok":"");$("main-status").innerHTML="<span>●</span><span>"+(passed?"SURVEILLER · contrôles passés":"ATTENDRE · données à vérifier")+"</span>";
   $("header-state").textContent=passed?"Rapport périodique · contrôles passés":"Rapport périodique · ATTENDRE";$("header-dot").style.background=passed?"var(--green)":"var(--amber)";
   $("last-price").textContent=t?price(t.last):"—";$("price-time").textContent=t&&t.observed_at?"Observation "+date(t.observed_at):"Aucune observation disponible";
