@@ -10,7 +10,7 @@ A read-only TEL/USDT market monitor. It collects public exchange data, calculate
 - No backtest results or profitability claims are included.
 
 ## Automation
-GitHub Actions is scheduled for 7, 22, 37 and 52 minutes past each hour (approximately every 15 minutes; GitHub may delay scheduled runs). You can also run it manually from the Actions tab.
+GitHub Actions uses the cron schedule `*/15 * * * *` (at minutes 0, 15, 30 and 45 of each hour; GitHub may delay scheduled runs). You can also run it manually from the Actions tab.
 
 Each run tests the indicator functions, collects public MEXC TEL/USDT ticker and 15-minute candles, checks the public KuCoin TEL-USDT price as an independent comparison, then publishes a short run summary and a downloadable JSON artifact.
 
