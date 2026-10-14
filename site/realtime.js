@@ -9,7 +9,7 @@ function all(a,f,w){return a.filter(function(x){return x.f===f&&(w===undefined||
 function str(a,f){var x=all(a,f,2)[0];return x?new TextDecoder("utf-8",{fatal:true}).decode(x.v):null;}
 function pos(v,n){v=Number(v);if(!Number.isFinite(v)||v<=0)throw Error("Invalid "+n);return v;}
 function ts(v,n){v=Number(v);if(!Number.isFinite(v)||v<=0||v>Number.MAX_SAFE_INTEGER)throw Error("Invalid "+n);return v;}
-function decodeMexc(input){var a=fields(input),channel=str(a,1),symbol=str(a,3),st=all(a,6,0)[0],sendTime=st?ts(st.v,"MEXC send time"):null,trades=[];
+function decodeMexc(input){var a=fields(input),channel=str(a,1),symbol=str(a,3),st=all(a,4,0)[0],sendTime=st?ts(st.v,"MEXC send time"):null,trades=[];
 var df=all(a,314,2)[0];if(df)all(fields(df.v),1,2).forEach(function(d){var q=fields(d.v);trades.push({price:pos(str(q,1),"MEXC trade price"),quantity:pos(str(q,2),"MEXC quantity"),eventAt:ts((all(q,4,0)[0]||{}).v,"MEXC trade timestamp")});});
 var bt=null,bf=all(a,315,2)[0];if(bf){var q=fields(bf.v);bt={bid:pos(str(q,1),"MEXC bid"),ask:pos(str(q,3),"MEXC ask"),eventAt:sendTime};if(bt.ask<bt.bid)throw Error("MEXC ask below bid");}
 if(!channel||symbol!==SYMBOL||(!trades.length&&!bt))throw Error("Unexpected MEXC schema or symbol");return {channel:channel,symbol:symbol,sendTime:sendTime,trades:trades,bookTicker:bt};}
