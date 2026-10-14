@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "generated_at": null,
+  "symbol": "TELUSDT",
+  "mode": "READ_ONLY_ALERTS",
+  "status": "ATTENDRE",
+  "sources": {
+    "mexc_ticker": {
+      "status": "UNAVAILABLE",
+      "reason": "Premier rapport non encore produit"
+    },
+    "mexc_candles": {
+      "status": "UNAVAILABLE",
+      "reason": "Premier rapport non encore produit"
+    },
+    "kucoin_level1": {
+      "status": "UNAVAILABLE",
+      "reason": "Premier rapport non encore produit"
+    }
+  },
+  "checks": [
+    {
+      "name": "Rapport de collecte",
+      "status": "FAIL",
+      "reason": "En attente de la première exécution planifiée"
+    }
+  ],
+  "indicators": null,
+  "error": "Aucune cotation n'est affichée avant la première collecte réelle.",
+  "interpretation": "ATTENDRE — aucun rapport réel disponible pour le moment.",
+  "disclaimer": "Lecture seule, aucun ordre, aucune promesse de rentabilité."
+}
