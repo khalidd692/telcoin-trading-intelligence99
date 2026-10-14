@@ -160,6 +160,10 @@ def build_report() -> dict[str, Any]:
             "rsi14": rsi(closes), "atr14": atr, "atr_pct": atr / closes[-1] * 100,
             "volume_last_closed": candles[-1][5],
             "volume_mean20": sum(c[5] for c in candles[-20:]) / 20,
+            "close_series": [
+                {"time": datetime.fromtimestamp(c[0] / 1000, timezone.utc).isoformat(),
+                 "close": c[4]} for c in candles[-48:]
+            ],
         }
         report["sources"]["mexc_candles"] = {"status": "OK", "timeframe": "15m", "closed_candles_used": len(candles)}
         report["checks"].append({"name": "MEXC ticker/candles freshness and schema", "status": "PASS"})
