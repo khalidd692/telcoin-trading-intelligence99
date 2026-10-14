@@ -141,7 +141,8 @@ def build_report() -> dict[str, Any]:
         report["sources"]["mexc_ticker"] = {"status": "OK", **ticker}
         candles = candles_15m()
         closes = [c[4] for c in candles]
-        latest_ts = candles[-1][0] / 1000
+        # MEXC kline timestamps mark candle OPEN time; evaluate freshness at candle CLOSE.
+        latest_ts = candles[-1][0] / 1000 + 900
         age = max(0, int(time.time() - latest_ts))
         if age > 1200:
             raise DataUnavailable(f"latest closed candle stale ({age}s)")
@@ -161,7 +162,7 @@ def build_report() -> dict[str, Any]:
             "volume_last_closed": candles[-1][5],
             "volume_mean20": sum(c[5] for c in candles[-20:]) / 20,
             "close_series": [
-                {"time": datetime.fromtimestamp(c[0] / 1000, timezone.utc).isoformat(),
+                {"time": datetime.fromtimestamp(c[0] / 1000 + 900, timezone.utc).isoformat(),
                  "close": c[4]} for c in candles[-48:]
             ],
         }
