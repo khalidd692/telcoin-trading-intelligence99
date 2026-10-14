@@ -40,28 +40,7 @@ jobs:
         if: always()
         run: |
           if [ ! -s site/report.json ]; then
-            python - <<'PY'
-            import json
-            from datetime import datetime, timezone
-            d = {
-                "schema_version": 1,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "symbol": "TELUSDT",
-                "mode": "READ_ONLY_ALERTS",
-                "status": "ATTENDRE",
-                "sources": {
-                    "mexc_ticker": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"},
-                    "mexc_candles": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"},
-                    "kucoin_level1": {"status": "UNAVAILABLE", "reason": "Collector did not return a report"}
-                },
-                "checks": [{"name": "Collection pipeline", "status": "FAIL", "reason": "No valid report produced; fail-closed"}],
-                "indicators": None,
-                "error": "No market report was produced by the collector.",
-                "disclaimer": "Read-only monitoring. No orders. No profitability claims."
-            }
-            with open("site/report.json", "w", encoding="utf-8") as f:
-                json.dump(d, f, indent=2, ensure_ascii=False)
-            PY
+            printf '%s\n' '{"schema_version":1,"generated_at":null,"symbol":"TELUSDT","mode":"READ_ONLY_ALERTS","status":"ATTENDRE","sources":{"mexc_ticker":{"status":"UNAVAILABLE","reason":"Collector did not return a report"},"mexc_candles":{"status":"UNAVAILABLE","reason":"Collector did not return a report"},"kucoin_level1":{"status":"UNAVAILABLE","reason":"Collector did not return a report"}},"checks":[{"name":"Collection pipeline","status":"FAIL","reason":"No valid report produced; fail-closed"}],"indicators":null,"error":"No market report was produced by the collector.","disclaimer":"Read-only monitoring. No orders. No profitability claims."}' > site/report.json
           fi
       - name: Add report reference to summary
         if: always()
