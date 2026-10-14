@@ -7,7 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "*/15 * * * *"
 
 permissions:
   contents: write
@@ -110,4 +110,3 @@ jobs:
         run: |
           echo "Market collection failed; the fail-closed ATTENDRE report was published."
           exit 1
-
