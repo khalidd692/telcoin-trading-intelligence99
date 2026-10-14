@@ -9,7 +9,7 @@ const html = fs.readFileSync(path.join(__dirname, "..", "site", "index.html"), "
 const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i);
 assert.ok(match, "dashboard script exists");
 const script = match[1];
-assert.match(html, /\.empty\[hidden\]\s*\{\s*display:\s*none;\s*\}/, "hidden chart placeholder must not cover a real chart");
+assert.ok(html.includes(".empty[hidden]{display:none}"), "hidden chart placeholder must not cover a real chart");
 
 function report(generatedAt) {
   return {
