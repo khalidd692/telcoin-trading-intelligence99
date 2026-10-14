@@ -48,8 +48,10 @@ jobs:
           echo "# TEL/USDT market dashboard" >> "$GITHUB_STEP_SUMMARY"
           echo "The report and actual source checks are shown on the deployed dashboard." >> "$GITHUB_STEP_SUMMARY"
           echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
-      - name: Read GitHub Pages configuration
+      - name: Enable and read GitHub Pages configuration
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
         with:
