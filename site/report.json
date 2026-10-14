@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-14T22:23:15.671134+00:00",
+  "generated_at": "2026-10-14T22:29:38.605539+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001747,
-      "bid": 0.001747,
-      "ask": 0.001752,
-      "spread_pct": 0.2857959416976286,
-      "quote_volume_24h": 100574.711153,
-      "change_pct_24h": -0.0218,
+      "last": 0.001749,
+      "bid": 0.001744,
+      "ask": 0.001751,
+      "spread_pct": 0.40057224606579944,
+      "quote_volume_24h": 100468.784425,
+      "change_pct_24h": -0.0245,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-14T22:23:16.293630+00:00"
+      "observed_at": "2026-10-14T22:29:39.482848+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -23,10 +23,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001753,
-      "bid": 0.001752,
-      "ask": 0.001753,
-      "observed_at": "2026-10-14T22:23:16.705369+00:00"
+      "last": 0.00175,
+      "bid": 0.00175,
+      "ask": 0.001755,
+      "observed_at": "2026-10-14T22:29:40.118030+00:00"
     }
   },
   "checks": [
@@ -37,20 +37,20 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.2858,
+      "value_pct": 0.4006,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.3429,
+      "divergence_pct": 0.0572,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-14T22:15:00+00:00",
-    "candle_age_seconds": 496,
+    "candle_age_seconds": 879,
     "close": 0.001755,
     "ema12": 0.0017704118727679516,
     "ema26": 0.0017780038818527761,
@@ -257,7 +257,7 @@
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.3429
+    "last_price_divergence_pct": 0.0572
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
