@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#090d18">
+<meta name="description" content="Tableau de surveillance TEL/USDT. Données publiques, indicateurs techniques et contrôles de qualité.">
+<title>Telcoin Intelligence — Marché</title>
+<style>
+:root{color-scheme:dark;--bg:#090d18;--panel:#111827;--line:#273348;--muted:#8c9bb2;--text:#edf3fc;--cyan:#62d7eb;--green:#53d6a2;--red:#ff7e87;--amber:#f4c56b;--blue:#8aa8ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -15%,#182946 0,transparent 48%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.shell{max-width:1180px;margin:auto;padding:24px 24px 40px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding:3px 0 22px}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border:1px solid #3e637d;border-radius:13px;display:grid;place-items:center;background:linear-gradient(135deg,#183a4b,#17243a);color:var(--cyan);font-weight:800;font-size:18px;letter-spacing:-2px}
+.brand h1{font-size:15px;letter-spacing:.14em;margin:0;font-weight:750}.brand p{margin:3px 0 0;color:var(--muted);font-size:12px}.head-actions{display:flex;align-items:center;gap:10px}
+.live{display:flex;align-items:center;gap:8px;color:#b4c3d8;font-size:12px;border:1px solid var(--line);border-radius:99px;padding:8px 12px;white-space:nowrap}.dot{width:7px;height:7px;background:var(--amber);border-radius:50%}
+button{border:1px solid #33526e;background:#152b3e;color:#dff8ff;padding:10px 14px;border-radius:10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}button:hover{background:#1b3b52}button:disabled{opacity:.55;cursor:wait}
+.eyebrow{margin:28px 0 8px;color:var(--cyan);font-size:11px;letter-spacing:.18em;font-weight:800}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:24px}
+h2{margin:0;font-size:clamp(25px,4vw,36px);letter-spacing:-.04em;line-height:1.15}.sub{margin:10px 0 0;color:var(--muted);max-width:650px;font-size:14px}
+.status{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 13px;border:1px solid #755d2b;background:#292315;color:var(--amber);font-size:12px;font-weight:800;white-space:nowrap}.status.ok{border-color:#285c4a;background:#102b25;color:var(--green)}
+.grid{display:grid;gap:14px}.metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}.panel{background:linear-gradient(145deg,#121b2b,#0d1421);border:1px solid var(--line);border-radius:16px;padding:18px;min-width:0;box-shadow:0 12px 30px #00000014}
+.metric-label{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px}.metric-value{font-size:clamp(21px,3vw,29px);font-weight:750;letter-spacing:-.04em;margin-top:15px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.metric-foot{margin-top:5px;color:var(--muted);font-size:11px}
+.middle{grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);margin-bottom:14px}.panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}h3{font-size:14px;margin:0;font-weight:750}.caption{color:var(--muted);font-size:11px;margin-top:4px}.tag{color:#a9c5ff;border:1px solid #34486c;background:#19243a;border-radius:7px;padding:4px 8px;font-size:10px;font-weight:750;white-space:nowrap}
+.chart-wrap{border:1px solid #202c40;border-radius:12px;background:#0a111d;padding:14px 10px 8px;min-height:220px;overflow:hidden}#price-chart{display:block;width:100%;height:190px}.chart-bottom{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;padding:0 5px 3px}.empty{display:grid;place-items:center;min-height:215px;color:var(--muted);text-align:center;padding:20px;font-size:13px}
+.indicator-list{display:grid;gap:0}.indicator{display:grid;grid-template-columns:1fr auto;gap:8px;padding:13px 0;border-bottom:1px solid #202c40;align-items:center}.indicator:last-child{border-bottom:0}.indicator-name{font-size:12px;color:#b7c4d7}.indicator-note{font-size:10px;color:var(--muted);margin-top:2px}.indicator-value{font-size:14px;font-weight:750;font-variant-numeric:tabular-nums;text-align:right}
+.lower{grid-template-columns:1.1fr 1fr;margin-bottom:14px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #202c40}.source-row:last-child{border-bottom:0}.source-name{font-size:12px;font-weight:700}.source-detail{font-size:10px;color:var(--muted);margin-top:3px;max-width:430px;overflow-wrap:anywhere}.source-state{border:1px solid #3a4558;background:#171f2e;border-radius:7px;color:#b0bfd3;padding:4px 7px;font-size:10px;font-weight:800;white-space:nowrap}.source-state.pass{border-color:#285c4a;background:#102b25;color:var(--green)}.source-state.fail{border-color:#755d2b;background:#292315;color:var(--amber)}
+.notice{border:1px solid #31415a;background:#101a2a;border-radius:12px;padding:14px 16px;color:#b1bfd4;font-size:12px;display:flex;gap:12px;align-items:flex-start}.notice strong{color:#e6edf8}.notice-icon{font-size:17px;line-height:1.2}
+footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-size:10px;margin-top:22px;flex-wrap:wrap}.mono{font-variant-numeric:tabular-nums}a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+@media(max-width:800px){.shell{padding:16px 14px 28px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.middle,.lower{grid-template-columns:1fr}.intro{align-items:flex-start;flex-direction:column}.status{align-self:flex-start}.panel{padding:15px}.head-actions .live{display:none}}
+@media(max-width:420px){.brand h1{font-size:12px}.brand p{font-size:11px}.logo{width:38px;height:38px}.metrics{gap:9px}.metric-value{font-size:22px}.metric-foot{font-size:10px}.panel-head{margin-bottom:12px}}
+</style>
+</head>
+<body><div class="shell">
+<header><div class="brand"><div class="logo">T/</div><div><h1>TELCOIN INTELLIGENCE</h1><p>Marché · Surveillance systématique</p></div></div>
+<div class="head-actions"><div class="live"><span class="dot" id="header-dot"></span><span id="header-state">Vérification des données</span></div><button id="refresh">↻ Actualiser</button></div></header>
+<div class="eyebrow">TABLEAU DE BORD / TEL-USDT</div>
+<section class="intro"><div><h2>Vue du marché</h2><p class="sub">Une lecture structurée des prix, de la volatilité et de la qualité des sources. Aucune donnée n’est inventée pour remplir l’écran.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
+<section class="grid metrics">
+<article class="panel"><div class="metric-label"><span>Dernier prix MEXC</span><span class="tag">TEL/USDT</span></div><div class="metric-value" id="last-price">—</div><div class="metric-foot" id="price-time">En attente du rapport de marché</div></article>
+<article class="panel"><div class="metric-label"><span>Variation 24 h</span><span>↕</span></div><div class="metric-value" id="change-24h">—</div><div class="metric-foot">Variation publiée par MEXC</div></article>
+<article class="panel"><div class="metric-label"><span>Spread observé</span><span>↔</span></div><div class="metric-value" id="spread">—</div><div class="metric-foot" id="spread-foot">Qualité d’exécution indicative, pas une garantie</div></article>
+<article class="panel"><div class="metric-label"><span>Volume coté sur 24 h</span><span>▤</span></div><div class="metric-value" id="volume-24h">—</div><div class="metric-foot">Volume en USDT si fourni par la source</div></article>
+</section>
+<section class="grid middle">
+<article class="panel"><div class="panel-head"><div><h3>Prix récent</h3><div class="caption">Clôtures 15 minutes · chandelles terminées uniquement</div></div><span class="tag" id="chart-period">48 dernières clôtures</span></div>
+<div class="chart-wrap"><svg id="price-chart" viewBox="0 0 720 190" role="img" aria-label="Graphique réel TEL/USDT" hidden></svg><div class="empty" id="chart-empty">Le graphique apparaîtra dès qu’un rapport contenant des clôtures réelles sera publié.</div><div class="chart-bottom"><span id="chart-start">—</span><span id="chart-end">—</span></div></div><div class="caption" style="margin-top:10px">Le graphique décrit le passé récent ; il ne prédit pas la direction suivante.</div></article>
+<article class="panel"><div class="panel-head"><div><h3>Indicateurs techniques</h3><div class="caption">Calculés sur les données clôturées</div></div><span class="tag">15 MIN</span></div><div class="indicator-list">
+<div class="indicator"><div><div class="indicator-name">EMA 12</div><div class="indicator-note">Tendance courte</div></div><div class="indicator-value" id="ema12">—</div></div>
+<div class="indicator"><div><div class="indicator-name">EMA 26</div><div class="indicator-note">Tendance intermédiaire</div></div><div class="indicator-value" id="ema26">—</div></div>
+<div class="indicator"><div><div class="indicator-name">EMA 50</div><div class="indicator-note">Tendance plus lente</div></div><div class="indicator-value" id="ema50">—</div></div>
+<div class="indicator"><div><div class="indicator-name">RSI 14</div><div class="indicator-note">Momentum, échelle 0–100</div></div><div class="indicator-value" id="rsi">—</div></div>
+<div class="indicator"><div><div class="indicator-name">ATR 14</div><div class="indicator-note">Volatilité absolue</div></div><div class="indicator-value" id="atr">—</div></div>
+<div class="indicator"><div><div class="indicator-name">ATR relatif</div><div class="indicator-note">ATR rapporté au prix</div></div><div class="indicator-value" id="atr-pct">—</div></div>
+<div class="indicator"><div><div class="indicator-name">Volume récent / moyenne 20</div><div class="indicator-note">Clôture 15 min vs moyenne</div></div><div class="indicator-value" id="vol-ratio">—</div></div>
+</div></article></section>
+<section class="grid lower">
+<article class="panel"><div class="panel-head"><div><h3>État des sources</h3><div class="caption">Chaque source est contrôlée séparément</div></div></div>
+<div class="source-row"><div><div class="source-name">MEXC · ticker TEL/USDT</div><div class="source-detail" id="mexc-ticker-detail">Aucune observation chargée</div></div><span class="source-state fail" id="mexc-ticker-state">INCONNU</span></div>
+<div class="source-row"><div><div class="source-name">MEXC · chandelles 15 min</div><div class="source-detail" id="mexc-candle-detail">Aucune clôture chargée</div></div><span class="source-state fail" id="mexc-candle-state">INCONNU</span></div>
+<div class="source-row"><div><div class="source-name">KuCoin · vérification indépendante</div><div class="source-detail" id="kucoin-detail">Aucune observation chargée</div></div><span class="source-state fail" id="kucoin-state">INCONNU</span></div></article>
+<article class="panel"><div class="panel-head"><div><h3>Contrôles de qualité</h3><div class="caption">Un échec impose l’attente</div></div></div><div id="checks"><div class="source-row"><div><div class="source-name">Rapport de collecte</div><div class="source-detail">En attente du premier rapport</div></div><span class="source-state fail">INCONNU</span></div></div><div class="caption" id="report-error" style="margin-top:12px"></div></article></section>
+<aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment, le contexte BTC et les analyses multi-unités ne sont pas encore intégrés à cette version.</div></aside>
+<footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Rapport généré : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
+</div>
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id);};
+var fmt=function(v,max){if(max===undefined)max=8;return v!==null&&v!==undefined&&Number.isFinite(Number(v))?Number(v).toLocaleString("fr-FR",{maximumFractionDigits:max}):"—";};
+var pct=function(v){return v!==null&&v!==undefined&&Number.isFinite(Number(v))?(Number(v)>0?"+":"")+fmt(v,2)+" %":"—";};
+var price=function(v){return v!==null&&v!==undefined&&Number.isFinite(Number(v))?fmt(v,10):"—";};
+var date=function(v){if(!v)return"inconnue";var d=new Date(v);return Number.isNaN(d.getTime())?"inconnue":d.toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short",timeZone:"UTC"})+" UTC";};
+function sourceState(id,value,good){var e=$(id);e.textContent=value;e.className="source-state "+(good?"pass":"fail");}
+function drawChart(series){
+ var svg=$("price-chart"),empty=$("chart-empty");
+ if(!Array.isArray(series)||series.length<2||!series.every(function(p){return Number.isFinite(Number(p.close));})){
+  svg.hidden=true;empty.hidden=false;$("chart-period").textContent="Données indisponibles";return;
+ }
+ var vals=series.map(function(p){return Number(p.close);}),min=Math.min.apply(null,vals),max=Math.max.apply(null,vals),range=max-min||Math.abs(max)*.001||1;
+ var points=vals.map(function(v,i){return (12+i*696/(vals.length-1)).toFixed(2)+","+(12+(max-v)/range*164).toFixed(2);}).join(" ");
+ var lastY=12+(max-vals[vals.length-1])/range*164;
+ svg.innerHTML='<defs><linearGradient id="linefade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#62d7eb" stop-opacity=".22"/><stop offset="100%" stop-color="#62d7eb" stop-opacity="0"/></linearGradient></defs>'+
+ '<line x1="12" y1="40" x2="708" y2="40" stroke="#243147" stroke-dasharray="3 6"/><line x1="12" y1="94" x2="708" y2="94" stroke="#243147" stroke-dasharray="3 6"/><line x1="12" y1="149" x2="708" y2="149" stroke="#243147" stroke-dasharray="3 6"/>'+
+ '<polygon points="'+points+' 708,176 12,176" fill="url(#linefade)"/><polyline points="'+points+'" fill="none" stroke="#62d7eb" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/><line x1="12" y1="'+lastY+'" x2="708" y2="'+lastY+'" stroke="#62d7eb" stroke-opacity=".38" stroke-dasharray="4 5"/><circle cx="708" cy="'+lastY+'" r="4" fill="#62d7eb" stroke="#0a111d" stroke-width="2"/>';
+ svg.hidden=false;empty.hidden=true;$("chart-period").textContent=series.length+" clôtures";$("chart-start").textContent=date(series[0].time).replace(" UTC","");$("chart-end").textContent=date(series[series.length-1].time).replace(" UTC","");
+ svg.setAttribute("aria-label","Prix de clôture réel : minimum "+price(min)+", maximum "+price(max)+", dernière clôture "+price(vals[vals.length-1]));
+}
+function renderChecks(checks){
+ var host=$("checks");
+ if(!Array.isArray(checks)||!checks.length){host.innerHTML='<div class="source-row"><div><div class="source-name">Contrôles</div><div class="source-detail">Aucun contrôle rapporté</div></div><span class="source-state fail">INCONNU</span></div>';return;}
+ host.innerHTML=checks.map(function(c){var ok=c.status==="PASS",detail=c.reason||(c.value_pct!==undefined?"Valeur : "+fmt(c.value_pct,4)+" %":"Résultat du contrôle");return '<div class="source-row"><div><div class="source-name">'+String(c.name||"Contrôle").replace(/[&<>"]/g,"")+'</div><div class="source-detail">'+String(detail).replace(/[&<>"]/g,"")+'</div></div><span class="source-state '+(ok?"pass":"fail")+'">'+(ok?"OK":"ÉCHEC")+'</span></div>';}).join("");
+}
+async function load(){
+ var button=$("refresh");button.disabled=true;button.textContent="Chargement…";
+ try{
+  var response=await fetch("./report.json?t="+Date.now(),{cache:"no-store"});if(!response.ok)throw new Error("Rapport indisponible (HTTP "+response.status+")");
+  var d=await response.json(),t=d.sources&&d.sources.mexc_ticker,c=d.sources&&d.sources.mexc_candles,k=d.sources&&d.sources.kucoin_level1,i=d.indicators,status=d.status||"ATTENDRE",passed=status==="SURVEILLER";
+  $("main-status").className="status "+(passed?"ok":"");$("main-status").innerHTML="<span>●</span><span>"+(passed?"SURVEILLER · contrôles passés":"ATTENDRE · données à vérifier")+"</span>";
+  $("header-state").textContent=passed?"Contrôles passés":"Surveillance prudente";$("header-dot").style.background=passed?"var(--green)":"var(--amber)";
+  $("last-price").textContent=t?price(t.last):"—";$("price-time").textContent=t&&t.observed_at?"Observation "+date(t.observed_at):"Aucune observation disponible";
+  $("change-24h").textContent=t?pct(t.change_pct_24h):"—";$("change-24h").style.color=t&&t.change_pct_24h>0?"var(--green)":t&&t.change_pct_24h<0?"var(--red)":"var(--text)";
+  $("spread").textContent=t&&t.spread_pct!=null?fmt(t.spread_pct,4)+" %":"—";$("spread-foot").textContent=t&&t.bid!=null&&t.ask!=null?"Bid "+price(t.bid)+" · Ask "+price(t.ask):"Pas de cotations disponibles";
+  $("volume-24h").textContent=t&&t.quote_volume_24h!=null?fmt(t.quote_volume_24h,0):"—";
+  $("ema12").textContent=i&&i.ema12!=null?price(i.ema12):"—";$("ema26").textContent=i&&i.ema26!=null?price(i.ema26):"—";$("ema50").textContent=i&&i.ema50!=null?price(i.ema50):"—";$("rsi").textContent=i&&i.rsi14!=null?fmt(i.rsi14,2):"—";$("atr").textContent=i&&i.atr14!=null?price(i.atr14):"—";$("atr-pct").textContent=i&&i.atr_pct!=null?fmt(i.atr_pct,3)+" %":"—";
+  $("vol-ratio").textContent=i&&i.volume_last_closed!=null&&i.volume_mean20>0?fmt(i.volume_last_closed/i.volume_mean20,2)+"×":"—";drawChart(i&&i.close_series);
+  sourceState("mexc-ticker-state",t&&t.status==="OK"?"REÇU":"INDISPONIBLE",!!(t&&t.status==="OK"));$("mexc-ticker-detail").textContent=t&&t.status==="OK"?(t.source||"MEXC public ticker")+" · "+date(t.observed_at):(t&&t.reason)||"Le ticker n’a pas été reçu";
+  sourceState("mexc-candle-state",c&&c.status==="OK"?"REÇU":"INDISPONIBLE",!!(c&&c.status==="OK"));$("mexc-candle-detail").textContent=c&&c.status==="OK"?String(c.closed_candles_used||"?")+" chandelles terminées · "+date(i&&i.last_closed_candle_at):(c&&c.reason)||"Pas de chandelles exploitables";
+  sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Prix "+price(k.last)+" USDT · "+date(k.observed_at):(k&&k.reason)||"Comparaison indépendante indisponible";
+  renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Rapport généré : "+date(d.generated_at);
+ }catch(err){$("main-status").className="status";$("main-status").innerHTML="<span>●</span><span>ATTENDRE · rapport absent</span>";$("header-state").textContent="Rapport indisponible";$("report-error").textContent=err.message||"Impossible de lire le rapport";}
+ finally{button.disabled=false;button.textContent="↻ Actualiser";}
+}
+$("refresh").addEventListener("click",load);load();
+})();
+</script></body></html>
