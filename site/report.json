@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-14T22:31:25.665989+00:00",
+  "generated_at": "2026-10-14T22:35:10.497885+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001747,
-      "bid": 0.001744,
-      "ask": 0.001751,
-      "spread_pct": 0.40057224606579944,
-      "quote_volume_24h": 100455.337862,
-      "change_pct_24h": -0.0256,
+      "last": 0.001752,
+      "bid": 0.001749,
+      "ask": 0.001754,
+      "spread_pct": 0.2854695974878683,
+      "quote_volume_24h": 100575.589826,
+      "change_pct_24h": -0.0223,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-14T22:31:26.247928+00:00"
+      "observed_at": "2026-10-14T22:35:10.745749+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -26,7 +26,7 @@
       "last": 0.001755,
       "bid": 0.001752,
       "ask": 0.001755,
-      "observed_at": "2026-10-14T22:31:26.808113+00:00"
+      "observed_at": "2026-10-14T22:35:11.106900+00:00"
     }
   },
   "checks": [
@@ -37,20 +37,20 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.4006,
+      "value_pct": 0.2855,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.4569,
+      "divergence_pct": 0.1711,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-14T22:30:00+00:00",
-    "candle_age_seconds": 86,
+    "candle_age_seconds": 310,
     "close": 0.001748,
     "ema12": 0.0017669638914043597,
     "ema26": 0.0017757814238142675,
@@ -257,7 +257,7 @@
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.4569
+    "last_price_divergence_pct": 0.1711
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
