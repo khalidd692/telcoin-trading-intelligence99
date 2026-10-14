@@ -32,7 +32,7 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <header><div class="brand"><div class="logo">T/</div><div><h1>TELCOIN INTELLIGENCE</h1><p>Marché · Surveillance systématique</p></div></div>
 <div class="head-actions"><div class="live"><span class="dot" id="header-dot"></span><span id="header-state">Vérification des données</span></div><button id="refresh">↻ Actualiser</button></div></header>
 <div class="eyebrow">TABLEAU DE BORD / TEL-USDT</div>
-<section class="intro"><div><h2>Vue du marché</h2><p class="sub">Rapport REST périodique (collecte environ toutes les 15 min). Il n’y a pas de flux WebSocket direct : l’actualisation visuelle ne signifie pas qu’un nouveau prix vient d’arriver.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
+<section class="intro"><div><h2>Vue du marché</h2><p class="sub">Indicateurs et chandelles issus du rapport REST périodique (~15 min). Les cotations WebSocket MEXC/KuCoin ne sont considérées en direct qu’après réception de trames fraîches ; le rafraîchissement visuel ne crée pas de nouveau prix.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
 <section class="panel realtime" aria-labelledby="live-title">
 <div class="panel-head"><div><h3 id="live-title">Flux publics en direct</h3><div class="caption">Les valeurs changent uniquement sur événement réellement reçu ; toute source manquante impose ATTENDRE.</div></div><span id="realtime-status" class="status">ATTENDRE · initialisation des flux</span></div>
 <div class="realtime-grid">
