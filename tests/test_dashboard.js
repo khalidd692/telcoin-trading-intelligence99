@@ -18,9 +18,9 @@ function report(generatedAt) {
     mode: "READ_ONLY_ALERTS",
     status: "SURVEILLER",
     sources: {
-      mexc_ticker: { status: "OK", last: 0.001, bid: 0.00099, ask: 0.00101, spread_pct: 2, observed_at: generatedAt, source: "test fixture" },
+      mexc_ticker: { status: "OK", last: 0.001, bid: 0.000999, ask: 0.001001, spread_pct: 0.2, observed_at: generatedAt, source: "test fixture" },
       mexc_candles: { status: "OK", timeframe: "15m", closed_candles_used: 1 },
-      kucoin_level1: { status: "OK", last: 0.001, bid: 0.00099, ask: 0.00101, observed_at: generatedAt }
+      kucoin_level1: { status: "OK", last: 0.001, bid: 0.000999, ask: 0.001001, observed_at: generatedAt }
     },
     checks: [{ name: "test quality check", status: "PASS" }],
     indicators: { timeframe: "15m", last_closed_candle_at: generatedAt, close_series: [] }
