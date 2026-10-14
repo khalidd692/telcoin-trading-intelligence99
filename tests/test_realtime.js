@@ -23,4 +23,64 @@ assert.equal(rt.assess(sources,now,{fresh:true,status:"ATTENDRE",checksPass:fals
 assert.equal(rt.assess({...sources,mexc:{...sources.mexc,ask:.00124}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
 assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,last:.0013}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
 assert.equal(rt.isOutOfOrder(100,99),true);assert.equal(rt.isOutOfOrder(100,100),false);assert.equal(rt.reconnectDelay(1),1000);assert.equal(rt.reconnectDelay(2),2000);assert.equal(rt.reconnectDelay(10),30000);
+
+function fakeEnvironment(WebSocketImpl) {
+  const elements = Object.create(null), timeouts = new Map(), intervals = new Map();
+  let nextId = 0;
+  const root = {
+    document: { getElementById(id) { return elements[id] || (elements[id] = { textContent: "", className: "", style: {}, innerHTML: "" }); } },
+    WebSocket: WebSocketImpl,
+    URL,
+    telcoinReportIsFresh: false,
+    telcoinReportStatus: "ATTENDRE",
+    telcoinReportChecksPass: false,
+    addEventListener() {},
+    setTimeout(fn, delay) { const id = ++nextId; timeouts.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { timeouts.delete(id); },
+    setInterval(fn, delay) { const id = ++nextId; intervals.set(id, { fn, delay }); return id; },
+    clearInterval(id) { intervals.delete(id); },
+    fetch: async () => ({ ok: true, json: async () => ({
+      code: "200000", data: { token: "test-public-token", instanceServers: [{ endpoint: "wss://unit.invalid/", pingInterval: 18000, pingTimeout: 10000 }] }
+    }) }),
+    runTimeout(delay) { const found = Array.from(timeouts.entries()).find(([, value]) => value.delay === delay); assert.ok(found, "scheduled reconnect exists"); timeouts.delete(found[0]); found[1].fn(); },
+    elements
+  };
+  return root;
+}
+function FakeSocket(url) {
+  this.url = url; this.readyState = 0; this.sent = [];
+  FakeSocket.instances.push(this);
+}
+FakeSocket.instances = [];
+FakeSocket.prototype.send = function (data) { this.sent.push(data); };
+FakeSocket.prototype.open = function () { this.readyState = 1; this.onopen(); };
+FakeSocket.prototype.message = function (data) { this.onmessage({ data }); };
+FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose) this.onclose(); };
+
+(async () => {
+  const absentRoot = fakeEnvironment(undefined);
+  const absentController = realtime.mount(absentRoot);
+  assert.match(absentController.state.mexc.status, /RECONNEXION/);
+  assert.match(absentRoot.elements["realtime-status"].textContent, /ATTENDRE/);
+  absentController.stop();
+
+  FakeSocket.instances = [];
+  const root = fakeEnvironment(FakeSocket);
+  const controller = realtime.mount(root);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(FakeSocket.instances.length, 2, "both public feeds attempt a connection");
+  const mexcSocket = FakeSocket.instances[0], kucoinSocket = FakeSocket.instances[1];
+  mexcSocket.open(); kucoinSocket.open();
+  kucoinSocket.message(JSON.stringify({ type: "welcome" }));
+  assert.equal(controller.state.kucoin.connected, true, "KuCoin welcome is not treated as a malformed ticker");
+  assert.equal(controller.state.kucoin.status, "ABONNEMENT");
+  mexcSocket.close();
+  assert.equal(controller.state.mexc.connected, false);
+  assert.match(controller.state.mexc.status, /RECONNEXION/);
+  assert.match(root.elements["realtime-status"].textContent, /ATTENDRE/);
+  root.runTimeout(1000);
+  assert.equal(FakeSocket.instances.length, 3, "closed MEXC socket reconnects after backoff");
+  controller.stop();
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
 process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");
