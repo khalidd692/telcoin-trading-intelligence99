@@ -67,18 +67,19 @@ export default {
     }
 
     let upstreamOpen = false;
+    const pending = [];
     const closeBoth = (code, reason) => {
       try { if (server.readyState < 2) server.close(code, reason); } catch {}
       try { if (upstream && upstream.readyState < 2) upstream.close(code, reason); } catch {}
     };
-    upstream.addEventListener("open", () => { upstreamOpen = true; });
+    upstream.addEventListener("open", () => { upstreamOpen = true; while (pending.length && upstream.readyState === 1) upstream.send(pending.shift()); });
     upstream.addEventListener("message", (event) => {
       try { if (server.readyState === 1) server.send(event.data); } catch { closeBoth(1011, "Relay send failed"); }
     });
     upstream.addEventListener("close", () => closeBoth(1012, "Exchange disconnected"));
     upstream.addEventListener("error", () => closeBoth(1011, "Exchange transport error"));
     server.addEventListener("message", (event) => {
-      if (!upstreamOpen || upstream.readyState !== 1) return;
+      if (!upstreamOpen || upstream.readyState !== 1) { if (pending.length < 32) pending.push(event.data); else closeBoth(1013, "Upstream not ready"); return; }
       try { upstream.send(event.data); } catch { closeBoth(1011, "Relay send failed"); }
     });
     server.addEventListener("close", () => closeBoth(1000, "Client disconnected"));
