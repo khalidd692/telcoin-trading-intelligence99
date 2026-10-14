@@ -1,0 +1,15 @@
+# TEL/USDT: public WebSocket streams and limits
+
+The dashboard is a static HTTPS site. It opens two public feeds directly, without exchange credentials or order endpoints:
+- MEXC: `wss://wbs-api.mexc.com/ws`, aggregated trades and best bid/ask for `TELUSDT`. Frames use protobuf and are decoded in `site/realtime.js` according to MEXC's published schemas.
+- KuCoin: request an ephemeral public token from `POST https://api.kucoin.com/api/v1/bullet-public`, then subscribe to `/market/ticker:TEL-USDT` over WSS. The token stays in the browser tab's memory. No private token is requested or persisted.
+
+Rows show exchange event timestamp, local receipt time, and event age. An interface clock never refreshes a price. The page uses a 30-second operational last-trade freshness limit; after that it clears the price in the live quote panel and shows ATTENDRE. An invalid frame, future timestamp, inconsistent quote, out-of-order event, disconnection, MEXC spread above the existing 0.50% check, MEXC/KuCoin divergence above the existing 1.0% check, or missing/stale periodic report also forces ATTENDRE. Market quality thresholds are unchanged from `src/monitor.py`; 30 seconds is a feed freshness limit, not a strategy threshold.
+
+Connections resubscribe with exponential backoff capped at 30 seconds. MEXC receives an application ping every 20 seconds. KuCoin is pinged at the interval announced by its server. Invalid market frames are rejected and fresh events are required after reconnection. No quote is reconstructed or simulated during an outage.
+
+The REST report and its closed 15-minute candles remain the source of historical indicators. WebSocket ticks are more recent but do not replace a closed candle. Trend text explicitly describes the last closed candle. `SURVEILLER` means only that source and report quality controls passed; it is not a prediction, buy/sell signal, or evidence of an edge. No orders are placed.
+
+## Browser and relay boundary
+
+Direct feeds depend on WSS availability and CORS policy for KuCoin's public-token endpoint. If the browser blocks the token request or a WSS feed, the interface stays at ATTENDRE and does not present an old snapshot as a live quote. GitHub Pages cannot host a permanent relay process. If network policy prevents direct access, the minimum architecture is an always-on HTTPS/WSS service that connects read-only to both official endpoints, handles heartbeats, MEXC protobuf, reconnects, ordering and freshness, publishes only validated events, stores no private credentials, and exposes no trading endpoint. Relay hosting and cost are not configured or evaluated here.
