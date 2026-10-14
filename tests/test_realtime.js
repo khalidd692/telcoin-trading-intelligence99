@@ -81,5 +81,17 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
   root.runTimeout(1000);
   assert.equal(FakeSocket.instances.length, 3, "closed MEXC socket reconnects after backoff");
   controller.stop();
+  FakeSocket.instances = [];
+  const relayRoot = fakeEnvironment(FakeSocket);
+  relayRoot.TELCOIN_REALTIME_RELAY_URL = "wss://relay.invalid/";
+  let relayFetches = 0;
+  relayRoot.fetch = async () => { relayFetches++; throw new Error("browser token fetch must be bypassed when relay is configured"); };
+  const relayController = rt.mount(relayRoot);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(FakeSocket.instances.length, 2, "relay mode still opens both venue sockets");
+  assert.equal(new URL(FakeSocket.instances[0].url).searchParams.get("venue"), "mexc");
+  assert.equal(new URL(FakeSocket.instances[1].url).searchParams.get("venue"), "kucoin");
+  assert.equal(relayFetches, 0, "relay mode must not fetch KuCoin token from the browser");
+  relayController.stop();
   process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });
