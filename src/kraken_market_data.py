@@ -214,15 +214,17 @@ def collect_snapshot() -> dict[str, Any]:
     trade_price = _positive(trade[0], "last trade price")
     trade_qty = _positive(trade[1], "last trade quantity")
     trade_age = server_time - trade_time
-    if trade_age < -2 or trade_age > MAX_MARKET_DATA_AGE_SECONDS:
-        raise KrakenMarketDataError(f"Kraken last trade stale or in future ({trade_age:.3f}s)")
     divergence_pct = abs(last - trade_price) / ((last + trade_price) / 2) * 100
-    if divergence_pct > 1.0:
-        raise KrakenMarketDataError(f"ticker/last-trade divergence too high ({divergence_pct:.4f}%)")
 
+    # Fetch OHLC before rejecting a stale trade so the live smoke log can document
+    # all public endpoints reached in this run; stale data still fail closed below.
     time.sleep(REQUEST_SPACING_SECONDS)
     ohlc_result, _, status = _get_json("OHLC", {"pair": pair_key, "interval": "15"})
     http_statuses["OHLC"] = status
+    if trade_age < -2 or trade_age > MAX_MARKET_DATA_AGE_SECONDS:
+        raise KrakenMarketDataError(f"Kraken last trade stale or in future ({trade_age:.3f}s)")
+    if divergence_pct > 1.0:
+        raise KrakenMarketDataError(f"ticker/last-trade divergence too high ({divergence_pct:.4f}%)")
     candle_arrays = [v for k, v in ohlc_result.items() if k != "last" and isinstance(v, list)]
     if len(candle_arrays) != 1 or len(candle_arrays[0]) < 2:
         raise KrakenMarketDataError("not enough Kraken OHLC candles")
