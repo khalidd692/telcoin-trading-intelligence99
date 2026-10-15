@@ -37,7 +37,7 @@ def fixture_payloads(*, pair=True, bid="0.001689", ask="0.001691",
 class KrakenSnapshotTests(unittest.TestCase):
     def call_with(self, payloads):
         def fake_get(path, params=None):
-            return payloads[path][ "result" ], 1
+            return payloads[path]["result"], 1, 200
         with patch.object(km, "_get_json", side_effect=fake_get), patch.object(km.time, "sleep"):
             return km.collect_snapshot()
 
