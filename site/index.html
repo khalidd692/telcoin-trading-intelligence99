@@ -120,7 +120,7 @@ function updateReportAge(){
  if(!currentGeneratedAt)return;
  var ageMs=Date.now()-Date.parse(currentGeneratedAt);
  if(!Number.isFinite(ageMs)||ageMs < -60000){if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"invalid");setWaiting("Horodatage du rapport incohérent · ATTENDRE");}return;}
- if(ageMs>20*60*1000){window.telcoinReportIsFresh=false;if(window.TelcoinRealtime)window.TelcoinRealtime.refresh();if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"stale");setWaiting("Rapport périmé (> 20 min) · ATTENDRE");}else $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · PÉRIMÉ";return;}
+ if(ageMs>30*60*1000){window.telcoinReportIsFresh=false;if(window.TelcoinRealtime)window.TelcoinRealtime.refresh();if(!reportExpired){clearMarketView(currentGeneratedAt,ageMs,"stale");setWaiting("Rapport périmé (> 30 min) · ATTENDRE");}else $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · PÉRIMÉ";return;}
  if(reportExpired){$("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s · NON VALIDÉ";return;}
  $("report-age").textContent="Âge du rapport : "+Math.floor(ageMs/1000)+" s";
 }
@@ -130,9 +130,9 @@ async function load(){
  try{
   var response=await fetch("./report.json?t="+Date.now(),{cache:"no-store"});if(!response.ok)throw new Error("Rapport indisponible (HTTP "+response.status+")");
   var d=await response.json(),generatedMs=Date.parse(d.generated_at);reportAgeMs=Date.now()-generatedMs;
-  if(Number.isFinite(generatedMs)){reportGeneratedAt=d.generated_at;freshnessState=reportAgeMs>20*60*1000?"stale":(reportAgeMs < -60000?"invalid":"fresh");}
+  if(Number.isFinite(generatedMs)){reportGeneratedAt=d.generated_at;freshnessState=reportAgeMs>30*60*1000?"stale":(reportAgeMs < -60000?"invalid":"fresh");}
   if(d.schema_version!==1||d.symbol!=="TELUSDT"||d.mode!=="READ_ONLY_ALERTS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.sources||!Array.isArray(d.checks)||!Number.isFinite(generatedMs))throw new Error("Schéma de rapport invalide · ATTENDRE");
-  if(reportAgeMs < -60000 || reportAgeMs > 20*60*1000)throw new Error("Rapport périmé ou horodatage incohérent · ATTENDRE");
+  if(reportAgeMs < -60000 || reportAgeMs > 30*60*1000)throw new Error("Rapport périmé ou horodatage incohérent · ATTENDRE");
   if(d.status==="SURVEILLER"&&(!["mexc_ticker","mexc_candles","kucoin_level1"].every(function(key){return d.sources[key]&&d.sources[key].status==="OK";})||!d.indicators||d.checks.some(function(check){return check.status!=="PASS";})))throw new Error("Rapport SURVEILLER incomplet ou incohérent · ATTENDRE");
   var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER"&&!window.TelcoinRealtime;
   if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker MEXC invalide · ATTENDRE");
@@ -149,7 +149,7 @@ async function load(){
   sourceState("mexc-ticker-state",t&&t.status==="OK"?"REÇU":"INDISPONIBLE",!!(t&&t.status==="OK"));$("mexc-ticker-detail").textContent=t&&t.status==="OK"?(t.source||"MEXC public ticker")+" · "+date(t.observed_at):(t&&t.reason)||"Le ticker n’a pas été reçu";
   sourceState("mexc-candle-state",c&&c.status==="OK"?"REÇU":"INDISPONIBLE",!!(c&&c.status==="OK"));$("mexc-candle-detail").textContent=c&&c.status==="OK"?String(c.closed_candles_used||"?")+" chandelles terminées · "+date(i&&i.last_closed_candle_at):(c&&c.reason)||"Pas de chandelles exploitables";
   sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Prix "+price(k.last)+" USDT · "+date(k.observed_at):(k&&k.reason)||"Comparaison indépendante indisponible";
-  renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Rapport généré : "+date(d.generated_at);
+  renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Collecte UTC : "+date(d.generated_at);
  }catch(err){if(reportGeneratedAt)currentGeneratedAt=reportGeneratedAt;clearMarketView(reportGeneratedAt,reportAgeMs,freshnessState==="stale"?"stale":"invalid");setWaiting(err.message||"Impossible de lire le rapport · ATTENDRE");}
  finally{button.disabled=false;button.textContent="↻ Actualiser";}
 }
