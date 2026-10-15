@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.mexc_market_data import collect_snapshot as collect_mexc_snapshot
+
 SYMBOL = "TELUSDT"
 TIMEOUT_SECONDS = 10
 MAX_SPREAD_PCT = 0.50
@@ -56,22 +58,26 @@ def maybe_number(value: Any) -> float | None:
 
 
 def mexc_ticker() -> dict[str, Any]:
-    data = http_json(f"https://api.mexc.com/api/v3/ticker/24hr?symbol={SYMBOL}")
-    if not isinstance(data, dict) or data.get("symbol") != SYMBOL:
-        raise DataUnavailable("unexpected MEXC ticker schema/symbol")
-    last = number(data.get("lastPrice"), "MEXC last")
-    bid = number(data.get("bidPrice"), "MEXC bid")
-    ask = number(data.get("askPrice"), "MEXC ask")
-    if ask < bid:
-        raise DataUnavailable("MEXC ask below bid")
+    """Collect and validate a complete MEXC public snapshot before trusting its quote."""
+    snapshot = collect_mexc_snapshot()
     return {
-        "last": last, "bid": bid, "ask": ask,
-        "spread_pct": (ask - bid) / ((ask + bid) / 2) * 100,
-        "quote_volume_24h": maybe_number(data.get("quoteVolume")),
-        "change_pct_24h": maybe_number(data.get("priceChangePercent")),
-        "source": "MEXC public ticker", "observed_at": utc_now().isoformat(),
+        "last": snapshot["last_price"],
+        "bid": snapshot["best_bid"]["price"],
+        "ask": snapshot["best_ask"]["price"],
+        "spread_pct": snapshot["spread_pct"],
+        "source": snapshot["source"],
+        "observed_at": snapshot["received_at_utc"],
+        "server_time": snapshot["server_time_utc"],
+        "last_trade_at": snapshot["last_trade_at_utc"],
+        "last_trade_age_seconds": snapshot["last_trade_age_seconds"],
+        "last_trade_price": snapshot["last_trade_price"],
+        "ticker_trade_divergence_pct": snapshot["ticker_trade_divergence_pct"],
+        "bid_quantity": snapshot["best_bid"]["quantity"],
+        "ask_quantity": snapshot["best_ask"]["quantity"],
+        "depth": snapshot["depth"],
+        "latest_closed_15m_candle": snapshot["latest_closed_15m_candle"],
+        "validation": snapshot["validation"],
     }
-
 
 def candles_15m() -> list[list[float]]:
     data = http_json(f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval=15m&limit=100")
