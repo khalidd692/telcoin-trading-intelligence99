@@ -1,6 +1,6 @@
 """Read-only Kraken Spot TEL/USD snapshot using public REST market-data endpoints only.
 
-No API keys, private/account endpoints, or trading endpoints are used.
+No API keys, private/account endpoints, or trading endpoints are used. Each public request is spaced to respect Kraken rate guidance.
 Ticker and order-book timestamps are treated separately: Kraken's Ticker response
 has no quote timestamp, so it is cross-checked against timestamped public trades
 and timestamped depth levels before the snapshot can be accepted.
@@ -23,6 +23,7 @@ TIMEOUT_SECONDS = 10
 MAX_SPREAD_PCT = 0.50  # Keep existing monitor limit; do not raise without approval.
 MAX_MARKET_DATA_AGE_SECONDS = 60
 MAX_COLLECTION_SECONDS = 20
+REQUEST_SPACING_SECONDS = 1.05
 USER_AGENT = "telcoin-trading-intelligence/0.3 (read-only public market data)"
 
 
@@ -44,7 +45,7 @@ def _positive(value: Any, label: str) -> float:
     return number
 
 
-def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str, Any], int]:
+def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str, Any], int, int]:
     query = "?" + urllib.parse.urlencode(params) if params else ""
     url = f"{BASE}/{path}{query}"
     request = urllib.request.Request(url, headers={
@@ -53,6 +54,7 @@ def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str
         "Cache-Control": "no-cache",
     })
     started = time.monotonic()
+    status = 0
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             status = getattr(response, "status", 200)
@@ -62,6 +64,8 @@ def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str
         payload = json.loads(raw.decode("utf-8"))
     except KrakenMarketDataError:
         raise
+    except urllib.error.HTTPError as exc:
+        raise KrakenMarketDataError(f"HTTP {exc.code} from {path}") from exc
     except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise KrakenMarketDataError(f"request/parse failure for {path}: {type(exc).__name__}") from exc
     elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -74,7 +78,7 @@ def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str
     result = payload.get("result")
     if not isinstance(result, dict):
         raise KrakenMarketDataError(f"missing result object from {path}")
-    return result, elapsed_ms
+    return result, elapsed_ms, status
 
 
 def _resolve_pair(asset_pairs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -130,12 +134,15 @@ def _levels(raw: Any, side: str, server_time: float) -> list[dict[str, float]]:
 def collect_snapshot() -> dict[str, Any]:
     """Fetch and validate public Kraken TEL/USD ticker, depth, trades, and closed 15m candles."""
     started = time.monotonic()
-    asset_pairs, _ = _get_json("AssetPairs")
+    http_statuses: dict[str, int] = {}
+    asset_pairs, _, status = _get_json("AssetPairs")
+    http_statuses["AssetPairs"] = status
     pair_key, pair_metadata = _resolve_pair(asset_pairs)
 
     # Kraken public rate limits are respected with spacing between requests.
-    time.sleep(0.35)
-    server_result, _ = _get_json("Time")
+    time.sleep(REQUEST_SPACING_SECONDS)
+    server_result, _, status = _get_json("Time")
+    http_statuses["Time"] = status
     try:
         server_time = float(server_result["unixtime"])
     except (KeyError, TypeError, ValueError) as exc:
@@ -143,8 +150,9 @@ def collect_snapshot() -> dict[str, Any]:
     if not math.isfinite(server_time) or server_time <= 0:
         raise KrakenMarketDataError("invalid Kraken server time")
 
-    time.sleep(0.35)
-    ticker_result, _ = _get_json("Ticker", {"pair": pair_key})
+    time.sleep(REQUEST_SPACING_SECONDS)
+    ticker_result, _, status = _get_json("Ticker", {"pair": pair_key})
+    http_statuses["Ticker"] = status
     ticker = _single_result(ticker_result, "Ticker")
     if not all(key in ticker for key in ("a", "b", "c")):
         raise KrakenMarketDataError("incomplete Kraken ticker")
@@ -157,8 +165,9 @@ def collect_snapshot() -> dict[str, Any]:
     if spread_pct > MAX_SPREAD_PCT:
         raise KrakenMarketDataError(f"spread too wide ({spread_pct:.4f}%)")
 
-    time.sleep(0.35)
-    depth_result, _ = _get_json("Depth", {"pair": pair_key, "count": "10"})
+    time.sleep(REQUEST_SPACING_SECONDS)
+    depth_result, _, status = _get_json("Depth", {"pair": pair_key, "count": "10"})
+    http_statuses["Depth"] = status
     depth = _single_result(depth_result, "Depth")
     bids = _levels(depth.get("bids"), "bid", server_time)
     asks = _levels(depth.get("asks"), "ask", server_time)
@@ -167,8 +176,9 @@ def collect_snapshot() -> dict[str, Any]:
     if abs(bids[0]["price"] - bid) / bid * 100 > 0.01 or abs(asks[0]["price"] - ask) / ask * 100 > 0.01:
         raise KrakenMarketDataError("Kraken ticker and depth best levels disagree")
 
-    time.sleep(0.35)
-    trades_result, _ = _get_json("Trades", {"pair": pair_key})
+    time.sleep(REQUEST_SPACING_SECONDS)
+    trades_result, _, status = _get_json("Trades", {"pair": pair_key})
+    http_statuses["Trades"] = status
     trades = [v for v in trades_result.values() if isinstance(v, list)]
     if len(trades) != 1 or not trades[0] or not isinstance(trades[0][0], list) or len(trades[0][0]) < 3:
         raise KrakenMarketDataError("missing/malformed Kraken recent trade")
@@ -188,8 +198,9 @@ def collect_snapshot() -> dict[str, Any]:
     if divergence_pct > 1.0:
         raise KrakenMarketDataError(f"ticker/last-trade divergence too high ({divergence_pct:.4f}%)")
 
-    time.sleep(0.35)
-    ohlc_result, _ = _get_json("OHLC", {"pair": pair_key, "interval": "15"})
+    time.sleep(REQUEST_SPACING_SECONDS)
+    ohlc_result, _, status = _get_json("OHLC", {"pair": pair_key, "interval": "15"})
+    http_statuses["OHLC"] = status
     candle_arrays = [v for k, v in ohlc_result.items() if k != "last" and isinstance(v, list)]
     if len(candle_arrays) != 1 or len(candle_arrays[0]) < 2:
         raise KrakenMarketDataError("not enough Kraken OHLC candles")
@@ -225,6 +236,7 @@ def collect_snapshot() -> dict[str, Any]:
     observed_at = datetime.now(timezone.utc).isoformat()
     return {
         "source": "Kraken Spot public REST",
+        "http_statuses": http_statuses,
         "symbol": "TEL/USD",
         "pair_key": pair_key,
         "pair_status": pair_metadata.get("status"),
