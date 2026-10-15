@@ -39,8 +39,7 @@ class MarketSnapshotTests(unittest.TestCase):
         now_ms = 1_800_000_000_000
         payloads = responses(now_ms)
         with patch.object(md, "_get_json", side_effect=lambda path: payloads[path]), \
-             patch.object(md.time, "time", return_value=now_ms / 1000), \
-             patch.object(md.datetime, "now", return_value=md.datetime(2027, 1, 15, tzinfo=md.timezone.utc)):
+             patch.object(md.time, "time", return_value=now_ms / 1000):
             result = md.collect_snapshot()
         self.assertEqual(result["symbol"], "TELUSDT")
         self.assertGreater(result["last_price"], 0)
