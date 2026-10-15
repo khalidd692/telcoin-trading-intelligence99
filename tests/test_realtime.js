@@ -71,7 +71,10 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
   assert.equal(FakeSocket.instances.length, 2, "both public feeds attempt a connection");
   const mexcSocket = FakeSocket.instances[0], kucoinSocket = FakeSocket.instances[1];
   mexcSocket.open(); kucoinSocket.open();
+  assert.equal(kucoinSocket.sent.length, 0, "KuCoin must not subscribe before the welcome handshake");
   kucoinSocket.message(JSON.stringify({ type: "welcome" }));
+  assert.equal(kucoinSocket.sent.length, 1, "KuCoin subscribes after welcome");
+  assert.equal(JSON.parse(kucoinSocket.sent[0]).type, "subscribe");
   assert.equal(controller.state.kucoin.connected, true, "KuCoin welcome is not treated as a malformed ticker");
   assert.equal(controller.state.kucoin.status, "ABONNEMENT");
   mexcSocket.close();
