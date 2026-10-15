@@ -20,10 +20,10 @@ The collector uses only:
 - `GET /0/public/Trades` — recent trades with timestamps.
 - `GET /0/public/OHLC?interval=15` — 15-minute candles; the still-forming candle is excluded.
 
-Requests are spaced to respect Kraken's published public API rate guidance. HTTP status codes are captured in the live smoke-test output. The live smoke test is an optional CI step and does not convert a live data failure into a successful validation.
+Requests are spaced to respect Kraken's published public API rate guidance. HTTP status codes are captured in the live smoke-test output. The live smoke test is required on pull requests; stale or invalid live data fails the check.
 
 ## Automation
-GitHub Actions runs unit tests and dashboard checks on pull requests. On pull requests, an optional public Kraken live smoke test records whether the API was reachable. Scheduled data collection and publication only occur on the default branch.
+GitHub Actions runs unit tests and dashboard checks on pull requests. On pull requests, a required public Kraken live smoke test validates API reachability and data freshness. Scheduled data collection and publication only occur on the default branch.
 
 ## Indicators
 EMA 12/26/50, RSI 14, ATR 14, candle age, and volume comparison. The current 15-minute candle is excluded from indicators.
