@@ -71,7 +71,7 @@ class ReportTests(unittest.TestCase):
 
     def test_mexc_snapshot_validation_error_is_rejected(self):
         with patch.object(monitor, "collect_mexc_snapshot", side_effect=monitor.MarketDataError("invalid public snapshot")):
-            with self.assertRaises(monitor.MarketDataError):
+            with self.assertRaises(monitor.DataUnavailable):
                 monitor.mexc_ticker()
 
     def test_fallback_report_has_no_market_quote(self):
