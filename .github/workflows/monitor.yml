@@ -39,7 +39,6 @@ jobs:
           node tests/test_realtime.js
       - name: Optional live Kraken public market-data smoke test
         if: github.event_name == 'pull_request'
-        continue-on-error: true
         run: python -m scripts.kraken_live_smoke
       - name: Collect public market data
         id: collect
