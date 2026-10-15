@@ -5,10 +5,10 @@ function vi(v){let n=BigInt(v),o=[];while(n>127n){o.push(Number(n&127n)|128);n>>
 function fb(f,x){const b=typeof x==="string"?Array.from(Buffer.from(x)):x;return [...vi((f<<3)|2),...vi(b.length),...b];}
 function fv(f,x){return [...vi(f<<3),...vi(x)];}
 function deal(price,time){const item=[...fb(1,price),...fb(2,"12.5"),...fv(3,1),...fv(4,time)],d=[...fb(1,item),...fb(2,"deals")];return new Uint8Array([...fb(1,"spot@public.aggre.deals.v3.api.pb@100ms@TELUSDT"),...fb(314,d),...fb(3,"TELUSDT"),...fv(4,time)]);}
-function book(bid,ask,time){const b=[...fb(1,bid),...fb(2,"4"),...fb(3,ask),...fb(4,"5")];return new Uint8Array([...fb(1,"spot@public.aggre.bookTicker.v3.api.pb@100ms@TELUSDT"),...fb(315,b),...fb(3,"TELUSDT"),...fv(6,time)]);}
+function book(bid,ask,time){const b=[...fb(1,bid),...fb(2,"4"),...fb(3,ask),...fb(4,"5")];return new Uint8Array([...fb(1,"spot@public.aggre.bookTicker.v3.api.pb@100ms@TELUSDT"),...fb(315,b),...fb(3,"TELUSDT"),...fv(4,time)]);}
 const now=Date.now(),src=(last,bid,ask,t,connected=true)=>({last,bid,ask,eventAt:t,bookEventAt:t,receivedAt:now,connected}),sources={mexc:src(.00123,.001229,.001231,now),kucoin:src(.001231,.00123,.001232,now)};
 const trade=rt.decodeMexcFrame(deal("0.00123",now));assert.equal(trade.symbol,"TELUSDT");assert.equal(trade.trades[0].price,.00123);assert.equal(trade.trades[0].eventAt,now);
-const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);
+const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);assert.equal(b.bookTicker.eventAt,now,"MEXC book fixture must encode wrapper sendTime in field 4");
 assert.throws(()=>rt.decodeMexcFrame(new Uint8Array([255,255])),/protobuf|field/i);
 assert.throws(()=>rt.decodeMexcFrame(deal("0",now)),/price/i);
 assert.throws(()=>rt.decodeMexcFrame(book("0.002","0.001",now)),/below bid/i);
