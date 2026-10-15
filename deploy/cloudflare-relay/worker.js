@@ -61,6 +61,8 @@ export default {
     let upstream;
     try {
       upstream = new WebSocket(target);
+      // Preserve binary exchange frames as ArrayBuffer where the runtime supports it.
+      try { upstream.binaryType = "arraybuffer"; } catch {}
     } catch {
       server.close(1011, "Upstream connection failed");
       return new Response(null, { status: 101, webSocket: client });
@@ -72,14 +74,38 @@ export default {
       try { if (server.readyState < 2) server.close(code, reason); } catch {}
       try { if (upstream && upstream.readyState < 2) upstream.close(code, reason); } catch {}
     };
-    upstream.addEventListener("open", () => { upstreamOpen = true; while (pending.length && upstream.readyState === 1) upstream.send(pending.shift()); });
-    upstream.addEventListener("message", (event) => {
-      try { if (server.readyState === 1) server.send(event.data); } catch { closeBoth(1011, "Relay send failed"); }
+    upstream.addEventListener("open", () => {
+      upstreamOpen = true;
+      while (pending.length && upstream.readyState === 1) {
+        try { upstream.send(pending.shift()); } catch { closeBoth(1011, "Relay send failed"); return; }
+      }
+    });
+    upstream.addEventListener("message", async (event) => {
+      try {
+        if (server.readyState !== 1) return;
+        let payload = event.data;
+        // Never call WebSocket.send() with a Blob object: some runtimes stringify it
+        // to "[object Blob]" instead of forwarding the original binary frame.
+        if (typeof Blob !== "undefined" && payload instanceof Blob) {
+          payload = await payload.arrayBuffer();
+        }
+        if (payload instanceof ArrayBuffer || ArrayBuffer.isView(payload) || typeof payload === "string") {
+          server.send(payload);
+        } else {
+          closeBoth(1011, "Unsupported upstream frame type");
+        }
+      } catch {
+        closeBoth(1011, "Relay send failed");
+      }
     });
     upstream.addEventListener("close", () => closeBoth(1012, "Exchange disconnected"));
     upstream.addEventListener("error", () => closeBoth(1011, "Exchange transport error"));
     server.addEventListener("message", (event) => {
-      if (!upstreamOpen || upstream.readyState !== 1) { if (pending.length < 32) pending.push(event.data); else closeBoth(1013, "Upstream not ready"); return; }
+      if (!upstreamOpen || upstream.readyState !== 1) {
+        if (pending.length < 32) pending.push(event.data);
+        else closeBoth(1013, "Upstream not ready");
+        return;
+      }
       try { upstream.send(event.data); } catch { closeBoth(1011, "Relay send failed"); }
     });
     server.addEventListener("close", () => closeBoth(1000, "Client disconnected"));

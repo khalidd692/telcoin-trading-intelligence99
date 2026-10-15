@@ -8,7 +8,7 @@ function deal(price,time){const item=[...fb(1,price),...fb(2,"12.5"),...fv(3,1),
 function book(bid,ask,time){const b=[...fb(1,bid),...fb(2,"4"),...fb(3,ask),...fb(4,"5")];return new Uint8Array([...fb(1,"spot@public.aggre.bookTicker.v3.api.pb@100ms@TELUSDT"),...fb(315,b),...fb(3,"TELUSDT"),...fv(6,time)]);}
 const now=Date.now(),src=(last,bid,ask,t,connected=true)=>({last,bid,ask,eventAt:t,bookEventAt:t,receivedAt:now,connected}),sources={mexc:src(.00123,.001229,.001231,now),kucoin:src(.001231,.00123,.001232,now)};
 const trade=rt.decodeMexcFrame(deal("0.00123",now));assert.equal(trade.symbol,"TELUSDT");assert.equal(trade.trades[0].price,.00123);assert.equal(trade.trades[0].eventAt,now);
-const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);
+const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);assert.equal(b.bookTicker.eventAt,now,"MEXC book timestamp must come from wrapper sendTime field 6");
 assert.throws(()=>rt.decodeMexcFrame(new Uint8Array([255,255])),/protobuf|field/i);
 assert.throws(()=>rt.decodeMexcFrame(deal("0",now)),/price/i);
 assert.throws(()=>rt.decodeMexcFrame(book("0.002","0.001",now)),/below bid/i);
@@ -71,7 +71,9 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
   assert.equal(FakeSocket.instances.length, 2, "both public feeds attempt a connection");
   const mexcSocket = FakeSocket.instances[0], kucoinSocket = FakeSocket.instances[1];
   mexcSocket.open(); kucoinSocket.open();
+  assert.equal(kucoinSocket.sent.length, 0, "KuCoin must not subscribe before welcome");
   kucoinSocket.message(JSON.stringify({ type: "welcome" }));
+  assert.equal(kucoinSocket.sent.length, 1, "KuCoin subscribes after welcome");
   assert.equal(controller.state.kucoin.connected, true, "KuCoin welcome is not treated as a malformed ticker");
   assert.equal(controller.state.kucoin.status, "ABONNEMENT");
   mexcSocket.close();
