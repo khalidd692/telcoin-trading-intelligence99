@@ -13,7 +13,7 @@ from typing import Any
 
 from src.kraken_market_data import KrakenMarketDataError, collect_snapshot as collect_kraken_snapshot
 
-SYMBOL = "TELUSDT"
+SYMBOL = "TELUSD"
 TIMEOUT_SECONDS = 10
 MAX_SPREAD_PCT = 0.50
 MAX_REPORT_AGE_SECONDS = 20 * 60
@@ -120,7 +120,7 @@ def build_report() -> dict[str, Any]:
         }
         report["sources"]["kraken_depth"] = {
             "status": "OK", "depth": snapshot["depth"],
-            "freshness_verified": snapshot["validation"]["depth_fresh"],
+            "snapshot_retrieved": snapshot["validation"]["depth_snapshot_retrieved"],
             "observed_at": snapshot["observed_at_utc"],
         }
         report["sources"]["kraken_trades"] = {
@@ -164,7 +164,7 @@ def build_report() -> dict[str, Any]:
             {"name": "Kraken TEL/USD exact pair", "status": "PASS"},
             {"name": "Kraken ticker positive and bid below ask", "status": "PASS"},
             {"name": "Kraken spread", "status": "PASS", "value_pct": round(snapshot["spread_pct"], 4), "limit_pct": MAX_SPREAD_PCT},
-            {"name": "Kraken timestamped depth freshness and ticker consistency", "status": "PASS"},
+            {"name": "Kraken order-book snapshot retrieved and ticker-consistent", "status": "PASS"},
             {"name": "Kraken latest trade freshness and ticker consistency", "status": "PASS"},
             {"name": "Kraken closed 15m candles", "status": "PASS", "closed_candles_used": len(candles)},
         ])
