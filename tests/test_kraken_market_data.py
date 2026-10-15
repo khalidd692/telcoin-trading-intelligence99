@@ -28,6 +28,7 @@ def fixture_payloads(*, pair=True, bid="0.001689", ask="0.001691",
         }}},
         "Depth": {"error": [], "result": {"TELUSD": depth}},
         "Trades": {"error": [], "result": {"TELUSD": [
+            ["0.001680", "50", str(now-trade_age-3600), "s", "l", "", 12344],
             ["0.001690", "100", str(now-trade_age), "b", "l", "", 12345]
         ], "last": "12345"}},
         "OHLC": {"error": [], "result": {"TELUSD": candles, "last": "123456"}},
