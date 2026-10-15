@@ -15,13 +15,13 @@ function report(generatedAt) {
   return {
     schema_version: 1,
     generated_at: generatedAt,
-    symbol: "TELUSDT",
+    symbol: "TELUSD",
     mode: "READ_ONLY_ALERTS",
     status: "SURVEILLER",
     sources: {
-      mexc_ticker: { status: "OK", last: 0.001, bid: 0.000999, ask: 0.001001, spread_pct: 0.2, observed_at: generatedAt, source: "test fixture" },
-      mexc_candles: { status: "OK", timeframe: "15m", closed_candles_used: 1 },
-      kucoin_level1: { status: "OK", last: 0.001, bid: 0.000999, ask: 0.001001, observed_at: generatedAt }
+      kraken_market: { status: "OK", last: 0.001, bid: 0.000999, ask: 0.001001, spread_pct: 0.2, observed_at: generatedAt, source: "test fixture" },
+      kraken_candles: { status: "OK", timeframe: "15m", closed_candles_used: 1 },
+      kraken_depth: { status: "OK", depth: { bids: [], asks: [] }, observed_at: generatedAt }, kraken_trades: { status: "OK" }
     },
     checks: [{ name: "test quality check", status: "PASS" }],
     indicators: { timeframe: "15m", last_closed_candle_at: generatedAt, close_series: [] }
