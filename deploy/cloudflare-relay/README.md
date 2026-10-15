@@ -14,7 +14,7 @@ The Worker accepts WebSocket upgrades only from `https://khalidd692.github.io`; 
 
 ## Validation and safety
 
-- The relay forwards frames unchanged. MEXC protobuf decoding and KuCoin ticker validation remain in the browser.
+- The relay preserves binary exchange frames, including Blob-to-ArrayBuffer normalization. MEXC protobuf decoding and KuCoin ticker validation remain in the browser.
 - A relay health response only proves the Worker is deployed, **not** that exchange feeds are healthy. Verify both cards receive fresh ticks before treating the live check as passed.
 - If either feed is unavailable, stale, malformed, or inconsistent, the dashboard must remain `ATTENDRE`.
 - No private credentials, API keys, trading permissions, or orders are involved.
