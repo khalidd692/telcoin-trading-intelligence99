@@ -1,3 +1,2 @@
-// Set this to your deployed Cloudflare Worker URL to enable the server-side relay.
-// Keep empty until the Worker is deployed and its /health endpoint is verified.
-window.TELCOIN_REALTIME_RELAY_URL = "";
+// Set to the deployed Cloudflare Worker URL. The site adds ?venue=mexc or ?venue=kucoin.
+window.TELCOIN_REALTIME_RELAY_URL = "wss://telcoin-public-ws-relay.babz15233.workers.dev";
