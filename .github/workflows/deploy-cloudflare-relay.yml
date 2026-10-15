@@ -1,0 +1,47 @@
+name: Deploy public WebSocket relay
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/cloudflare-relay/worker.js"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telcoin-public-ws-relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing repository secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing repository secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy deploy/cloudflare-relay/worker.js --name telcoin-public-ws-relay --compatibility-date 2026-10-15
+
+      - name: Verify Worker health endpoint
+        env:
+          WORKER_HEALTH_URL: https://telcoin-public-ws-relay.babz15233.workers.dev/health
+        run: |
+          set -eu
+          body="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$WORKER_HEALTH_URL")"
+          printf '%s\n' "$body"
+          echo "$body" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status")=="ok", d; assert set(d.get("venues",[]))=={"mexc","kucoin"}, d'
