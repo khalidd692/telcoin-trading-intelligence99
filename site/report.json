@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-15T05:31:09.690801+00:00",
+  "generated_at": "2026-10-15T07:13:30.421629+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001714,
-      "bid": 0.001709,
-      "ask": 0.001715,
-      "spread_pct": 0.35046728971962204,
-      "quote_volume_24h": 98743.489483,
-      "change_pct_24h": -0.0456,
+      "last": 0.001709,
+      "bid": 0.001708,
+      "ask": 0.001712,
+      "spread_pct": 0.23391812865496375,
+      "quote_volume_24h": 100516.890121,
+      "change_pct_24h": -0.0409,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-15T05:31:10.196888+00:00"
+      "observed_at": "2026-10-15T07:13:30.867934+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -23,10 +23,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001718,
-      "bid": 0.001716,
-      "ask": 0.001718,
-      "observed_at": "2026-10-15T05:31:10.669200+00:00"
+      "last": 0.001713,
+      "bid": 0.001713,
+      "ask": 0.001716,
+      "observed_at": "2026-10-15T07:13:31.469735+00:00"
     }
   },
   "checks": [
@@ -37,54 +37,30 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.3505,
+      "value_pct": 0.2339,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.2331,
+      "divergence_pct": 0.2338,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
-    "last_closed_candle_at": "2026-10-15T05:30:00+00:00",
-    "candle_age_seconds": 70,
-    "close": 0.001715,
-    "ema12": 0.0017202174292915437,
-    "ema26": 0.001731128760235494,
-    "ema50": 0.0017463456629229729,
-    "rsi14": 38.679245283018815,
-    "atr14": 1.2285714285714274e-05,
-    "atr_pct": 0.7163681799250305,
-    "volume_last_closed": 408664.76,
-    "volume_mean20": 673150.5835,
+    "last_closed_candle_at": "2026-10-15T07:00:00+00:00",
+    "candle_age_seconds": 811,
+    "close": 0.001701,
+    "ema12": 0.0017133836443451382,
+    "ema26": 0.0017231517791236922,
+    "ema50": 0.001738261758331214,
+    "rsi14": 36.36363636363632,
+    "atr14": 8.999999999999987e-06,
+    "atr_pct": 0.5291005291005283,
+    "volume_last_closed": 956429.62,
+    "volume_mean20": 661424.225,
     "close_series": [
-      {
-        "time": "2026-10-14T17:45:00+00:00",
-        "close": 0.0018
-      },
-      {
-        "time": "2026-10-14T18:00:00+00:00",
-        "close": 0.001791
-      },
-      {
-        "time": "2026-10-14T18:15:00+00:00",
-        "close": 0.001791
-      },
-      {
-        "time": "2026-10-14T18:30:00+00:00",
-        "close": 0.001792
-      },
-      {
-        "time": "2026-10-14T18:45:00+00:00",
-        "close": 0.001791
-      },
-      {
-        "time": "2026-10-14T19:00:00+00:00",
-        "close": 0.001804
-      },
       {
         "time": "2026-10-14T19:15:00+00:00",
         "close": 0.001802
@@ -252,12 +228,36 @@
       {
         "time": "2026-10-15T05:30:00+00:00",
         "close": 0.001715
+      },
+      {
+        "time": "2026-10-15T05:45:00+00:00",
+        "close": 0.001711
+      },
+      {
+        "time": "2026-10-15T06:00:00+00:00",
+        "close": 0.001708
+      },
+      {
+        "time": "2026-10-15T06:15:00+00:00",
+        "close": 0.001706
+      },
+      {
+        "time": "2026-10-15T06:30:00+00:00",
+        "close": 0.001714
+      },
+      {
+        "time": "2026-10-15T06:45:00+00:00",
+        "close": 0.001718
+      },
+      {
+        "time": "2026-10-15T07:00:00+00:00",
+        "close": 0.001701
       }
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.2331
+    "last_price_divergence_pct": 0.2338
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
