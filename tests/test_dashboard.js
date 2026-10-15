@@ -85,7 +85,7 @@ async function boot(generatedAt, initialNow) {
   assert.match(fresh.elements.get("report-age").textContent, /11 s/);
   assert.equal(fresh.fetchCount, callsBeforeTick, "the age clock must not fetch or invent prices");
 
-  fresh.advance(20 * 60 * 1000);
+  fresh.advance(31 * 60 * 1000);
   fresh.tickAge();
   assert.match(fresh.elements.get("main-status").innerHTML, /ATTENDRE/);
   assert.equal(fresh.elements.get("last-price").textContent, "—");
@@ -96,7 +96,7 @@ async function boot(generatedAt, initialNow) {
   assert.match(fresh.elements.get("report-age").textContent, /PÉRIMÉ/);
   assert.equal(fresh.fetchCount, callsBeforeTick, "staleness must fail closed without a market request");
 
-  const stale = await boot(new Date(start - 21 * 60 * 1000).toISOString(), start);
+  const stale = await boot(new Date(start - 31 * 60 * 1000).toISOString(), start);
   assert.match(stale.elements.get("main-status").innerHTML, /ATTENDRE/);
   assert.equal(stale.elements.get("last-price").textContent, "—");
   assert.equal(stale.elements.get("chart-start").textContent, "—");
