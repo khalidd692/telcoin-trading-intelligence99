@@ -57,55 +57,6 @@ def maybe_number(value: Any) -> float | None:
         return None
 
 
-def mexc_ticker() -> dict[str, Any]:
-    """Collect and validate a complete MEXC public snapshot before trusting its quote."""
-    try:
-        snapshot = collect_mexc_snapshot()
-    except MarketDataError as exc:
-        raise DataUnavailable(str(exc)) from exc
-    return {
-        "last": snapshot["last_price"],
-        "bid": snapshot["best_bid"]["price"],
-        "ask": snapshot["best_ask"]["price"],
-        "spread_pct": snapshot["spread_pct"],
-        "source": snapshot["source"],
-        "observed_at": snapshot["received_at_utc"],
-        "server_time": snapshot["server_time_utc"],
-        "last_trade_at": snapshot["last_trade_at_utc"],
-        "last_trade_age_seconds": snapshot["last_trade_age_seconds"],
-        "last_trade_price": snapshot["last_trade_price"],
-        "ticker_trade_divergence_pct": snapshot["ticker_trade_divergence_pct"],
-        "bid_quantity": snapshot["best_bid"]["quantity"],
-        "ask_quantity": snapshot["best_ask"]["quantity"],
-        "depth": snapshot["depth"],
-        "latest_closed_15m_candle": snapshot["latest_closed_15m_candle"],
-        "validation": snapshot["validation"],
-    }
-
-def candles_15m() -> list[list[float]]:
-    data = http_json(f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval=15m&limit=100")
-    if not isinstance(data, list) or len(data) < 55:
-        raise DataUnavailable("not enough MEXC candles")
-    candles = []
-    for row in data:
-        if not isinstance(row, list) or len(row) < 6:
-            raise DataUnavailable("unexpected candle schema")
-        try:
-            ts = int(row[0])
-            o, h, low, close, vol = (float(row[i]) for i in (1, 2, 3, 4, 5))
-        except (TypeError, ValueError, IndexError) as exc:
-            raise DataUnavailable("malformed candle") from exc
-        if not all(math.isfinite(x) for x in (o, h, low, close, vol)):
-            raise DataUnavailable("non-finite candle")
-        if min(o, h, low, close) <= 0 or vol < 0 or h < max(o, close, low) or low > min(o, close):
-            raise DataUnavailable("incoherent OHLCV candle")
-        candles.append([ts, o, h, low, close, vol])
-    candles.sort(key=lambda c: c[0])
-    if any(candles[i][0] >= candles[i + 1][0] for i in range(len(candles) - 1)):
-        raise DataUnavailable("duplicate candle timestamps")
-    return candles[:-1]  # never use the still-forming candle
-
-
 def ema(values: list[float], period: int) -> float:
     if len(values) < period:
         raise DataUnavailable(f"not enough values for EMA{period}")
@@ -125,21 +76,6 @@ def rsi(values: list[float], period: int = 14) -> float:
     if loss == 0:
         return 100.0 if gain > 0 else 50.0
     return 100 - 100 / (1 + gain / loss)
-
-
-def kucoin_price() -> dict[str, float]:
-    data = http_json("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=TEL-USDT")
-    if not isinstance(data, dict) or data.get("code") != "200000" or not isinstance(data.get("data"), dict):
-        raise DataUnavailable("unexpected KuCoin response")
-    d = data["data"]
-    result = {
-        "last": number(d.get("price"), "KuCoin last"),
-        "bid": number(d.get("bestBid"), "KuCoin bid"),
-        "ask": number(d.get("bestAsk"), "KuCoin ask"),
-    }
-    if result["ask"] < result["bid"]:
-        raise DataUnavailable("KuCoin ask below bid")
-    return result
 
 
 def fallback_report(reason: str) -> dict[str, Any]:
