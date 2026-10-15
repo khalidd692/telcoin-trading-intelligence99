@@ -125,9 +125,13 @@ def _levels(raw: Any, side: str, server_time: float) -> list[dict[str, float]]:
         if not math.isfinite(timestamp) or timestamp <= 0:
             raise KrakenMarketDataError(f"invalid {side} depth timestamp")
         age = server_time - timestamp
-        if age < -2 or age > MAX_MARKET_DATA_AGE_SECONDS:
-            raise KrakenMarketDataError(f"{side} depth timestamp stale or in future ({age:.3f}s)")
-        levels.append({"price": price, "quantity": quantity, "timestamp": timestamp})
+        # Kraken's L2 timestamp is associated with that price level, not the whole HTTP snapshot.
+        # Old levels can remain valid; reject only implausible future timestamps. The fresh
+        # HTTP snapshot and timestamped recent trades establish current market context.
+        if age < -2:
+            raise KrakenMarketDataError(f"{side} depth timestamp is in the future ({age:.3f}s)")
+        levels.append({"price": price, "quantity": quantity, "timestamp": timestamp,
+                       "level_age_seconds": round(age, 3)})
     return levels
 
 
@@ -245,7 +249,8 @@ def collect_snapshot() -> dict[str, Any]:
         "server_time_utc": _utc(server_time),
         "ticker_timestamp": None,
         "ticker_freshness_verified": False,
-        "ticker_freshness_note": "Kraken Ticker REST response has no quote timestamp; cross-checked against timestamped trades and depth.",
+        "ticker_freshness_note": "Kraken Ticker REST response has no quote timestamp; values are cross-checked against fresh timestamped trades and the just-retrieved L2 snapshot.",
+        "depth_timestamp_note": "L2 level timestamps describe price-level events, not HTTP snapshot age; the snapshot is observed at collection time.",
         "last": last,
         "bid": bid,
         "ask": ask,
