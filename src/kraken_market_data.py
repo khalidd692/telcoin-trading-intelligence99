@@ -282,7 +282,7 @@ def collect_snapshot() -> dict[str, Any]:
         "recent_closed_15m_candles": closed,
         "validation": {
             "exact_pair": True, "positive_prices": True, "bid_below_ask": True,
-            "spread_within_limit": True, "depth_fresh": True, "trade_fresh": True,
+            "spread_within_limit": True, "depth_snapshot_retrieved": True, "trade_fresh": True,
             "ticker_depth_consistent": True, "ticker_trade_consistent": True,
             "closed_candle_available": True,
         },
