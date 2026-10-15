@@ -3,7 +3,7 @@ from unittest.mock import patch
 from src import mexc_market_data as md
 
 
-def responses(now_ms=1_800_000_000_000, *, trade_age_ms=5_000, bid="0.00169", ask="0.00170", last="0.001695"):
+def responses(now_ms=1_800_000_000_000, *, trade_age_ms=5_000, bid="0.001692", ask="0.001700", last="0.001695"):
     trade_ms = now_ms - trade_age_ms
     return {
         "/api/v3/time": ({"serverTime": now_ms}, now_ms),
@@ -12,8 +12,8 @@ def responses(now_ms=1_800_000_000_000, *, trade_age_ms=5_000, bid="0.00169", as
             "symbol": "TELUSDT", "bidPrice": bid, "bidQty": "1000", "askPrice": ask, "askQty": "1200"
         }, now_ms),
         "/api/v3/depth?symbol=TELUSDT&limit=5": ({
-            "bids": [[bid, "1000"], ["0.00168", "2000"]],
-            "asks": [[ask, "1200"], ["0.00171", "2500"]]
+            "bids": [[bid, "1000"], ["0.001680", "2000"]],
+            "asks": [[ask, "1200"], ["0.001710", "2500"]]
         }, now_ms),
         "/api/v3/trades?symbol=TELUSDT&limit=1": ([{
             "price": last, "time": trade_ms, "qty": "100", "isBuyerMaker": False
@@ -48,7 +48,7 @@ class MarketSnapshotTests(unittest.TestCase):
         self.assertIn("server_time_utc", result)
         self.assertTrue(result["validation"]["last_trade_fresh"])
         self.assertTrue(result["latest_closed_15m_candle"]["close"] > 0)
-        self.assertAlmostEqual(result["spread_pct"], (0.00170 - 0.00169) / ((0.00170 + 0.00169) / 2) * 100, places=4)
+        self.assertAlmostEqual(result["spread_pct"], (0.001700 - 0.001692) / ((0.001700 + 0.001692) / 2) * 100, places=4)
 
     def test_network_error_fails_closed(self):
         with patch.object(md, "_get_json", side_effect=md.MarketDataError("offline")):
