@@ -34,7 +34,7 @@ class ReportTests(unittest.TestCase):
             "depth": {"bids": [{"price": 0.001779, "quantity": 1000.0}], "asks": [{"price": 0.001781, "quantity": 1000.0}]},
             "latest_closed_15m_candle": self.candles[-1], "recent_closed_15m_candles": self.candles,
             "validation": {"exact_pair": True, "positive_prices": True, "bid_below_ask": True,
-                "spread_within_limit": True, "depth_fresh": True, "trade_fresh": True,
+                "spread_within_limit": True, "depth_snapshot_retrieved": True, "trade_fresh": True,
                 "ticker_depth_consistent": True, "ticker_trade_consistent": True, "closed_candle_available": True},
             "collection_duration_seconds": 2.1,
         }
