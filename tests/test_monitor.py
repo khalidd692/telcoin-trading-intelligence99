@@ -69,11 +69,10 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["status"], "ATTENDRE")
         self.assertEqual(report["checks"][-1]["status"], "FAIL")
 
-    def test_mexc_schema_error_is_rejected(self):
-        with patch.object(monitor, "mexc_ticker", REAL_MEXC_TICKER):
-            with patch.object(monitor, "http_json", return_value={"symbol": "OTHER"}):
-                with self.assertRaises(monitor.DataUnavailable):
-                    monitor.mexc_ticker()
+    def test_mexc_snapshot_validation_error_is_rejected(self):
+        with patch.object(monitor, "collect_mexc_snapshot", side_effect=monitor.MarketDataError("invalid public snapshot")):
+            with self.assertRaises(monitor.MarketDataError):
+                monitor.mexc_ticker()
 
     def test_fallback_report_has_no_market_quote(self):
         report = monitor.fallback_report("collector failed")
