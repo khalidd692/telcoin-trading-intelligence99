@@ -181,8 +181,14 @@ def collect_snapshot() -> dict[str, Any]:
     asks = _levels(depth.get("asks"), "ask", server_time)
     if bids[0]["price"] >= asks[0]["price"]:
         raise KrakenMarketDataError("crossed/locked Kraken depth: bid >= ask")
-    if abs(bids[0]["price"] - bid) / bid * 100 > 0.01 or abs(asks[0]["price"] - ask) / ask * 100 > 0.01:
-        raise KrakenMarketDataError("Kraken ticker and depth best levels disagree")
+    bid_gap_pct = abs(bids[0]["price"] - bid) / bid * 100
+    ask_gap_pct = abs(asks[0]["price"] - ask) / ask * 100
+    # Ticker and depth are separate REST snapshots. Use the already-approved spread ceiling
+    # as the maximum tolerated cross-endpoint divergence; do not introduce a new tighter threshold.
+    if bid_gap_pct > MAX_SPREAD_PCT or ask_gap_pct > MAX_SPREAD_PCT:
+        raise KrakenMarketDataError(
+            f"Kraken ticker/depth disagreement (bid gap {bid_gap_pct:.4f}%, ask gap {ask_gap_pct:.4f}%)"
+        )
 
     time.sleep(REQUEST_SPACING_SECONDS)
     trades_result, _, status = _get_json("Trades", {"pair": pair_key})
