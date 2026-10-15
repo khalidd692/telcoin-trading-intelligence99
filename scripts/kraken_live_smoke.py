@@ -5,13 +5,14 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from src.kraken_market_data import collect_snapshot
+from src import kraken_market_data as km
 
 
 def main() -> int:
     started_at = datetime.now(timezone.utc).isoformat()
+    km.HTTP_REQUEST_LOG.clear()
     try:
-        snapshot = collect_snapshot()
+        snapshot = km.collect_snapshot()
         evidence = {
             "test_type": "LIVE_PUBLIC_API",
             "started_at_utc": started_at,
@@ -25,6 +26,7 @@ def main() -> int:
                 "/0/public/OHLC?pair=<resolved-TEL-USD-pair>&interval=15",
             ],
             "http_statuses": snapshot["http_statuses"],
+            "http_requests": km.HTTP_REQUEST_LOG,
             "source": snapshot["source"],
             "pair": snapshot["symbol"],
             "pair_key": snapshot["pair_key"],
@@ -56,6 +58,7 @@ def main() -> int:
             "result": "UNAVAILABLE_OR_INVALID",
             "error_type": type(exc).__name__,
             "error": str(exc),
+            "http_requests": km.HTTP_REQUEST_LOG,
             "orders_sent": False,
         }, indent=2, ensure_ascii=False))
         return 1
