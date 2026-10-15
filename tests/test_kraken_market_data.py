@@ -47,7 +47,7 @@ class KrakenSnapshotTests(unittest.TestCase):
         self.assertEqual(result["symbol"], "TEL/USD")
         self.assertTrue(result["validation"]["exact_pair"])
         self.assertLess(result["bid"], result["ask"])
-        self.assertTrue(result["validation"]["depth_fresh"])
+        self.assertTrue(result["validation"]["depth_snapshot_retrieved"])
         self.assertTrue(result["validation"]["trade_fresh"])
         self.assertTrue(result["latest_closed_15m_candle"]["close"] > 0)
         self.assertLessEqual(result["latest_closed_15m_candle"]["open_time_epoch"] + 900, 1797000000)
