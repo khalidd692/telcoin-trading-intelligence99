@@ -28,6 +28,7 @@ class ReportTests(unittest.TestCase):
             "observed_at_utc": self.now.isoformat(), "server_time_utc": self.now.isoformat(),
             "ticker_timestamp": None, "ticker_freshness_verified": False,
             "ticker_freshness_note": "Ticker endpoint has no quote timestamp; cross-checked.",
+            "depth_timestamp_note": "Level timestamp is not snapshot timestamp.",
             "last": 0.00178, "bid": 0.001779, "ask": 0.001781, "spread_pct": 0.1124,
             "trade": {"price": 0.00178, "quantity": 1000.0, "timestamp_utc": self.now.isoformat(), "age_seconds": 2},
             "depth": {"bids": [{"price": 0.001779, "quantity": 1000.0}], "asks": [{"price": 0.001781, "quantity": 1000.0}]},
