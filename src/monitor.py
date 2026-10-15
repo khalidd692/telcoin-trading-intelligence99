@@ -216,7 +216,7 @@ def build_report() -> dict[str, Any]:
             "volume_last_closed": candles[-1]["volume"],
             "volume_mean20": sum(c["volume"] for c in candles[-20:]) / 20,
             "close_series": [
-                {"time": c["open_time_epoch"] + 900, "close": c["close"]}
+                {"time": datetime.fromtimestamp(c["open_time_epoch"] + 900, timezone.utc).isoformat(), "close": c["close"]}
                 for c in candles[-48:]
             ],
         }
