@@ -115,6 +115,7 @@ def build_report() -> dict[str, Any]:
             "ticker_timestamp": snapshot["ticker_timestamp"],
             "ticker_freshness_verified": snapshot["ticker_freshness_verified"],
             "ticker_freshness_note": snapshot["ticker_freshness_note"],
+            "depth_timestamp_note": snapshot["depth_timestamp_note"],
             "collection_duration_seconds": snapshot["collection_duration_seconds"],
         }
         report["sources"]["kraken_depth"] = {
