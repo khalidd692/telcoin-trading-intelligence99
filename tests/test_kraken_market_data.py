@@ -92,9 +92,9 @@ class KrakenSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(km.KrakenMarketDataError, "trade stale"):
             self.call_with(fixture_payloads(trade_age=120))
 
-    def test_stale_depth_fails_closed(self):
-        with self.assertRaisesRegex(km.KrakenMarketDataError, "depth timestamp stale"):
-            self.call_with(fixture_payloads(depth_age=120))
+    def test_future_depth_timestamp_fails_closed(self):
+        with self.assertRaisesRegex(km.KrakenMarketDataError, "depth timestamp is in the future"):
+            self.call_with(fixture_payloads(depth_age=-5))
 
     def test_malformed_json_result_fails_closed(self):
         p = fixture_payloads()
