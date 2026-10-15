@@ -25,6 +25,7 @@ MAX_MARKET_DATA_AGE_SECONDS = 60
 MAX_COLLECTION_SECONDS = 20
 REQUEST_SPACING_SECONDS = 1.05
 USER_AGENT = "telcoin-trading-intelligence/0.3 (read-only public market data)"
+HTTP_REQUEST_LOG: list[dict[str, Any]] = []
 
 
 class KrakenMarketDataError(RuntimeError):
@@ -59,14 +60,17 @@ def _get_json(path: str, params: dict[str, str] | None = None) -> tuple[dict[str
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             status = getattr(response, "status", 200)
             raw = response.read(1_000_000)
+        HTTP_REQUEST_LOG.append({"endpoint": path, "http_status": status})
         if status != 200:
             raise KrakenMarketDataError(f"HTTP {status} from {path}")
         payload = json.loads(raw.decode("utf-8"))
     except KrakenMarketDataError:
         raise
     except urllib.error.HTTPError as exc:
+        HTTP_REQUEST_LOG.append({"endpoint": path, "http_status": exc.code})
         raise KrakenMarketDataError(f"HTTP {exc.code} from {path}") from exc
     except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        HTTP_REQUEST_LOG.append({"endpoint": path, "error_type": type(exc).__name__})
         raise KrakenMarketDataError(f"request/parse failure for {path}: {type(exc).__name__}") from exc
     elapsed_ms = int((time.monotonic() - started) * 1000)
     if not isinstance(payload, dict):
