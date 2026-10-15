@@ -183,18 +183,26 @@ def collect_snapshot() -> dict[str, Any]:
     time.sleep(REQUEST_SPACING_SECONDS)
     trades_result, _, status = _get_json("Trades", {"pair": pair_key})
     http_statuses["Trades"] = status
-    trades = [v for v in trades_result.values() if isinstance(v, list)]
-    if len(trades) != 1 or not trades[0] or not isinstance(trades[0][0], list) or len(trades[0][0]) < 3:
-        raise KrakenMarketDataError("missing/malformed Kraken recent trade")
-    trade = trades[0][0]
+    trades = [v for k, v in trades_result.items() if k != "last" and isinstance(v, list)]
+    if len(trades) != 1 or not trades[0]:
+        raise KrakenMarketDataError("missing/malformed Kraken recent trades")
+    trade_rows = trades[0]
+    parsed_trades = []
+    for row in trade_rows:
+        if not isinstance(row, list) or len(row) < 3:
+            raise KrakenMarketDataError("malformed Kraken trade row")
+        try:
+            row_time = float(row[2])
+        except (TypeError, ValueError) as exc:
+            raise KrakenMarketDataError("missing/invalid Kraken trade timestamp") from exc
+        if not math.isfinite(row_time) or row_time <= 0:
+            raise KrakenMarketDataError("invalid Kraken trade timestamp")
+        parsed_trades.append((row_time, row))
+    # Kraken REST returns recent trades oldest-to-newest; choose the maximum timestamp,
+    # not the first row, which may be hours old on an illiquid pair.
+    trade_time, trade = max(parsed_trades, key=lambda item: item[0])
     trade_price = _positive(trade[0], "last trade price")
     trade_qty = _positive(trade[1], "last trade quantity")
-    try:
-        trade_time = float(trade[2])
-    except (TypeError, ValueError) as exc:
-        raise KrakenMarketDataError("missing/invalid Kraken trade timestamp") from exc
-    if not math.isfinite(trade_time) or trade_time <= 0:
-        raise KrakenMarketDataError("invalid Kraken trade timestamp")
     trade_age = server_time - trade_time
     if trade_age < -2 or trade_age > MAX_MARKET_DATA_AGE_SECONDS:
         raise KrakenMarketDataError(f"Kraken last trade stale or in future ({trade_age:.3f}s)")
