@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.mexc_market_data import collect_snapshot as collect_mexc_snapshot
+from src.mexc_market_data import MarketDataError, collect_snapshot as collect_mexc_snapshot
 
 SYMBOL = "TELUSDT"
 TIMEOUT_SECONDS = 10
@@ -59,7 +59,10 @@ def maybe_number(value: Any) -> float | None:
 
 def mexc_ticker() -> dict[str, Any]:
     """Collect and validate a complete MEXC public snapshot before trusting its quote."""
-    snapshot = collect_mexc_snapshot()
+    try:
+        snapshot = collect_mexc_snapshot()
+    except MarketDataError as exc:
+        raise DataUnavailable(str(exc)) from exc
     return {
         "last": snapshot["last_price"],
         "bid": snapshot["best_bid"]["price"],
