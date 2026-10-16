@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SYMBOL = "TELUSDT"
+from src.kraken_market_data import KrakenMarketDataError, collect_snapshot as collect_kraken_snapshot
+
+SYMBOL = "TELUSD"
 TIMEOUT_SECONDS = 10
 MAX_SPREAD_PCT = 0.50
 MAX_REPORT_AGE_SECONDS = 20 * 60
@@ -55,48 +57,6 @@ def maybe_number(value: Any) -> float | None:
         return None
 
 
-def mexc_ticker() -> dict[str, Any]:
-    data = http_json(f"https://api.mexc.com/api/v3/ticker/24hr?symbol={SYMBOL}")
-    if not isinstance(data, dict) or data.get("symbol") != SYMBOL:
-        raise DataUnavailable("unexpected MEXC ticker schema/symbol")
-    last = number(data.get("lastPrice"), "MEXC last")
-    bid = number(data.get("bidPrice"), "MEXC bid")
-    ask = number(data.get("askPrice"), "MEXC ask")
-    if ask < bid:
-        raise DataUnavailable("MEXC ask below bid")
-    return {
-        "last": last, "bid": bid, "ask": ask,
-        "spread_pct": (ask - bid) / ((ask + bid) / 2) * 100,
-        "quote_volume_24h": maybe_number(data.get("quoteVolume")),
-        "change_pct_24h": maybe_number(data.get("priceChangePercent")),
-        "source": "MEXC public ticker", "observed_at": utc_now().isoformat(),
-    }
-
-
-def candles_15m() -> list[list[float]]:
-    data = http_json(f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval=15m&limit=100")
-    if not isinstance(data, list) or len(data) < 55:
-        raise DataUnavailable("not enough MEXC candles")
-    candles = []
-    for row in data:
-        if not isinstance(row, list) or len(row) < 6:
-            raise DataUnavailable("unexpected candle schema")
-        try:
-            ts = int(row[0])
-            o, h, low, close, vol = (float(row[i]) for i in (1, 2, 3, 4, 5))
-        except (TypeError, ValueError, IndexError) as exc:
-            raise DataUnavailable("malformed candle") from exc
-        if not all(math.isfinite(x) for x in (o, h, low, close, vol)):
-            raise DataUnavailable("non-finite candle")
-        if min(o, h, low, close) <= 0 or vol < 0 or h < max(o, close, low) or low > min(o, close):
-            raise DataUnavailable("incoherent OHLCV candle")
-        candles.append([ts, o, h, low, close, vol])
-    candles.sort(key=lambda c: c[0])
-    if any(candles[i][0] >= candles[i + 1][0] for i in range(len(candles) - 1)):
-        raise DataUnavailable("duplicate candle timestamps")
-    return candles[:-1]  # never use the still-forming candle
-
-
 def ema(values: list[float], period: int) -> float:
     if len(values) < period:
         raise DataUnavailable(f"not enough values for EMA{period}")
@@ -118,32 +78,18 @@ def rsi(values: list[float], period: int = 14) -> float:
     return 100 - 100 / (1 + gain / loss)
 
 
-def kucoin_price() -> dict[str, float]:
-    data = http_json("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=TEL-USDT")
-    if not isinstance(data, dict) or data.get("code") != "200000" or not isinstance(data.get("data"), dict):
-        raise DataUnavailable("unexpected KuCoin response")
-    d = data["data"]
-    result = {
-        "last": number(d.get("price"), "KuCoin last"),
-        "bid": number(d.get("bestBid"), "KuCoin bid"),
-        "ask": number(d.get("bestAsk"), "KuCoin ask"),
-    }
-    if result["ask"] < result["bid"]:
-        raise DataUnavailable("KuCoin ask below bid")
-    return result
-
-
 def fallback_report(reason: str) -> dict[str, Any]:
-    """Return a schema-valid, fail-closed report when collection cannot complete."""
+    """Return a schema-valid, fail-closed TEL/USD report."""
     return {
         "schema_version": 1, "generated_at": utc_now().isoformat(),
-        "symbol": SYMBOL, "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
+        "symbol": "TELUSD", "pair": "TEL/USD", "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
         "sources": {
-            "mexc_ticker": {"status": "UNAVAILABLE", "reason": reason},
-            "mexc_candles": {"status": "UNAVAILABLE", "reason": reason},
-            "kucoin_level1": {"status": "UNAVAILABLE", "reason": reason},
+            "kraken_market": {"status": "UNAVAILABLE", "reason": reason},
+            "kraken_candles": {"status": "UNAVAILABLE", "reason": reason},
+            "kraken_depth": {"status": "UNAVAILABLE", "reason": reason},
+            "kraken_trades": {"status": "UNAVAILABLE", "reason": reason},
         },
-        "checks": [{"name": "Collection pipeline", "status": "FAIL", "reason": reason}],
+        "checks": [{"name": "Kraken collection pipeline", "status": "FAIL", "reason": reason}],
         "indicators": None, "error": reason,
         "interpretation": "Rapport de secours. Fail-closed : ATTENDRE.",
         "disclaimer": "Read-only monitoring. No orders. No profitability claims.",
@@ -151,67 +97,90 @@ def fallback_report(reason: str) -> dict[str, Any]:
 
 
 def build_report() -> dict[str, Any]:
+    """Build a Kraken TEL/USD report. No automatic currency-mixed fallback."""
     report: dict[str, Any] = {
         "schema_version": 1, "generated_at": utc_now().isoformat(),
-        "symbol": SYMBOL, "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
+        "symbol": "TELUSD", "pair": "TEL/USD", "quote_currency": "USD",
+        "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
         "sources": {}, "checks": [], "indicators": None,
-        "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
+        "disclaimer": "No orders are placed. TEL/USD is not interchangeable with TEL/USDT.",
     }
     try:
-        ticker = mexc_ticker()
-        report["sources"]["mexc_ticker"] = {"status": "OK", **ticker}
-        candles = candles_15m()
-        closes = [c[4] for c in candles]
-        # MEXC kline timestamps mark candle OPEN time; evaluate freshness at candle CLOSE.
-        latest_ts = candles[-1][0] / 1000 + 900
-        age = max(0, int(time.time() - latest_ts))
+        snapshot = collect_kraken_snapshot()
+        report["sources"]["kraken_market"] = {
+            "status": "OK", "source": snapshot["source"], "pair": snapshot["symbol"],
+            "pair_key": snapshot["pair_key"], "observed_at": snapshot["observed_at_utc"],
+            "server_time": snapshot["server_time_utc"], "last": snapshot["last"],
+            "bid": snapshot["bid"], "ask": snapshot["ask"], "spread_pct": snapshot["spread_pct"],
+            "ticker_timestamp": snapshot["ticker_timestamp"],
+            "ticker_freshness_verified": snapshot["ticker_freshness_verified"],
+            "ticker_freshness_note": snapshot["ticker_freshness_note"],
+            "depth_timestamp_note": snapshot["depth_timestamp_note"],
+            "collection_duration_seconds": snapshot["collection_duration_seconds"],
+        }
+        report["sources"]["kraken_depth"] = {
+            "status": "OK", "depth": snapshot["depth"],
+            "snapshot_retrieved": snapshot["validation"]["depth_snapshot_retrieved"],
+            "observed_at": snapshot["observed_at_utc"],
+        }
+        report["sources"]["kraken_trades"] = {
+            "status": "OK", **snapshot["trade"], "observed_at": snapshot["observed_at_utc"],
+            "freshness_verified": snapshot["validation"]["trade_fresh"],
+        }
+        candles = snapshot["recent_closed_15m_candles"]
+        closes = [c["close"] for c in candles]
+        candle_close_epoch = candles[-1]["open_time_epoch"] + 900
+        server_epoch = datetime.fromisoformat(snapshot["server_time_utc"]).timestamp()
+        age = max(0, int(server_epoch - candle_close_epoch))
         if age > MAX_REPORT_AGE_SECONDS:
-            raise DataUnavailable(f"latest closed candle stale ({age}s)")
+            raise DataUnavailable(f"latest closed Kraken candle stale ({age}s)")
         true_ranges = [
-            max(candles[i][2] - candles[i][3],
-                abs(candles[i][2] - candles[i-1][4]),
-                abs(candles[i][3] - candles[i-1][4]))
+            max(candles[i]["high"] - candles[i]["low"],
+                abs(candles[i]["high"] - candles[i-1]["close"]),
+                abs(candles[i]["low"] - candles[i-1]["close"]))
             for i in range(1, len(candles))
         ]
+        if len(candles) < 55 or len(true_ranges) < 14:
+            raise DataUnavailable("not enough closed Kraken candles for EMA50/RSI14/ATR14")
         atr = sum(true_ranges[-14:]) / 14
         report["indicators"] = {
             "timeframe": "15m",
-            "last_closed_candle_at": datetime.fromtimestamp(latest_ts, timezone.utc).isoformat(),
+            "last_closed_candle_at": candles[-1]["open_time"],
             "candle_age_seconds": age, "close": closes[-1],
             "ema12": ema(closes, 12), "ema26": ema(closes, 26), "ema50": ema(closes, 50),
             "rsi14": rsi(closes), "atr14": atr, "atr_pct": atr / closes[-1] * 100,
-            "volume_last_closed": candles[-1][5],
-            "volume_mean20": sum(c[5] for c in candles[-20:]) / 20,
+            "volume_last_closed": candles[-1]["volume"],
+            "volume_mean20": sum(c["volume"] for c in candles[-20:]) / 20,
             "close_series": [
-                {"time": datetime.fromtimestamp(c[0] / 1000 + 900, timezone.utc).isoformat(),
-                 "close": c[4]} for c in candles[-48:]
+                {"time": datetime.fromtimestamp(c["open_time_epoch"] + 900, timezone.utc).isoformat(), "close": c["close"]}
+                for c in candles[-48:]
             ],
         }
-        report["sources"]["mexc_candles"] = {"status": "OK", "timeframe": "15m", "closed_candles_used": len(candles)}
-        report["checks"].append({"name": "MEXC ticker/candles freshness and schema", "status": "PASS"})
-        spread_ok = ticker["spread_pct"] <= MAX_SPREAD_PCT
-        report["checks"].append({"name": "MEXC spread", "status": "PASS" if spread_ok else "FAIL",
-                                 "value_pct": round(ticker["spread_pct"], 4), "limit_pct": MAX_SPREAD_PCT})
-        try:
-            ku = kucoin_price()
-            report["sources"]["kucoin_level1"] = {"status": "OK", **ku, "observed_at": utc_now().isoformat()}
-            divergence = abs(ticker["last"] - ku["last"]) / ((ticker["last"] + ku["last"]) / 2) * 100
-            report["cross_exchange"] = {"last_price_divergence_pct": round(divergence, 4)}
-            report["checks"].append({"name": "Cross-exchange price consistency",
-                                     "status": "PASS" if divergence <= 1.0 else "FAIL",
-                                     "divergence_pct": round(divergence, 4), "limit_pct": 1.0})
-        except DataUnavailable as exc:
-            report["sources"]["kucoin_level1"] = {"status": "UNAVAILABLE", "reason": str(exc)}
-            report["checks"].append({"name": "Independent venue confirmation", "status": "FAIL",
-                                     "reason": "KuCoin unavailable; fail-closed"})
+        report["sources"]["kraken_candles"] = {
+            "status": "OK", "timeframe": "15m", "closed_candles_used": len(candles),
+            "latest_closed_at": candles[-1]["open_time"],
+        }
+        report["checks"].extend([
+            {"name": "Kraken TEL/USD exact pair", "status": "PASS"},
+            {"name": "Kraken ticker positive and bid below ask", "status": "PASS"},
+            {"name": "Kraken spread", "status": "PASS", "value_pct": round(snapshot["spread_pct"], 4), "limit_pct": MAX_SPREAD_PCT},
+            {"name": "Kraken order-book snapshot retrieved and ticker-consistent", "status": "PASS"},
+            {"name": "Kraken latest trade freshness and ticker consistency", "status": "PASS"},
+            {"name": "Kraken closed 15m candles", "status": "PASS", "closed_candles_used": len(candles)},
+        ])
         report["status"] = "SURVEILLER" if all(c["status"] == "PASS" for c in report["checks"]) else "ATTENDRE"
-        report["interpretation"] = ("Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
-                                    if report["status"] == "SURVEILLER"
-                                    else "At least one quality/confirmation check failed. Fail-closed: ATTENDRE.")
-    except DataUnavailable as exc:
+        report["interpretation"] = (
+            "Kraken TEL/USD public data passed current checks. SURVEILLER is not an entry instruction."
+            if report["status"] == "SURVEILLER"
+            else "At least one required data-quality check failed. Fail-closed: ATTENDRE."
+        )
+    except (DataUnavailable, KrakenMarketDataError) as exc:
         report["status"] = "ATTENDRE"
         report["error"] = str(exc)
-        report["interpretation"] = "Required data unavailable or incoherent. Fail-closed: ATTENDRE."
+        report["checks"].append({"name": "Kraken data quality", "status": "FAIL", "reason": str(exc)})
+        report["interpretation"] = "Required Kraken data unavailable or incoherent. Fail-closed: ATTENDRE."
+        for key in ("kraken_market", "kraken_depth", "kraken_trades", "kraken_candles"):
+            report["sources"].setdefault(key, {"status": "UNAVAILABLE", "reason": str(exc)})
     return report
 
 

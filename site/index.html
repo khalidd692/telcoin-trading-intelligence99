@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#090d18">
-<meta name="description" content="Tableau de surveillance TEL/USDT. Données publiques, indicateurs techniques et contrôles de qualité.">
+<meta name="description" content="Tableau de surveillance TEL/USD. Données publiques, indicateurs techniques et contrôles de qualité.">
 <title>Telcoin Intelligence — Marché</title>
 <style>
 :root{color-scheme:dark;--bg:#090d18;--panel:#111827;--line:#273348;--muted:#8c9bb2;--text:#edf3fc;--cyan:#62d7eb;--green:#53d6a2;--red:#ff7e87;--amber:#f4c56b;--blue:#8aa8ff}
@@ -31,25 +31,18 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <body><div class="shell">
 <header><div class="brand"><div class="logo">T/</div><div><h1>TELCOIN INTELLIGENCE</h1><p>Marché · Surveillance systématique</p></div></div>
 <div class="head-actions"><div class="live"><span class="dot" id="header-dot"></span><span id="header-state">Vérification des données</span></div><button id="refresh">↻ Actualiser</button></div></header>
-<div class="eyebrow">TABLEAU DE BORD / TEL-USDT</div>
-<section class="intro"><div><h2>Vue du marché</h2><p class="sub">Indicateurs et chandelles issus du rapport REST périodique (~15 min). Les cotations WebSocket MEXC/KuCoin ne sont considérées en direct qu’après réception de trames fraîches ; le rafraîchissement visuel ne crée pas de nouveau prix.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
-<section class="panel realtime" aria-labelledby="live-title">
-<div class="panel-head"><div><h3 id="live-title">Flux publics en direct</h3><div class="caption">Les valeurs changent uniquement sur événement réellement reçu ; toute source manquante impose ATTENDRE.</div></div><span id="realtime-status" class="status">ATTENDRE · initialisation des flux</span></div>
-<div class="realtime-grid">
-<div class="rt-card"><div class="rt-label">MEXC · dernier trade TEL/USDT</div><div class="rt-value" id="rt-mexc-last">—</div><div class="rt-detail" id="rt-mexc-book">Bid/Ask indisponibles</div><div class="rt-detail" id="rt-mexc-detail">En attente d’un événement réel</div><div class="rt-detail rt-state" id="rt-mexc-state">CONNEXION</div><div class="rt-detail" id="rt-mexc-move">Variation depuis le tick précédent : —</div></div>
-<div class="rt-card"><div class="rt-label">KuCoin · dernier trade TEL-USDT</div><div class="rt-value" id="rt-kucoin-last">—</div><div class="rt-detail" id="rt-kucoin-book">Bid/Ask indisponibles</div><div class="rt-detail" id="rt-kucoin-detail">En attente d’un événement réel</div><div class="rt-detail rt-state" id="rt-kucoin-state">CONNEXION</div><div class="rt-detail" id="rt-kucoin-move">Variation depuis le tick précédent : —</div></div>
-<div class="rt-card"><div class="rt-label">Spread MEXC (bid/ask live)</div><div class="rt-value" id="rt-spread">—</div><div class="rt-detail">Contrôle existant : 0,50 % max</div></div>
-<div class="rt-card"><div class="rt-label">Divergence des derniers trades</div><div class="rt-value" id="rt-divergence">—</div><div class="rt-detail">Contrôle existant : 1,0 % max</div></div></div>
-<div id="wait-reasons" class="rt-reason">Attente des trames MEXC, KuCoin et du rapport d’indicateurs.</div><div id="trend-context" class="trend-context">Indicateurs historiques absents ou périmés ; tendance indisponible.</div></section>
+<div class="eyebrow">TABLEAU DE BORD / TEL-USD</div>
+<section class="intro"><div><h2>Vue du marché</h2><p class="sub">Indicateurs et chandelles issus du rapport REST périodique (~15 min). Les cotations WebSocket Kraken/Carnet Kraken ne sont considérées en direct qu’après réception de trames fraîches ; le rafraîchissement visuel ne crée pas de nouveau prix.</p></div><div id="main-status" class="status"><span>●</span><span>ATTENDRE · rapport non chargé</span></div></section>
+<div class="notice" style="margin:16px 0"><strong>Source active : Kraken TEL/USD (REST public).</strong> Aucun flux WebSocket MEXC/KuCoin n’est utilisé pour valider ce rapport. Toute donnée manquante ou non fraîche impose ATTENDRE.</div>
 <section class="grid metrics">
-<article class="panel"><div class="metric-label"><span>Dernier prix MEXC</span><span class="tag">TEL/USDT</span></div><div class="metric-value" id="last-price">—</div><div class="metric-foot" id="price-time">En attente du rapport de marché</div></article>
-<article class="panel"><div class="metric-label"><span>Variation 24 h</span><span>↕</span></div><div class="metric-value" id="change-24h">—</div><div class="metric-foot">Variation publiée par MEXC</div></article>
+<article class="panel"><div class="metric-label"><span>Dernier prix Kraken</span><span class="tag">TEL/USD</span></div><div class="metric-value" id="last-price">—</div><div class="metric-foot" id="price-time">En attente du rapport de marché</div></article>
+<article class="panel"><div class="metric-label"><span>Variation 24 h</span><span>↕</span></div><div class="metric-value" id="change-24h">—</div><div class="metric-foot">Variation publiée par Kraken</div></article>
 <article class="panel"><div class="metric-label"><span>Spread observé</span><span>↔</span></div><div class="metric-value" id="spread">—</div><div class="metric-foot" id="spread-foot">Qualité d’exécution indicative, pas une garantie</div></article>
-<article class="panel"><div class="metric-label"><span>Volume coté sur 24 h</span><span>▤</span></div><div class="metric-value" id="volume-24h">—</div><div class="metric-foot">Volume en USDT si fourni par la source</div></article>
+<article class="panel"><div class="metric-label"><span>Volume coté sur 24 h</span><span>▤</span></div><div class="metric-value" id="volume-24h">—</div><div class="metric-foot">Volume en USD si fourni par la source</div></article>
 </section>
 <section class="grid middle">
 <article class="panel"><div class="panel-head"><div><h3>Prix récent</h3><div class="caption">Clôtures 15 minutes · chandelles terminées uniquement</div></div><span class="tag" id="chart-period">48 dernières clôtures</span></div>
-<div class="chart-wrap"><svg id="price-chart" viewBox="0 0 720 190" role="img" aria-label="Graphique réel TEL/USDT" hidden></svg><div class="empty" id="chart-empty">Le graphique apparaîtra dès qu’un rapport contenant des clôtures réelles sera publié.</div><div class="chart-bottom"><span id="chart-start">—</span><span id="chart-end">—</span></div></div><div class="caption" style="margin-top:10px">Le graphique décrit le passé récent ; il ne prédit pas la direction suivante.</div></article>
+<div class="chart-wrap"><svg id="price-chart" viewBox="0 0 720 190" role="img" aria-label="Graphique réel TEL/USD" hidden></svg><div class="empty" id="chart-empty">Le graphique apparaîtra dès qu’un rapport contenant des clôtures réelles sera publié.</div><div class="chart-bottom"><span id="chart-start">—</span><span id="chart-end">—</span></div></div><div class="caption" style="margin-top:10px">Le graphique décrit le passé récent ; il ne prédit pas la direction suivante.</div></article>
 <article class="panel"><div class="panel-head"><div><h3>Indicateurs techniques</h3><div class="caption">Calculés sur les données clôturées</div></div><span class="tag">15 MIN</span></div><div class="indicator-list">
 <div class="indicator"><div><div class="indicator-name">EMA 12</div><div class="indicator-note">Tendance courte</div></div><div class="indicator-value" id="ema12">—</div></div>
 <div class="indicator"><div><div class="indicator-name">EMA 26</div><div class="indicator-note">Tendance intermédiaire</div></div><div class="indicator-value" id="ema26">—</div></div>
@@ -61,15 +54,13 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 </div></article></section>
 <section class="grid lower">
 <article class="panel"><div class="panel-head"><div><h3>État des sources</h3><div class="caption">Chaque source est contrôlée séparément</div></div></div>
-<div class="source-row"><div><div class="source-name">MEXC · ticker TEL/USDT</div><div class="source-detail" id="mexc-ticker-detail">Aucune observation chargée</div></div><span class="source-state fail" id="mexc-ticker-state">INCONNU</span></div>
-<div class="source-row"><div><div class="source-name">MEXC · chandelles 15 min</div><div class="source-detail" id="mexc-candle-detail">Aucune clôture chargée</div></div><span class="source-state fail" id="mexc-candle-state">INCONNU</span></div>
-<div class="source-row"><div><div class="source-name">KuCoin · vérification indépendante</div><div class="source-detail" id="kucoin-detail">Aucune observation chargée</div></div><span class="source-state fail" id="kucoin-state">INCONNU</span></div></article>
+<div class="source-row"><div><div class="source-name">Kraken · ticker TEL/USD</div><div class="source-detail" id="mexc-ticker-detail">Aucune observation chargée</div></div><span class="source-state fail" id="mexc-ticker-state">INCONNU</span></div>
+<div class="source-row"><div><div class="source-name">Kraken · chandelles 15 min</div><div class="source-detail" id="mexc-candle-detail">Aucune clôture chargée</div></div><span class="source-state fail" id="mexc-candle-state">INCONNU</span></div>
+<div class="source-row"><div><div class="source-name">Carnet Kraken · vérification indépendante</div><div class="source-detail" id="kucoin-detail">Aucune observation chargée</div></div><span class="source-state fail" id="kucoin-state">INCONNU</span></div></article>
 <article class="panel"><div class="panel-head"><div><h3>Contrôles de qualité</h3><div class="caption">Un échec impose l’attente</div></div></div><div id="checks"><div class="source-row"><div><div class="source-name">Rapport de collecte</div><div class="source-detail">En attente du premier rapport</div></div><span class="source-state fail">INCONNU</span></div></div><div class="caption" id="report-error" style="margin-top:12px"></div></article></section>
 <aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment, le contexte BTC et les analyses multi-unités ne sont pas encore intégrés à cette version.</div></aside>
 <footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Collecte UTC : inconnue</span><span id="report-age">Âge des données : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
 </div>
-<script src="./realtime-config.js?v=relay-fix-1"></script>
-<script src="./realtime.js?v=relay-fix-1"></script>
 <script>
 (function(){
 "use strict";
@@ -131,12 +122,12 @@ async function load(){
   var response=await fetch("./report.json?t="+Date.now(),{cache:"no-store"});if(!response.ok)throw new Error("Rapport indisponible (HTTP "+response.status+")");
   var d=await response.json(),generatedMs=Date.parse(d.generated_at);reportAgeMs=Date.now()-generatedMs;
   if(Number.isFinite(generatedMs)){reportGeneratedAt=d.generated_at;freshnessState=reportAgeMs>30*60*1000?"stale":(reportAgeMs < -60000?"invalid":"fresh");}
-  if(d.schema_version!==1||d.symbol!=="TELUSDT"||d.mode!=="READ_ONLY_ALERTS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.sources||!Array.isArray(d.checks)||!Number.isFinite(generatedMs))throw new Error("Schéma de rapport invalide · ATTENDRE");
+  if(d.schema_version!==1||d.symbol!=="TELUSD"||d.mode!=="READ_ONLY_ALERTS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.sources||!Array.isArray(d.checks)||!Number.isFinite(generatedMs))throw new Error("Schéma de rapport invalide · ATTENDRE");
   if(reportAgeMs < -60000 || reportAgeMs > 30*60*1000)throw new Error("Rapport périmé ou horodatage incohérent · ATTENDRE");
-  if(d.status==="SURVEILLER"&&(!["mexc_ticker","mexc_candles","kucoin_level1"].every(function(key){return d.sources[key]&&d.sources[key].status==="OK";})||!d.indicators||d.checks.some(function(check){return check.status!=="PASS";})))throw new Error("Rapport SURVEILLER incomplet ou incohérent · ATTENDRE");
-  var t=d.sources.mexc_ticker,c=d.sources.mexc_candles,k=d.sources.kucoin_level1,i=d.indicators,status=d.status,passed=status==="SURVEILLER"&&!window.TelcoinRealtime;
-  if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker MEXC invalide · ATTENDRE");
-  if(k&&k.status==="OK"&&(!Number.isFinite(Number(k.last))||Number(k.last)<=0||!Number.isFinite(Date.parse(k.observed_at))))throw new Error("Ticker KuCoin invalide · ATTENDRE");
+  if(d.status==="SURVEILLER"&&(!["kraken_market","kraken_candles","kraken_depth","kraken_trades"].every(function(key){return d.sources[key]&&d.sources[key].status==="OK";})||!d.indicators||d.checks.some(function(check){return check.status!=="PASS";})))throw new Error("Rapport SURVEILLER incomplet ou incohérent · ATTENDRE");
+  var t=d.sources.kraken_market,c=d.sources.kraken_candles,k=d.sources.kraken_depth,tr=d.sources.kraken_trades,i=d.indicators,status=d.status,passed=status==="SURVEILLER";
+  if(t&&t.status==="OK"&&(!Number.isFinite(Number(t.last))||Number(t.last)<=0||!Number.isFinite(Date.parse(t.observed_at))))throw new Error("Ticker Kraken invalide · ATTENDRE");
+  if(k&&k.status==="OK"&&(!k.depth||!Array.isArray(k.depth.bids)||!Array.isArray(k.depth.asks)||!Number.isFinite(Date.parse(k.observed_at))))throw new Error("Carnet Kraken invalide · ATTENDRE");
   currentGeneratedAt=d.generated_at;reportExpired=false;window.telcoinReportIsFresh=true;window.telcoinReportStatus=d.status;window.telcoinReportChecksPass=d.checks.every(function(check){return check.status==="PASS";});window.telcoinIndicators=i||null;updateReportAge();
   $("main-status").className="status "+(passed?"ok":"");$("main-status").innerHTML="<span>●</span><span>"+(passed?"SURVEILLER · contrôles passés":"ATTENDRE · données à vérifier")+"</span>";
   $("header-state").textContent=passed?"Rapport périodique · contrôles passés":"Rapport périodique · ATTENDRE";$("header-dot").style.background=passed?"var(--green)":"var(--amber)";
@@ -146,9 +137,9 @@ async function load(){
   $("volume-24h").textContent=t&&t.quote_volume_24h!=null?fmt(t.quote_volume_24h,0):"—";
   $("ema12").textContent=i&&i.ema12!=null?price(i.ema12):"—";$("ema26").textContent=i&&i.ema26!=null?price(i.ema26):"—";$("ema50").textContent=i&&i.ema50!=null?price(i.ema50):"—";$("rsi").textContent=i&&i.rsi14!=null?fmt(i.rsi14,2):"—";$("atr").textContent=i&&i.atr14!=null?price(i.atr14):"—";$("atr-pct").textContent=i&&i.atr_pct!=null?fmt(i.atr_pct,3)+" %":"—";
   $("vol-ratio").textContent=i&&i.volume_last_closed!=null&&i.volume_mean20>0?fmt(i.volume_last_closed/i.volume_mean20,2)+"×":"—";drawChart(i&&i.close_series);
-  sourceState("mexc-ticker-state",t&&t.status==="OK"?"REÇU":"INDISPONIBLE",!!(t&&t.status==="OK"));$("mexc-ticker-detail").textContent=t&&t.status==="OK"?(t.source||"MEXC public ticker")+" · "+date(t.observed_at):(t&&t.reason)||"Le ticker n’a pas été reçu";
+  sourceState("mexc-ticker-state",t&&t.status==="OK"?"REÇU":"INDISPONIBLE",!!(t&&t.status==="OK"));$("mexc-ticker-detail").textContent=t&&t.status==="OK"?(t.source||"Kraken public ticker")+" · "+date(t.observed_at):(t&&t.reason)||"Le ticker n’a pas été reçu";
   sourceState("mexc-candle-state",c&&c.status==="OK"?"REÇU":"INDISPONIBLE",!!(c&&c.status==="OK"));$("mexc-candle-detail").textContent=c&&c.status==="OK"?String(c.closed_candles_used||"?")+" chandelles terminées · "+date(i&&i.last_closed_candle_at):(c&&c.reason)||"Pas de chandelles exploitables";
-  sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Prix "+price(k.last)+" USDT · "+date(k.observed_at):(k&&k.reason)||"Comparaison indépendante indisponible";
+  sourceState("kucoin-state",k&&k.status==="OK"?"REÇU":"INDISPONIBLE",!!(k&&k.status==="OK"));$("kucoin-detail").textContent=k&&k.status==="OK"?"Bid/ask profondeur validés · "+date(k.observed_at):(k&&k.reason)||"Carnet Kraken indisponible";
   renderChecks(d.checks);$("report-error").textContent=d.error||d.interpretation||"";$("generated").textContent="Collecte UTC : "+date(d.generated_at);
  }catch(err){if(reportGeneratedAt)currentGeneratedAt=reportGeneratedAt;clearMarketView(reportGeneratedAt,reportAgeMs,freshnessState==="stale"?"stale":"invalid");setWaiting(err.message||"Impossible de lire le rapport · ATTENDRE");}
  finally{button.disabled=false;button.textContent="↻ Actualiser";}

@@ -37,6 +37,9 @@ jobs:
           python -m unittest discover -s tests -v
           node tests/test_dashboard.js
           node tests/test_realtime.js
+      - name: Required live Kraken public market-data smoke test
+        if: github.event_name == 'pull_request'
+        run: python -m scripts.kraken_live_smoke
       - name: Collect public market data
         id: collect
         continue-on-error: true
@@ -57,7 +60,7 @@ jobs:
                   report = json.loads(path.read_text(encoding="utf-8"))
                   valid = (isinstance(report, dict)
                            and report.get("schema_version") == 1
-                           and report.get("symbol") == "TELUSDT"
+                           and report.get("symbol") == "TELUSD"
                            and report.get("mode") == "READ_ONLY_ALERTS"
                            and report.get("status") in {"SURVEILLER", "ATTENDRE"}
                            and isinstance(report.get("generated_at"), str)
@@ -82,13 +85,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add site/report.json
           if ! git diff --cached --quiet; then
-            git commit -m "Refresh published TEL/USDT market report [skip ci]"
+            git commit -m "Refresh published TEL/USD market report [skip ci]"
             git push origin HEAD:main
           fi
       - name: Add report reference to summary
         if: always()
         run: |
-          echo "# TEL/USDT market dashboard" >> "$GITHUB_STEP_SUMMARY"
+          echo "# TEL/USD market dashboard" >> "$GITHUB_STEP_SUMMARY"
           echo "The report and actual source checks are shown on the deployed dashboard." >> "$GITHUB_STEP_SUMMARY"
           echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
       - name: Enable and read GitHub Pages configuration
