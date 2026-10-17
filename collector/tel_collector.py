@@ -92,9 +92,12 @@ def buy_cost(asks,notional):
 
 def server_time(c):
     d=c.get("/api/v3/time") if c.venue=="mexc" else c.get("/api/v1/timestamp")
-    if isinstance(d,dict):
-        v=d.get("serverTime") if c.venue=="mexc" else d
-        return int(v) if isinstance(v,(int,float)) else None
+    if c.venue == "mexc" and isinstance(d, dict):
+        v = d.get("serverTime")
+        return int(v) if isinstance(v, (int, float)) else None
+    # Client.get unwraps KuCoin's response; timestamp data is an integer.
+    if c.venue == "kucoin" and isinstance(d, (int, float)):
+        return int(d)
     return None
 
 def fast(c):
