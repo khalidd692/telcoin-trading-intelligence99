@@ -171,9 +171,18 @@ def candles(c,server_ms):
         rows.sort(key=lambda x:x[0])
         valid=[]
         for r in rows:
-            if all(x is not None and math.isfinite(x) for x in r) and min(r[1:5])>0 and r[5]>=0 and r[2]>=max(r[1],r[4],r[3]) and r[3]<=min(r[1],r[4]):
-                close_ms=month_end_ms(r[0]) if iv=="1M" else r[0]+meta["seconds"]*1000
-                if server_ms and close_ms<=server_ms: valid.append(r)
+            if not (all(x is not None and math.isfinite(x) for x in r) and min(r[1:5])>0 and r[5]>=0 and r[2]>=max(r[1],r[4],r[3]) and r[3]<=min(r[1],r[4])):
+                continue
+            if iv=="1M":
+                from datetime import datetime, timezone
+                opened=datetime.fromtimestamp(r[0]/1000,timezone.utc)
+                # Monthly candles must be anchored to 00:00 UTC on day one.
+                if (opened.day,opened.hour,opened.minute,opened.second,r[0] % 1000) != (1,0,0,0,0):
+                    continue
+                close_ms=month_end_ms(r[0])
+            else:
+                close_ms=r[0]+meta["seconds"]*1000
+            if server_ms and close_ms<=server_ms: valid.append(r)
         # Count the uninterrupted tail of closed candles. A large total count can
         # otherwise hide holes in the most recent data used by indicators.
         contiguous_tail_count=0
@@ -199,14 +208,15 @@ def candles(c,server_ms):
                 if (cy,cm)!=expected: gaps.append({"after":iso(prev[0]),"before":iso(cur[0])})
             elif cur[0]-prev[0] > meta["seconds"]*1000:
                 gaps.append({"after":iso(prev[0]),"before":iso(cur[0]),"missing_intervals":cur[0]//(meta["seconds"]*1000)-prev[0]//(meta["seconds"]*1000)-1})
-        status="UNAVAILABLE" if not valid else ("PARTIEL" if gaps else "OK")
+        zero_volume_count=sum(1 for row in valid if row[5]==0)
+        status="UNAVAILABLE" if not valid else ("PARTIEL" if gaps or zero_volume_count else "OK")
         week_anchor_utc=None
         if iv=="1w" and valid:
             from datetime import datetime, timezone
             anchor=datetime.fromtimestamp(valid[-1][0]/1000,timezone.utc)
             week_anchor_utc=anchor.strftime("%A")
         out[iv]={"status":status,"count_received":len(rows)+duplicates_dropped,"closed_count":len(valid),
-          "duplicates_dropped":duplicates_dropped,"gaps":gaps,"contiguous_tail_count":contiguous_tail_count,
+          "duplicates_dropped":duplicates_dropped,"gaps":gaps,"zero_volume_count":zero_volume_count,"contiguous_tail_count":contiguous_tail_count,
           "week_anchor_utc":week_anchor_utc,
           "last_closed_at":iso((valid[-1][0]+(meta["seconds"]*1000 if meta["seconds"] else 0))) if valid and meta["seconds"] else (iso(month_end_ms(valid[-1][0])) if valid else None),
           "rows":[{"open_time":iso(r[0]),"open":r[1],"high":r[2],"low":r[3],"close":r[4],"volume":r[5]} for r in valid[-300:]],
