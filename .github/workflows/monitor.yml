@@ -35,6 +35,7 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -v
+          python -m unittest discover -s collector -p "test_*.py" -v
           node tests/test_dashboard.js
           node tests/test_realtime.js
       - name: Collect public market data
@@ -75,12 +76,47 @@ jobs:
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           COLLECT_OUTCOME: ${{ steps.collect.outcome }}
-      - name: Commit the exact published report to main
+      - name: Collect detailed public TEL market data (read-only)
+        id: detailed_collect
+        continue-on-error: true
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300
+      - name: Ensure detailed snapshot exists and is valid JSON
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("site/tel_snapshot.json")
+          valid = False
+          if p.is_file() and p.stat().st_size:
+              try:
+                  d = json.loads(p.read_text(encoding="utf-8"))
+                  valid = (isinstance(d, dict) and d.get("schema_version") == 1
+                           and d.get("symbol") == "TELUSDT"
+                           and isinstance(d.get("sources"), dict)
+                           and isinstance(d.get("request_log"), list))
+              except (OSError, UnicodeError, json.JSONDecodeError):
+                  pass
+          if not valid:
+              p.write_text(json.dumps({
+                  "schema_version": 1, "symbol": "TELUSDT",
+                  "mode": "READ_ONLY_PUBLIC_DATA", "generated_at": None,
+                  "collector": {"read_only": True, "orders_sent": 0},
+                  "sources": {
+                      "mexc": {"status": {"book": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}, "trades": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}}},
+                      "kucoin": {"status": {"book": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}, "trades": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}}}
+                  },
+                  "cross_check": {"independent_confirmation": "NON ÉTABLIE"},
+                  "request_log": [], "error": "Collecteur détaillé absent ou JSON invalide; aucune donnée de marché n'est inventée."
+              }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Commit the exact published reports to main
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/report.json
+          git add site/report.json site/tel_snapshot.json
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
             git push origin HEAD:main
@@ -91,6 +127,8 @@ jobs:
           echo "# TEL/USDT market dashboard" >> "$GITHUB_STEP_SUMMARY"
           echo "The report and actual source checks are shown on the deployed dashboard." >> "$GITHUB_STEP_SUMMARY"
           echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
+          echo "Detailed snapshot: site/tel_snapshot.json (multi-timeframe, order book, trades, spread and 300 USDT slippage estimate)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Detailed collector outcome: ${{ steps.detailed_collect.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Enable and read GitHub Pages configuration
         uses: actions/configure-pages@v5
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
