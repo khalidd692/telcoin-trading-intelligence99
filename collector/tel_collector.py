@@ -162,15 +162,65 @@ def candles(c,server_ms):
                     try: rows.append([int(k[0])*1000,num(k[1]),num(k[3]),num(k[4]),num(k[2]),num(k[5])])
                     except (ValueError,TypeError,IndexError): pass
         rows.sort(key=lambda x:x[0])
+        # Deduplicate by candle open time; retain the last row returned for a timestamp.
+        unique={}
+        for row in rows:
+            unique[row[0]]=row
+        duplicates_dropped=len(rows)-len(unique)
+        rows=list(unique.values())
+        rows.sort(key=lambda x:x[0])
         valid=[]
         for r in rows:
-            if all(x is not None and math.isfinite(x) for x in r) and min(r[1:5])>0 and r[5]>=0 and r[2]>=max(r[1],r[4],r[3]) and r[3]<=min(r[1],r[4]):
-                close_ms=month_end_ms(r[0]) if iv=="1M" else r[0]+meta["seconds"]*1000
-                if server_ms and close_ms<=server_ms: valid.append(r)
-        out[iv]={"status":"OK" if valid else "UNAVAILABLE","count_received":len(rows),"closed_count":len(valid),
+            if not (all(x is not None and math.isfinite(x) for x in r) and min(r[1:5])>0 and r[5]>=0 and r[2]>=max(r[1],r[4],r[3]) and r[3]<=min(r[1],r[4])):
+                continue
+            if iv=="1M":
+                from datetime import datetime, timezone
+                opened=datetime.fromtimestamp(r[0]/1000,timezone.utc)
+                # Monthly candles must be anchored to 00:00 UTC on day one.
+                if (opened.day,opened.hour,opened.minute,opened.second,r[0] % 1000) != (1,0,0,0,0):
+                    continue
+                close_ms=month_end_ms(r[0])
+            else:
+                close_ms=r[0]+meta["seconds"]*1000
+            if server_ms and close_ms<=server_ms: valid.append(r)
+        # Count the uninterrupted tail of closed candles. A large total count can
+        # otherwise hide holes in the most recent data used by indicators.
+        contiguous_tail_count=0
+        if valid:
+            contiguous_tail_count=1
+            for prev,cur in zip(reversed(valid[:-1]),reversed(valid[1:])):
+                if iv=="1M":
+                    from datetime import datetime, timezone
+                    py,pm=datetime.fromtimestamp(prev[0]/1000,timezone.utc).year,datetime.fromtimestamp(prev[0]/1000,timezone.utc).month
+                    cy,cm=datetime.fromtimestamp(cur[0]/1000,timezone.utc).year,datetime.fromtimestamp(cur[0]/1000,timezone.utc).month
+                    expected=(py+1,1) if pm==12 else (py,pm+1)
+                    if (cy,cm)!=expected: break
+                else:
+                    if cur[0]-prev[0] != meta["seconds"]*1000: break
+                contiguous_tail_count+=1
+        gaps=[]
+        for prev,cur in zip(valid,valid[1:]):
+            if iv=="1M":
+                from datetime import datetime, timezone
+                py,pm=datetime.fromtimestamp(prev[0]/1000,timezone.utc).year,datetime.fromtimestamp(prev[0]/1000,timezone.utc).month
+                cy,cm=datetime.fromtimestamp(cur[0]/1000,timezone.utc).year,datetime.fromtimestamp(cur[0]/1000,timezone.utc).month
+                expected=(py+1,1) if pm==12 else (py,pm+1)
+                if (cy,cm)!=expected: gaps.append({"after":iso(prev[0]),"before":iso(cur[0])})
+            elif cur[0]-prev[0] > meta["seconds"]*1000:
+                gaps.append({"after":iso(prev[0]),"before":iso(cur[0]),"missing_intervals":cur[0]//(meta["seconds"]*1000)-prev[0]//(meta["seconds"]*1000)-1})
+        zero_volume_count=sum(1 for row in valid if row[5]==0)
+        status="UNAVAILABLE" if not valid else ("PARTIEL" if gaps or zero_volume_count else "OK")
+        week_anchor_utc=None
+        if iv=="1w" and valid:
+            from datetime import datetime, timezone
+            anchor=datetime.fromtimestamp(valid[-1][0]/1000,timezone.utc)
+            week_anchor_utc=anchor.strftime("%A")
+        out[iv]={"status":status,"count_received":len(rows)+duplicates_dropped,"closed_count":len(valid),
+          "duplicates_dropped":duplicates_dropped,"gaps":gaps,"zero_volume_count":zero_volume_count,"contiguous_tail_count":contiguous_tail_count,
+          "week_anchor_utc":week_anchor_utc,
           "last_closed_at":iso((valid[-1][0]+(meta["seconds"]*1000 if meta["seconds"] else 0))) if valid and meta["seconds"] else (iso(month_end_ms(valid[-1][0])) if valid else None),
           "rows":[{"open_time":iso(r[0]),"open":r[1],"high":r[2],"low":r[3],"close":r[4],"volume":r[5]} for r in valid[-300:]],
-          "sufficient_for":{"rsi14":len(valid)>=15,"macd_12_26_9":len(valid)>=35,"sma50":len(valid)>=50,"sma200":len(valid)>=200,"atr14":len(valid)>=15}}
+          "sufficient_for":{"rsi14":contiguous_tail_count>=15,"macd_12_26_9":contiguous_tail_count>=35,"sma50":contiguous_tail_count>=50,"sma200":contiguous_tail_count>=200,"atr14":contiguous_tail_count>=15}}
     return out
 
 def observe(r):
@@ -186,20 +236,33 @@ def observe(r):
       "newest_trade_age_ms":st-newest["time_ms"] if st and newest and newest.get("time_ms") else None}
 
 def verdict(obs,max_book_age,max_trade_age):
-    last=obs[-1]; bookages=[o["book_age_ms"] for o in obs if o["book_age_ms"] is not None]
-    if bookages:
-        age=bookages[-1]/1000
+    last=obs[-1]
+    # The published order book is from the final pass; earlier timestamps cannot
+    # certify it when the final pass has no usable source timestamp.
+    age_ms=last["book_age_ms"]
+    if age_ms is not None:
+        age=age_ms/1000
         bv="VÉRIFIÉ" if 0<=age<=max_book_age else ("PÉRIMÉ" if age>max_book_age else "NON VÉRIFIÉ")
-        br=f"horodatage source, âge {age:.1f}s"
+        br=f"horodatage source de la dernière passe, âge {age:.1f}s"
     elif len({o["book_hash"] for o in obs})>1 or (len([o for o in obs if o["book_sequence"] is not None])>=2 and len({str(o["book_sequence"]) for o in obs if o["book_sequence"] is not None})>1):
         bv="PARTIEL"; br="carnet changé entre les passes, mais âge absolu non démontré"
-    else: bv="NON VÉRIFIÉ"; br="carnet inchangé sans horodatage : marché immobile ou données figées, indiscernables"
+    else: bv="NON VÉRIFIÉ"; br="carnet inchangé sans horodatage exploitable dans la dernière passe"
     age=last["newest_trade_age_ms"]
     if age is None: tv="NON VÉRIFIÉ"; tr="aucune transaction horodatée exploitable"
     elif age<0: tv="NON VÉRIFIÉ"; tr="horloge source incohérente"
     elif age/1000<=max_trade_age: tv="VÉRIFIÉ"; tr=f"dernière transaction il y a {age/1000:.0f}s"
     else: tv="NON VÉRIFIÉ"; tr=f"dernière transaction il y a {age/1000:.0f}s; activité récente non prouvée"
     return {"book":{"verdict":bv,"reason":br},"trades":{"verdict":tv,"reason":tr}}
+
+def book_anomalies(bids,asks,best):
+    anomalies=[]
+    if not bids or not asks:
+        anomalies.append("CARNET_VIDE" if not bids and not asks else "CARNET_INCOMPLET")
+    if bids and asks and bids[0][0]>=asks[0][0]:
+        anomalies.append("CARNET_CROISE")
+    if not isinstance(best,dict) or best.get("bid") is None or best.get("ask") is None:
+        anomalies.append("L1_ABSENT")
+    return anomalies
 
 def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     runs=[]
@@ -212,11 +275,15 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     cs=candles(c,st)
     s=spread(last["best"]["bid"],last["best"]["ask"]) if last["best"] and last["best"].get("bid") and last["best"].get("ask") else spread(None,None)
     asks=last["asks"]
-    return {"status":verdict(obs,max_book_age,max_trade_age),"server_time_utc":iso(st) if st else None,
+    status=verdict(obs,max_book_age,max_trade_age)
+    anomalies=book_anomalies(last["bids"],asks,last["best"])
+    if anomalies:
+        status["book"]={"verdict":"NON VÉRIFIÉ","reason":"anomalies du carnet: "+", ".join(anomalies)}
+    return {"status":status,"server_time_utc":iso(st) if st else None,
       "mid":s["mid"],"best":last["best"],"spread":s,"book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
-      "bid_levels":len(last["bids"]),"ask_levels":len(last["asks"]),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
+      "bid_levels":len(last["bids"]),"ask_levels":len(asks),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
       "asks":sum(p*q for p,q in asks if p<=s["mid"]*(1+b/100)) if s["mid"] else None} for b in (.5,1,2,5)},
-      "anomalies":(["CARNET_VIDE"] if not last["bids"] or not asks else [])+ (["CARNET_CROISE"] if s["mid"] is None and last["bids"] and asks else [])},
+      "anomalies":anomalies},
       "buy_cost_300_usdt":buy_cost(asks,notional),"trades":last["trades"][:100] or None,
       "candles":cs,"fees":{"verified":False,"value":None,"note":"frais non vérifiés; exclus du coût simulé"},
       "observations":obs,"best_ask_source":c.venue}
@@ -228,10 +295,13 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
         except Exception as e: sources[v]={"status":{"book":{"verdict":"ERREUR","reason":type(e).__name__},"trades":{"verdict":"ERREUR","reason":type(e).__name__}},"error":str(e)[:200],"mid":None,"best":None,"book":None,"trades":None,"candles":{},"fees":{"verified":False,"value":None}}
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
-    usable={"VÉRIFIÉ","PARTIEL"}
-    both=m["status"]["book"]["verdict"] in usable and k["status"]["book"]["verdict"] in usable and not identical
     mids=[m.get("mid"),k.get("mid")]
-    divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None for x in mids) and mids[1] else None
+    divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None and x>0 for x in mids) else None
+    # A fresh book on each venue is not independent confirmation if their mids
+    # disagree by more than the existing 1% cross-venue tolerance.
+    both=(m["status"]["book"]["verdict"]=="VÉRIFIÉ" and k["status"]["book"]["verdict"]=="VÉRIFIÉ"
+          and all(x is not None and x>0 for x in mids) and not identical
+          and divergence is not None and abs(divergence)<=100)
     return {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
