@@ -42,7 +42,19 @@ jobs:
         id: collect
         continue-on-error: true
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: python -m src.monitor --output site/report.json
+        run: |
+          # Retry transient API/network failures. The final outcome still fails closed.
+          for attempt in 1 2 3; do
+            echo "Public market collection attempt ${attempt}/3"
+            if python -m src.monitor --output site/report.json; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          echo "Public market collection failed after 3 attempts."
+          exit 1
       - name: Ensure fail-closed report exists
         run: |
           python - <<'PY'
@@ -83,7 +95,19 @@ jobs:
         run: |
           # Remove any committed snapshot before collection so a failed run cannot reuse it.
           rm -f site/tel_snapshot.json
-          python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300
+          # Retry transient API/network failures; never fall back to a prior snapshot.
+          for attempt in 1 2 3; do
+            echo "Detailed TEL collection attempt ${attempt}/3"
+            rm -f site/tel_snapshot.json
+            if python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          echo "Detailed TEL collection failed after 3 attempts."
+          exit 1
       - name: Ensure detailed snapshot exists and is valid JSON
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
