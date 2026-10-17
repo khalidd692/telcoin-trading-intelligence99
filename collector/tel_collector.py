@@ -298,6 +298,13 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
     mids=[m.get("mid"),k.get("mid")]
+    venue_data_diagnostic=diagnose_identical_cross_venue_data(
+      "MEXC:TELUSDT",
+      {"mid":m.get("mid"),"bid":(m.get("best") or {}).get("bid"),"ask":(m.get("best") or {}).get("ask")},
+      "KUCOIN:TEL-USDT",
+      {"mid":k.get("mid"),"bid":(k.get("best") or {}).get("bid"),"ask":(k.get("best") or {}).get("ask")},
+      ["mid","bid","ask"],
+    )
     divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None and x>0 for x in mids) else None
     # A fresh book on each venue is not independent confirmation if their mids
     # disagree by more than the existing 1% cross-venue tolerance.
@@ -309,7 +316,7 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
       "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms())},
       "sources":sources,"cross_check":{"mid_mexc":m.get("mid"),"mid_kucoin":k.get("mid"),"divergence_bps":divergence,
-       "identical_top_bids_alert":identical,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"},
+       "identical_top_bids_alert":identical,"venue_data_diagnostic":venue_data_diagnostic,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"},
       "request_log":sum((c.log for c in clients.values()),[]),
       "limits":["Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.","Les frais sont inconnus et exclus.",
        "Les transactions récentes ne prouvent pas à elles seules la fraîcheur absolue du carnet.",
