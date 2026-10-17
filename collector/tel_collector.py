@@ -4,6 +4,8 @@ import argparse, hashlib, json, math, os, socket, ssl, time, urllib.error, urlli
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from src.tradingview_quality import diagnose_identical_cross_venue_data, validate_order_book
+
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
 SYMBOLS = {"mexc": ("https://api.mexc.com", "TELUSDT"), "kucoin": ("https://api.kucoin.com", "TEL-USDT")}
