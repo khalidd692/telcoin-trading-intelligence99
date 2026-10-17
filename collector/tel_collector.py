@@ -246,9 +246,12 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
     mids=[m.get("mid"),k.get("mid")]
+    divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None and x>0 for x in mids) else None
+    # A fresh book on each venue is not independent confirmation if their mids
+    # disagree by more than the existing 1% cross-venue tolerance.
     both=(m["status"]["book"]["verdict"]=="VÉRIFIÉ" and k["status"]["book"]["verdict"]=="VÉRIFIÉ"
-          and all(x is not None and x>0 for x in mids) and not identical)
-    divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None for x in mids) and mids[1] else None
+          and all(x is not None and x>0 for x in mids) and not identical
+          and divergence is not None and abs(divergence)<=100)
     return {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
