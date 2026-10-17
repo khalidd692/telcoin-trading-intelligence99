@@ -48,6 +48,16 @@ class CollectorTests(unittest.TestCase):
         obs=[{"book_age_ms":None,"book_hash":"a","book_sequence":None,"newest_trade_age_ms":3600000}]
         self.assertEqual(tc.verdict(obs,10,900)["trades"]["verdict"],"NON VÉRIFIÉ")
 
+    def test_kucoin_server_timestamp_is_unwrapped_integer(self):
+        class C:
+            venue = "kucoin"
+            def get(self, path):
+                self.path = path
+                return 1792257123456
+        c = C()
+        self.assertEqual(tc.server_time(c), 1792257123456)
+        self.assertEqual(c.path, "/api/v1/timestamp")
+
     def test_month_end(self):
         from datetime import datetime, timezone
         start=int(datetime(2026,9,1,tzinfo=timezone.utc).timestamp()*1000)
