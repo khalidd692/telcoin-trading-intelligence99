@@ -80,7 +80,10 @@ jobs:
         id: detailed_collect
         continue-on-error: true
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300
+        run: |
+          # Remove any committed snapshot before collection so a failed run cannot reuse it.
+          rm -f site/tel_snapshot.json
+          python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300
       - name: Ensure detailed snapshot exists and is valid JSON
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
@@ -88,12 +91,13 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
           p = Path("site/tel_snapshot.json")
           # Never republish a previously committed market snapshot as if it were fresh.
           # Any collector failure forces an explicit unavailable/fail-closed snapshot.
           valid = False
-          if __import__('os').environ.get("DETAILED_COLLECT_OUTCOME") == "success" and p.is_file() and p.stat().st_size:
+          if os.environ.get("DETAILED_COLLECT_OUTCOME") == "success" and p.is_file() and p.stat().st_size:
               try:
                   d = json.loads(p.read_text(encoding="utf-8"))
                   valid = (isinstance(d, dict) and d.get("schema_version") == 1
@@ -113,7 +117,7 @@ jobs:
                   },
                   "cross_check": {"independent_confirmation": "NON ÉTABLIE"},
                   "request_log": [], "error": "Collecteur détaillé en échec, absent ou JSON invalide; aucune donnée de marché n'est inventée.",
-                  "collection_outcome": __import__('os').environ.get("DETAILED_COLLECT_OUTCOME", "unknown")
+                  "collection_outcome": os.environ.get("DETAILED_COLLECT_OUTCOME", "unknown")
               }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
       - name: Commit the exact published reports to main
@@ -149,7 +153,7 @@ jobs:
         uses: actions/deploy-pages@v4
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       - name: Mark failed collection as workflow failure
-        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.collect.outcome != 'success'
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (steps.collect.outcome != 'success' || steps.detailed_collect.outcome != 'success')
         run: |
-          echo "Market collection failed; the fail-closed ATTENDRE report was published."
+          echo "At least one market collection failed; fail-closed reports were published."
           exit 1
