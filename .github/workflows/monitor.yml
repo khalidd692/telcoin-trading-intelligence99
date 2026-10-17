@@ -83,13 +83,17 @@ jobs:
         run: python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300
       - name: Ensure detailed snapshot exists and is valid JSON
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          DETAILED_COLLECT_OUTCOME: ${{ steps.detailed_collect.outcome }}
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           p = Path("site/tel_snapshot.json")
+          # Never republish a previously committed market snapshot as if it were fresh.
+          # Any collector failure forces an explicit unavailable/fail-closed snapshot.
           valid = False
-          if p.is_file() and p.stat().st_size:
+          if __import__('os').environ.get("DETAILED_COLLECT_OUTCOME") == "success" and p.is_file() and p.stat().st_size:
               try:
                   d = json.loads(p.read_text(encoding="utf-8"))
                   valid = (isinstance(d, dict) and d.get("schema_version") == 1
@@ -108,7 +112,8 @@ jobs:
                       "kucoin": {"status": {"book": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}, "trades": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}}}
                   },
                   "cross_check": {"independent_confirmation": "NON ÉTABLIE"},
-                  "request_log": [], "error": "Collecteur détaillé absent ou JSON invalide; aucune donnée de marché n'est inventée."
+                  "request_log": [], "error": "Collecteur détaillé en échec, absent ou JSON invalide; aucune donnée de marché n'est inventée.",
+                  "collection_outcome": __import__('os').environ.get("DETAILED_COLLECT_OUTCOME", "unknown")
               }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
       - name: Commit the exact published reports to main
