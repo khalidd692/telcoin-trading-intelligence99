@@ -162,15 +162,55 @@ def candles(c,server_ms):
                     try: rows.append([int(k[0])*1000,num(k[1]),num(k[3]),num(k[4]),num(k[2]),num(k[5])])
                     except (ValueError,TypeError,IndexError): pass
         rows.sort(key=lambda x:x[0])
+        # Deduplicate by candle open time; retain the last row returned for a timestamp.
+        unique={}
+        for row in rows:
+            unique[row[0]]=row
+        duplicates_dropped=len(rows)-len(unique)
+        rows=list(unique.values())
+        rows.sort(key=lambda x:x[0])
         valid=[]
         for r in rows:
             if all(x is not None and math.isfinite(x) for x in r) and min(r[1:5])>0 and r[5]>=0 and r[2]>=max(r[1],r[4],r[3]) and r[3]<=min(r[1],r[4]):
                 close_ms=month_end_ms(r[0]) if iv=="1M" else r[0]+meta["seconds"]*1000
                 if server_ms and close_ms<=server_ms: valid.append(r)
-        out[iv]={"status":"OK" if valid else "UNAVAILABLE","count_received":len(rows),"closed_count":len(valid),
+        # Count the uninterrupted tail of closed candles. A large total count can
+        # otherwise hide holes in the most recent data used by indicators.
+        contiguous_tail_count=0
+        if valid:
+            contiguous_tail_count=1
+            for prev,cur in zip(reversed(valid[:-1]),reversed(valid[1:])):
+                if iv=="1M":
+                    from datetime import datetime, timezone
+                    py,pm=datetime.fromtimestamp(prev[0]/1000,timezone.utc).year,datetime.fromtimestamp(prev[0]/1000,timezone.utc).month
+                    cy,cm=datetime.fromtimestamp(cur[0]/1000,timezone.utc).year,datetime.fromtimestamp(cur[0]/1000,timezone.utc).month
+                    expected=(py+1,1) if pm==12 else (py,pm+1)
+                    if (cy,cm)!=expected: break
+                else:
+                    if cur[0]-prev[0] != meta["seconds"]*1000: break
+                contiguous_tail_count+=1
+        gaps=[]
+        for prev,cur in zip(valid,valid[1:]):
+            if iv=="1M":
+                from datetime import datetime, timezone
+                py,pm=datetime.fromtimestamp(prev[0]/1000,timezone.utc).year,datetime.fromtimestamp(prev[0]/1000,timezone.utc).month
+                cy,cm=datetime.fromtimestamp(cur[0]/1000,timezone.utc).year,datetime.fromtimestamp(cur[0]/1000,timezone.utc).month
+                expected=(py+1,1) if pm==12 else (py,pm+1)
+                if (cy,cm)!=expected: gaps.append({"after":iso(prev[0]),"before":iso(cur[0])})
+            elif cur[0]-prev[0] > meta["seconds"]*1000:
+                gaps.append({"after":iso(prev[0]),"before":iso(cur[0]),"missing_intervals":cur[0]//(meta["seconds"]*1000)-prev[0]//(meta["seconds"]*1000)-1})
+        status="UNAVAILABLE" if not valid else ("PARTIEL" if gaps else "OK")
+        week_anchor_utc=None
+        if iv=="1w" and valid:
+            from datetime import datetime, timezone
+            anchor=datetime.fromtimestamp(valid[-1][0]/1000,timezone.utc)
+            week_anchor_utc=anchor.strftime("%A")
+        out[iv]={"status":status,"count_received":len(rows)+duplicates_dropped,"closed_count":len(valid),
+          "duplicates_dropped":duplicates_dropped,"gaps":gaps,"contiguous_tail_count":contiguous_tail_count,
+          "week_anchor_utc":week_anchor_utc,
           "last_closed_at":iso((valid[-1][0]+(meta["seconds"]*1000 if meta["seconds"] else 0))) if valid and meta["seconds"] else (iso(month_end_ms(valid[-1][0])) if valid else None),
           "rows":[{"open_time":iso(r[0]),"open":r[1],"high":r[2],"low":r[3],"close":r[4],"volume":r[5]} for r in valid[-300:]],
-          "sufficient_for":{"rsi14":len(valid)>=15,"macd_12_26_9":len(valid)>=35,"sma50":len(valid)>=50,"sma200":len(valid)>=200,"atr14":len(valid)>=15}}
+          "sufficient_for":{"rsi14":contiguous_tail_count>=15,"macd_12_26_9":contiguous_tail_count>=35,"sma50":contiguous_tail_count>=50,"sma200":contiguous_tail_count>=200,"atr14":contiguous_tail_count>=15}}
     return out
 
 def observe(r):
