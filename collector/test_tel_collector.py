@@ -83,4 +83,18 @@ class CollectorTests(unittest.TestCase):
         self.assertIn("CARNET_CROISE", anomalies)
         self.assertIn("L1_ABSENT", anomalies)
 
+    def test_quality_guard_detects_unsorted_order_book(self):
+        quality = tc.validate_order_book([[1.0, 2.0], [1.1, 3.0]], [[1.2, 2.0], [1.3, 3.0]])
+        self.assertEqual(quality["status"], "NON_VÉRIFIÉ")
+        self.assertIn("BIDS_NOT_DESCENDING", quality["problems"])
+
+    def test_quality_guard_does_not_call_identical_venue_values_corruption(self):
+        diagnostic = tc.diagnose_identical_cross_venue_data(
+            "MEXC:TELUSDT", {"mid": 1.0, "bid": 0.99, "ask": 1.01},
+            "KUCOIN:TEL-USDT", {"mid": 1.0, "bid": 0.99, "ask": 1.01},
+            ["mid", "bid", "ask"],
+        )
+        self.assertEqual(diagnostic["status"], "SUSPECT_IDENTIQUE")
+        self.assertIn("ne prouvent pas", diagnostic["note"])
+
 if __name__=="__main__": unittest.main(verbosity=2)
