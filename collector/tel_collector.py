@@ -4,6 +4,8 @@ import argparse, hashlib, json, math, os, socket, ssl, time, urllib.error, urlli
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from src.tradingview_quality import diagnose_identical_cross_venue_data, validate_order_book
+
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
 SYMBOLS = {"mexc": ("https://api.mexc.com", "TELUSDT"), "kucoin": ("https://api.kucoin.com", "TEL-USDT")}
@@ -279,7 +281,12 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     anomalies=book_anomalies(last["bids"],asks,last["best"])
     if anomalies:
         status["book"]={"verdict":"NON VÉRIFIÉ","reason":"anomalies du carnet: "+", ".join(anomalies)}
-    return {"status":status,"server_time_utc":iso(st) if st else None,
+    # Independent shape validation catches unsorted depth levels; it does not
+    # claim freshness when the exchange does not provide a usable timestamp.
+    shape_quality=validate_order_book(last["bids"],asks)
+    if shape_quality["problems"]:
+        status["book"]={"verdict":"NON VÉRIFIÉ","reason":"contrôle qualité du carnet: "+", ".join(shape_quality["problems"])}
+    return {"status":status,"quality_diagnostics":{"order_book_shape":shape_quality},"server_time_utc":iso(st) if st else None,
       "mid":s["mid"],"best":last["best"],"spread":s,"book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
       "bid_levels":len(last["bids"]),"ask_levels":len(asks),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
       "asks":sum(p*q for p,q in asks if p<=s["mid"]*(1+b/100)) if s["mid"] else None} for b in (.5,1,2,5)},
@@ -296,6 +303,13 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
     mids=[m.get("mid"),k.get("mid")]
+    venue_data_diagnostic=diagnose_identical_cross_venue_data(
+      "MEXC:TELUSDT",
+      {"mid":m.get("mid"),"bid":(m.get("best") or {}).get("bid"),"ask":(m.get("best") or {}).get("ask")},
+      "KUCOIN:TEL-USDT",
+      {"mid":k.get("mid"),"bid":(k.get("best") or {}).get("bid"),"ask":(k.get("best") or {}).get("ask")},
+      ["mid","bid","ask"],
+    )
     divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None and x>0 for x in mids) else None
     # A fresh book on each venue is not independent confirmation if their mids
     # disagree by more than the existing 1% cross-venue tolerance.
@@ -307,7 +321,7 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
       "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms())},
       "sources":sources,"cross_check":{"mid_mexc":m.get("mid"),"mid_kucoin":k.get("mid"),"divergence_bps":divergence,
-       "identical_top_bids_alert":identical,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"},
+       "identical_top_bids_alert":identical,"venue_data_diagnostic":venue_data_diagnostic,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"},
       "request_log":sum((c.log for c in clients.values()),[]),
       "limits":["Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.","Les frais sont inconnus et exclus.",
        "Les transactions récentes ne prouvent pas à elles seules la fraîcheur absolue du carnet.",
