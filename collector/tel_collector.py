@@ -3,6 +3,15 @@
 import argparse, hashlib, json, math, os, socket, ssl, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from pathlib import Path
+import sys
+
+# When executed as `python collector/tel_collector.py`, Python puts only
+# the collector directory on sys.path. Add the repository root so `src.*`
+# imports resolve consistently in GitHub Actions and local runs.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from src.tradingview_quality import diagnose_identical_cross_venue_data, validate_order_book
 
