@@ -64,4 +64,23 @@ class CollectorTests(unittest.TestCase):
         end=int(datetime(2026,10,1,tzinfo=timezone.utc).timestamp()*1000)
         self.assertEqual(tc.month_end_ms(start),end)
 
+
+    def test_book_verdict_uses_only_last_pass_timestamp(self):
+        obs=[
+            {"book_age_ms":1000,"book_hash":"a","book_sequence":1,"newest_trade_age_ms":1000},
+            {"book_age_ms":None,"book_hash":"b","book_sequence":2,"newest_trade_age_ms":1000},
+        ]
+        self.assertEqual(tc.verdict(obs,10,900)["book"]["verdict"],"PARTIEL")
+
+    def test_empty_or_one_sided_book_is_anomaly_not_crossed(self):
+        self.assertIn("CARNET_VIDE", tc.book_anomalies([], [], None))
+        one_sided=tc.book_anomalies([[1.0,2.0]], [], None)
+        self.assertIn("CARNET_INCOMPLET", one_sided)
+        self.assertNotIn("CARNET_CROISE", one_sided)
+
+    def test_crossed_depth_book_detected_even_without_l1(self):
+        anomalies=tc.book_anomalies([[1.1,2.0]], [[1.0,2.0]], None)
+        self.assertIn("CARNET_CROISE", anomalies)
+        self.assertIn("L1_ABSENT", anomalies)
+
 if __name__=="__main__": unittest.main(verbosity=2)
