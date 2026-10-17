@@ -186,20 +186,33 @@ def observe(r):
       "newest_trade_age_ms":st-newest["time_ms"] if st and newest and newest.get("time_ms") else None}
 
 def verdict(obs,max_book_age,max_trade_age):
-    last=obs[-1]; bookages=[o["book_age_ms"] for o in obs if o["book_age_ms"] is not None]
-    if bookages:
-        age=bookages[-1]/1000
+    last=obs[-1]
+    # The published order book is from the final pass; earlier timestamps cannot
+    # certify it when the final pass has no usable source timestamp.
+    age_ms=last["book_age_ms"]
+    if age_ms is not None:
+        age=age_ms/1000
         bv="VÉRIFIÉ" if 0<=age<=max_book_age else ("PÉRIMÉ" if age>max_book_age else "NON VÉRIFIÉ")
-        br=f"horodatage source, âge {age:.1f}s"
+        br=f"horodatage source de la dernière passe, âge {age:.1f}s"
     elif len({o["book_hash"] for o in obs})>1 or (len([o for o in obs if o["book_sequence"] is not None])>=2 and len({str(o["book_sequence"]) for o in obs if o["book_sequence"] is not None})>1):
         bv="PARTIEL"; br="carnet changé entre les passes, mais âge absolu non démontré"
-    else: bv="NON VÉRIFIÉ"; br="carnet inchangé sans horodatage : marché immobile ou données figées, indiscernables"
+    else: bv="NON VÉRIFIÉ"; br="carnet inchangé sans horodatage exploitable dans la dernière passe"
     age=last["newest_trade_age_ms"]
     if age is None: tv="NON VÉRIFIÉ"; tr="aucune transaction horodatée exploitable"
     elif age<0: tv="NON VÉRIFIÉ"; tr="horloge source incohérente"
     elif age/1000<=max_trade_age: tv="VÉRIFIÉ"; tr=f"dernière transaction il y a {age/1000:.0f}s"
     else: tv="NON VÉRIFIÉ"; tr=f"dernière transaction il y a {age/1000:.0f}s; activité récente non prouvée"
     return {"book":{"verdict":bv,"reason":br},"trades":{"verdict":tv,"reason":tr}}
+
+def book_anomalies(bids,asks,best):
+    anomalies=[]
+    if not bids or not asks:
+        anomalies.append("CARNET_VIDE" if not bids and not asks else "CARNET_INCOMPLET")
+    if bids and asks and bids[0][0]>=asks[0][0]:
+        anomalies.append("CARNET_CROISE")
+    if not isinstance(best,dict) or best.get("bid") is None or best.get("ask") is None:
+        anomalies.append("L1_ABSENT")
+    return anomalies
 
 def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     runs=[]
@@ -212,11 +225,15 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     cs=candles(c,st)
     s=spread(last["best"]["bid"],last["best"]["ask"]) if last["best"] and last["best"].get("bid") and last["best"].get("ask") else spread(None,None)
     asks=last["asks"]
-    return {"status":verdict(obs,max_book_age,max_trade_age),"server_time_utc":iso(st) if st else None,
+    status=verdict(obs,max_book_age,max_trade_age)
+    anomalies=book_anomalies(last["bids"],asks,last["best"])
+    if anomalies:
+        status["book"]={"verdict":"NON VÉRIFIÉ","reason":"anomalies du carnet: "+", ".join(anomalies)}
+    return {"status":status,"server_time_utc":iso(st) if st else None,
       "mid":s["mid"],"best":last["best"],"spread":s,"book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
-      "bid_levels":len(last["bids"]),"ask_levels":len(last["asks"]),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
+      "bid_levels":len(last["bids"]),"ask_levels":len(asks),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
       "asks":sum(p*q for p,q in asks if p<=s["mid"]*(1+b/100)) if s["mid"] else None} for b in (.5,1,2,5)},
-      "anomalies":(["CARNET_VIDE"] if not last["bids"] or not asks else [])+ (["CARNET_CROISE"] if s["mid"] is None and last["bids"] and asks else [])},
+      "anomalies":anomalies},
       "buy_cost_300_usdt":buy_cost(asks,notional),"trades":last["trades"][:100] or None,
       "candles":cs,"fees":{"verified":False,"value":None,"note":"frais non vérifiés; exclus du coût simulé"},
       "observations":obs,"best_ask_source":c.venue}
@@ -228,9 +245,9 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
         except Exception as e: sources[v]={"status":{"book":{"verdict":"ERREUR","reason":type(e).__name__},"trades":{"verdict":"ERREUR","reason":type(e).__name__}},"error":str(e)[:200],"mid":None,"best":None,"book":None,"trades":None,"candles":{},"fees":{"verified":False,"value":None}}
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
-    usable={"VÉRIFIÉ","PARTIEL"}
-    both=m["status"]["book"]["verdict"] in usable and k["status"]["book"]["verdict"] in usable and not identical
     mids=[m.get("mid"),k.get("mid")]
+    both=(m["status"]["book"]["verdict"]=="VÉRIFIÉ" and k["status"]["book"]["verdict"]=="VÉRIFIÉ"
+          and all(x is not None and x>0 for x in mids) and not identical)
     divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None for x in mids) and mids[1] else None
     return {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
