@@ -281,7 +281,12 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     anomalies=book_anomalies(last["bids"],asks,last["best"])
     if anomalies:
         status["book"]={"verdict":"NON VÉRIFIÉ","reason":"anomalies du carnet: "+", ".join(anomalies)}
-    return {"status":status,"server_time_utc":iso(st) if st else None,
+    # Independent shape validation catches unsorted depth levels; it does not
+    # claim freshness when the exchange does not provide a usable timestamp.
+    shape_quality=validate_order_book(last["bids"],asks)
+    if shape_quality["problems"]:
+        status["book"]={"verdict":"NON VÉRIFIÉ","reason":"contrôle qualité du carnet: "+", ".join(shape_quality["problems"])}
+    return {"status":status,"quality_diagnostics":{"order_book_shape":shape_quality},"server_time_utc":iso(st) if st else None,
       "mid":s["mid"],"best":last["best"],"spread":s,"book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
       "bid_levels":len(last["bids"]),"ask_levels":len(asks),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
       "asks":sum(p*q for p,q in asks if p<=s["mid"]*(1+b/100)) if s["mid"] else None} for b in (.5,1,2,5)},
