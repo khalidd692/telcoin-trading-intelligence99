@@ -127,7 +127,7 @@ def fast(c):
         book_ts=book.get("time") if isinstance(book,dict) else None
         tx=[]
         for x in (trades if isinstance(trades,list) else []):
-            raw=x.get("time"); tms=raw//1_000_000 if isinstance(raw,int) else None
+            raw=x.get("time"); tms=(int(raw)//1_000_000 if str(raw).isdigit() else None)
             tx.append({"time_ms":tms,"price":num(x.get("price")),"qty":num(x.get("size")),"quote_qty":None,"side":x.get("side"),"id":x.get("sequence")})
     tx.sort(key=lambda x: x.get("time_ms") or 0,reverse=True)
     return {"server_time_ms":st,"local_mid_ms":(t0+t1)//2,"best":best,"bids":bids,"asks":asks,"sequence":seq,
