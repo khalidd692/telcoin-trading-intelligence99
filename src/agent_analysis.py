@@ -14,7 +14,7 @@ from typing import Any
 
 TIMEFRAMES = ("15m", "1h", "4h", "1d", "1w", "1M")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
-MIN_CANDLES = {"15m": 55, "1h": 55, "4h": 55, "1d": 55, "1w": 55, "1M": 35}
+MIN_CANDLES = {"15m": 55, "1h": 55, "4h": 55, "1d": 55, "1w": 55, "1M": 15}
 
 
 def parse_time(value: Any) -> datetime | None:
@@ -128,19 +128,20 @@ def analyze_timeframe(source: dict[str, Any], timeframe: str, now: datetime) -> 
     ema50 = ema_series(closes, 50)
     rsi14 = rsi_series(closes, 14)
     hist = macd_histogram(closes)
-    if not ema20 or not ema50 or not math.isfinite(rsi14[-1]):
-        return {"status": "UNAVAILABLE", "reason": "indicateurs non calculables",
+    if not ema20 or not math.isfinite(rsi14[-1]):
+        return {"status": "UNAVAILABLE", "reason": "indicateurs minimaux non calculables",
                 "candle_count": len(rows), "trend": "INDETERMINE"}
     close = closes[-1]
-    e20, e50, rsi_now = ema20[-1], ema50[-1], rsi14[-1]
+    e20, rsi_now = ema20[-1], rsi14[-1]
+    e50 = ema50[-1] if ema50 and math.isfinite(ema50[-1]) else None
     hist_now = hist[-1] if hist and math.isfinite(hist[-1]) else None
     hist_prev = hist[-2] if len(hist) > 1 and math.isfinite(hist[-2]) else None
-    if close > e20 > e50 and hist_now is not None and hist_now > 0:
+    if e50 is not None and close > e20 > e50 and hist_now is not None and hist_now > 0:
         trend = "HAUSSIER"
-    elif close < e20 < e50 and hist_now is not None and hist_now < 0:
+    elif e50 is not None and close < e20 < e50 and hist_now is not None and hist_now < 0:
         trend = "BAISSIER"
     else:
-        trend = "MIXTE"
+        trend = "MIXTE" if e50 is not None else "INDETERMINE"
     avg_volume = mean(volumes[-20:])
     volume_ratio = volumes[-1] / avg_volume if avg_volume > 0 else None
     recent_rsi = [v for v in rsi14[-4:] if math.isfinite(v)]
@@ -160,9 +161,17 @@ def analyze_timeframe(source: dict[str, Any], timeframe: str, now: datetime) -> 
     candle_status = section.get("status", "UNKNOWN")
     fresh = 0 <= age_seconds <= MAX_SNAPSHOT_AGE_SECONDS if timeframe == "15m" else age_seconds >= -60
     # Higher timeframes naturally have older last-closed candles; snapshot freshness is checked separately.
+    monthly_history_partial = timeframe == "1M" and (e50 is None or hist_now is None)
+    valid_source_status = candle_status in ("OK", "PARTIEL")
+    result_status = "PARTIEL" if fresh and valid_source_status and monthly_history_partial else (
+        "OK" if fresh and valid_source_status else "ATTENTION"
+    )
+    reason = "historique mensuel trop court pour EMA50/MACD complet" if monthly_history_partial else (
+        None if fresh else "dernière bougie clôturée trop ancienne"
+    )
     return {
-        "status": "OK" if fresh and candle_status in ("OK", "PARTIEL") else "ATTENTION",
-        "reason": None if fresh else "dernière bougie clôturée trop ancienne",
+        "status": result_status,
+        "reason": reason,
         "candle_status": candle_status, "candle_count": len(rows),
         "last_closed_at": last_close_at.isoformat(), "candle_age_seconds": round(age_seconds),
         "close": close, "ema20": e20, "ema50": e50, "rsi14": rsi_now,
@@ -199,16 +208,22 @@ def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]
     mexc = sources["mexc"]
     cross = snapshot.get("cross_check") if isinstance(snapshot.get("cross_check"), dict) else {}
     timeframes = {tf: analyze_timeframe(mexc, tf, now) for tf in TIMEFRAMES}
-    available = [value for value in timeframes.values() if value.get("status") == "OK"]
-    if len(available) != len(TIMEFRAMES):
+    required_timeframes = ("15m", "1h", "4h", "1d", "1w")
+    missing_required = [tf for tf in required_timeframes if timeframes[tf].get("status") != "OK"]
+    monthly_unavailable = timeframes["1M"].get("status") not in ("OK", "PARTIEL")
+    if missing_required or monthly_unavailable:
         status = "ATTENDRE"
-        reasons = [f"{tf}: {value.get('reason') or value.get('candle_status') or value.get('status')}"
-                   for tf, value in timeframes.items() if value.get("status") != "OK"]
-        reason = "Unités de temps non toutes validées: " + "; ".join(reasons)
+        reasons = [f"{tf}: {timeframes[tf].get('reason') or timeframes[tf].get('candle_status') or timeframes[tf].get('status')}"
+                   for tf in required_timeframes if timeframes[tf].get("status") != "OK"]
+        if monthly_unavailable:
+            reasons.append(f"1M: {timeframes['1M'].get('reason') or timeframes['1M'].get('status')}")
+        reason = "Unités de temps requises non validées: " + "; ".join(reasons)
     else:
         status, reason = "SURVEILLER", None
-    long_trends = [timeframes[tf]["trend"] for tf in ("4h", "1d", "1w", "1M") if timeframes[tf]["status"] == "OK"]
-    if len(long_trends) < 4:
+    long_trends = [timeframes[tf]["trend"] for tf in ("4h", "1d", "1w") if timeframes[tf]["status"] == "OK"]
+    if timeframes["1M"]["status"] == "OK":
+        long_trends.append(timeframes["1M"]["trend"])
+    if len(long_trends) < 3:
         alignment = "INDETERMINE"
     elif all(trend == "HAUSSIER" for trend in long_trends):
         alignment = "HAUSSIER_ALIGNE"
