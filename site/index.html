@@ -195,7 +195,8 @@ async function loadAgentAnalysis(){
 }
 $("refresh").addEventListener("click",function(){load();loadAgentAnalysis();});load();loadAgentAnalysis();
 // Collection runs about every 15 minutes. Poll the published report once per minute.
-window.setInterval(load,60*1000);\nwindow.setInterval(loadAgentAnalysis,60*1000);
+window.setInterval(load,60*1000);
+window.setInterval(loadAgentAnalysis,60*1000);
 // This clock updates report age only; it never refreshes or invents a market price.
 window.setInterval(updateReportAge,1000);
 })();
