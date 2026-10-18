@@ -26,7 +26,7 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 @media(max-width:800px){.shell{padding:16px 14px 28px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.middle,.lower{grid-template-columns:1fr}.intro{align-items:flex-start;flex-direction:column}.status{align-self:flex-start}.panel{padding:15px}.head-actions .live{display:none}}
 .realtime{margin:0 0 14px;border-color:#31506b}.realtime-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.rt-card{border:1px solid #202c40;border-radius:11px;padding:12px;background:#0b1320;min-width:0}.rt-label{color:var(--muted);font-size:11px}.rt-value{font-size:18px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:5px;overflow-wrap:anywhere}.rt-detail{color:var(--muted);font-size:10px;margin-top:5px}.rt-reason{margin-top:12px;color:#c3cee0;font-size:12px}.rt-state{font-size:10px;font-weight:800;color:var(--amber)}.rt-state.pass{color:var(--green)}.trend-context{margin-top:8px;color:#b6c4d8;font-size:11px}@media(max-width:800px){.realtime-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:420px){.rt-card{padding:10px}.rt-value{font-size:15px}}
 @media(max-width:420px){.brand h1{font-size:12px}.brand p{font-size:11px}.logo{width:38px;height:38px}.metrics{gap:9px}.metric-value{font-size:22px}.metric-foot{font-size:10px}.panel-head{margin-bottom:12px}}
-</style>
+.agent-panel{margin-bottom:14px}.agent-meta{color:var(--muted);font-size:11px;margin-top:5px}.agent-state{display:inline-flex;border:1px solid #755d2b;background:#292315;color:var(--amber);border-radius:7px;padding:4px 8px;font-size:10px;font-weight:800;white-space:nowrap}.agent-state.pass{border-color:#285c4a;background:#102b25;color:var(--green)}.tf-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.tf-card{border:1px solid #202c40;border-radius:11px;padding:13px;background:#0b1320;min-width:0}.tf-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.tf-name{font-size:13px;font-weight:800}.tf-trend{font-size:10px;color:var(--amber);font-weight:800}.tf-values{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.tf-k{color:var(--muted);font-size:10px}.tf-v{font-size:12px;font-weight:750;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.tf-note{color:var(--muted);font-size:10px;margin-top:8px}.agent-flags{color:#c3cee0;font-size:11px;margin-top:12px;line-height:1.7}@media(max-width:800px){.tf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:420px){.tf-grid{grid-template-columns:1fr}.tf-card{padding:11px}}</style>
 </head>
 <body><div class="shell">
 <header><div class="brand"><div class="logo">T/</div><div><h1>TELCOIN INTELLIGENCE</h1><p>Marché · Surveillance systématique</p></div></div>
@@ -59,14 +59,19 @@ footer{display:flex;justify-content:space-between;gap:15px;color:#718098;font-si
 <div class="indicator"><div><div class="indicator-name">ATR relatif</div><div class="indicator-note">ATR rapporté au prix</div></div><div class="indicator-value" id="atr-pct">—</div></div>
 <div class="indicator"><div><div class="indicator-name">Volume récent / moyenne 20</div><div class="indicator-note">Clôture 15 min vs moyenne</div></div><div class="indicator-value" id="vol-ratio">—</div></div>
 </div></article></section>
+<section class="panel agent-panel" aria-labelledby="agent-title">
+<div class="panel-head"><div><h3 id="agent-title">Analyse multi-unités de temps</h3><div class="caption">Agent déterministe · bougies clôturées uniquement · aucun ordre</div><div id="agent-meta" class="agent-meta">Analyse multi-unités non encore chargée</div></div><span id="agent-status" class="agent-state">ATTENDRE · initialisation</span></div>
+<div id="agent-grid" class="tf-grid"><div class="empty">En attente de l’analyse multi-unités de temps.</div></div>
+<div id="agent-flags" class="agent-flags">Aucun signal descriptif validé.</div>
+</section>
 <section class="grid lower">
 <article class="panel"><div class="panel-head"><div><h3>État des sources</h3><div class="caption">Chaque source est contrôlée séparément</div></div></div>
 <div class="source-row"><div><div class="source-name">MEXC · ticker TEL/USDT</div><div class="source-detail" id="mexc-ticker-detail">Aucune observation chargée</div></div><span class="source-state fail" id="mexc-ticker-state">INCONNU</span></div>
 <div class="source-row"><div><div class="source-name">MEXC · chandelles 15 min</div><div class="source-detail" id="mexc-candle-detail">Aucune clôture chargée</div></div><span class="source-state fail" id="mexc-candle-state">INCONNU</span></div>
 <div class="source-row"><div><div class="source-name">KuCoin · vérification indépendante</div><div class="source-detail" id="kucoin-detail">Aucune observation chargée</div></div><span class="source-state fail" id="kucoin-state">INCONNU</span></div></article>
 <article class="panel"><div class="panel-head"><div><h3>Contrôles de qualité</h3><div class="caption">Un échec impose l’attente</div></div></div><div id="checks"><div class="source-row"><div><div class="source-name">Rapport de collecte</div><div class="source-detail">En attente du premier rapport</div></div><span class="source-state fail">INCONNU</span></div></div><div class="caption" id="report-error" style="margin-top:12px"></div></article></section>
-<aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment, le contexte BTC et les analyses multi-unités ne sont pas encore intégrés à cette version.</div></aside>
-<footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Collecte UTC : inconnue</span><span id="report-age">Âge des données : inconnu</span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
+<aside class="notice"><div class="notice-icon">ⓘ</div><div><strong>Lecture seule · pas de signal d’achat automatique.</strong><br>« SURVEILLER » signifie uniquement que les contrôles de flux ont réussi. Cela ne prouve aucun avantage statistique et ne déclenche aucun ordre. Les nouvelles, le sentiment et le contexte BTC ne sont pas encore intégrés. L’analyse multi-unités est descriptive : un RSI survendu ne confirme pas un retournement.</div></aside>
+<footer><span>Telcoin Intelligence · Prototype de surveillance</span><span id="generated">Collecte UTC : inconnue</span><span id="report-age">Âge des données : inconnu</span><span><a href="./agent_analysis.json" target="_blank" rel="noreferrer">Rapport agent JSON ↗</a></span><span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99" target="_blank" rel="noreferrer">Code source GitHub ↗</a></span></footer>
 </div>
 <script src="./realtime-config.js?v=relay-fix-1"></script>
 <script src="./realtime.js?v=relay-fix-1"></script>
@@ -153,9 +158,44 @@ async function load(){
  }catch(err){if(reportGeneratedAt)currentGeneratedAt=reportGeneratedAt;clearMarketView(reportGeneratedAt,reportAgeMs,freshnessState==="stale"?"stale":"invalid");setWaiting(err.message||"Impossible de lire le rapport · ATTENDRE");}
  finally{button.disabled=false;button.textContent="↻ Actualiser";}
 }
-$("refresh").addEventListener("click",load);load();
+async function loadAgentAnalysis(){
+ var state=$("agent-status"),meta=$("agent-meta"),grid=$("agent-grid"),flags=$("agent-flags");
+ try{
+  var response=await fetch("./agent_analysis.json?t="+Date.now(),{cache:"no-store"});
+  if(!response.ok)throw new Error("Rapport agent indisponible");
+  var d=await response.json(),generated=Date.parse(d.generated_at),age=Date.now()-generated;
+  if(d.schema_version!==1||d.symbol!=="TELUSDT"||d.mode!=="READ_ONLY_ANALYSIS"||!["SURVEILLER","ATTENDRE"].includes(d.status)||!d.timeframes||!Number.isFinite(generated)||age < -60000||age>20*60*1000)throw new Error("Rapport agent invalide ou périmé · ATTENDRE");
+  state.textContent=d.status+(d.reason?" · données à vérifier":" · données contrôlées");
+  state.className="agent-state"+(d.status==="SURVEILLER"?" pass":"");
+  meta.textContent="Généré "+date(d.generated_at)+" · âge "+Math.floor(Math.max(0,age)/1000)+" s · alignement long terme : "+String(d.alignment||"INDETERMINE");
+  var labels={"15m":"15 min","1h":"1 heure","4h":"4 heures","1d":"1 jour","1w":"1 semaine","1M":"1 mois"};
+  var order=["15m","1h","4h","1d","1w","1M"];
+  grid.innerHTML=order.map(function(tf){
+   var x=d.timeframes[tf]||{},status=String(x.status||"UNAVAILABLE"),trend=String(x.trend||"INDETERMINE");
+   function val(v,kind){if(v===null||v===undefined||!Number.isFinite(Number(v)))return "—";return kind==="price"?price(Number(v)):fmt(Number(v),2);}
+   var note=x.reason||("RSI "+val(x.rsi14)+" · volume "+(x.volume_ratio_20==null?"—":val(x.volume_ratio_20)+"×"));
+   return '<article class="tf-card"><div class="tf-head"><span class="tf-name">'+labels[tf]+'</span><span class="tf-trend">'+status.replace(/[&<>"]/g,"")+'</span></div>'+
+    '<div class="tf-note">Tendance : '+trend.replace(/[&<>"]/g,"")+'</div><div class="tf-values">'+
+    '<div><div class="tf-k">Clôture</div><div class="tf-v">'+val(x.close,"price")+'</div></div>'+
+    '<div><div class="tf-k">RSI 14</div><div class="tf-v">'+val(x.rsi14)+'</div></div>'+
+    '<div><div class="tf-k">EMA 20</div><div class="tf-v">'+val(x.ema20,"price")+'</div></div>'+
+    '<div><div class="tf-k">EMA 50</div><div class="tf-v">'+val(x.ema50,"price")+'</div></div>'+
+    '<div><div class="tf-k">MACD hist.</div><div class="tf-v">'+val(x.macd_histogram)+'</div></div>'+
+    '<div><div class="tf-k">Volume / moy. 20</div><div class="tf-v">'+(x.volume_ratio_20==null?"—":val(x.volume_ratio_20)+"×")+'</div></div></div>'+
+    '<div class="tf-note">'+String(note).replace(/[&<>"]/g,"")+'</div></article>';
+  }).join("");
+  var list=Array.isArray(d.flags)?d.flags:[];
+  flags.textContent=list.length?"Observations à vérifier : "+list.map(function(f){return f.timeframe+" — "+f.flag;}).join(" · "):"Aucun drapeau précoce détecté dans les données validées.";
+  if(d.status==="ATTENDRE")flags.textContent=(d.reason||"Une condition de qualité n'est pas satisfaite.")+" "+flags.textContent;
+ }catch(err){
+  state.textContent="ATTENDRE · rapport absent/périmé";state.className="agent-state";
+  meta.textContent=err.message||"Analyse indisponible";grid.innerHTML='<div class="empty">Analyse multi-unités indisponible. Aucune conclusion d’entrée.</div>';
+  flags.textContent="Les données manquantes ne sont pas remplacées par des estimations.";
+ }
+}
+$("refresh").addEventListener("click",function(){load();loadAgentAnalysis();});load();loadAgentAnalysis();
 // Collection runs about every 15 minutes. Poll the published report once per minute.
-window.setInterval(load,60*1000);
+window.setInterval(load,60*1000);\nwindow.setInterval(loadAgentAnalysis,60*1000);
 // This clock updates report age only; it never refreshes or invents a market price.
 window.setInterval(updateReportAge,1000);
 })();
