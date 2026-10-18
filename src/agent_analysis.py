@@ -159,8 +159,11 @@ def analyze_timeframe(source: dict[str, Any], timeframe: str, now: datetime) -> 
     if hist_now is not None and hist_prev is not None and hist_now > hist_prev:
         flags.append("HISTOGRAMME_MACD_EN_AMELIORATION")
     candle_status = section.get("status", "UNKNOWN")
-    fresh = 0 <= age_seconds <= MAX_SNAPSHOT_AGE_SECONDS if timeframe == "15m" else age_seconds >= -60
-    # Higher timeframes naturally have older last-closed candles; snapshot freshness is checked separately.
+    timeframe_seconds = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800, "1M": 31 * 86400}[timeframe]
+    # The snapshot can be fresh while one timeframe silently contains an old candle.
+    # Keep the stricter 15m limit; higher intervals get one interval plus the snapshot grace.
+    max_candle_age = MAX_SNAPSHOT_AGE_SECONDS if timeframe == "15m" else timeframe_seconds + MAX_SNAPSHOT_AGE_SECONDS
+    fresh = -60 <= age_seconds <= max_candle_age
     monthly_history_partial = timeframe == "1M" and (e50 is None or hist_now is None)
     valid_source_status = candle_status in ("OK", "PARTIEL")
     result_status = "PARTIEL" if fresh and valid_source_status and monthly_history_partial else (
