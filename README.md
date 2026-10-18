@@ -30,3 +30,11 @@ python -m src.monitor --output report.json
 ```
 
 This is decision-support software, not financial advice. It does not place orders and does not establish a trading edge.
+
+## Multi-timeframe read-only analysis layer
+
+The detailed collector already gathers closed OHLCV candles from MEXC and KuCoin for 15m, 1h, 4h, 1d, 1w and 1M. The deterministic analysis layer in `src/agent_analysis.py` reads the detailed snapshot and publishes `site/agent_analysis.json`.
+
+It calculates EMA20/EMA50, RSI14, MACD histogram and relative volume per timeframe, then summarizes broad timeframe alignment and descriptive early-warning flags. It does not use the forming candle, does not infer a reversal from an oversold RSI, and never places orders. If the snapshot is stale, a timeframe is missing, or there is insufficient coherent history, the result is `ATTENDRE`. `SURVEILLER` means only that the data and analysis passed basic checks; it is not an entry instruction.
+
+The JSON output is published alongside the existing report and detailed snapshot. Tests cover stale/missing data, duplicate candles, timeframe coverage and oversold conditions.

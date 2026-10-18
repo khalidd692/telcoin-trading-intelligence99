@@ -144,12 +144,15 @@ jobs:
                   "collection_outcome": os.environ.get("DETAILED_COLLECT_OUTCOME", "unknown")
               }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
+      - name: Generate read-only multi-timeframe analysis
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: python -m src.agent_analysis --input site/tel_snapshot.json --output site/agent_analysis.json
       - name: Commit the exact published reports to main
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/report.json site/tel_snapshot.json
+          git add site/report.json site/tel_snapshot.json site/agent_analysis.json
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
             git push origin HEAD:main
@@ -161,6 +164,7 @@ jobs:
           echo "The report and actual source checks are shown on the deployed dashboard." >> "$GITHUB_STEP_SUMMARY"
           echo "A missing or invalid data feed must remain ATTENDRE." >> "$GITHUB_STEP_SUMMARY"
           echo "Detailed snapshot: site/tel_snapshot.json (multi-timeframe, order book, trades, spread and 300 USDT slippage estimate)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Read-only agent analysis: site/agent_analysis.json (15m, 1h, 4h, 1d, 1w, 1M)." >> "$GITHUB_STEP_SUMMARY"
           echo "Detailed collector outcome: ${{ steps.detailed_collect.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Enable and read GitHub Pages configuration
         uses: actions/configure-pages@v5
