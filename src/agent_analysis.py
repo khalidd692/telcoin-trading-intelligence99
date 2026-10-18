@@ -14,6 +14,7 @@ from typing import Any
 
 TIMEFRAMES = ("15m", "1h", "4h", "1d", "1w", "1M")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
+CRITICAL_LEVEL = 0.001526
 MIN_CANDLES = {"15m": 55, "1h": 55, "4h": 55, "1d": 55, "1w": 55, "1M": 15}
 
 
@@ -238,6 +239,17 @@ def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]
     for tf in ("15m", "1h", "4h", "1d", "1w", "1M"):
         for flag in timeframes[tf].get("flags", []):
             flags.append({"timeframe": tf, "flag": flag})
+    critical_timeframes = ("15m", "1h", "4h")
+    below_critical = [tf for tf in critical_timeframes
+                      if timeframes[tf].get("status") == "OK"
+                      and isinstance(timeframes[tf].get("close"), (int, float))
+                      and timeframes[tf]["close"] < CRITICAL_LEVEL]
+    critical_status = "SOUS_NIVEAU_SURVEILLANCE" if below_critical else "AU_DESSUS_SUR_CLOTURE"
+    if below_critical:
+        flags.append({
+            "timeframe": "GLOBAL",
+            "flag": "NIVEAU_CRITIQUE_0_001526_CLOTURE_SOUS_NIVEAU_" + "_".join(below_critical),
+        })
     return {
         "schema_version": 1, "symbol": "TELUSDT", "mode": "READ_ONLY_ANALYSIS",
         "generated_at": now.isoformat(), "source_generated_at": generated.isoformat(),
@@ -248,6 +260,12 @@ def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]
             "divergence_bps": cross.get("divergence_bps"),
         },
         "timeframes": timeframes, "alignment": alignment, "flags": flags,
+        "risk_checks": {
+            "critical_level": CRITICAL_LEVEL,
+            "status": critical_status,
+            "closed_timeframes_below_level": below_critical,
+            "interpretation": "Risque de rupture à réévaluer; ce contrôle n’est jamais un signal d’achat."
+        },
         "interpretation": (
             "Analyse multi-unités de temps. Les drapeaux sont des observations, pas des signaux d'achat. "
             "Un RSI survendu ne confirme pas un retournement. SURVEILLER ne signifie pas ENTRER."
