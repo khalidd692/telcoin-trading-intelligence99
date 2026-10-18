@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-10-18T20:00:41.226238+00:00",
-  "source_generated_at": "2026-10-18T20:00:41.090000+00:00",
+  "generated_at": "2026-10-18T22:25:16.352256+00:00",
+  "source_generated_at": "2026-10-18T22:25:16.217000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "reason": null,
@@ -18,10 +18,12 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [],
+      "matching_fields": [
+        "ask"
+      ],
       "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": 19.7238658777118
+    "divergence_bps": -9.807126511933305
   },
   "timeframes": {
     "15m": {
@@ -29,39 +31,43 @@
       "reason": null,
       "candle_status": "OK",
       "candle_count": 300,
-      "last_closed_at": "2026-10-18T20:00:00+00:00",
-      "candle_age_seconds": 41,
-      "close": 0.001521,
-      "ema20": 0.0015377449285544735,
-      "ema50": 0.0015521520067324525,
-      "rsi14": 36.249999999999865,
-      "macd_histogram": -1.839292191540939e-06,
-      "macd_histogram_previous": -1.3463596273946518e-06,
-      "volume_last": 1102596.61,
-      "volume_mean20": 1030871.5285,
-      "volume_ratio_20": 1.0695771291737641,
-      "trend": "BAISSIER",
-      "flags": []
+      "last_closed_at": "2026-10-18T22:15:00+00:00",
+      "candle_age_seconds": 616,
+      "close": 0.001533,
+      "ema20": 0.0015255624561693808,
+      "ema50": 0.0015414735283560386,
+      "rsi14": 46.15384615384617,
+      "macd_histogram": 6.281351440375494e-07,
+      "macd_histogram_previous": -9.367072722383711e-07,
+      "volume_last": 1589958.2,
+      "volume_mean20": 1072682.534,
+      "volume_ratio_20": 1.482226240853475,
+      "trend": "MIXTE",
+      "flags": [
+        "RSI_EN_HAUSSE_SUR_LES_DERNIERES_CLOTURES",
+        "TROIS_CLOTURES_EN_HAUSSE",
+        "HISTOGRAMME_MACD_EN_AMELIORATION"
+      ]
     },
     "1h": {
       "status": "OK",
       "reason": null,
       "candle_status": "OK",
       "candle_count": 300,
-      "last_closed_at": "2026-10-18T20:00:00+00:00",
-      "candle_age_seconds": 41,
-      "close": 0.001521,
-      "ema20": 0.0015683740286472478,
-      "ema50": 0.0016275818096101197,
-      "rsi14": 25.67567567567569,
-      "macd_histogram": 1.387933695970758e-06,
-      "macd_histogram_previous": 1.910529940176472e-06,
-      "volume_last": 8701171.73,
-      "volume_mean20": 3376476.2920000004,
-      "volume_ratio_20": 2.576997727073038,
+      "last_closed_at": "2026-10-18T22:00:00+00:00",
+      "candle_age_seconds": 1516,
+      "close": 0.001519,
+      "ema20": 0.0015582971073506927,
+      "ema50": 0.0016187431298714994,
+      "rsi14": 33.33333333333333,
+      "macd_histogram": 8.262710824077303e-07,
+      "macd_histogram_previous": 3.4871747580630984e-07,
+      "volume_last": 2103048.04,
+      "volume_mean20": 3477374.3880000003,
+      "volume_ratio_20": 0.6047804479314524,
       "trend": "MIXTE",
       "flags": [
-        "RSI_SURVENDU_NE_CONFIRME_PAS_UN_REBOND"
+        "HISTOGRAMME_MACD_EN_AMELIORATION"
       ]
     },
     "4h": {
@@ -70,7 +76,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-10-18T20:00:00+00:00",
-      "candle_age_seconds": 41,
+      "candle_age_seconds": 8716,
       "close": 0.001521,
       "ema20": 0.0016569426549658426,
       "ema50": 0.0017304383808656892,
@@ -91,7 +97,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-10-18T00:00:00+00:00",
-      "candle_age_seconds": 72041,
+      "candle_age_seconds": 80716,
       "close": 0.001624,
       "ema20": 0.0018047258376189426,
       "ema50": 0.0018014364603038359,
@@ -112,7 +118,7 @@
       "candle_status": "OK",
       "candle_count": 99,
       "last_closed_at": "2026-10-12T00:00:00+00:00",
-      "candle_age_seconds": 590441,
+      "candle_age_seconds": 599116,
       "close": 0.001703,
       "ema20": 0.0019511055565476388,
       "ema50": 0.0027410285028982764,
@@ -131,7 +137,7 @@
       "candle_status": "OK",
       "candle_count": 23,
       "last_closed_at": "2026-10-01T00:00:00+00:00",
-      "candle_age_seconds": 1540841,
+      "candle_age_seconds": 1549516,
       "close": 0.002369,
       "ema20": 0.0036936835492927334,
       "ema50": null,
@@ -148,8 +154,20 @@
   "alignment": "MIXTE",
   "flags": [
     {
+      "timeframe": "15m",
+      "flag": "RSI_EN_HAUSSE_SUR_LES_DERNIERES_CLOTURES"
+    },
+    {
+      "timeframe": "15m",
+      "flag": "TROIS_CLOTURES_EN_HAUSSE"
+    },
+    {
+      "timeframe": "15m",
+      "flag": "HISTOGRAMME_MACD_EN_AMELIORATION"
+    },
+    {
       "timeframe": "1h",
-      "flag": "RSI_SURVENDU_NE_CONFIRME_PAS_UN_REBOND"
+      "flag": "HISTOGRAMME_MACD_EN_AMELIORATION"
     },
     {
       "timeframe": "4h",
@@ -161,14 +179,13 @@
     },
     {
       "timeframe": "GLOBAL",
-      "flag": "NIVEAU_CRITIQUE_0_001526_CLOTURE_SOUS_NIVEAU_15m_1h_4h"
+      "flag": "NIVEAU_CRITIQUE_0_001526_CLOTURE_SOUS_NIVEAU_1h_4h"
     }
   ],
   "risk_checks": {
     "critical_level": 0.001526,
     "status": "SOUS_NIVEAU_SURVEILLANCE",
     "closed_timeframes_below_level": [
-      "15m",
       "1h",
       "4h"
     ],
