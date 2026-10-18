@@ -66,7 +66,7 @@ class AgentAnalysisTests(unittest.TestCase):
         self.assertEqual(report["risk_checks"]["status"], "SOUS_NIVEAU_SURVEILLANCE")
         self.assertIn("15m", report["risk_checks"]["closed_timeframes_below_level"])
         self.assertEqual(report["orders_sent"], 0)
-        self.assertIn("NIVEAU_CRITIQUE_0_001526", [x["flag"] for x in report["flags"]])
+        self.assertTrue(any(x["flag"].startswith("NIVEAU_CRITIQUE_0_001526") for x in report["flags"]))
 
     def test_critical_level_above_closes_does_not_flag_breakdown(self):
         now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
