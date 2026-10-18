@@ -59,6 +59,14 @@ class AgentAnalysisTests(unittest.TestCase):
         self.assertEqual(report["orders_sent"], 0)
         self.assertIn("pas des signaux d'achat", report["interpretation"])
 
+    def test_stale_higher_timeframe_candle_fails_closed(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now)
+        snapshot["sources"]["mexc"]["candles"]["4h"]["last_closed_at"] = (now - timedelta(hours=5)).isoformat()
+        report = build_analysis(snapshot, now)
+        self.assertEqual(report["status"], "ATTENDRE")
+        self.assertNotEqual(report["timeframes"]["4h"]["status"], "OK")
+
     def test_missing_timeframe_fails_closed(self):
         now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
         snapshot = make_snapshot(now)
