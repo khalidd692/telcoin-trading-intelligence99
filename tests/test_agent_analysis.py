@@ -59,6 +59,26 @@ class AgentAnalysisTests(unittest.TestCase):
         self.assertEqual(report["orders_sent"], 0)
         self.assertIn("pas des signaux d'achat", report["interpretation"])
 
+    def test_critical_level_breach_is_reported_as_risk_not_buy_signal(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        report = build_analysis(make_snapshot(now), now)
+        self.assertEqual(report["risk_checks"]["critical_level"], 0.001526)
+        self.assertEqual(report["risk_checks"]["status"], "SOUS_NIVEAU_SURVEILLANCE")
+        self.assertIn("15m", report["risk_checks"]["closed_timeframes_below_level"])
+        self.assertEqual(report["orders_sent"], 0)
+        self.assertTrue(any(x["flag"].startswith("NIVEAU_CRITIQUE_0_001526") for x in report["flags"]))
+
+    def test_critical_level_above_closes_does_not_flag_breakdown(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now)
+        for rows in snapshot["sources"]["mexc"]["candles"].values():
+            for row in rows["rows"]:
+                for key in ("open", "high", "low", "close"):
+                    row[key] += 0.001
+        report = build_analysis(snapshot, now)
+        self.assertEqual(report["risk_checks"]["status"], "AU_DESSUS_SUR_CLOTURE")
+        self.assertEqual(report["risk_checks"]["closed_timeframes_below_level"], [])
+
     def test_stale_higher_timeframe_candle_fails_closed(self):
         now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
         snapshot = make_snapshot(now)
