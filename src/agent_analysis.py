@@ -8,9 +8,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from collector.tel_collector import compute_snapshot_fingerprint
 
 TIMEFRAMES = ("15m", "1h", "4h", "1d", "1w", "1M")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
@@ -189,17 +192,39 @@ def unavailable_report(reason: str, generated_at: str | None = None) -> dict[str
     return {
         "schema_version": 1, "symbol": "TELUSDT", "mode": "READ_ONLY_ANALYSIS",
         "generated_at": datetime.now(timezone.utc).isoformat(), "source_generated_at": generated_at,
-        "status": "ATTENDRE", "reason": reason, "timeframes": {},
+        "status": "ATTENDRE", "collection_status": "FALLBACK", "reason": reason, "timeframes": {},
         "alignment": "INDETERMINE",
         "interpretation": "Données absentes, périmées ou incohérentes : aucune conclusion d'entrée.",
         "orders_sent": 0,
     }
 
 
-def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]:
+def build_analysis(snapshot: Any, expected_collection_id: str | None = None, now: datetime | None = None) -> dict[str, Any]:
+    if isinstance(expected_collection_id, datetime):
+        now = expected_collection_id
+        expected_collection_id = None
     now = now or datetime.now(timezone.utc)
     if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1 or snapshot.get("symbol") != "TELUSDT":
         return unavailable_report("snapshot absent, schéma invalide ou symbole inattendu")
+
+    snapshot_collection_id = snapshot.get("collection_id")
+    if expected_collection_id is not None:
+        if snapshot_collection_id is None:
+            return unavailable_report("collection_id absent dans le snapshot (provenance non vérifiable)")
+        if snapshot_collection_id != expected_collection_id:
+            return unavailable_report(f"collection_id incohérent: snapshot={snapshot_collection_id}, attendu={expected_collection_id}")
+
+    snapshot_id = snapshot.get("snapshot_id")
+    if snapshot_id is not None:
+        if not isinstance(snapshot_id, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", snapshot_id):
+            return unavailable_report(f"snapshot_id invalide ou mal formé ({snapshot_id})")
+        try:
+            actual_hash = compute_snapshot_fingerprint(snapshot.get("sources"), snapshot.get("cross_check"))
+        except ValueError as exc:
+            return unavailable_report(f"snapshot_id invalide: source incomplète ou mal formée ({exc})")
+        if actual_hash != snapshot_id:
+            return unavailable_report(f"snapshot_id incohérent: attendu={actual_hash}, reçu={snapshot_id}")
+
     generated = parse_time(snapshot.get("generated_at"))
     if generated is None:
         return unavailable_report("horodatage de snapshot absent/invalide", snapshot.get("generated_at"))
@@ -250,10 +275,10 @@ def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]
             "timeframe": "GLOBAL",
             "flag": "NIVEAU_CRITIQUE_0_001526_CLOTURE_SOUS_NIVEAU_" + "_".join(below_critical),
         })
-    return {
+    result = {
         "schema_version": 1, "symbol": "TELUSDT", "mode": "READ_ONLY_ANALYSIS",
         "generated_at": now.isoformat(), "source_generated_at": generated.isoformat(),
-        "snapshot_age_seconds": round(age), "status": status, "reason": reason,
+        "snapshot_age_seconds": round(age), "status": status, "collection_status": "VALID", "reason": reason,
         "cross_check": {
             "independent_confirmation": cross.get("independent_confirmation", "NON ÉTABLIE"),
             "venue_data_diagnostic": cross.get("venue_data_diagnostic"),
@@ -274,18 +299,30 @@ def build_analysis(snapshot: Any, now: datetime | None = None) -> dict[str, Any]
         ),
         "orders_sent": 0,
     }
+    if expected_collection_id is not None:
+        result["collection_id"] = expected_collection_id
+    if snapshot_id is not None:
+        result["snapshot_id"] = snapshot_id
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="site/tel_snapshot.json")
     parser.add_argument("--output", default="site/agent_analysis.json")
+    parser.add_argument("--collection-id", default=None, help="Collection ID for provenance verification (UUID)")
     args = parser.parse_args()
     try:
         snapshot = json.loads(Path(args.input).read_text(encoding="utf-8"))
-        report = build_analysis(snapshot)
+        report = build_analysis(snapshot, args.collection_id)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         report = unavailable_report(f"lecture du snapshot impossible ({type(exc).__name__})")
+    # Include collection_id in report for dashboard verification
+    if args.collection_id:
+        report["collection_id"] = args.collection_id
+    # Also include snapshot_id from snapshot if available
+    if isinstance(snapshot, dict) and snapshot.get("snapshot_id"):
+        report["snapshot_id"] = snapshot.get("snapshot_id")
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Analyse TEL multi-timeframes: {report['status']} | alignement={report.get('alignment')}")

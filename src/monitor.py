@@ -138,6 +138,7 @@ def fallback_report(reason: str) -> dict[str, Any]:
     return {
         "schema_version": 1, "generated_at": utc_now().isoformat(),
         "symbol": SYMBOL, "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
+        "collection_status": "FALLBACK",
         "sources": {
             "mexc_ticker": {"status": "UNAVAILABLE", "reason": reason},
             "mexc_candles": {"status": "UNAVAILABLE", "reason": reason},
@@ -150,13 +151,16 @@ def fallback_report(reason: str) -> dict[str, Any]:
     }
 
 
-def build_report() -> dict[str, Any]:
+def build_report(collection_id: str | None = None) -> dict[str, Any]:
     report: dict[str, Any] = {
         "schema_version": 1, "generated_at": utc_now().isoformat(),
         "symbol": SYMBOL, "mode": "READ_ONLY_ALERTS", "status": "ATTENDRE",
+        "collection_status": "VALID",
         "sources": {}, "checks": [], "indicators": None,
         "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
     }
+    if collection_id:
+        report["collection_id"] = collection_id
     try:
         ticker = mexc_ticker()
         report["sources"]["mexc_ticker"] = {"status": "OK", **ticker}
@@ -210,6 +214,7 @@ def build_report() -> dict[str, Any]:
                                     else "At least one quality/confirmation check failed. Fail-closed: ATTENDRE.")
     except DataUnavailable as exc:
         report["status"] = "ATTENDRE"
+        report["collection_status"] = "FALLBACK"
         report["error"] = str(exc)
         report["interpretation"] = "Required data unavailable or incoherent. Fail-closed: ATTENDRE."
     return report
@@ -218,11 +223,14 @@ def build_report() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="report.json")
+    parser.add_argument("--collection-id", default=None, help="Collection ID for provenance tracking (UUID)")
     args = parser.parse_args()
     try:
-        report = build_report()
+        report = build_report(args.collection_id)
     except Exception as exc:  # Keep a usable fail-closed artifact for unexpected errors too.
         report = fallback_report(f"unexpected collector error: {type(exc).__name__}")
+        if args.collection_id:
+            report["collection_id"] = args.collection_id
     Path(args.output).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))
     # ATTENDRE is a valid report, but a critical data-quality failure must fail the workflow.

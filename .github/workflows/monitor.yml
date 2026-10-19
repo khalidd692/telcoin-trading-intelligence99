@@ -32,6 +32,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Generate collection ID
+        id: collection_id
+        run: |
+          COLLECTION_ID=$(python -c "import uuid; print(uuid.uuid4())")
+          echo "collection_id=$COLLECTION_ID" >> $GITHUB_OUTPUT
+          echo "COLLECTION_ID=$COLLECTION_ID" >> $GITHUB_ENV
+      - name: Check generated collection ID is non-empty
+        run: |
+          if [ -z "${{ steps.collection_id.outputs.collection_id }}" ]; then
+            echo "Missing collection_id output from generation step" >&2
+            exit 1
+          fi
+          echo "collection_id=${{ steps.collection_id.outputs.collection_id }}"
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -v
@@ -46,7 +59,7 @@ jobs:
           # Retry transient API/network failures. The final outcome still fails closed.
           for attempt in 1 2 3; do
             echo "Public market collection attempt ${attempt}/3"
-            if python -m src.monitor --output site/report.json; then
+            if python -m src.monitor --output site/report.json --collection-id "${{ steps.collection_id.outputs.collection_id }}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 3 ]; then
@@ -99,7 +112,7 @@ jobs:
           for attempt in 1 2 3; do
             echo "Detailed TEL collection attempt ${attempt}/3"
             rm -f site/tel_snapshot.json
-            if python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300; then
+            if python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300 --collection-id "${{ steps.collection_id.outputs.collection_id }}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 3 ]; then
@@ -146,7 +159,66 @@ jobs:
           PY
       - name: Generate read-only multi-timeframe analysis
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: python -m src.agent_analysis --input site/tel_snapshot.json --output site/agent_analysis.json
+        run: python -m src.agent_analysis --input site/tel_snapshot.json --output site/agent_analysis.json --collection-id "${{ steps.collection_id.outputs.collection_id }}"
+      - name: Validate collection provenance before publication
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          COLLECTION_ID: ${{ env.COLLECTION_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          from collector.tel_collector import compute_snapshot_fingerprint
+
+          root = Path('.')
+          snapshot_path = root / 'site' / 'tel_snapshot.json'
+          report_path = root / 'site' / 'report.json'
+          analysis_path = root / 'site' / 'agent_analysis.json'
+
+          for path in (snapshot_path, report_path, analysis_path):
+              if not path.exists() or path.stat().st_size == 0:
+                  raise SystemExit(f'Artifact missing or empty: {path}')
+
+          snapshot = json.loads(snapshot_path.read_text(encoding='utf-8'))
+          report = json.loads(report_path.read_text(encoding='utf-8'))
+          analysis = json.loads(analysis_path.read_text(encoding='utf-8'))
+
+          for name, obj in [('snapshot', snapshot), ('report', report), ('analysis', analysis)]:
+              if not isinstance(obj, dict):
+                  raise SystemExit(f'{name} artifact is not an object')
+              if obj.get('collection_id') is None or str(obj.get('collection_id')).strip() == '':
+                  raise SystemExit(f'{name} artifact missing or empty collection_id')
+              if obj.get('symbol') != 'TELUSDT':
+                  raise SystemExit(f'{name} artifact symbol mismatch')
+              if obj.get('collection_status') not in {'VALID', 'FALLBACK'}:
+                  raise SystemExit(f'{name} artifact missing reliable collection_status marker')
+              if obj.get('collection_status') == 'FALLBACK':
+                  raise SystemExit(f'{name} artifact is a fallback and cannot be published')
+
+          if snapshot.get('collection_id') != report.get('collection_id'):
+              raise SystemExit('snapshot and report have different collection_id')
+          if snapshot.get('collection_id') != analysis.get('collection_id'):
+              raise SystemExit('snapshot and analysis have different collection_id')
+          expected_id = os.environ.get('COLLECTION_ID')
+          if not expected_id or str(expected_id).strip() == '':
+              raise SystemExit('COLLECTION_ID is empty or missing in workflow environment')
+          if snapshot.get('collection_id') != expected_id:
+              raise SystemExit('collection_id mismatch with workflow value')
+
+          if not isinstance(snapshot.get('snapshot_id'), str) or len(snapshot['snapshot_id']) != 64:
+              raise SystemExit('snapshot_id missing or malformed')
+
+          try:
+              expected_hash = compute_snapshot_fingerprint(snapshot.get('sources'), snapshot.get('cross_check'))
+          except Exception as exc:
+              raise SystemExit(f'snapshot fingerprint invalid: {exc}')
+          if snapshot.get('snapshot_id') != expected_hash:
+              raise SystemExit('snapshot_id does not match the deterministic fingerprint of the snapshot payload')
+
+          print('provenance validation OK for collection', snapshot['collection_id'])
+          PY
       - name: Commit the exact published reports to main
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
