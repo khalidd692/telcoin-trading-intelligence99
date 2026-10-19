@@ -4,6 +4,16 @@ Date d'ajout : 2026-10-20
 ## Règle non négociable
 Ne jamais fonder une analyse ou un verdict d'entrée TEL sur le RSI seul. Examiner toutes les captures TradingView fournies par l'utilisateur et relever les informations visibles avant de conclure. Ne jamais prétendre qu'une capture ou une unité de temps a été vérifiée si ce n'est pas le cas.
 
+## Principe crucial : ne pas détecter les retournements trop tard
+**Ne jamais attendre que tous les indicateurs deviennent acheteurs pour détecter le début d'un retournement.** Cette attente peut faire manquer une partie importante du mouvement. Détecter et signaler les premiers indices crédibles dès leur apparition, même si la tendance générale reste baissière ou si la confirmation n'est pas encore acquise.
+
+Toujours distinguer explicitement trois états :
+- **ALERTE PRÉCOCE** : premiers indices possibles de retournement (par exemple, perte de force vendeuse, divergence, amélioration du MACD, réaction sur support, changement de structure ou volume inhabituel). À signaler sans attendre un alignement complet des indicateurs. Préciser les indices présents, ceux qui manquent et le risque de faux signal.
+- **CONFIRMATION** : plusieurs éléments indépendants concordent, avec une structure et des clôtures pertinentes qui soutiennent le scénario. La confirmation est une étape distincte de l'alerte précoce.
+- **INVALIDATION** : le scénario est contredit par les observations (par exemple, support perdu ou reprise échouée selon les niveaux pertinents). Expliquer ce qui invalide le scénario.
+
+Une alerte précoce n'est pas une confirmation ni une instruction automatique d'achat. Elle sert à rendre le retournement visible assez tôt pour évaluer une entrée précoce plus risquée par rapport à une entrée après confirmation. Présenter clairement les deux possibilités et leurs compromis, sans forcer systématiquement l'attente d'une confirmation tardive.
+
 ## Lecture des captures
 Pour chaque capture, noter :
 - la paire et la plateforme (ex. TEL/USDT, KuCoin/MEXC) ;
@@ -33,13 +43,8 @@ Examiner conjointement :
 5. Contexte externe : BTC et ETH, volatilité et contexte de marché.
 6. Qualité des données : horodatage, fraîcheur, bougie clôturée ou en formation, cohérence entre sources et indépendance réelle des plateformes.
 
-## États de signal à distinguer
-- ALERTE PRÉCOCE : des signes initiaux de changement apparaissent, sans confirmation suffisante.
-- CONFIRMATION : plusieurs éléments concordants, structure et clôtures pertinentes confirmant le scénario.
-- INVALIDATION : les conditions observées contredisent le scénario.
-- ATTENDRE / DONNÉES INSUFFISANTES : données périmées, incohérentes ou manquantes. Ne pas inventer de confirmation.
-
-Un marché survendu (RSI/Stochastique/Williams %R bas) rend un rebond possible mais ne confirme pas un retournement. À l'inverse, ne pas attendre que tous les indicateurs deviennent acheteurs avant de détecter une alerte précoce.
+## Interprétation conjointe
+Un marché survendu (RSI/Stochastique/Williams %R bas) rend un rebond possible mais ne confirme pas un retournement. À l'inverse, ne pas attendre que tous les indicateurs deviennent acheteurs avant de détecter une alerte précoce. Les indicateurs servent à éclairer le scénario, pas à remplacer la lecture de la structure, du volume et des clôtures.
 
 ## Compte rendu obligatoire
 - Horodatage et sources utilisées ;
@@ -48,9 +53,10 @@ Un marché survendu (RSI/Stochastique/Williams %R bas) rend un rebond possible m
 - arguments haussiers ET baissiers ;
 - niveaux observés, sans transformer une observation en nouveau seuil stratégique non autorisé ;
 - statut des données et bougies ;
-- distinction explicite entre alerte précoce, confirmation et invalidation ;
-- verdict pratique et incertitudes ;
+- état explicite : ALERTE PRÉCOCE, CONFIRMATION, INVALIDATION ou ATTENDRE / DONNÉES INSUFFISANTES ;
+- si alerte précoce : indices observés, confirmations manquantes et risque de faux signal ;
+- verdict pratique, distinction entre entrée précoce risquée et entrée confirmée, et incertitudes ;
 - journaliser les retournements et vérifier ensuite quels signaux ont réellement précédé le mouvement.
 
 ## Protections du projet
-Ne pas modifier des seuils, stratégies, scripts, alertes, ordres ou déploiements sans autorisation explicite. Aucune exécution d'ordre. Si données insuffisantes ou incohérentes : ATTENDRE.
+Ne pas modifier des seuils, stratégies, scripts, alertes, ordres ou déploiements sans autorisation explicite. Aucune exécution d'ordre. Si données insuffisantes ou incohérentes : ATTENDRE pour toute conclusion ferme, mais ne pas masquer une alerte précoce crédible si les données disponibles permettent de la relever. Toujours préciser les limites des données.
