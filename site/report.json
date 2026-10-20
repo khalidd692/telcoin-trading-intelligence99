@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-19T21:32:24.347660+00:00",
+  "generated_at": "2026-10-20T00:39:36.291947+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001521,
-      "bid": 0.001519,
-      "ask": 0.001521,
-      "spread_pct": 0.13157894736842424,
-      "quote_volume_24h": 123634.831169,
-      "change_pct_24h": 0.0066,
+      "last": 0.001496,
+      "bid": 0.001495,
+      "ask": 0.001499,
+      "spread_pct": 0.2672010688042672,
+      "quote_volume_24h": 109446.947211,
+      "change_pct_24h": -0.0273,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-19T21:32:24.859560+00:00"
+      "observed_at": "2026-10-20T00:39:36.660241+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -23,10 +23,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001517,
-      "bid": 0.001515,
-      "ask": 0.00152,
-      "observed_at": "2026-10-19T21:32:25.293549+00:00"
+      "last": 0.0015,
+      "bid": 0.0015,
+      "ask": 0.001502,
+      "observed_at": "2026-10-20T00:39:37.218589+00:00"
     }
   },
   "checks": [
@@ -37,78 +37,30 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.1316,
+      "value_pct": 0.2672,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.2633,
+      "divergence_pct": 0.267,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
-    "last_closed_candle_at": "2026-10-19T21:30:00+00:00",
-    "candle_age_seconds": 145,
-    "close": 0.001519,
-    "ema12": 0.0015233852034950315,
-    "ema26": 0.001522299098053225,
-    "ema50": 0.0015207543974527376,
-    "rsi14": 44.18604651162793,
-    "atr14": 8.071428571428559e-06,
-    "atr_pct": 0.5313646195805503,
-    "volume_last_closed": 225714.43,
-    "volume_mean20": 612123.476,
+    "last_closed_candle_at": "2026-10-20T00:30:00+00:00",
+    "candle_age_seconds": 576,
+    "close": 0.001495,
+    "ema12": 0.001504460646017186,
+    "ema26": 0.0015110423237565398,
+    "ema50": 0.0015146323059243919,
+    "rsi14": 6.666666666666174,
+    "atr14": 7.357142857142842e-06,
+    "atr_pct": 0.4921165790730998,
+    "volume_last_closed": 406847.15,
+    "volume_mean20": 622289.3955,
     "close_series": [
-      {
-        "time": "2026-10-19T09:45:00+00:00",
-        "close": 0.00152
-      },
-      {
-        "time": "2026-10-19T10:00:00+00:00",
-        "close": 0.001519
-      },
-      {
-        "time": "2026-10-19T10:15:00+00:00",
-        "close": 0.001515
-      },
-      {
-        "time": "2026-10-19T10:30:00+00:00",
-        "close": 0.001501
-      },
-      {
-        "time": "2026-10-19T10:45:00+00:00",
-        "close": 0.001506
-      },
-      {
-        "time": "2026-10-19T11:00:00+00:00",
-        "close": 0.001511
-      },
-      {
-        "time": "2026-10-19T11:15:00+00:00",
-        "close": 0.001509
-      },
-      {
-        "time": "2026-10-19T11:30:00+00:00",
-        "close": 0.001509
-      },
-      {
-        "time": "2026-10-19T11:45:00+00:00",
-        "close": 0.001504
-      },
-      {
-        "time": "2026-10-19T12:00:00+00:00",
-        "close": 0.00151
-      },
-      {
-        "time": "2026-10-19T12:15:00+00:00",
-        "close": 0.001507
-      },
-      {
-        "time": "2026-10-19T12:30:00+00:00",
-        "close": 0.001502
-      },
       {
         "time": "2026-10-19T12:45:00+00:00",
         "close": 0.001501
@@ -252,12 +204,60 @@
       {
         "time": "2026-10-19T21:30:00+00:00",
         "close": 0.001519
+      },
+      {
+        "time": "2026-10-19T21:45:00+00:00",
+        "close": 0.001517
+      },
+      {
+        "time": "2026-10-19T22:00:00+00:00",
+        "close": 0.001517
+      },
+      {
+        "time": "2026-10-19T22:15:00+00:00",
+        "close": 0.001517
+      },
+      {
+        "time": "2026-10-19T22:30:00+00:00",
+        "close": 0.001513
+      },
+      {
+        "time": "2026-10-19T22:45:00+00:00",
+        "close": 0.001511
+      },
+      {
+        "time": "2026-10-19T23:00:00+00:00",
+        "close": 0.001505
+      },
+      {
+        "time": "2026-10-19T23:15:00+00:00",
+        "close": 0.001501
+      },
+      {
+        "time": "2026-10-19T23:30:00+00:00",
+        "close": 0.001497
+      },
+      {
+        "time": "2026-10-19T23:45:00+00:00",
+        "close": 0.001499
+      },
+      {
+        "time": "2026-10-20T00:00:00+00:00",
+        "close": 0.001498
+      },
+      {
+        "time": "2026-10-20T00:15:00+00:00",
+        "close": 0.001498
+      },
+      {
+        "time": "2026-10-20T00:30:00+00:00",
+        "close": 0.001495
       }
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.2633
+    "last_price_divergence_pct": 0.267
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
