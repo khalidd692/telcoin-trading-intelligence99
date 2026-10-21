@@ -146,12 +146,20 @@ def dispatch_workflow(repository: str, workflow: str, ref: str, token: str) -> b
 
 
 def main(argv: Optional[list] = None) -> int:
-    """Point d'entree. Ne fait jamais echouer le workflow de publication."""
+    """Point d'entree. Ne fait jamais echouer le workflow de publication.
+
+    Toute exception est absorbee : cette etape est un aidant au suivi, elle ne
+    doit jamais interrompre la publication ni faire rougir le run.
+    """
     parser = argparse.ArgumentParser(description="Auto-relance de la publication")
     parser.add_argument("--min-interval-min", type=float, default=MIN_INTERVAL_SECONDS / 60,
                         help="intervalle minimal entre deux publications, en minutes")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--workflow", default=os.environ.get("GITHUB_WORKFLOW", "monitor.yml"))
+    # GITHUB_WORKFLOW contient le NOM D'AFFICHAGE du workflow
+    # ("TEL market monitor and website"), pas son nom de fichier : l'utiliser
+    # produirait une URL invalide. L'API accepte le nom de fichier.
+    parser.add_argument("--workflow", default="monitor.yml",
+                        help="nom de fichier du workflow (monitor.yml)")
     parser.add_argument("--ref", default=os.environ.get("GITHUB_REF_NAME", "main"),
                         help="branche de reference : son historique de publication est lu "
                              "et c'est elle qui est declenchee")
@@ -159,6 +167,15 @@ def main(argv: Optional[list] = None) -> int:
                         help="decisionne sans declencher (diagnostic)")
     args = parser.parse_args(argv)
 
+    try:
+        return _run(args)
+    except Exception as exc:  # filet de securite absolut
+        print(f"Auto-relance ignoree ({type(exc).__name__} : {exc})")
+        return 0
+
+
+def _run(args: Any) -> int:
+    """Corps de main() : toute exception est absorbee par l'appelant."""
     try:
         entries, head_is_current = read_git_entries(".", ref=args.ref)
     except Exception as exc:  # pragma: no cover - defensive
@@ -185,8 +202,8 @@ def main(argv: Optional[list] = None) -> int:
         return 0
     try:
         accepted = dispatch_workflow(args.repository, args.workflow, args.ref, token)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        print(f"  Auto-relance ignoree (erreur reseau : {exc})")
+    except Exception as exc:  # cette etape ne doit jamais faire echouer la publication
+        print(f"  Auto-relance ignoree ({type(exc).__name__} : {exc})")
         return 0
     print(f"  Auto-relance {'declenchee' if accepted else 'refusee'} "
           f"({args.repository}/{args.workflow} sur {args.ref})")

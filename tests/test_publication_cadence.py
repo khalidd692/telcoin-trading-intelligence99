@@ -166,5 +166,41 @@ class TestGitHistoryReading(unittest.TestCase):
             self.assertIsInstance(entries, list)
 
 
+class test_never_fails_the_publication(unittest.TestCase):
+    """L'etape de cadence ne doit jamais faire echouer la publication."""
+
+    def test_invalid_workflow_name_does_not_raise(self):
+        import os
+        from src import publication_cadence
+        env_backup = os.environ.get("GITHUB_TOKEN")
+        os.environ["GITHUB_TOKEN"] = "jeton-bidon"
+        try:
+            code = publication_cadence.main([
+                "--repository", "khalidd692/telcoin-trading-intelligence99",
+                "--workflow", "nom de workflow invalide",
+                "--ref", "main", "--dry-run"])
+            self.assertEqual(code, 0)
+        finally:
+            if env_backup is None:
+                os.environ.pop("GITHUB_TOKEN", None)
+            else:
+                os.environ["GITHUB_TOKEN"] = env_backup
+
+    def test_main_never_raises(self):
+        from src import publication_cadence
+        for args in ([], ["--ref", "reference-inexistante", "--dry-run"]):
+            self.assertEqual(publication_cadence.main(args), 0)
+
+    def test_workflow_default_is_a_file_name(self):
+        import inspect
+        from src import publication_cadence
+        source = inspect.getsource(publication_cadence.main)
+        self.assertIn('--workflow", default="monitor.yml"', source)
+        # la variable d'environnement ne doit pas servir de valeur par defaut :
+        # GITHUB_WORKFLOW contient le nom d'affichage, pas le nom de fichier.
+        self.assertNotIn('os.environ.get("GITHUB_WORKFLOW"', source)
+
+
+
 if __name__ == "__main__":
     unittest.main()
