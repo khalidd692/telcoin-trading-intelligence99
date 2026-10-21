@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-21T21:33:49.804374+00:00",
+  "generated_at": "2026-10-21T21:40:46.812629+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001519,
+      "last": 0.00152,
       "bid": 0.001517,
       "ask": 0.001523,
       "spread_pct": 0.3947368421052727,
-      "quote_volume_24h": 148932.587881,
-      "change_pct_24h": -0.0013,
+      "quote_volume_24h": 148349.030346,
+      "change_pct_24h": 0.0033,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-21T21:33:49.972469+00:00"
+      "observed_at": "2026-10-21T21:40:46.981498+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -27,7 +27,7 @@
       "last": 0.00152,
       "bid": 0.001517,
       "ask": 0.001519,
-      "observed_at": "2026-10-21T21:33:50.301625+00:00"
+      "observed_at": "2026-10-21T21:40:47.301662+00:00"
     }
   },
   "checks": [
@@ -44,14 +44,14 @@
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0658,
+      "divergence_pct": 0.0,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-21T21:30:00+00:00",
-    "candle_age_seconds": 230,
+    "candle_age_seconds": 647,
     "close": 0.001517,
     "ema12": 0.001509372895400957,
     "ema26": 0.0015041151404841465,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "69c65e83-73f6-403f-ba25-5309737708ee",
+  "collection_id": "00f26ad7-b6bd-4be5-8453-c70623bcba64",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0658
+    "last_price_divergence_pct": 0.0
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
