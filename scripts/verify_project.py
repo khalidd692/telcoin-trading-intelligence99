@@ -191,7 +191,14 @@ def main() -> int:
     code, out = run(["git", "status", "--porcelain=v1", "-b"])
     record("git status accessible", code == 0)
     branch_line = out.splitlines()[0] if out else ""
-    record("branche : wip/p0-provenance", "wip/p0-provenance" in branch_line, branch_line)
+    # En CI, actions/checkout fait un checkout detache (HEAD sans branche) :
+    # c'est un etat normal et attendu la-bas. Ce controle doit donc accepter
+    # un HEAD detache tout en signalant toute AUTRE branche, qui serait
+    # vraiment anormale.
+    detached = "HEAD (no branch)" in branch_line or branch_line.strip() in ("## HEAD", "## HEAD ")
+    expected_branch = "wip/p0-provenance" in branch_line
+    record("branche : wip/p0-provenance (ou HEAD detache en CI)", expected_branch or detached,
+           branch_line)
     record("aucune operation destructive effectuee par cet outil", True,
            "l'outil ne lance que des commandes de lecture")
     code, out = run(["git", "log", "--oneline", "-1"])
