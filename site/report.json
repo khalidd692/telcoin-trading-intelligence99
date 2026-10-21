@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-21T20:18:25.759968+00:00",
+  "generated_at": "2026-10-21T20:24:52.963345+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001505,
+      "last": 0.001506,
       "bid": 0.001503,
       "ask": 0.001509,
       "spread_pct": 0.39840637450198735,
-      "quote_volume_24h": 150698.136209,
-      "change_pct_24h": 0.0053,
+      "quote_volume_24h": 150683.5894,
+      "change_pct_24h": 0.01,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-21T20:18:25.874177+00:00"
+      "observed_at": "2026-10-21T20:24:53.018748+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001508,
-      "bid": 0.001507,
-      "ask": 0.00151,
-      "observed_at": "2026-10-21T20:18:26.187754+00:00"
+      "last": 0.001507,
+      "bid": 0.001506,
+      "ask": 0.001509,
+      "observed_at": "2026-10-21T20:24:53.441734+00:00"
     }
   },
   "checks": [
@@ -44,14 +44,14 @@
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.1991,
+      "divergence_pct": 0.0664,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-21T20:15:00+00:00",
-    "candle_age_seconds": 206,
+    "candle_age_seconds": 593,
     "close": 0.001506,
     "ema12": 0.0015028759160023173,
     "ema26": 0.0014994813431922639,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "12c88188-488d-4e01-91e3-559ff8aeb890",
+  "collection_id": "ccb8c26e-5c68-4e9b-8a08-7a2fa8d2e08a",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.1991
+    "last_price_divergence_pct": 0.0664
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
