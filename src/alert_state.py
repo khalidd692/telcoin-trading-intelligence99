@@ -311,9 +311,13 @@ def advance(previous: dict, report: Any) -> tuple[dict, dict]:
 
     Fonction pure : elle ne touche ni au disque ni au reseau. La lecture et
     l'ecriture du fichier d'etat sont faites par l'appelant.
+
+    **Fail-closed** : si les donnees ne sont pas exploitables, aucun signal
+    n'est pris en compte. Un rapport degrade qui porterait encore un signal
+    residuel ne doit donc ni ouvrir une alerte, ni en resoudre une.
     """
     usable = report_is_usable(report)
-    event = event_from_report(report)
+    event = event_from_report(report) if usable else None
     decision = evaluate(previous, event, usable)
     state = json.loads(json.dumps(previous)) if isinstance(previous, dict) else default_state()
     state.setdefault("counters", {})

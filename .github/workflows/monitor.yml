@@ -256,9 +256,9 @@ jobs:
           # s'arrête d'elle-même si une exécution échoue (intervalle de 45 min
           # dans ce cas, pour ne pas boucler sur une panne).
           if [ "${{ steps.publish.outcome }}" = "success" ]; then
-            python -m src.publication_cadence --min-interval-min 12 --ref main
+            python -m src.publication_cadence --min-interval-min 12 --ref main --workflow monitor.yml
           else
-            python -m src.publication_cadence --min-interval-min 45 --ref main
+            python -m src.publication_cadence --min-interval-min 45 --ref main --workflow monitor.yml
           fi
       - name: Mark failed collection as workflow failure
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (steps.collect.outcome != 'success' || steps.detailed_collect.outcome != 'success')

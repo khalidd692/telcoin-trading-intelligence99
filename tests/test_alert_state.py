@@ -441,5 +441,41 @@ class TestProspectiveLedger(unittest.TestCase):
             self.assertEqual(len(lines), 1)
 
 
+class TestUnusableDataIsFailClosed(unittest.TestCase):
+    """Un rapport dont les donnees ne sont pas exploitables ne doit produire
+    ni ouverture d'alerte, ni resolution."""
+
+    def test_degraded_report_with_a_residual_signal_opens_no_alert(self):
+        report = make_report()
+        report["collection_status"] = "FALLBACK"
+        report["timeframes"] = {"15m": {"status": "PARTIEL"}}
+        state, decision = alerts.advance(alerts.default_state(), report)
+        self.assertEqual(decision["action"], "INDISPONIBLE")
+        self.assertIsNone(state["open_alert"])
+        self.assertEqual(state["counters"]["alerts"], 0)
+
+    def test_degraded_report_does_not_resolve_an_open_alert(self):
+        state, _ = alerts.advance(alerts.default_state(), make_report())
+        self.assertIsNotNone(state["open_alert"])
+        degraded = make_report()
+        degraded["collection_status"] = "FALLBACK"
+        degraded["timeframes"] = {"15m": {"status": "PARTIEL"}}
+        state, decision = alerts.advance(state, degraded)
+        self.assertEqual(decision["action"], "INDISPONIBLE")
+        self.assertIsNotNone(state["open_alert"])
+        self.assertEqual(state["counters"]["resolutions"], 0)
+
+    def test_degraded_report_does_not_change_the_open_alert_status(self):
+        state, _ = alerts.advance(alerts.default_state(), make_report())
+        before = state["open_alert"]["signal_status"]
+        degraded = make_report()
+        degraded["collection_status"] = "FALLBACK"
+        degraded["timeframes"] = {"15m": {"status": "PARTIEL"}}
+        state, _ = alerts.advance(state, degraded)
+        self.assertEqual(state["open_alert"]["signal_status"], before)
+        self.assertEqual(state["counters"]["evaluations"], 2)
+
+
+
 if __name__ == "__main__":
     unittest.main()
