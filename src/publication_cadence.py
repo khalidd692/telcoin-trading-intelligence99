@@ -245,7 +245,7 @@ def plan_dispatch(mode: str,
       que si la chaine est arretee, afin de ne jamais creer une chaine
       parallelle (les chaines s'accumuleraient).
 
-    \ge_seconds\ est l'age de la **derniere** publication (celle que
+    `age_seconds` est l'age de la **derniere** publication (celle que
     l'execution vient de faire, s'il y a lieu). `liveness_age_seconds` est
     l'age de la publication **precedente**, mesuree au commit de checkout :
     c'est l'etat de la chaine au moment ou l'execution a demarre. Sans cette
