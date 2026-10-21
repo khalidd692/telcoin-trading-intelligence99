@@ -11,6 +11,10 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  # Necessaire pour la auto-relance de la publication (declenchement
+  # workflow_dispatch par le jeton de l'execution). Le jeton reste limite a
+  # ce depot et a cette seule action.
+  actions: write
 
 concurrency:
   group: telcoin-market-monitor-${{ github.ref }}
@@ -204,6 +208,7 @@ jobs:
           COLLECTION_ID: ${{ env.COLLECTION_ID }}
         run: python -m src.publication_gate --root . --collection-id "${{ env.COLLECTION_ID }}"
       - name: Commit the exact published reports to main
+        id: publish
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
@@ -237,6 +242,24 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Keep the publication cadence (auto re-dispatch)
+        id: cadence
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Le cron de GitHub est fortement bridé sur ce dépôt : cadence observée
+          # ~3 h 49 pour un */15 configuré (45 exécutions planifiées sur 168 h).
+          # Chaque publication relance donc la suivante, mais seulement si la
+          # dernière publication a plus de 12 minutes : la chaîne est
+          # auto-limitée, ne déclenche rien si une publication récente existe, et
+          # s'arrête d'elle-même si une exécution échoue (intervalle de 45 min
+          # dans ce cas, pour ne pas boucler sur une panne).
+          if [ "${{ steps.publish.outcome }}" = "success" ]; then
+            python -m src.publication_cadence --min-interval-min 12 --ref main
+          else
+            python -m src.publication_cadence --min-interval-min 45 --ref main
+          fi
       - name: Mark failed collection as workflow failure
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (steps.collect.outcome != 'success' || steps.detailed_collect.outcome != 'success')
         run: |
