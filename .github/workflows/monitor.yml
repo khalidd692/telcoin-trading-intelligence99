@@ -145,6 +145,7 @@ jobs:
               p.write_text(json.dumps({
                   "schema_version": 1, "symbol": "TELUSDT",
                   "mode": "READ_ONLY_PUBLIC_DATA", "generated_at": None,
+                  "collection_status": "FALLBACK",
                   "collector": {"read_only": True, "orders_sent": 0},
                   "sources": {
                       "mexc": {"status": {"book": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}, "trades": {"verdict": "ERREUR", "reason": "snapshot absent/invalide"}}},
@@ -201,61 +202,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           COLLECTION_ID: ${{ env.COLLECTION_ID }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import sys
-          from pathlib import Path
-          from collector.tel_collector import compute_snapshot_fingerprint
-
-          root = Path('.')
-          snapshot_path = root / 'site' / 'tel_snapshot.json'
-          report_path = root / 'site' / 'report.json'
-          analysis_path = root / 'site' / 'agent_analysis.json'
-
-          for path in (snapshot_path, report_path, analysis_path):
-              if not path.exists() or path.stat().st_size == 0:
-                  raise SystemExit(f'Artifact missing or empty: {path}')
-
-          snapshot = json.loads(snapshot_path.read_text(encoding='utf-8'))
-          report = json.loads(report_path.read_text(encoding='utf-8'))
-          analysis = json.loads(analysis_path.read_text(encoding='utf-8'))
-
-          for name, obj in [('snapshot', snapshot), ('report', report), ('analysis', analysis)]:
-              if not isinstance(obj, dict):
-                  raise SystemExit(f'{name} artifact is not an object')
-              if obj.get('collection_id') is None or str(obj.get('collection_id')).strip() == '':
-                  raise SystemExit(f'{name} artifact missing or empty collection_id')
-              if obj.get('symbol') != 'TELUSDT':
-                  raise SystemExit(f'{name} artifact symbol mismatch')
-              if obj.get('collection_status') not in {'VALID', 'FALLBACK'}:
-                  raise SystemExit(f'{name} artifact missing reliable collection_status marker')
-              if obj.get('collection_status') == 'FALLBACK':
-                  raise SystemExit(f'{name} artifact is a fallback and cannot be published')
-
-          if snapshot.get('collection_id') != report.get('collection_id'):
-              raise SystemExit('snapshot and report have different collection_id')
-          if snapshot.get('collection_id') != analysis.get('collection_id'):
-              raise SystemExit('snapshot and analysis have different collection_id')
-          expected_id = os.environ.get('COLLECTION_ID')
-          if not expected_id or str(expected_id).strip() == '':
-              raise SystemExit('COLLECTION_ID is empty or missing in workflow environment')
-          if snapshot.get('collection_id') != expected_id:
-              raise SystemExit('collection_id mismatch with workflow value')
-
-          if not isinstance(snapshot.get('snapshot_id'), str) or len(snapshot['snapshot_id']) != 64:
-              raise SystemExit('snapshot_id missing or malformed')
-
-          try:
-              expected_hash = compute_snapshot_fingerprint(snapshot.get('sources'), snapshot.get('cross_check'))
-          except Exception as exc:
-              raise SystemExit(f'snapshot fingerprint invalid: {exc}')
-          if snapshot.get('snapshot_id') != expected_hash:
-              raise SystemExit('snapshot_id does not match the deterministic fingerprint of the snapshot payload')
-
-          print('provenance validation OK for collection', snapshot['collection_id'])
-          PY
+        run: python -m src.publication_gate --root . --collection-id "${{ env.COLLECTION_ID }}"
       - name: Commit the exact published reports to main
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |

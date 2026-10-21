@@ -418,6 +418,12 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
 
     snapshot = {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
       "collection_id": collection_id,
+      # Marqueur de fiabilite de la collecte, exigé par la porte de publication
+      # (src/publication_gate.py) : VALID uniquement lorsque l'empreinte
+      # deterministe des sources a pu etre calculee, c'est-a-dire lorsque les
+      # donnees des deux places sont presentes et coherentes. Sinon l'instantane
+      # est marque FALLBACK et ne peut pas etre publie.
+      "collection_status": "VALID" if snapshot_fingerprint is not None else "FALLBACK",
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
       "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms())},

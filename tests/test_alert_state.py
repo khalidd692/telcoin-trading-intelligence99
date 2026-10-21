@@ -382,6 +382,43 @@ class TestProspectiveLedger(unittest.TestCase):
         self.assertEqual(row["symbol"], report["symbol"])
         self.assertIn("action", row)
         self.assertIn("at", row)
+        # champs du protocole Phase 10 section 2E
+        for key in ("time_ms", "status", "regime", "fees_appliquees", "period_type",
+                    "returns_24h_bruts", "returns_24h_net", "ci95", "pct_up", "segment",
+                    "evidence", "contradictions", "reason"):
+            self.assertIn(key, row)
+        # fraicheur : sans ces champs, on ne pourrait pas distinguer une
+        # observation recente d'une observation perimee
+        for key in ("report_status", "collection_status", "snapshot_age_seconds",
+                    "source_generated_at", "close_15m", "tf_15m_status"):
+            self.assertIn(key, row)
+
+    def test_ledger_row_labels_the_nature_of_the_observation(self):
+        report = make_report()
+        state, decision = alerts.advance(alerts.default_state(), report)
+        # par defaut, la fonction reste "historical" (rejeu de donnees d'historique)
+        self.assertEqual(alerts.ledger_row(report, decision, state)["period_type"], "historical")
+        # la CLI, elle, consigne des observations reellement collectees
+        self.assertEqual(
+            alerts.ledger_row(report, decision, state, period_type="live")["period_type"], "live")
+
+    def test_cli_labels_its_rows_as_live(self):
+        with tempfile.TemporaryDirectory() as folder:
+            report_path = Path(folder) / "report.json"
+            state_path = Path(folder) / "state.json"
+            ledger_path = Path(folder) / "prospective.jsonl"
+            report_path.write_text(json.dumps(make_report()), encoding="utf-8")
+            alerts.main(["--input", str(report_path), "--state", str(state_path),
+                         "--ledger", str(ledger_path)])
+            row = json.loads(ledger_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(row["period_type"], "live")
+
+    def test_fees_are_declared_as_a_protocol_hypothesis(self):
+        report = make_report()
+        state, decision = alerts.advance(alerts.default_state(), report)
+        row = alerts.ledger_row(report, decision, state)
+        self.assertAlmostEqual(row["fees_appliquees"], 0.0057)
+        self.assertIn("hypothese", row["fees_note"].lower())
 
     def test_ledger_row_handles_a_fallback_report(self):
         report = make_report(usable=False)
