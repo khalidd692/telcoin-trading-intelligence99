@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode de publication : auto (execution ponctuelle) ou chain (maillon de la chaine)"
+        type: choice
+        options: [auto, chain]
+        default: auto
+        required: false
   schedule:
     - cron: "*/15 * * * *"
 
@@ -23,7 +30,9 @@ concurrency:
 jobs:
   monitor-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # L'etape de cadence attend le prochain creneau (13 min) ou le delai de
+    # repli apres un echec (45 min) : le plafond doit les contenir.
+    timeout-minutes: 60
     environment:
       name: ${{ github.event_name == 'pull_request' && 'test' || 'github-pages' }}
       url: ${{ steps.deployment.outputs.page_url }}
@@ -36,6 +45,19 @@ jobs:
           python-version: "3.12"
       - name: Record the checked-out commit (provenance of the publication)
         run: echo "CHECKOUT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Decide the publication slot (cadence gate)
+        id: slot
+        continue-on-error: true
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          # Porte de publication : on ne republie que si la derniere publication
+          # a plus de 12 min. La cadence elle-meme est portee par la chaine
+          # (relance cadencee), pas par les executions ponctuelles.
+          python -m src.publication_cadence --decide --ref main --min-interval-min 12 \
+            --github-output "$GITHUB_OUTPUT" || true
+          if ! grep -qE '^publish=(true|false)$' "$GITHUB_OUTPUT"; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Generate collection ID
         id: collection_id
         run: |
@@ -211,7 +233,7 @@ jobs:
         run: python -m src.publication_gate --root . --collection-id "${{ env.COLLECTION_ID }}"
       - name: Commit the exact published reports to main
         id: publish
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.slot.outputs.publish == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -232,36 +254,49 @@ jobs:
           echo "Detailed collector outcome: ${{ steps.detailed_collect.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Enable and read GitHub Pages configuration
         uses: actions/configure-pages@v5
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.slot.outputs.publish == 'true'
         with:
           enablement: true
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.slot.outputs.publish == 'true'
         with:
           path: site
       - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.slot.outputs.publish == 'true'
       - name: Keep the publication cadence (auto re-dispatch)
         id: cadence
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLICATION_MODE: ${{ github.event.inputs.mode || 'auto' }}
         run: |
-          # Le cron de GitHub est fortement bridé sur ce dépôt : cadence observée
-          # ~3 h 49 pour un */15 configuré (45 exécutions planifiées sur 168 h).
-          # Chaque publication relance donc la suivante, mais seulement si la
-          # dernière publication a plus de 12 minutes : la chaîne est
-          # auto-limitée, ne déclenche rien si une publication récente existe, et
-          # s'arrête d'elle-même si une exécution échoue (intervalle de 45 min
-          # dans ce cas, pour ne pas boucler sur une panne).
-          if [ "${{ steps.publish.outcome }}" = "success" ]; then
-            python -m src.publication_cadence --min-interval-min 12 --ref main --workflow monitor.yml
-          else
-            python -m src.publication_cadence --min-interval-min 45 --ref main --workflow monitor.yml
+          # Le cron de GitHub n'est pas une garantie de frequence : sur ce depot,
+          # un cron */15 n'a livre que 44 executions planifiees sur 168 h
+          # (intervalle median 252 min, min 104 min, max 387 min). La cadence
+          # est donc portee par une chaine auto-portee : l'execution attend le
+          # prochain creneau (13 min) puis relance la suivante.
+          #
+          # Seuls les maillons de chaine (mode=chain) se relancent : une
+          # execution ponctuelle (cron, push, manuel) ne relance que si la
+          # chaine est arretee (30 min sans publication), sinon chaque push
+          # creerait une chaine parallelle et les publications s'accumuleraient.
+          #
+          # Un echec de publication impose un delai de repli de 45 min pour ne
+          # pas boucler sur une panne.
+          PUBLISHED="${{ steps.publish.outcome }}"
+          if [ "$PUBLISHED" = "skipped" ] && [ "${{ steps.slot.outputs.publish }}" = "true" ]; then
+            # La publication etait attendue mais sautee : une etape prealable
+            # a echoue (porte de provenance) -> repli, pas creneau.
+            PUBLISHED="failure"
           fi
+          python -m src.publication_cadence \
+            --mode "$PUBLICATION_MODE" \
+            --published "$PUBLISHED" \
+            --min-interval-min 12 --pace-min 13 --stale-min 30 --backoff-min 45 \
+            --ref main --workflow monitor.yml
       - name: Mark failed collection as workflow failure
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (steps.collect.outcome != 'success' || steps.detailed_collect.outcome != 'success')
         run: |
