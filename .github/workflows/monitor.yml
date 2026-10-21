@@ -3,8 +3,6 @@ name: TEL market monitor and website
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "*/15 * * * *"
@@ -32,6 +30,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Generate collection ID
+        id: collection_id
+        run: |
+          COLLECTION_ID=$(python -c "import uuid; print(uuid.uuid4())")
+          echo "collection_id=$COLLECTION_ID" >> $GITHUB_OUTPUT
+          echo "COLLECTION_ID=$COLLECTION_ID" >> $GITHUB_ENV
+      - name: Check generated collection ID is non-empty
+        run: |
+          if [ -z "${{ steps.collection_id.outputs.collection_id }}" ]; then
+            echo "Missing collection_id output from generation step" >&2
+            exit 1
+          fi
+          echo "collection_id=${{ steps.collection_id.outputs.collection_id }}"
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -v
@@ -46,7 +57,7 @@ jobs:
           # Retry transient API/network failures. The final outcome still fails closed.
           for attempt in 1 2 3; do
             echo "Public market collection attempt ${attempt}/3"
-            if python -m src.monitor --output site/report.json; then
+            if python -m src.monitor --output site/report.json --collection-id "${{ steps.collection_id.outputs.collection_id }}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 3 ]; then
@@ -99,7 +110,7 @@ jobs:
           for attempt in 1 2 3; do
             echo "Detailed TEL collection attempt ${attempt}/3"
             rm -f site/tel_snapshot.json
-            if python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300; then
+            if python collector/tel_collector.py --out site/tel_snapshot.json --passes 3 --interval 3 --notional 300 --collection-id "${{ steps.collection_id.outputs.collection_id }}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 3 ]; then
@@ -146,13 +157,112 @@ jobs:
           PY
       - name: Generate read-only multi-timeframe analysis
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: python -m src.agent_analysis --input site/tel_snapshot.json --output site/agent_analysis.json
+        run: python -m src.agent_analysis --input site/tel_snapshot.json --output site/agent_analysis.json --collection-id "${{ steps.collection_id.outputs.collection_id }}"
+      - name: Track reversal alerts (persistence, deduplication, resolution)
+        id: alert_tracking
+        continue-on-error: true
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          # Etat persistant des alertes de retournement :
+          #  - une alerte qui se prolonge n'est PAS re-emise a chaque execution ;
+          #  - une panne de flux ou un instantane perime ne resout JAMAIS une alerte ;
+          #  - l'etat est ecrit de facon atomique et relu apres redemarrage.
+          # Cette etape est un aidant au suivi : elle ne doit jamais bloquer la
+          # publication, d'ou continue-on-error.
+          mkdir -p alerts
+          python -m src.alert_state --input site/agent_analysis.json --state alerts/alert_state.json --output alerts/last_decision.json --ledger alerts/prospective.jsonl
+          echo "### Alerte de retournement" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          p = Path("alerts/last_decision.json")
+          lines = []
+          if p.is_file():
+              try:
+                  d = json.loads(p.read_text(encoding="utf-8"))
+              except (OSError, UnicodeError, json.JSONDecodeError):
+                  d = {}
+              lines.append(f"- action : **{d.get('action')}**")
+              lines.append(f"- raison : {d.get('reason')}")
+              a = d.get("alert") or {}
+              if a:
+                  lines.append(f"- signal : {a.get('signal_status')} / {a.get('direction')} / "
+                               f"ancrage {a.get('anchor')} / confiance {a.get('confidence')}")
+                  lines.append(f"- exploitable : {a.get('exploitable')} ({a.get('exploitable_reason')})")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as stream:
+                  stream.write("\n".join(lines) + "\n")
+          else:
+              print("\n".join(lines))
+          PY
+      - name: Validate collection provenance before publication
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          COLLECTION_ID: ${{ env.COLLECTION_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          from collector.tel_collector import compute_snapshot_fingerprint
+
+          root = Path('.')
+          snapshot_path = root / 'site' / 'tel_snapshot.json'
+          report_path = root / 'site' / 'report.json'
+          analysis_path = root / 'site' / 'agent_analysis.json'
+
+          for path in (snapshot_path, report_path, analysis_path):
+              if not path.exists() or path.stat().st_size == 0:
+                  raise SystemExit(f'Artifact missing or empty: {path}')
+
+          snapshot = json.loads(snapshot_path.read_text(encoding='utf-8'))
+          report = json.loads(report_path.read_text(encoding='utf-8'))
+          analysis = json.loads(analysis_path.read_text(encoding='utf-8'))
+
+          for name, obj in [('snapshot', snapshot), ('report', report), ('analysis', analysis)]:
+              if not isinstance(obj, dict):
+                  raise SystemExit(f'{name} artifact is not an object')
+              if obj.get('collection_id') is None or str(obj.get('collection_id')).strip() == '':
+                  raise SystemExit(f'{name} artifact missing or empty collection_id')
+              if obj.get('symbol') != 'TELUSDT':
+                  raise SystemExit(f'{name} artifact symbol mismatch')
+              if obj.get('collection_status') not in {'VALID', 'FALLBACK'}:
+                  raise SystemExit(f'{name} artifact missing reliable collection_status marker')
+              if obj.get('collection_status') == 'FALLBACK':
+                  raise SystemExit(f'{name} artifact is a fallback and cannot be published')
+
+          if snapshot.get('collection_id') != report.get('collection_id'):
+              raise SystemExit('snapshot and report have different collection_id')
+          if snapshot.get('collection_id') != analysis.get('collection_id'):
+              raise SystemExit('snapshot and analysis have different collection_id')
+          expected_id = os.environ.get('COLLECTION_ID')
+          if not expected_id or str(expected_id).strip() == '':
+              raise SystemExit('COLLECTION_ID is empty or missing in workflow environment')
+          if snapshot.get('collection_id') != expected_id:
+              raise SystemExit('collection_id mismatch with workflow value')
+
+          if not isinstance(snapshot.get('snapshot_id'), str) or len(snapshot['snapshot_id']) != 64:
+              raise SystemExit('snapshot_id missing or malformed')
+
+          try:
+              expected_hash = compute_snapshot_fingerprint(snapshot.get('sources'), snapshot.get('cross_check'))
+          except Exception as exc:
+              raise SystemExit(f'snapshot fingerprint invalid: {exc}')
+          if snapshot.get('snapshot_id') != expected_hash:
+              raise SystemExit('snapshot_id does not match the deterministic fingerprint of the snapshot payload')
+
+          print('provenance validation OK for collection', snapshot['collection_id'])
+          PY
       - name: Commit the exact published reports to main
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/report.json site/tel_snapshot.json site/agent_analysis.json
+          mkdir -p alerts
+          git add site/report.json site/tel_snapshot.json site/agent_analysis.json alerts/
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
             git push origin HEAD:main

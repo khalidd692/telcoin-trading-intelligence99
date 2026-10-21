@@ -1,0 +1,141 @@
+=== COMMAND: python -m unittest discover -s tests -v ===
+test_critical_level_above_closes_does_not_flag_breakdown (test_agent_analysis.AgentAnalysisTests.test_critical_level_above_closes_does_not_flag_breakdown) ... ok
+test_critical_level_breach_is_reported_as_risk_not_buy_signal (test_agent_analysis.AgentAnalysisTests.test_critical_level_breach_is_reported_as_risk_not_buy_signal) ... ok
+test_duplicate_rows_are_rejected (test_agent_analysis.AgentAnalysisTests.test_duplicate_rows_are_rejected) ... ok
+test_missing_snapshot_fails_closed (test_agent_analysis.AgentAnalysisTests.test_missing_snapshot_fails_closed) ... ok
+test_missing_timeframe_fails_closed (test_agent_analysis.AgentAnalysisTests.test_missing_timeframe_fails_closed) ... ok
+test_oversold_flag_is_not_a_reversal_claim (test_agent_analysis.AgentAnalysisTests.test_oversold_flag_is_not_a_reversal_claim) ... ok
+test_stale_higher_timeframe_candle_fails_closed (test_agent_analysis.AgentAnalysisTests.test_stale_higher_timeframe_candle_fails_closed) ... ok
+test_stale_snapshot_fails_closed (test_agent_analysis.AgentAnalysisTests.test_stale_snapshot_fails_closed) ... ok
+test_valid_snapshot_reports_all_timeframes_without_entry_signal (test_agent_analysis.AgentAnalysisTests.test_valid_snapshot_reports_all_timeframes_without_entry_signal) ... ok
+test_ema_constant_series (test_indicators.IndicatorTests.test_ema_constant_series) ... ok
+test_ema_rejects_short_series (test_indicators.IndicatorTests.test_ema_rejects_short_series) ... ok
+test_rsi_rising_series (test_indicators.IndicatorTests.test_rsi_rising_series) ... ok
+test_api_unavailable_fails_closed (test_monitor.ReportTests.test_api_unavailable_fails_closed) ... ok
+test_fallback_report_has_no_market_quote (test_monitor.ReportTests.test_fallback_report_has_no_market_quote) ... ok
+test_inconsistent_exchange_quotes_fail_closed (test_monitor.ReportTests.test_inconsistent_exchange_quotes_fail_closed) ... ok
+test_mexc_schema_error_is_rejected (test_monitor.ReportTests.test_mexc_schema_error_is_rejected) ... ok
+test_stale_candles_fail_closed (test_monitor.ReportTests.test_stale_candles_fail_closed) ... ok
+test_unexpected_error_writes_fallback_and_exits_nonzero (test_monitor.ReportTests.test_unexpected_error_writes_fallback_and_exits_nonzero) ... ok
+test_valid_report_contains_real_source_fields_and_indicators (test_monitor.ReportTests.test_valid_report_contains_real_source_fields_and_indicators) ... ok
+test_agent_analysis_rejects_mismatched_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_mismatched_collection_id)
+Test that agent_analysis rejects snapshot with mismatched collection_id. ... ok
+test_agent_analysis_rejects_mismatched_snapshot_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_mismatched_snapshot_id)
+Test that a snapshot hash mismatch is rejected before analysis is accepted. ... ok
+test_agent_analysis_rejects_missing_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_missing_collection_id)
+Test that agent_analysis rejects snapshot with missing collection_id when expected. ... ok
+test_agent_analysis_verifies_collection_id_match (test_provenance.TestProvenanceDeterministic.test_agent_analysis_verifies_collection_id_match)
+Test that agent_analysis verifies collection_id matches snapshot. ... ok
+test_agent_analysis_without_expected_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_without_expected_collection_id)
+Test that agent_analysis works without expected collection_id (backward compatibility). ... ok
+test_fallback_attendre_report_is_rejected_even_with_matching_ids (test_provenance.TestProvenanceDeterministic.test_fallback_attendre_report_is_rejected_even_with_matching_ids)
+A fallback ATTENDRE must be rejected even when identifiers match the valid artifacts. ... ok
+test_fallback_report_is_fail_closed_for_absent_or_invalid_artifact (test_provenance.TestProvenanceDeterministic.test_fallback_report_is_fail_closed_for_absent_or_invalid_artifact)
+Fail-closed fallback must remain schema-valid and never claim a valid signal. ... ok
+test_monitor_includes_collection_id (test_provenance.TestProvenanceDeterministic.test_monitor_includes_collection_id)
+Test that monitor includes collection_id in report. ... ok
+test_monitor_without_collection_id (test_provenance.TestProvenanceDeterministic.test_monitor_without_collection_id)
+Test that monitor works without collection_id (backward compatibility). ... ok
+test_snapshot_fingerprint_deterministic (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_deterministic)
+Test that snapshot fingerprint is deterministic for same valid source data. ... ok
+test_snapshot_fingerprint_rejects_malformed_best_prices (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_rejects_malformed_best_prices)
+Test that a malformed best quote cannot produce a valid snapshot hash. ... ok
+test_snapshot_fingerprint_rejects_missing_or_incomplete_sources (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_rejects_missing_or_incomplete_sources)
+Test that a missing or malformed source block is rejected rather than hashed. ... ok
+test_valid_attendre_report_is_accepted_when_provenance_is_valid (test_provenance.TestProvenanceDeterministic.test_valid_attendre_report_is_accepted_when_provenance_is_valid)
+A legitimate ATTENDRE report remains valid when its provenance and snapshot are valid. ... ok
+test_workflow_validation_fails_nonzero_for_missing_or_invalid_artifacts (test_provenance.TestProvenanceDeterministic.test_workflow_validation_fails_nonzero_for_missing_or_invalid_artifacts)
+The publication gate must fail closed for missing or inconsistent provenance artifacts. ... ok
+test_tel_collector_generates_collection_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_generates_collection_id)
+Test that tel_collector generates a collection_id when not provided. ... skipped 'requires live public-market access'
+test_tel_collector_generates_snapshot_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_generates_snapshot_id)
+Test that a valid live snapshot yields a SHA-256 fingerprint, otherwise the collector stays fail-closed. ... skipped 'requires live public-market access'
+test_tel_collector_uses_provided_collection_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_uses_provided_collection_id)
+Test that tel_collector uses the provided collection_id. ... skipped 'requires live public-market access'
+test_different_payload_is_not_flagged (test_tradingview_quality.IdenticalVenuePayloadTests.test_different_payload_is_not_flagged) ... ok
+test_exactly_identical_technical_fields_are_flagged_diagnostically (test_tradingview_quality.IdenticalVenuePayloadTests.test_exactly_identical_technical_fields_are_flagged_diagnostically) ... ok
+test_same_symbol_is_not_cross_venue_alert (test_tradingview_quality.IdenticalVenuePayloadTests.test_same_symbol_is_not_cross_venue_alert) ... ok
+test_suspect_tradingview_never_changes_native_verdict (test_tradingview_quality.NativeVerdictSafetyTests.test_suspect_tradingview_never_changes_native_verdict) ... ok
+test_verified_tradingview_is_only_cross_check (test_tradingview_quality.NativeVerdictSafetyTests.test_verified_tradingview_is_only_cross_check) ... ok
+test_crossed_book_fails (test_tradingview_quality.OrderBookQualityTests.test_crossed_book_fails) ... ok
+test_empty_or_incomplete_book_fails (test_tradingview_quality.OrderBookQualityTests.test_empty_or_incomplete_book_fails) ... ok
+test_stale_or_future_age_fails (test_tradingview_quality.OrderBookQualityTests.test_stale_or_future_age_fails) ... ok
+test_valid_book_passes (test_tradingview_quality.OrderBookQualityTests.test_valid_book_passes) ... ok
+test_fresh_timestamp_passes (test_tradingview_quality.TimestampTests.test_fresh_timestamp_passes) ... ok
+test_future_timestamp_fails (test_tradingview_quality.TimestampTests.test_future_timestamp_fails) ... ok
+test_invalid_timestamp_fails (test_tradingview_quality.TimestampTests.test_invalid_timestamp_fails) ... ok
+test_stale_timestamp_fails (test_tradingview_quality.TimestampTests.test_stale_timestamp_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 49 tests in 0.784s
+
+OK (skipped=3)
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-14T15:45:00+00:00",
+  "symbol": "TELUSDT",
+  "mode": "READ_ONLY_ALERTS",
+  "status": "ATTENDRE",
+  "collection_status": "FALLBACK",
+  "sources": {
+    "mexc_ticker": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    },
+    "mexc_candles": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    },
+    "kucoin_level1": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    }
+  },
+  "checks": [
+    {
+      "name": "Collection pipeline",
+      "status": "FAIL",
+      "reason": "unexpected collector error: RuntimeError"
+    }
+  ],
+  "indicators": null,
+  "error": "unexpected collector error: RuntimeError",
+  "interpretation": "Rapport de secours. Fail-closed : ATTENDRE.",
+  "disclaimer": "Read-only monitoring. No orders. No profitability claims."
+}
+
+=== EXIT CODE: 0 ===
+
+=== COMMAND: python -m unittest discover -s collector -p "test_*.py" -v ===
+test_book_verdict_uses_only_last_pass_timestamp (test_tel_collector.CollectorTests.test_book_verdict_uses_only_last_pass_timestamp) ... ok
+test_buy_cost_walks_asks_and_marks_fees_excluded (test_tel_collector.CollectorTests.test_buy_cost_walks_asks_and_marks_fees_excluded) ... ok
+test_changed_book_without_timestamp_is_partial (test_tel_collector.CollectorTests.test_changed_book_without_timestamp_is_partial) ... ok
+test_crossed_depth_book_detected_even_without_l1 (test_tel_collector.CollectorTests.test_crossed_depth_book_detected_even_without_l1) ... ok
+test_empty_or_one_sided_book_is_anomaly_not_crossed (test_tel_collector.CollectorTests.test_empty_or_one_sided_book_is_anomaly_not_crossed) ... ok
+test_kucoin_server_timestamp_is_unwrapped_integer (test_tel_collector.CollectorTests.test_kucoin_server_timestamp_is_unwrapped_integer) ... ok
+test_missing_book_timestamp_never_claims_verified (test_tel_collector.CollectorTests.test_missing_book_timestamp_never_claims_verified) ... ok
+test_month_end (test_tel_collector.CollectorTests.test_month_end) ... ok
+test_partial_depth_is_not_reported_complete (test_tel_collector.CollectorTests.test_partial_depth_is_not_reported_complete) ... ok
+test_quality_guard_detects_unsorted_order_book (test_tel_collector.CollectorTests.test_quality_guard_detects_unsorted_order_book) ... ok
+test_quality_guard_does_not_call_identical_venue_values_corruption (test_tel_collector.CollectorTests.test_quality_guard_does_not_call_identical_venue_values_corruption) ... ok
+test_recent_mexc_trade_order_is_sorted_by_timestamp (test_tel_collector.CollectorTests.test_recent_mexc_trade_order_is_sorted_by_timestamp) ... ok
+test_spread (test_tel_collector.CollectorTests.test_spread) ... ok
+test_stale_trade_not_verified (test_tel_collector.CollectorTests.test_stale_trade_not_verified) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.001s
+
+OK
+
+=== EXIT CODE: 0 ===
+
+=== COMMAND: node tests/test_dashboard.js ===
+Dashboard freshness tests: OK
+
+=== EXIT CODE: 0 ===
+
+=== COMMAND: node tests/test_realtime.js ===
+Real-time stream protocol/fail-closed tests: OK
+
+=== EXIT CODE: 0 ===
+

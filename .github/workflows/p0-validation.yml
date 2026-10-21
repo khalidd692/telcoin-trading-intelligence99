@@ -1,0 +1,44 @@
+name: P0 provenance validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [wip/p0-provenance]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Unit and fail-closed tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Test application
+        run: python -m unittest discover -s tests -v
+      - name: Test collector
+        run: python -m unittest discover -s collector -p "test_*.py" -v
+      - name: Test dashboard freshness
+        run: node tests/test_dashboard.js
+      - name: Test realtime fail-closed protocol
+        run: node tests/test_realtime.js
+      - name: Verify operational states and project invariants
+        run: |
+          python scripts/verify_states.py
+          python scripts/verify_project.py --quick

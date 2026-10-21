@@ -1,0 +1,938 @@
+{
+  "schema_version": 1,
+  "kind": "backtest_early_reversal_v2",
+  "generated_at": "2026-10-20T23:54:47+00:00",
+  "venue": "kucoin",
+  "symbol": "TEL-USDT",
+  "detector": {
+    "path": "src/agent_analysis.py",
+    "sha256": "81811320dac01b3f334c7e4364d5c163f7b5cd19ca66a4a184d176c8bd8befed",
+    "note": "Empreinte du detecteur evalue. Le detecteur n'est pas modifie par le harnais."
+  },
+  "protocol": {
+    "version": "1.1",
+    "sigma_multiplier": 1.5,
+    "quantile": 0.9,
+    "quantile_window": 200,
+    "criterion": "quantile",
+    "min_horizons_hit": 2,
+    "dedup_window_minutes": 90,
+    "atr_window_bars": 200,
+    "reference_sigma": 1.5,
+    "reference_min_separation": 0.5,
+    "warning_window_horizon": 1,
+    "base_rate_min": 0.05,
+    "base_rate_max": 0.6,
+    "null_test_iterations": 2000,
+    "null_test_iterations_note": "200 iterations donnaient une resolution de percentile de 0,5 % : un verdict limite (0,955 vs 0,91) ne distinguait pas un signal reel d'une variation de l'estimateur. Le nombre d'iterations est la PRECISION de l'estimateur, pas le seuil de decision (le seuil reste percentile >= 0,95) : l'augmenter ne favorise aucune hypothese.",
+    "revision_note": "v1.0 (seuil sigma) a échoué au test d'atteignabilité R6 (base rate 4,8 % < 5 %) : le critère n'était atteignable sur aucune fenêtre testée. v1.1 ajoute un second critère distributionnel (quantile causal q90) dont le taux de base est constructible (~10 %). LES DEUX RÃ‰SULTATS SONT PUBLIÃ‰S. Les constantes n'ont pas été retouchées pour améliorer la performance du détecteur."
+  },
+  "data": {
+    "15m": {
+      "count": 45000,
+      "from": "2025-07-09T05:30:00Z",
+      "to": "2026-10-20T23:15:00Z",
+      "span_days": 468.7,
+      "gaps": 0,
+      "off_grid": 0,
+      "status": "OK",
+      "atr_pct_median_last": 0.010340293990006492
+    },
+    "1h": {
+      "count": 5999,
+      "from": "2026-02-13T00:00:00Z",
+      "to": "2026-10-20T22:00:00Z",
+      "span_days": 249.9,
+      "gaps": 0,
+      "off_grid": 0,
+      "status": "OK",
+      "atr_pct_median_last": 0.015749870534773724
+    },
+    "4h": {
+      "count": 5999,
+      "from": "2024-01-25T00:00:00Z",
+      "to": "2026-10-20T16:00:00Z",
+      "span_days": 999.7,
+      "gaps": 0,
+      "off_grid": 0,
+      "status": "OK",
+      "atr_pct_median_last": 0.035485278636371985
+    },
+    "1d": {
+      "count": 2723,
+      "from": "2019-05-07T00:00:00Z",
+      "to": "2026-10-19T00:00:00Z",
+      "span_days": 2722.0,
+      "gaps": 0,
+      "off_grid": 0,
+      "status": "OK",
+      "atr_pct_median_last": 0.07774152490060644
+    },
+    "1w": {
+      "count": 395,
+      "from": "2018-02-08T00:00:00Z",
+      "to": "2026-10-08T00:00:00Z",
+      "span_days": 3164.0,
+      "gaps": 1,
+      "off_grid": 0,
+      "status": "UNAVAILABLE",
+      "atr_pct_median_last": 0.29537525700061534
+    },
+    "1M": {
+      "count": 89,
+      "from": "2018-02-01T00:00:00Z",
+      "to": "2026-09-01T00:00:00Z",
+      "span_days": 3134.0,
+      "gaps": 0,
+      "off_grid": 0,
+      "status": "OK",
+      "atr_pct_median_last": 1.1258484526965913
+    }
+  },
+  "results": {
+    "15m": {
+      "data": {
+        "count": 45000,
+        "from": "2025-07-09T05:30:00Z",
+        "to": "2026-10-20T23:15:00Z",
+        "span_days": 468.7,
+        "gaps": 0,
+        "off_grid": 0,
+        "status": "OK",
+        "atr_pct_median_last": 0.010340293990006492
+      },
+      "status_counts": {
+        "DONNÉES_INSUFFISANTES": 54,
+        "ATTENDRE": 33310,
+        "ALERTE_PRÉCOCE": 10190,
+        "INVALIDATION": 1446
+      },
+      "raw_signals": 11636,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 5565,
+          "alert_density_per_bar": 0.12366666666666666,
+          "evaluated": 5565,
+          "not_evaluable": 0,
+          "hits": 2047,
+          "hit_rate": 0.3678346810422282,
+          "hit_rate_wilson95": [
+            0.35526023060317025,
+            0.3805914768686314
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 44698,
+            "significant_bars": 14161,
+            "base_rate": 0.3168150700255045,
+            "discriminant": true,
+            "thresholds": {
+              "8": 0.00826121164437458,
+              "24": 0.0,
+              "96": 0.03269537480063798,
+              "288": 0.037480063795853405
+            },
+            "horizon_bars": [
+              8,
+              24,
+              96,
+              288
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.31897736231557605,
+            "bearish_rate": 0.41597026692195066,
+            "evaluable_bars": 44395,
+            "bullish_significant": 14161,
+            "bearish_significant": 18467
+          },
+          "reference_reversals": {
+            "total": 229,
+            "warning_window_bars": 24,
+            "detected_in_advance": 144,
+            "missed": 85,
+            "detection_rate": 0.62882096069869,
+            "median_lead_minutes": 60.0,
+            "mean_lead_minutes": 115.3125,
+            "pct_detected_before_entry": 66.66666666666667,
+            "median_lead_before_entry_minutes": 165.0,
+            "median_lag_after_entry_minutes": 0.0
+          },
+          "alerts_without_reference_reversal": 5421,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.3883142805298494,
+            "null_hit_rate_median": 0.37848353421756015,
+            "null_hit_rate_p95": 0.3895117540687161,
+            "percentile": 0.926,
+            "significant": false
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 5565,
+          "alert_density_per_bar": 0.12366666666666666,
+          "evaluated": 5565,
+          "not_evaluable": 0,
+          "hits": 156,
+          "hit_rate": 0.028032345013477088,
+          "hit_rate_wilson95": [
+            0.024010317374357205,
+            0.03270553534445598
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 44698,
+            "significant_bars": 1422,
+            "base_rate": 0.03181350395990872,
+            "discriminant": false,
+            "thresholds": {
+              "8": 0.036374417235018004,
+              "24": 0.06300233874676021,
+              "96": 0.12600467749352043,
+              "288": 0.218246503410108
+            },
+            "horizon_bars": [
+              8,
+              24,
+              96,
+              288
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.03181350395990872,
+            "bearish_rate": 0.01438543111548615,
+            "evaluable_bars": 44698,
+            "bullish_significant": 1422,
+            "bearish_significant": 643
+          },
+          "reference_reversals": {
+            "total": 42,
+            "warning_window_bars": 24,
+            "detected_in_advance": 23,
+            "missed": 19,
+            "detection_rate": 0.5476190476190477,
+            "median_lead_minutes": 30.0,
+            "mean_lead_minutes": 94.56521739130434,
+            "pct_detected_before_entry": 69.56521739130434,
+            "median_lead_before_entry_minutes": 45.0,
+            "median_lag_after_entry_minutes": 0.0
+          },
+          "alerts_without_reference_reversal": 5542,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.02561789644596789,
+            "null_hit_rate_median": 0.021024258760107817,
+            "null_hit_rate_p95": 0.02425876010781671,
+            "percentile": 0.986,
+            "significant": true
+          }
+        }
+      }
+    },
+    "1h": {
+      "data": {
+        "count": 5999,
+        "from": "2026-02-13T00:00:00Z",
+        "to": "2026-10-20T22:00:00Z",
+        "span_days": 249.9,
+        "gaps": 0,
+        "off_grid": 0,
+        "status": "OK",
+        "atr_pct_median_last": 0.015749870534773724
+      },
+      "status_counts": {
+        "ALERTE_PRÉCOCE": 1257,
+        "ATTENDRE": 4377,
+        "INVALIDATION": 365
+      },
+      "raw_signals": 1622,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 1120,
+          "alert_density_per_bar": 0.1866977829638273,
+          "evaluated": 1120,
+          "not_evaluable": 0,
+          "hits": 196,
+          "hit_rate": 0.175,
+          "hit_rate_wilson95": [
+            0.1538680150920185,
+            0.19835386386316517
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 5913,
+            "significant_bars": 875,
+            "base_rate": 0.14797902925756806,
+            "discriminant": true,
+            "thresholds": {
+              "2": 0.010949722085905013,
+              "6": 0.02189544591180199,
+              "24": 0.045839498267262024,
+              "72": 0.06938224385603461
+            },
+            "horizon_bars": [
+              2,
+              6,
+              24,
+              72
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.15018880878819088,
+            "bearish_rate": 0.18657741160315824,
+            "evaluable_bars": 5826,
+            "bullish_significant": 875,
+            "bearish_significant": 1087
+          },
+          "reference_reversals": {
+            "total": 72,
+            "warning_window_bars": 6,
+            "detected_in_advance": 23,
+            "missed": 49,
+            "detection_rate": 0.3194444444444444,
+            "median_lead_minutes": 60.0,
+            "mean_lead_minutes": 138.2608695652174,
+            "pct_detected_before_entry": 65.21739130434783,
+            "median_lead_before_entry_minutes": 240.0,
+            "median_lag_after_entry_minutes": 0.0
+          },
+          "alerts_without_reference_reversal": 1097,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.18198529411764705,
+            "null_hit_rate_median": 0.17246026582396135,
+            "null_hit_rate_p95": 0.19168173598553345,
+            "percentile": 0.789,
+            "significant": false
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 1120,
+          "alert_density_per_bar": 0.1866977829638273,
+          "evaluated": 1120,
+          "not_evaluable": 0,
+          "hits": 37,
+          "hit_rate": 0.033035714285714286,
+          "hit_rate_wilson95": [
+            0.024061094385181492,
+            0.04520275916855775
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 5913,
+            "significant_bars": 193,
+            "base_rate": 0.03263994588195501,
+            "discriminant": false,
+            "thresholds": {
+              "2": 0.027638729360609182,
+              "6": 0.04787168350922076,
+              "24": 0.09574336701844152,
+              "72": 0.16583237616365507
+            },
+            "horizon_bars": [
+              2,
+              6,
+              24,
+              72
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.03263994588195501,
+            "bearish_rate": 0.009470657872484356,
+            "evaluable_bars": 5913,
+            "bullish_significant": 193,
+            "bearish_significant": 56
+          },
+          "reference_reversals": {
+            "total": 11,
+            "warning_window_bars": 6,
+            "detected_in_advance": 1,
+            "missed": 10,
+            "detection_rate": 0.09090909090909091,
+            "median_lead_minutes": 240.0,
+            "mean_lead_minutes": 240.0,
+            "pct_detected_before_entry": 100.0,
+            "median_lead_before_entry_minutes": 240.0,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 1119,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.032403240324032405,
+            "null_hit_rate_median": 0.017857142857142856,
+            "null_hit_rate_p95": 0.024107142857142858,
+            "percentile": 0.9995,
+            "significant": true
+          }
+        }
+      }
+    },
+    "4h": {
+      "data": {
+        "count": 5999,
+        "from": "2024-01-25T00:00:00Z",
+        "to": "2026-10-20T16:00:00Z",
+        "span_days": 999.7,
+        "gaps": 0,
+        "off_grid": 0,
+        "status": "OK",
+        "atr_pct_median_last": 0.035485278636371985
+      },
+      "status_counts": {
+        "DONNÉES_INSUFFISANTES": 3190,
+        "ALERTE_PRÉCOCE": 629,
+        "ATTENDRE": 2090,
+        "INVALIDATION": 90
+      },
+      "raw_signals": 719,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 629,
+          "alert_density_per_bar": 0.10485080846807801,
+          "evaluated": 628,
+          "not_evaluable": 1,
+          "hits": 203,
+          "hit_rate": 0.3232484076433121,
+          "hit_rate_wilson95": [
+            0.2878373089805744,
+            0.3608088073878317
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 5805,
+            "significant_bars": 1547,
+            "base_rate": 0.2664944013781223,
+            "discriminant": true,
+            "thresholds": {
+              "6": 0.15598571697049426,
+              "18": 0.342800961328381,
+              "42": 0.37068771138669687,
+              "180": 0.16813022060398355
+            },
+            "horizon_bars": [
+              6,
+              18,
+              42,
+              180
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.27575757575757576,
+            "bearish_rate": 0.31319073083778964,
+            "evaluable_bars": 5610,
+            "bullish_significant": 1547,
+            "bearish_significant": 1757
+          },
+          "reference_reversals": {
+            "total": 40,
+            "warning_window_bars": 18,
+            "detected_in_advance": 11,
+            "missed": 29,
+            "detection_rate": 0.275,
+            "median_lead_minutes": 1920.0,
+            "mean_lead_minutes": 1658.1818181818182,
+            "pct_detected_before_entry": 81.81818181818181,
+            "median_lead_before_entry_minutes": 2160.0,
+            "median_lag_after_entry_minutes": 0.0
+          },
+          "alerts_without_reference_reversal": 618,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.35384615384615387,
+            "null_hit_rate_median": 0.2986798679867987,
+            "null_hit_rate_p95": 0.3295081967213115,
+            "percentile": 0.999,
+            "significant": true
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 629,
+          "alert_density_per_bar": 0.10485080846807801,
+          "evaluated": 628,
+          "not_evaluable": 1,
+          "hits": 12,
+          "hit_rate": 0.01910828025477707,
+          "hit_rate_wilson95": [
+            0.010963806571726228,
+            0.0331004019260998
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 5805,
+            "significant_bars": 358,
+            "base_rate": 0.06167097329888028,
+            "discriminant": true,
+            "thresholds": {
+              "6": 0.15534442414031968,
+              "18": 0.26906443528356294,
+              "42": 0.41100271383582465,
+              "180": 0.8508564528430317
+            },
+            "horizon_bars": [
+              6,
+              18,
+              42,
+              180
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.06167097329888028,
+            "bearish_rate": 0.0010335917312661498,
+            "evaluable_bars": 5805,
+            "bullish_significant": 358,
+            "bearish_significant": 6
+          },
+          "reference_reversals": {
+            "total": 12,
+            "warning_window_bars": 18,
+            "detected_in_advance": 3,
+            "missed": 9,
+            "detection_rate": 0.25,
+            "median_lead_minutes": 2160.0,
+            "mean_lead_minutes": 1840.0,
+            "pct_detected_before_entry": 100.0,
+            "median_lead_before_entry_minutes": 2160.0,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 626,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.015384615384615385,
+            "null_hit_rate_median": 0.02388535031847134,
+            "null_hit_rate_p95": 0.03503184713375796,
+            "percentile": 0.059,
+            "significant": false
+          }
+        }
+      }
+    },
+    "1d": {
+      "data": {
+        "count": 2723,
+        "from": "2019-05-07T00:00:00Z",
+        "to": "2026-10-19T00:00:00Z",
+        "span_days": 2722.0,
+        "gaps": 0,
+        "off_grid": 0,
+        "status": "OK",
+        "atr_pct_median_last": 0.07774152490060644
+      },
+      "status_counts": {
+        "DONNÉES_INSUFFISANTES": 2255,
+        "ATTENDRE": 371,
+        "ALERTE_PRÉCOCE": 82,
+        "INVALIDATION": 15
+      },
+      "raw_signals": 97,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 82,
+          "alert_density_per_bar": 0.030113845023870732,
+          "evaluated": 82,
+          "not_evaluable": 0,
+          "hits": 4,
+          "hit_rate": 0.04878048780487805,
+          "hit_rate_wilson95": [
+            0.0191307559738843,
+            0.11881634659643125
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 2689,
+            "significant_bars": 351,
+            "base_rate": 0.1305317962067683,
+            "discriminant": true,
+            "thresholds": {
+              "2": 0.11288724642239344,
+              "5": 0.19673155542375387,
+              "10": 0.30873151434159657,
+              "20": 0.4648922654082504
+            },
+            "horizon_bars": [
+              2,
+              5,
+              10,
+              20
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.1322532027128862,
+            "bearish_rate": 0.08214016578749057,
+            "evaluable_bars": 2654,
+            "bullish_significant": 351,
+            "bearish_significant": 218
+          },
+          "reference_reversals": {
+            "total": 38,
+            "warning_window_bars": 5,
+            "detected_in_advance": 3,
+            "missed": 35,
+            "detection_rate": 0.07894736842105263,
+            "median_lead_minutes": 1440.0,
+            "mean_lead_minutes": 2400.0,
+            "pct_detected_before_entry": 66.66666666666667,
+            "median_lead_before_entry_minutes": 3600.0,
+            "median_lag_after_entry_minutes": 0.0
+          },
+          "alerts_without_reference_reversal": 79,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.06329113924050633,
+            "null_hit_rate_median": 0.0975609756097561,
+            "null_hit_rate_p95": 0.15853658536585366,
+            "percentile": 0.183,
+            "significant": false
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 82,
+          "alert_density_per_bar": 0.030113845023870732,
+          "evaluated": 82,
+          "not_evaluable": 0,
+          "hits": 1,
+          "hit_rate": 0.012195121951219513,
+          "hit_rate_wilson95": [
+            0.00215593657096515,
+            0.06589498512667329
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 2689,
+            "significant_bars": 175,
+            "base_rate": 0.06507995537374489,
+            "discriminant": true,
+            "thresholds": {
+              "2": 0.15634215431488124,
+              "5": 0.24719865096627314,
+              "10": 0.34959168479683644,
+              "20": 0.4943973019325463
+            },
+            "horizon_bars": [
+              2,
+              5,
+              10,
+              20
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.06507995537374489,
+            "bearish_rate": 0.0026031982149497955,
+            "evaluable_bars": 2689,
+            "bullish_significant": 175,
+            "bearish_significant": 7
+          },
+          "reference_reversals": {
+            "total": 12,
+            "warning_window_bars": 5,
+            "detected_in_advance": 1,
+            "missed": 11,
+            "detection_rate": 0.08333333333333333,
+            "median_lead_minutes": 1440.0,
+            "mean_lead_minutes": 1440.0,
+            "pct_detected_before_entry": 100.0,
+            "median_lead_before_entry_minutes": 1440.0,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 81,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.012658227848101266,
+            "null_hit_rate_median": 0.024390243902439025,
+            "null_hit_rate_p95": 0.04878048780487805,
+            "percentile": 0.45,
+            "significant": false
+          }
+        }
+      }
+    },
+    "1w": {
+      "data": {
+        "count": 395,
+        "from": "2018-02-08T00:00:00Z",
+        "to": "2026-10-08T00:00:00Z",
+        "span_days": 3164.0,
+        "gaps": 1,
+        "off_grid": 0,
+        "status": "UNAVAILABLE",
+        "atr_pct_median_last": 0.29537525700061534
+      },
+      "status_counts": {
+        "DONNÉES_INSUFFISANTES": 328,
+        "ATTENDRE": 55,
+        "ALERTE_PRÉCOCE": 11,
+        "INVALIDATION": 1
+      },
+      "raw_signals": 12,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 11,
+          "alert_density_per_bar": 0.027848101265822784,
+          "evaluated": 11,
+          "not_evaluable": 0,
+          "hits": 0,
+          "hit_rate": 0.0,
+          "hit_rate_wilson95": [
+            2.057132194452876e-17,
+            0.2588400172488141
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 361,
+            "significant_bars": 47,
+            "base_rate": 0.13019390581717452,
+            "discriminant": true,
+            "thresholds": {
+              "2": 0.4364804286966652,
+              "5": 1.510963000972897,
+              "10": 3.5456043908913637,
+              "20": 15.164288249238055
+            },
+            "horizon_bars": [
+              2,
+              5,
+              10,
+              20
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.1441717791411043,
+            "bearish_rate": 0.04294478527607362,
+            "evaluable_bars": 326,
+            "bullish_significant": 47,
+            "bearish_significant": 14
+          },
+          "reference_reversals": {
+            "total": 3,
+            "warning_window_bars": 5,
+            "detected_in_advance": 0,
+            "missed": 3,
+            "detection_rate": 0.0,
+            "median_lead_minutes": null,
+            "mean_lead_minutes": null,
+            "pct_detected_before_entry": null,
+            "median_lead_before_entry_minutes": null,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 11,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.0,
+            "null_hit_rate_median": 0.09090909090909091,
+            "null_hit_rate_p95": 0.2222222222222222,
+            "percentile": 0.435,
+            "significant": false
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 11,
+          "alert_density_per_bar": 0.027848101265822784,
+          "evaluated": 11,
+          "not_evaluable": 0,
+          "hits": 0,
+          "hit_rate": 0.0,
+          "hit_rate_wilson95": [
+            2.057132194452876e-17,
+            0.2588400172488141
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 361,
+            "significant_bars": 27,
+            "base_rate": 0.07479224376731301,
+            "discriminant": true,
+            "thresholds": {
+              "2": 1.2523026289869519,
+              "5": 1.9800643137077838,
+              "10": 2.8002338068165225,
+              "20": 3.9601286274155676
+            },
+            "horizon_bars": [
+              2,
+              5,
+              10,
+              20
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.07479224376731301,
+            "bearish_rate": 0.0,
+            "evaluable_bars": 361,
+            "bullish_significant": 27,
+            "bearish_significant": 0
+          },
+          "reference_reversals": {
+            "total": 4,
+            "warning_window_bars": 5,
+            "detected_in_advance": 0,
+            "missed": 4,
+            "detection_rate": 0.0,
+            "median_lead_minutes": null,
+            "mean_lead_minutes": null,
+            "pct_detected_before_entry": null,
+            "median_lead_before_entry_minutes": null,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 11,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.0,
+            "null_hit_rate_median": 0.0,
+            "null_hit_rate_p95": 0.09090909090909091,
+            "percentile": 0.7275,
+            "significant": false
+          }
+        }
+      }
+    },
+    "1M": {
+      "data": {
+        "count": 89,
+        "from": "2018-02-01T00:00:00Z",
+        "to": "2026-09-01T00:00:00Z",
+        "span_days": 3134.0,
+        "gaps": 0,
+        "off_grid": 0,
+        "status": "OK",
+        "atr_pct_median_last": 1.1258484526965913
+      },
+      "status_counts": {
+        "DONNÉES_INSUFFISANTES": 74,
+        "ALERTE_PRÉCOCE": 2,
+        "ATTENDRE": 13
+      },
+      "raw_signals": 2,
+      "criteria": {
+        "quantile": {
+          "criterion": "quantile",
+          "episodes": 2,
+          "alert_density_per_bar": 0.02247191011235955,
+          "evaluated": 2,
+          "not_evaluable": 0,
+          "hits": 0,
+          "hit_rate": 0.0,
+          "hit_rate_wilson95": [
+            0.0,
+            0.6576280471103807
+          ],
+          "base_rate": {
+            "criterion": "quantile",
+            "evaluable_bars": 51,
+            "significant_bars": 0,
+            "base_rate": 0.0,
+            "discriminant": false,
+            "thresholds": {
+              "3": null,
+              "6": null,
+              "12": null,
+              "24": null
+            },
+            "horizon_bars": [
+              3,
+              6,
+              12,
+              24
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.0,
+            "bearish_rate": 0.0,
+            "evaluable_bars": 12,
+            "bullish_significant": 0,
+            "bearish_significant": 0
+          },
+          "reference_reversals": {
+            "total": 0,
+            "warning_window_bars": 6,
+            "detected_in_advance": 0,
+            "missed": 0,
+            "detection_rate": null,
+            "median_lead_minutes": null,
+            "mean_lead_minutes": null,
+            "pct_detected_before_entry": null,
+            "median_lead_before_entry_minutes": null,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 2,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.0,
+            "null_hit_rate_median": 0.0,
+            "null_hit_rate_p95": 0.0,
+            "percentile": 1.0,
+            "significant": true
+          }
+        },
+        "sigma": {
+          "criterion": "sigma",
+          "episodes": 2,
+          "alert_density_per_bar": 0.02247191011235955,
+          "evaluated": 2,
+          "not_evaluable": 0,
+          "hits": 0,
+          "hit_rate": 0.0,
+          "hit_rate_wilson95": [
+            0.0,
+            0.6576280471103807
+          ],
+          "base_rate": {
+            "criterion": "sigma",
+            "evaluable_bars": 51,
+            "significant_bars": 6,
+            "base_rate": 0.11764705882352941,
+            "discriminant": true,
+            "thresholds": {
+              "3": 2.6476883703019105,
+              "6": 3.7443968022184784,
+              "12": 5.295376740603821,
+              "24": 7.488793604436957
+            },
+            "horizon_bars": [
+              3,
+              6,
+              12,
+              24
+            ]
+          },
+          "directional_base_rate": {
+            "bullish_rate": 0.11764705882352941,
+            "bearish_rate": 0.0,
+            "evaluable_bars": 51,
+            "bullish_significant": 6,
+            "bearish_significant": 0
+          },
+          "reference_reversals": {
+            "total": 0,
+            "warning_window_bars": 6,
+            "detected_in_advance": 0,
+            "missed": 0,
+            "detection_rate": null,
+            "median_lead_minutes": null,
+            "mean_lead_minutes": null,
+            "pct_detected_before_entry": null,
+            "median_lead_before_entry_minutes": null,
+            "median_lag_after_entry_minutes": null
+          },
+          "alerts_without_reference_reversal": 2,
+          "null_test": {
+            "iterations": 2000,
+            "observed_hit_rate": 0.0,
+            "null_hit_rate_median": 0.0,
+            "null_hit_rate_p95": 0.0,
+            "percentile": 1.0,
+            "significant": true
+          }
+        }
+      }
+    }
+  }
+}

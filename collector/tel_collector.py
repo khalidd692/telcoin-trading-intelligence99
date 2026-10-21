@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Read-only public TEL/USDT market collector. Missing fields remain null."""
-import argparse, hashlib, json, math, os, socket, ssl, time, urllib.error, urllib.parse, urllib.request
+import argparse, os, json, time, math, hashlib, random, uuid
+import socket
+import ssl
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -304,7 +309,79 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
       "candles":cs,"fees":{"verified":False,"value":None,"note":"frais non vérifiés; exclus du coût simulé"},
       "observations":obs,"best_ask_source":c.venue}
 
-def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
+def compute_snapshot_fingerprint(sources, cross_check):
+    """
+    Compute a deterministic SHA-256 fingerprint for the validated snapshot payload.
+
+    Deterministic serialization used here: JSON with sort_keys=True and ensure_ascii=False,
+    then SHA-256 over the UTF-8 bytes. This covers the stable source data and the
+    derived cross-check summary used for provenance validation, while excluding volatile
+    fields such as generated_at, collection timing and request_log metadata.
+
+    Any missing, null or malformed source block is rejected explicitly instead of
+    generating a misleading fingerprint over incomplete data.
+    """
+    if not isinstance(sources, dict):
+        raise ValueError("sources must be a dict")
+    if not isinstance(cross_check, dict):
+        raise ValueError("cross_check must be a dict")
+
+    def _finite_positive(value, label):
+        number = num(value)
+        if number is None or not math.isfinite(number) or number <= 0:
+            raise ValueError(f"{label} missing or invalid")
+        return float(number)
+
+    normalized = {}
+    for venue in ("mexc", "kucoin"):
+        src = sources.get(venue)
+        if src is None or not isinstance(src, dict):
+            raise ValueError(f"sources.{venue} missing or malformed")
+        mid = _finite_positive(src.get("mid"), f"sources.{venue}.mid")
+        best = src.get("best")
+        if not isinstance(best, dict):
+            raise ValueError(f"sources.{venue}.best missing or malformed")
+        bid = _finite_positive(best.get("bid"), f"sources.{venue}.best.bid")
+        ask = _finite_positive(best.get("ask"), f"sources.{venue}.best.ask")
+        if ask < bid:
+            raise ValueError(f"sources.{venue}.best.ask below bid")
+        book = src.get("book")
+        if not isinstance(book, dict):
+            raise ValueError(f"sources.{venue}.book missing or malformed")
+        bids = book.get("bids")
+        asks = book.get("asks")
+        if not isinstance(bids, list) or not isinstance(asks, list):
+            raise ValueError(f"sources.{venue}.book bids/asks must be lists")
+        if not bids or not asks:
+            raise ValueError(f"sources.{venue}.book bids/asks cannot be empty")
+        normalized[venue] = {
+            "mid": mid,
+            "best": {"bid": bid, "ask": ask},
+            "book_bids_top5": [[_finite_positive(level[0], f"sources.{venue}.book.bids[{i}][0]"), _finite_positive(level[1], f"sources.{venue}.book.bids[{i}][1]")] for i, level in enumerate(bids[:5])],
+            "book_asks_top5": [[_finite_positive(level[0], f"sources.{venue}.book.asks[{i}][0]"), _finite_positive(level[1], f"sources.{venue}.book.asks[{i}][1]")] for i, level in enumerate(asks[:5])],
+        }
+
+    required_fields = ("mid_mexc", "mid_kucoin", "divergence_bps")
+    for field in required_fields:
+        if field not in cross_check or cross_check.get(field) is None:
+            raise ValueError(f"cross_check.{field} missing or null")
+        if field in ("mid_mexc", "mid_kucoin") and not math.isfinite(float(cross_check.get(field))):
+            raise ValueError(f"cross_check.{field} invalid")
+        if field == "divergence_bps" and not math.isfinite(float(cross_check.get(field))):
+            raise ValueError(f"cross_check.{field} invalid")
+
+    fingerprint_data = {
+        "sources": normalized,
+        "cross_check": {
+            "mid_mexc": float(cross_check.get("mid_mexc")),
+            "mid_kucoin": float(cross_check.get("mid_kucoin")),
+            "divergence_bps": float(cross_check.get("divergence_bps")),
+        },
+    }
+    fingerprint_json = json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(fingerprint_json.encode("utf-8")).hexdigest()
+
+def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,collection_id=None):
     started=now_ms(); clients={v:Client(v) for v in SYMBOLS}; sources={}
     for v,c in clients.items():
         try: sources[v]=source_report(c,notional,passes,interval,max_book_age,max_trade_age)
@@ -325,28 +402,48 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900):
     both=(m["status"]["book"]["verdict"]=="VÉRIFIÉ" and k["status"]["book"]["verdict"]=="VÉRIFIÉ"
           and all(x is not None and x>0 for x in mids) and not identical
           and divergence is not None and abs(divergence)<=100)
-    return {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
+    
+    # Generate collection_id if not provided (for local runs)
+    if collection_id is None:
+        collection_id = str(uuid.uuid4())
+    
+    # Compute snapshot fingerprint only for complete source data. Otherwise fail closed.
+    cross_check_temp = {"mid_mexc":m.get("mid"),"mid_kucoin":k.get("mid"),"divergence_bps":divergence,
+       "identical_top_bids_alert":identical,"venue_data_diagnostic":venue_data_diagnostic,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"}
+    try:
+        snapshot_fingerprint = compute_snapshot_fingerprint(sources, cross_check_temp)
+    except ValueError as exc:
+        snapshot_fingerprint = None
+        cross_check_temp["provenance_error"] = str(exc)
+
+    snapshot = {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
+      "collection_id": collection_id,
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
        "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
       "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms())},
-      "sources":sources,"cross_check":{"mid_mexc":m.get("mid"),"mid_kucoin":k.get("mid"),"divergence_bps":divergence,
-       "identical_top_bids_alert":identical,"venue_data_diagnostic":venue_data_diagnostic,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"},
+      "sources":sources,"cross_check":cross_check_temp,
       "request_log":sum((c.log for c in clients.values()),[]),
       "limits":["Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.","Les frais sont inconnus et exclus.",
        "Les transactions récentes ne prouvent pas à elles seules la fraîcheur absolue du carnet.",
        "Un succès de collecte n'est pas un signal d'achat."]}
+    if snapshot_fingerprint is not None:
+        snapshot["snapshot_id"] = snapshot_fingerprint
+    return snapshot
 
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument("--out",default="tel_snapshot.json"); p.add_argument("--passes",type=int,default=3)
     p.add_argument("--interval",type=float,default=3); p.add_argument("--notional",type=float,default=300)
     p.add_argument("--max-book-age-s",type=float,default=10); p.add_argument("--max-trade-age-s",type=float,default=900)
+    p.add_argument("--collection-id",default=None,help="Collection ID for provenance tracking (UUID)")
     a=p.parse_args(argv)
     if a.passes<1 or a.interval<0 or a.notional<=0: p.error("invalid positive collection parameters")
-    rep=run(a.passes,a.interval,a.notional,a.max_book_age_s,a.max_trade_age_s)
+    rep=run(a.passes,a.interval,a.notional,a.max_book_age_s,a.max_trade_age_s,a.collection_id)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)),exist_ok=True)
     with open(a.out,"w",encoding="utf-8") as f: json.dump(rep,f,ensure_ascii=False,indent=2)
     for v,s in rep["sources"].items(): print(f'{v}: book={s["status"]["book"]["verdict"]}; trades={s["status"]["trades"]["verdict"]}; mid={s.get("mid")}')
     print("confirmation indépendante:",rep["cross_check"]["independent_confirmation"])
+    print("collection_id:",rep.get("collection_id"))
+    print("snapshot_id:",rep.get("snapshot_id"))
     return 0 if any(s.get("mid") for s in rep["sources"].values()) else 2
 
 if __name__=="__main__": raise SystemExit(main())
