@@ -261,6 +261,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p alerts
           git add site/report.json site/tel_snapshot.json site/agent_analysis.json alerts/
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
