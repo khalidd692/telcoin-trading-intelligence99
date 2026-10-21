@@ -26,15 +26,17 @@ correction des défauts reproductibles, préparation de la fin de mission.
 | Tableau de bord déployé | HTTP 200 ; **code déployé = fichier du dépôt à l'octet** ; rend les **4 états** (badge vert **uniquement** pour `CONFIRMATION` exploitable) ; dégradation de fraîcheur → `ATTENDRE` + « PÉRIMÉ » + prix effacés, **sans requête marché** |
 | Site déployé | sert l'artefact courant (6 unités de temps, `early_reversal` présent) |
 
-## 2. Cadence : prévu ≠ observé (correction appliquée)
+## 2. Cadence : prévu ≠ observé (deux causes distinctes, corrigées)
 
 | | Valeur |
 |---|---|
 | Cadence **configurée** (cron `*/15`) | 15 min |
 | Cadence **observée** avant correction | **229 min** (45 exécutions planifiées sur 168 h ; intervalles 104 à 387 min ; attente de démarrage nulle ; 4 créations sur 45 alignées sur un slot) |
-| Cause | bradage de l'ordonnanceur de la plateforme (le cron GitHub n'est pas une garantie de fréquence) |
+| Cause n°1 | bradage de l'ordonnanceur de la plateforme (le cron GitHub n'est pas une garantie de fréquence) |
+| Cause n°2 (mesurée le 22/10) | **le garde-fou de cadence lisait l'âge de l'artefact que l'exécution venait de publier** (l'étape de publication commite sur la branche locale *avant* l'étape de cadence) → âge ≈ 0,2 min → « inutile » → **la chaîne s'arrêtait à chaque maillon** |
+| Mesure du cron reprise le 22/10 | **44 exécutions planifiées sur 168 h** pour un `*/15` qui en attendrait 672 → **livraison 6,5 %**, intervalle **médian 252 min**, min 104 min, max 387 min ; livraisons **non alignées** sur un slot `*/15` (minutes observées : 56, 56, 04, 49, 57, 31, 27, 15…) → ce sont des exécutions **rattrapées**, livrées une par une des heures plus tard |
 | Conséquence mesurée | le tableau de bord publié reposait sur des données de **27 à 290 min**, au-delà de sa fenêtre de fraîcheur (20 min analyse / 30 min rapport) → `ATTENDRE « périmé »` presque en permanence |
-| Correction | auto-relance **auto-limitée** (12 min), reprise à 45 min après un échec, âge lu dans l'artefact publié au commit de checkout, âge inconnu ⇒ **aucune relance** ; levier manuel `workflow_dispatch` |
+| Correction | **créneau** : le maillon de chaîne **attend** le prochain créneau (13 min) puis relance ; **porte de publication** (12 min) : deux publications ne peuvent pas tomber dans la même fenêtre ; **une seule chaîne** : seuls les maillons explicites (`workflow_dispatch` `mode=chain`) se relancent, une exécution ponctuelle ne relance qu'une chaîne **arrêtée** (30 min) ; **repli** : 45 min après un échec ; âge inconnu ⇒ **aucune relance** et attente d'un créneau complet |
 
 ## 3. Défauts trouvés et corrigés
 
@@ -48,6 +50,9 @@ correction des défauts reproductibles, préparation de la fin de mission.
 | 6 | Un rapport dégradé portant un signal résiduel pouvait ouvrir une alerte | fail-closed incomplet | `advance()` ignore tout signal si les données ne sont pas exploitables | 3 tests de régression |
 | 7 | `period_type` par défaut `historical` sur des lignes réelles | corruption historique/prospective | CLI étiquetée `live` | 39 tests du module |
 | 8 | `returns_24h_*` jamais renseignés | prospective non mesurable | `scripts/backtest/evaluate_prospective.py` (n'évalue que les échéances atteintes) | 12 tests + journal réel (0 renseigné) |
+| 9 | **Garde-fou de cadence auto-saboté** : l'âge lu était celui de la publication que l'exécution venait de faire (0,1 à 0,7 min sur les 4 derniers runs de `main`) ⇒ chaîne arrêtée à chaque maillon | **cadence perdue** | création du **créneau** (attente puis relance), **porte de publication** (12 min), **chaîne unique** (`mode=chain`), **repli** (45 min) | PR #39 et #40 fusionnées ; 49 tests de cadence dont une **simulation du runner** (24 tours, intervalles 12-16 min) |
+| 10 | La relance d'une chaîne morte testait la **vive** de la chaîne sur la publication **que l'exécution venait de faire** ⇒ une chaîne morte ne pouvait jamais être relancée | chaîne non récupérable | l'état de la chaîne se mesure **au commit de checkout** (`CHECKOUT_SHA`), le créneau continue d'utiliser la dernière publication | PR #40 ; test de régression dédié ; run réel `39687968845` : « chaine vue au demarrage 6.9 min → aucune relance » |
+
 
 ## 4. Tests exécutés
 
