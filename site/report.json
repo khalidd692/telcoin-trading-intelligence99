@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-21T22:46:00.665051+00:00",
+  "generated_at": "2026-10-21T22:59:35.198646+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001502,
-      "bid": 0.001492,
-      "ask": 0.001499,
-      "spread_pct": 0.4680708793045701,
-      "quote_volume_24h": 144180.940103,
-      "change_pct_24h": -0.0026,
+      "last": 0.001491,
+      "bid": 0.001482,
+      "ask": 0.001489,
+      "spread_pct": 0.4712218108381058,
+      "quote_volume_24h": 144291.719995,
+      "change_pct_24h": -0.0086,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-21T22:46:00.832146+00:00"
+      "observed_at": "2026-10-21T22:59:35.272901+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001501,
-      "bid": 0.001501,
-      "ask": 0.001504,
-      "observed_at": "2026-10-21T22:46:01.148468+00:00"
+      "last": 0.001492,
+      "bid": 0.001492,
+      "ask": 0.001496,
+      "observed_at": "2026-10-21T22:59:35.694244+00:00"
     }
   },
   "checks": [
@@ -38,20 +38,20 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.4681,
+      "value_pct": 0.4712,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0666,
+      "divergence_pct": 0.067,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-21T22:45:00+00:00",
-    "candle_age_seconds": 60,
+    "candle_age_seconds": 875,
     "close": 0.001501,
     "ema12": 0.001510462772975428,
     "ema26": 0.001506668100654654,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "2c019946-267d-4223-8003-d481bdfeb5bd",
+  "collection_id": "efdfc86d-d213-48f6-b8fc-e9d493df3b06",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0666
+    "last_price_divergence_pct": 0.067
   },
   "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
