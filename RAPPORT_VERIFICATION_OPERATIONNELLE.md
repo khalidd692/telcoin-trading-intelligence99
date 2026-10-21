@@ -37,6 +37,8 @@ correction des défauts reproductibles, préparation de la fin de mission.
 | Mesure du cron reprise le 22/10 | **44 exécutions planifiées sur 168 h** pour un `*/15` qui en attendrait 672 → **livraison 6,5 %**, intervalle **médian 252 min**, min 104 min, max 387 min ; livraisons **non alignées** sur un slot `*/15` (minutes observées : 56, 56, 04, 49, 57, 31, 27, 15…) → ce sont des exécutions **rattrapées**, livrées une par une des heures plus tard |
 | Conséquence mesurée | le tableau de bord publié reposait sur des données de **27 à 290 min**, au-delà de sa fenêtre de fraîcheur (20 min analyse / 30 min rapport) → `ATTENDRE « périmé »` presque en permanence |
 | Correction | **créneau** : le maillon de chaîne **attend** le prochain créneau (13 min) puis relance ; **porte de publication** (12 min) : deux publications ne peuvent pas tomber dans la même fenêtre ; **une seule chaîne** : seuls les maillons explicites (`workflow_dispatch` `mode=chain`) se relancent, une exécution ponctuelle ne relance qu'une chaîne **arrêtée** (30 min) ; **repli** : 45 min après un échec ; âge inconnu ⇒ **aucune relance** et attente d'un créneau complet |
+| Cadence **re-mesurée** après correction | **13,73 min** puis **13,63 min** entre deux publications de chaîne (22:32:35 → 22:46:19 → 22:59:57), contre un étalement de **1,35 à 37,83 min** avant correction |
+| Chaîne observée en production | maillon 1 `39688273028` (relance acceptée, `mode chain`) → maillon 2 `39688796167` (20 étapes vertes, publication + déploiement) → maillon 3 `39690361887` ; artefact servi : `generated_at = 2026-10-21T22:46:19`, HTTP 200 |
 
 ## 3. Défauts trouvés et corrigés
 
