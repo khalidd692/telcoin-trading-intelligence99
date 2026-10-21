@@ -558,5 +558,107 @@ class TestCadenceCli(unittest.TestCase):
             self.assertEqual(code, 0)
 
 
+class TestCheckoutRef(unittest.TestCase):
+    """Le commit de checkout (CHECKOUT_SHA) n'est pas HEAD.
+
+    C'est la reference qui donne l'etat de la chaine AU DEMARRAGE de
+    l'execution (la publication precedente). Les tests verifient la DECISION
+    finale de relance, pas seulement la valeur brute retournee.
+    """
+
+    def _repo(self, folder, commits):
+        """commits : liste de (message, generated_at ou None)."""
+        import json
+        import subprocess
+        subprocess.run(["git", "-C", folder, "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", folder, "config", "user.name", "t"], check=True)
+        subprocess.run(["git", "-C", folder, "config", "user.email", "t@t"], check=True)
+        for message, generated_at in commits:
+            (Path(folder) / "site").mkdir(exist_ok=True)
+            target = Path(folder) / "site" / "agent_analysis.json"
+            if generated_at is not None:
+                target.write_text(json.dumps({"generated_at": generated_at}), encoding="utf-8")
+            elif target.exists():
+                target.unlink()
+            # un fichier temoin : chaque commit a un contenu (git refuse un
+            # commit vide) et l'artefact peut en etre absent
+            (Path(folder) / "notes.txt").write_text(message, encoding="utf-8")
+            subprocess.run(["git", "-C", folder, "add", "-A"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", folder, "commit", "-qm", message],
+                           capture_output=True, check=True)
+
+    def test_age_read_from_a_checkout_ref_distinct_from_head(self):
+        """L'age au commit de checkout est different de l'age a HEAD."""
+        import tempfile
+        from src.publication_cadence import previous_publication_age_from_artifact
+
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            self._repo(folder, [
+                ("Refresh published TEL/USDT market report [skip ci]",
+                 (now - timedelta(minutes=45)).isoformat()),
+                ("Refresh published TEL/USDT market report [skip ci]",
+                 (now - timedelta(minutes=2)).isoformat()),
+            ])
+            head_age = previous_publication_age_from_artifact(folder, ref="HEAD")
+            checkout_age = previous_publication_age_from_artifact(folder, ref="HEAD~1")
+            self.assertIsNotNone(head_age)
+            self.assertIsNotNone(checkout_age)
+            # les deux references designent bien deux publications differentes
+            self.assertAlmostEqual(head_age, 2 * 60, delta=90)
+            self.assertAlmostEqual(checkout_age, 45 * 60, delta=90)
+            self.assertNotAlmostEqual(head_age, checkout_age, delta=60)
+
+    def test_the_checkout_ref_decides_whether_the_chain_is_alive(self):
+        """Scenario de production : l'execution vient de publier (age frais a
+        HEAD) mais la chaine etait MORTE a son demarrage (age au checkout).
+        La decision finale doit etre une relance."""
+        from src.publication_cadence import plan_dispatch
+
+        dead = plan_dispatch(MODE_AUTO, 2 * 60, liveness_age_seconds=45 * 60)
+        self.assertTrue(dead.dispatch, "une chaine morte n'a pas ete relancee")
+        alive = plan_dispatch(MODE_AUTO, 2 * 60, liveness_age_seconds=2 * 60)
+        self.assertFalse(alive.dispatch, "une chaine parallele a ete creee")
+
+    def test_missing_artifact_at_the_checkout_ref_decides_the_relay(self):
+        """Pas d'artefact au CHECKOUT_SHA : l'etat de la chaine au demarrage
+        est inconnu. On verifie la DECISION, pas seulement le retour None.
+
+        - l'age inconnu seul ne prouve pas l'arret de la chaine : une execution
+          ponctuelle ne relance pas (protection anti-boucle) ;
+        - si aucun age n'est connu du tout, la decision reste defavorable ;
+        - un maillon de chaine, lui, attend un creneau complet puis relance.
+        """
+        import tempfile
+        from src.publication_cadence import plan_dispatch, previous_publication_age_from_artifact
+
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            self._repo(folder, [
+                ("docs: un commit sans artefact de publication", None),
+                ("Refresh published TEL/USDT market report [skip ci]",
+                 (now - timedelta(minutes=2)).isoformat()),
+            ])
+            checkout_age = previous_publication_age_from_artifact(folder, ref="HEAD~1")
+            self.assertIsNone(checkout_age, "l'artefact absent au checkout devrait etre None")
+            branch_age = previous_publication_age_from_artifact(folder, ref="HEAD")
+            self.assertIsNotNone(branch_age)
+
+            # l'etat de la chaine au demarrage est inconnu -> on se rabat sur
+            # l'etat courant, qui dit "chain alive" : pas de chaine parallele
+            decision = plan_dispatch(MODE_AUTO, branch_age, liveness_age_seconds=checkout_age)
+            self.assertFalse(decision.dispatch, "relance sur un etat de chaine inconnu")
+
+            # aucun age connu du tout : la decision reste defavorable
+            unknown = plan_dispatch(MODE_AUTO, None, liveness_age_seconds=None)
+            self.assertFalse(unknown.dispatch, "relance sans age connu (anti-boucle)")
+            self.assertIn("age inconnu", unknown.reason)
+
+            # un maillon de chaine attend un creneau complet puis relance
+            maillon = plan_dispatch(MODE_CHAIN, None, liveness_age_seconds=None)
+            self.assertTrue(maillon.dispatch, "un maillon de chaine doit pouvoir relancer")
+            self.assertEqual(maillon.wait_seconds, PACE_SECONDS)
+
+
 if __name__ == "__main__":
     unittest.main()
