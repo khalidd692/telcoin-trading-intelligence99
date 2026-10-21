@@ -411,18 +411,49 @@ def append_ledger(path: Any, row: dict) -> bool:
         return False
 
 
-def ledger_row(report: Any, decision: dict, state: dict) -> dict:
+def ledger_row(report: Any, decision: dict, state: dict, period_type: str = "historical") -> dict:
     """Construit la ligne du journal prospectif pour une execution.
 
     La ligne ne contient que des valeurs presentes dans le rapport d'analyse ou
     dans l'etat d'alertes : aucune donnee de marche n'y est ajoutee. Le prix
     observe est repris tel quel du rapport ; son absence simply n'est pas
     signalee plutot que devinee.
+
+    Tous les champs du protocole Phase 10 section 2E sont inclus avec des
+    valeurs par défaut "inconnues" quand les données ne sont pas disponibles,
+    afin de permettre le suivi et l'audit sans jamais inventer des observations.
     """
     row = {
+        # Phase 10 section 2E fields (17 fields required)
+        "time_ms": decision.get("at"),
+        # Horodatage ISO conserve en plus du nom de protocole "time_ms" :
+        # "time_ms" suggere un compteur en millisecondes alors que la valeur
+        # est un horodatage ISO. Les deux noms sont publies pour ne rompre
+        # aucun consommateur.
         "at": decision.get("at"),
+        "status": decision.get("alert", {}).get("signal_status") if isinstance(decision.get("alert"), dict) else None,
+        "regime": (report or {}).get("early_reversal", {}).get("regime", {}).get("state") if isinstance(report, dict) else None,
+        "direction": (report or {}).get("early_reversal", {}).get("direction") if isinstance(report, dict) else None,
+        "confidence": (report or {}).get("early_reversal", {}).get("confidence") if isinstance(report, dict) else None,
+        "exploitable": (report or {}).get("early_reversal", {}).get("exploitable") if isinstance(report, dict) else None,
+        "fees_appliquees": decision.get("fees", 0.0057),  # round-trip default 0.57%
+        # Le cout applique est une HYPOTHESE du protocole fige (scenario
+        # S1_slippage_AR), pas une mesure : le champ le dit explicitement.
+        "fees_note": "hypothese du protocole OOS-1.2 (S1_slippage_AR), non mesuree sur ce signal",
+        "period_type": period_type,  # historical / simulated / live
+        "returns_24h_bruts": (report or {}).get("early_reversal", {}).get("returns_24h_bruts") if isinstance(report, dict) else None,
+        "returns_24h_net": (report or {}).get("early_reversal", {}).get("returns_24h_net") if isinstance(report, dict) else None,
+        "ci95": (report or {}).get("early_reversal", {}).get("ci95") if isinstance(report, dict) else None,
+        "pct_up": (report or {}).get("early_reversal", {}).get("pct_up") if isinstance(report, dict) else None,
+        "segment": (report or {}).get("segment") if isinstance(report, dict) else None,
+        "evidence": (report or {}).get("early_reversal", {}).get("evidence") if isinstance(report, dict) else None,
+        "contradictions": (report or {}).get("early_reversal", {}).get("contradictions") if isinstance(report, dict) else None,
+        "reason": (report or {}).get("early_reversal", {}).get("reason") if isinstance(report, dict) else decision.get("reason"),
+        # Additional tracking fields (not in Phase 10 minimal but useful)
         "action": decision.get("action"),
         "symbol": (report or {}).get("symbol") if isinstance(report, dict) else None,
+        # Fraicheur et statut de la collecte : sans ces champs, on ne pourrait
+        # pas distinguer une observation recente d'une observation perimee.
         "report_status": (report or {}).get("status") if isinstance(report, dict) else None,
         "collection_status": (report or {}).get("collection_status") if isinstance(report, dict) else None,
         "snapshot_age_seconds": (report or {}).get("snapshot_age_seconds") if isinstance(report, dict) else None,
@@ -471,6 +502,11 @@ def main(argv: Optional[list] = None) -> int:
                         help="fichier de decision a ecrire")
     parser.add_argument("--ledger", default=None,
                         help="journal prospectif JSONL a completer (une ligne par execution)")
+    parser.add_argument("--period-type", default="live", choices=("live", "simulated", "historical"),
+                        help="nature de l'observation consignee dans le journal. "
+                             "La CLI est utilisee par la CI sur des donnees reellement "
+                             "collectees : 'live' est donc le defaut. 'historical' est "
+                             "reserve aux rejeux de donnees d'historique.")
     parser.add_argument("--summary", action="store_true",
                         help="ecrit un resume dans la sortie standard")
     args = parser.parse_args(argv)
@@ -504,7 +540,7 @@ def main(argv: Optional[list] = None) -> int:
         except OSError:
             pass
     if args.ledger:
-        append_ledger(args.ledger, ledger_row(report, decision, state))
+        append_ledger(args.ledger, ledger_row(report, decision, state, period_type=args.period_type))
     print(format_summary(decision))
     if args.summary:
         print(f"Etat ecrit : {'oui' if written else 'non'} | {state_path}")
