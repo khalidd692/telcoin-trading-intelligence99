@@ -302,56 +302,20 @@ class TestProvenanceDeterministic(unittest.TestCase):
         self.assertTrue(snapshot["collection_status"] == "FALLBACK")
 
     def test_workflow_validation_fails_nonzero_for_missing_or_invalid_artifacts(self):
-        """The publication gate must fail closed for missing or inconsistent provenance artifacts."""
-        script = r'''
-import json
-import os
-import sys
-from pathlib import Path
-from collector.tel_collector import compute_snapshot_fingerprint
+        """The publication gate must fail closed for missing or inconsistent provenance artifacts.
 
-root = Path('.')
-snapshot_path = root / 'site' / 'tel_snapshot.json'
-report_path = root / 'site' / 'report.json'
-analysis_path = root / 'site' / 'agent_analysis.json'
-
-for path in (snapshot_path, report_path, analysis_path):
-    if not path.exists() or path.stat().st_size == 0:
-        raise SystemExit(f'Artifact missing or empty: {path}')
-
-snapshot = json.loads(snapshot_path.read_text(encoding='utf-8'))
-report = json.loads(report_path.read_text(encoding='utf-8'))
-analysis = json.loads(analysis_path.read_text(encoding='utf-8'))
-for name, obj in [('snapshot', snapshot), ('report', report), ('analysis', analysis)]:
-    if not isinstance(obj, dict):
-        raise SystemExit(f'{name} artifact is not an object')
-    if obj.get('collection_id') is None or str(obj.get('collection_id')).strip() == '':
-        raise SystemExit(f'{name} artifact missing or empty collection_id')
-    if obj.get('symbol') != 'TELUSDT':
-        raise SystemExit(f'{name} artifact symbol mismatch')
-    if obj.get('collection_status') not in {'VALID', 'FALLBACK'}:
-        raise SystemExit(f'{name} artifact missing reliable collection_status marker')
-    if obj.get('collection_status') == 'FALLBACK':
-        raise SystemExit(f'{name} artifact is a fallback and cannot be published')
-if snapshot.get('collection_id') != report.get('collection_id'):
-    raise SystemExit('snapshot and report have different collection_id')
-if snapshot.get('collection_id') != analysis.get('collection_id'):
-    raise SystemExit('snapshot and analysis have different collection_id')
-expected_id = os.environ.get('COLLECTION_ID')
-if not expected_id or str(expected_id).strip() == '':
-    raise SystemExit('COLLECTION_ID is empty or missing in workflow environment')
-if snapshot.get('collection_id') != expected_id:
-    raise SystemExit('collection_id mismatch with workflow value')
-if not isinstance(snapshot.get('snapshot_id'), str) or len(snapshot['snapshot_id']) != 64:
-    raise SystemExit('snapshot_id missing or malformed')
-try:
-    expected_hash = compute_snapshot_fingerprint(snapshot.get('sources'), snapshot.get('cross_check'))
-except Exception as exc:
-    raise SystemExit(f'snapshot fingerprint invalid: {exc}')
-if snapshot.get('snapshot_id') != expected_hash:
-    raise SystemExit('snapshot_id does not match the deterministic fingerprint of the snapshot payload')
-print('provenance validation OK for collection', snapshot['collection_id'])
-'''
+        The gate lives in src/publication_gate.py and is executed exactly as the
+        workflow does. This test used to run a COPY of the inline workflow
+        script, from a temporary directory without the repository on the import
+        path: it therefore failed on the import and never exercised the gate.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(repo_root)!r})\n"
+            "from src.publication_gate import main\n"
+            "sys.exit(main(['--root', '.']))\n"
+        )
         base = {
             "schema_version": 1,
             "symbol": "TELUSDT",
@@ -416,6 +380,11 @@ print('provenance validation OK for collection', snapshot['collection_id'])
                     env['COLLECTION_ID'] = '123e4567-e89b-12d3-a456-426614174000'
                     completed = subprocess.run([sys.executable, '-c', script], cwd=root, env=env, capture_output=True, text=True)
                     self.assertNotEqual(completed.returncode, 0, msg=f'{label} should fail closed')
+                    # The rejection must come from the gate itself, not from a
+                    # crash (import error, syntax error) that would make the
+                    # test pass for the wrong reason.
+                    self.assertIn('PUBLICATION REFUSEE', completed.stdout,
+                                  msg=f'{label} must be rejected by the publication gate')
 
 
 @unittest.skipUnless(os.environ.get("TEL_NETWORK_INTEGRATION") == "1", "requires live public-market access")
