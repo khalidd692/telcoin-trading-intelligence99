@@ -82,8 +82,9 @@ class TestDispatchDecision(unittest.TestCase):
         self.assertTrue(should_dispatch(13 * 60))
         self.assertTrue(should_dispatch(4 * 3600))
 
-    def test_unknown_publication_triggers(self):
-        self.assertTrue(should_dispatch(None))
+    def test_unknown_age_does_not_trigger(self):
+        """Sans age connu, on ne relance pas : risque de boucle de publications."""
+        self.assertFalse(should_dispatch(None))
 
     def test_interval_is_configurable(self):
         self.assertFalse(should_dispatch(20 * 60, min_interval_seconds=30 * 60))
@@ -200,6 +201,44 @@ class test_never_fails_the_publication(unittest.TestCase):
         # GITHUB_WORKFLOW contient le nom d'affichage, pas le nom de fichier.
         self.assertNotIn('os.environ.get("GITHUB_WORKFLOW"', source)
 
+
+
+
+class TestAgeFromPublishedArtifact(unittest.TestCase):
+    """L'age de la derniere publication se lit dans l'artefact publie au commit
+    de checkout : cette source fonctionne meme avec un checkout de profondeur 1."""
+
+    def test_age_read_from_the_artifact_of_the_checkout_commit(self):
+        import json
+        import subprocess
+        import tempfile
+        from src.publication_cadence import previous_publication_age_from_artifact
+
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                proc = subprocess.run(["git", "-C", folder, *args], capture_output=True,
+                                      text=True, encoding="utf-8", errors="replace")
+                return proc.stdout or ""
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "t")
+            git("config", "user.email", "t@t")
+            (Path(folder) / "site").mkdir()
+            generated = (datetime.now(timezone.utc) - timedelta(minutes=7)).isoformat()
+            (Path(folder) / "site" / "agent_analysis.json").write_text(
+                json.dumps({"generated_at": generated}), encoding="utf-8")
+            git("add", "site/agent_analysis.json")
+            git("commit", "-qm", "Refresh published TEL/USDT market report [skip ci]")
+
+            age = previous_publication_age_from_artifact(folder, ref="HEAD")
+            self.assertIsNotNone(age)
+            self.assertAlmostEqual(age, 7 * 60, delta=90)
+
+    def test_missing_artifact_gives_no_age(self):
+        import tempfile
+        from src.publication_cadence import previous_publication_age_from_artifact
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertIsNone(previous_publication_age_from_artifact(folder, ref="HEAD"))
 
 
 if __name__ == "__main__":
