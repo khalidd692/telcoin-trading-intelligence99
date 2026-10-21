@@ -296,6 +296,7 @@ jobs:
             --mode "$PUBLICATION_MODE" \
             --published "$PUBLISHED" \
             --min-interval-min 12 --pace-min 13 --stale-min 30 --backoff-min 45 \
+            --checkout-ref "$CHECKOUT_SHA" \
             --ref main --workflow monitor.yml
       - name: Mark failed collection as workflow failure
         if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (steps.collect.outcome != 'success' || steps.detailed_collect.outcome != 'success')

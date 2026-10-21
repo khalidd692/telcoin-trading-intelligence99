@@ -228,6 +228,21 @@ class TestDispatchPlan(unittest.TestCase):
         self.assertTrue(plan.dispatch)
         self.assertEqual(plan.wait_seconds, 0)
 
+    def test_a_one_off_run_uses_the_state_at_its_own_start(self):
+        """Regression production du 21/10 : une execution ponctuelle qui vient
+        de publier verifiait SA publication et croyait la chaine toujours
+        vivante -- elle ne pouvait donc jamais la relancer.
+
+        L'etat de la chaine se mesure au commit de checkout (publication
+        precedente), pas sur l'artefact que l'execution vient d'ecrire.
+        """
+        # l'execution a demarre il y a 40 min (chaine arretee) et vient de publier
+        plan = plan_dispatch(MODE_AUTO, 0, liveness_age_seconds=40 * 60)
+        self.assertTrue(plan.dispatch, "la chaine arretee n'a pas ete relancee")
+        # l'execution a demarre il y a 5 min (chaine vivante) : pas de relance
+        plan = plan_dispatch(MODE_AUTO, 0, liveness_age_seconds=5 * 60)
+        self.assertFalse(plan.dispatch, "une chaine parallele a ete creee")
+
     def test_an_unknown_age_never_relays_a_one_off_run(self):
         """Protection anti-boucle : sans age connu, une execution ponctuelle
         ne relance rien."""

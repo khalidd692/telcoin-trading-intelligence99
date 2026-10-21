@@ -232,6 +232,7 @@ def chain_is_dead(age_seconds: Optional[float],
 def plan_dispatch(mode: str,
                   age_seconds: Optional[float],
                   published: str = PUBLISHED_SUCCESS,
+                  liveness_age_seconds: Optional[float] = None,
                   pace_seconds: int = PACE_SECONDS,
                   stale_seconds: int = CHAIN_STALE_SECONDS,
                   backoff_seconds: int = FAILURE_BACKOFF_SECONDS) -> Plan:
@@ -243,6 +244,14 @@ def plan_dispatch(mode: str,
     - `auto` : l'execution est ponctuelle (cron, push, manuel). Elle ne relance
       que si la chaine est arretee, afin de ne jamais creer une chaine
       parallelle (les chaines s'accumuleraient).
+
+    \ge_seconds\ est l'age de la **derniere** publication (celle que
+    l'execution vient de faire, s'il y a lieu). \liveness_age_seconds\ est
+    l'age de la publication **precedente**, mesuree au commit de checkout :
+    c'est l'etat de la chaine au moment ou l'execution a demarre. Sans cette
+    distinction, une execution ponctuelle qui vient de publier verifierait sa
+    propre publication, croirait la chaine toujours vivante, et ne pourrait
+    donc jamais la relancer.
     """
     if mode == MODE_CHAIN:
         if published == PUBLISHED_FAILURE:
@@ -251,12 +260,13 @@ def plan_dispatch(mode: str,
         wait = seconds_until_next_slot(age_seconds, pace_seconds)
         return Plan(True, wait,
                     f"maillon de chaine : publication suivante au plus tard dans {wait / 60:.1f} min")
-    if age_seconds is None:
+    if liveness_age_seconds is None:
+        liveness_age_seconds = age_seconds
+    if liveness_age_seconds is None:
         return Plan(False, 0, "age inconnu : aucune relance (protection anti-boucle)")
-    if not chain_is_dead(age_seconds, stale_seconds):
+    if not chain_is_dead(liveness_age_seconds, stale_seconds):
         return Plan(False, 0, "chaine vivante : aucune relance")
     return Plan(True, 0, "chaine arretee : relance du chainage")
-
 
 def read_git_entries(root: str = ".", limit: int = 30, ref: str = "HEAD") -> tuple[list[tuple[str, str]], bool]:
     """Lit les derniers commits (horodatage, sujet) de `ref` et indique si la tete est recente.
@@ -328,6 +338,9 @@ def main(argv: Optional[list] = None) -> int:
                         help="age sans publication au-dela duquel la chaine est consideree arretee")
     parser.add_argument("--backoff-min", type=float, default=FAILURE_BACKOFF_SECONDS / 60,
                         help="delai de repli apres un echec de publication, en minutes")
+    parser.add_argument("--checkout-ref", default="",
+                        help="commit de checkout : mesure l'etat de la chaine au demarrage "
+                             "de l'execution (relance d'une chaine arretee)")
     parser.add_argument("--decide", action="store_true",
                         help="decide de la publication (porte) sans relancer quoi que ce soit")
     parser.add_argument("--github-output", default="",
@@ -387,12 +400,24 @@ def _run(args: Any) -> int:
                 print(f"  (ecriture $GITHUB_OUTPUT impossible : {exc})")
         return 0
 
+    # Etat de la chaine AU DEMARRAGE de l'execution : publication precedente,
+    # mesuree au commit de checkout. Sans cela, une execution ponctuelle qui
+    # vient de publier verifierait sa propre publication et croirait la
+    # chaine toujours vivante -- elle ne pourrait jamais la relancer.
+    liveness_age = None
+    if args.checkout_ref:
+        try:
+            liveness_age = previous_publication_age_from_artifact(".", ref=args.checkout_ref)
+        except Exception:  # pragma: no cover - defensive
+            liveness_age = None
     plan = plan_dispatch(args.mode, age, args.published,
+                          liveness_age_seconds=liveness_age,
                           pace_seconds=int(args.pace_min * 60),
                           stale_seconds=int(args.stale_min * 60),
                           backoff_seconds=int(args.backoff_min * 60))
+    live_text = "" if liveness_age is None else f" ; chaine vue au demarrage {liveness_age/60:.1f} min"
     print(f"Auto-relance : derniere publication {age_text} (source : {source}) ; mode {args.mode} "
-          f"-> {'RELANCE' if plan.dispatch else 'inutile'} ; {plan.reason}")
+          f"-> {'RELANCE' if plan.dispatch else 'inutile'}{live_text} ; {plan.reason}")
 
     if not plan.dispatch:
         return 0
