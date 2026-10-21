@@ -87,15 +87,41 @@ def previous_publication_age(entries: list[tuple[str, str]],
     return (now - stamp).total_seconds()
 
 
+def previous_publication_age_from_artifact(root: str = ".", ref: str = "HEAD") -> Optional[float]:
+    """Age de la derniere publication, lu dans l'artefact publie au commit de checkout.
+
+    Le runner fait un checkout de profondeur 1 : l'historique des commits de
+    publication n'y est pas. L'artefact `site/agent_analysis.json` du commit de
+    checkout porte en revanche l'horodatage de la derniere publication. Cette
+    source est donc la plus fiable en exploitation.
+    """
+    proc = subprocess.run(["git", "-C", root, "show", f"{ref}:site/agent_analysis.json"],
+                          capture_output=True, timeout=60)
+    if proc.returncode != 0:
+        return None
+    try:
+        payload = json.loads(proc.stdout.decode("utf-8", "replace"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    stamp = parse_timestamp(payload.get("generated_at"))
+    if stamp is None:
+        return None
+    return (datetime.now(timezone.utc) - stamp).total_seconds()
+
+
 def should_dispatch(age_seconds: Optional[float],
                     min_interval_seconds: int = MIN_INTERVAL_SECONDS) -> bool:
     """Decide s'il faut relancer une publication.
 
-    Une publication recente rend le relancement inutile ; aucune publication
-    connue signifie qu'il faut la lancer.
+    Une publication recente rend le relancement inutile. Un age INCONNU ne
+    declenche rien : relancer sans savoir quand la derniere publication a eu
+    lieu risquerait une boucle de publications. Dans ce cas, la chaine demarre
+    par le cron ou par un declenchement manuel.
     """
     if age_seconds is None:
-        return True
+        return False
     return age_seconds >= min_interval_seconds
 
 
@@ -183,11 +209,17 @@ def _run(args: Any) -> int:
         return 0
 
     now = datetime.now(timezone.utc)
-    age = previous_publication_age(entries, now, head_is_current)
+    # Source prioritaire : l'artefact publie au commit de checkout (fonctionne
+    # meme avec un checkout de profondeur 1). Secours : l'historique git.
+    age = previous_publication_age_from_artifact(".", ref=args.ref)
+    source = "artefact publie au commit de checkout"
+    if age is None:
+        age = previous_publication_age(entries, now, head_is_current)
+        source = "historique des commits de publication"
     interval = int(args.min_interval_min * 60)
     decision = should_dispatch(age, interval)
-    age_text = "aucune publication connue" if age is None else f"{age/60:.1f} min"
-    print(f"Auto-relance : derniere publication {age_text} ; intervalle minimal "
+    age_text = "age inconnu (aucune relance)" if age is None else f"{age/60:.1f} min"
+    print(f"Auto-relance : derniere publication {age_text} (source : {source}) ; intervalle minimal "
           f"{interval/60:.0f} min -> {'RELANCE' if decision else 'inutile'}")
 
     if not decision:
