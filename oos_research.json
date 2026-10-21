@@ -1,0 +1,1521 @@
+{
+  "boundaries": {
+    "NEW": [
+      "2024-03-27T11:45:00+00:00",
+      "2025-07-08T22:00:00+00:00"
+    ],
+    "IS1": [
+      "2025-07-08T22:00:00+00:00",
+      "2025-11-26T23:00:00+00:00"
+    ],
+    "IS2": [
+      "2025-11-26T23:00:00+00:00",
+      "2026-04-15T22:00:00+00:00"
+    ],
+    "OOS": [
+      "2026-04-15T22:00:00+00:00",
+      "2026-10-20T23:30:00.001000+00:00"
+    ]
+  },
+  "round_trip": 0.0057,
+  "random_reference": {
+    "NEW": {
+      "n": 44969,
+      "expectancy": 0.0023112704613848347,
+      "median": -0.006407689227072469,
+      "pct_up": 44.597389312637596
+    },
+    "IS1": {
+      "n": 13540,
+      "expectancy": 0.005490508567271547,
+      "median": -0.0065654353714055015,
+      "pct_up": 44.793205317577545
+    },
+    "IS2": {
+      "n": 13436,
+      "expectancy": -0.004968156110001716,
+      "median": -0.009697013534761665,
+      "pct_up": 39.0890145876749
+    },
+    "OOS": {
+      "n": 17959,
+      "expectancy": -0.0004963642019018125,
+      "median": -0.00744985673352435,
+      "pct_up": 41.527924717411885
+    }
+  },
+  "results": {
+    "ALERTE_PRÉCOCE|NEW": [
+      {
+        "label": "tous",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 1146,
+        "expectancy_24h": -0.0029443172574547065,
+        "ci95_24h": [
+          -0.007182471349177348,
+          0.0011409143056433483
+        ],
+        "median_24h": -0.00020391530695410454,
+        "expectancy_72h": -0.009808183985027018,
+        "expectancy_24h_net": -0.008644317257454707,
+        "pct_up_24h": 49.56369982547993
+      },
+      {
+        "label": "regime neutre (|tendance 30j| < 5 %)",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 82,
+        "expectancy_24h": 0.002898815995594992,
+        "ci95_24h": [
+          -0.008802735682893447,
+          0.015277943894349626
+        ],
+        "median_24h": 0.006758755454310956,
+        "expectancy_72h": 0.00960802968040363,
+        "expectancy_24h_net": -0.002801184004405008,
+        "pct_up_24h": 51.21951219512195
+      },
+      {
+        "label": "regime en baisse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 634,
+        "expectancy_24h": -0.0041584731989240285,
+        "ci95_24h": [
+          -0.009364113543049193,
+          0.0012943578126939292
+        ],
+        "median_24h": -0.0009535001444824883,
+        "expectancy_72h": -0.007455066530951095,
+        "expectancy_24h_net": -0.00985847319892403,
+        "pct_up_24h": 48.89589905362776
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 430,
+        "expectancy_24h": -0.002268415071079184,
+        "ci95_24h": [
+          -0.009900774974977563,
+          0.005381312461236331
+        ],
+        "median_24h": 0.0015034233285286633,
+        "expectancy_72h": -0.016980290930258293,
+        "expectancy_24h_net": -0.007968415071079184,
+        "pct_up_24h": 50.23255813953488
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 1004,
+        "expectancy_24h": -0.0019042159571538775,
+        "ci95_24h": [
+          -0.006216539945440774,
+          0.002305271314187677
+        ],
+        "median_24h": -0.00029052876234751093,
+        "expectancy_72h": -0.009687040461753,
+        "expectancy_24h_net": -0.007604215957153878,
+        "pct_up_24h": 49.601593625498005
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 142,
+        "expectancy_24h": -0.010298272930004229,
+        "ci95_24h": [
+          -0.023819808789583972,
+          0.003558269991142852
+        ],
+        "median_24h": -0.00020391530695410454,
+        "expectancy_72h": -0.010664719881978523,
+        "expectancy_24h_net": -0.015998272930004227,
+        "pct_up_24h": 49.29577464788732
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 584,
+        "expectancy_24h": -0.004289674584818525,
+        "ci95_24h": [
+          -0.010195188645228595,
+          0.001715911961502589
+        ],
+        "median_24h": 0.002590582441328773,
+        "expectancy_72h": -0.012787328097140801,
+        "expectancy_24h_net": -0.009989674584818524,
+        "pct_up_24h": 50.68493150684932
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 562,
+        "expectancy_24h": -0.0015462946966353652,
+        "ci95_24h": [
+          -0.006968409454078355,
+          0.004154477488250653
+        ],
+        "median_24h": -0.0015565046698852883,
+        "expectancy_72h": -0.006712418573150775,
+        "expectancy_24h_net": -0.007246294696635365,
+        "pct_up_24h": 48.39857651245551
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 465,
+        "expectancy_24h": -0.004569594747384191,
+        "ci95_24h": [
+          -0.011882687268713832,
+          0.0022753078945009554
+        ],
+        "median_24h": 0.0036190476190476033,
+        "expectancy_72h": -0.012170736662055684,
+        "expectancy_24h_net": -0.010269594747384191,
+        "pct_up_24h": 52.043010752688176
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 681,
+        "expectancy_24h": -0.0018345462841548386,
+        "ci95_24h": [
+          -0.006886937750537491,
+          0.003280819473139383
+        ],
+        "median_24h": -0.002097902097902073,
+        "expectancy_72h": -0.00819498722317925,
+        "expectancy_24h_net": -0.007534546284154839,
+        "pct_up_24h": 47.87077826725404
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 579,
+        "expectancy_24h": 8.581538525838057e-05,
+        "ci95_24h": [
+          -0.0058761014167626165,
+          0.005867988090935169
+        ],
+        "median_24h": 0.007109004739336409,
+        "expectancy_72h": -0.010673754919096955,
+        "expectancy_24h_net": -0.00561418461474162,
+        "pct_up_24h": 53.8860103626943
+      },
+      {
+        "label": "regime neutre + BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 42,
+        "expectancy_24h": -0.0020960759317641743,
+        "ci95_24h": [
+          -0.01777017176846863,
+          0.013659105006426565
+        ],
+        "median_24h": 0.006758755454310956,
+        "expectancy_72h": -0.002595497652811958,
+        "expectancy_24h_net": -0.007796075931764174,
+        "pct_up_24h": 52.38095238095238
+      },
+      {
+        "label": "regime neutre + BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 40,
+        "expectancy_24h": 0.008143452519322117,
+        "ci95_24h": [
+          -0.008647553161969813,
+          0.024443696787858953
+        ],
+        "median_24h": 0.006217991137092766,
+        "expectancy_72h": 0.022421733380279994,
+        "expectancy_24h_net": 0.002443452519322117,
+        "pct_up_24h": 50.0
+      },
+      {
+        "label": "regime neutre + TEL/BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 46,
+        "expectancy_24h": 0.004927341817025727,
+        "ci95_24h": [
+          -0.010248706010169788,
+          0.020512970324859877
+        ],
+        "median_24h": 0.004223828392186386,
+        "expectancy_72h": 0.0030909135640119494,
+        "expectancy_24h_net": -0.0007726581829742736,
+        "pct_up_24h": 50.0
+      }
+    ],
+    "ALERTE_PRÉCOCE|IS1": [
+      {
+        "label": "tous",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 422,
+        "expectancy_24h": -0.002852465440743949,
+        "ci95_24h": [
+          -0.010548087838097917,
+          0.004359954395473879
+        ],
+        "median_24h": -0.0030638554409552978,
+        "expectancy_72h": 0.0027295953321453707,
+        "expectancy_24h_net": -0.008552465440743949,
+        "pct_up_24h": 46.91943127962085
+      },
+      {
+        "label": "regime neutre (|tendance 30j| < 5 %)",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 33,
+        "expectancy_24h": 0.011766192542118088,
+        "ci95_24h": [
+          -0.0067847058582036195,
+          0.027927013343176675
+        ],
+        "median_24h": 0.002596278667243587,
+        "expectancy_72h": 0.05895949738249599,
+        "expectancy_24h_net": 0.006066192542118088,
+        "pct_up_24h": 51.515151515151516
+      },
+      {
+        "label": "regime en baisse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 237,
+        "expectancy_24h": -0.005670390318934701,
+        "ci95_24h": [
+          -0.016501684289354838,
+          0.0036698398801812714
+        ],
+        "median_24h": -0.0033248081841433306,
+        "expectancy_72h": -0.005623299608026217,
+        "expectancy_24h_net": -0.011370390318934701,
+        "pct_up_24h": 46.413502109704645
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 152,
+        "expectancy_24h": -0.0016325148966863112,
+        "ci95_24h": [
+          -0.013142694375690963,
+          0.009796321854316633
+        ],
+        "median_24h": -0.003136104573558418,
+        "expectancy_72h": 0.0035457093660867904,
+        "expectancy_24h_net": -0.007332514896686311,
+        "pct_up_24h": 46.71052631578947
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 374,
+        "expectancy_24h": -0.006508731748829008,
+        "ci95_24h": [
+          -0.01470534635853286,
+          0.0008195939780840344
+        ],
+        "median_24h": -0.004434936753383397,
+        "expectancy_72h": 0.005592878386576557,
+        "expectancy_24h_net": -0.012208731748829008,
+        "pct_up_24h": 45.72192513368984
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 48,
+        "expectancy_24h": 0.025635942876418804,
+        "ci95_24h": [
+          0.00984423241528259,
+          0.04241278633410569
+        ],
+        "median_24h": 0.02238143094077192,
+        "expectancy_72h": -0.019580151800297624,
+        "expectancy_24h_net": 0.019935942876418804,
+        "pct_up_24h": 56.25
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 231,
+        "expectancy_24h": -0.005965958994888137,
+        "ci95_24h": [
+          -0.013473708029359226,
+          0.0016217269345682865
+        ],
+        "median_24h": -0.0033248081841433306,
+        "expectancy_72h": -0.010921654814981675,
+        "expectancy_24h_net": -0.011665958994888138,
+        "pct_up_24h": 45.45454545454545
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 191,
+        "expectancy_24h": 0.0009130686482995445,
+        "ci95_24h": [
+          -0.01359963832967929,
+          0.01399957638619623
+        ],
+        "median_24h": -0.001534788540245622,
+        "expectancy_72h": 0.019239746033644575,
+        "expectancy_24h_net": -0.0047869313517004556,
+        "pct_up_24h": 48.69109947643979
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 185,
+        "expectancy_24h": -0.0034181110990125895,
+        "ci95_24h": [
+          -0.016035654002463644,
+          0.007028294057753921
+        ],
+        "median_24h": -0.0004683109584764905,
+        "expectancy_72h": -0.009373220136119274,
+        "expectancy_24h_net": -0.00911811109901259,
+        "pct_up_24h": 49.729729729729726
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 237,
+        "expectancy_24h": -0.002410927690618639,
+        "ci95_24h": [
+          -0.011375556285346047,
+          0.006095019328888137
+        ],
+        "median_24h": -0.006924101198402126,
+        "expectancy_72h": 0.012176940739862498,
+        "expectancy_24h_net": -0.008110927690618639,
+        "pct_up_24h": 44.72573839662447
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "IS1",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 247,
+        "expectancy_24h": -0.006851140796603137,
+        "ci95_24h": [
+          -0.01456334547393147,
+          0.0005893021135957016
+        ],
+        "median_24h": -0.004732159757713392,
+        "expectancy_72h": -0.011180815777082624,
+        "expectancy_24h_net": -0.012551140796603136,
+        "pct_up_24h": 42.91497975708502
+      },
+      null,
+      null,
+      null
+    ],
+    "ALERTE_PRÉCOCE|IS2": [
+      {
+        "label": "tous",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 380,
+        "expectancy_24h": -0.0010712699942479204,
+        "ci95_24h": [
+          -0.0065957788450928465,
+          0.004510774493842456
+        ],
+        "median_24h": -0.004015502520616681,
+        "expectancy_72h": 0.009872129259403504,
+        "expectancy_24h_net": -0.006771269994247921,
+        "pct_up_24h": 46.05263157894737
+      },
+      null,
+      {
+        "label": "regime en baisse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 303,
+        "expectancy_24h": -0.0021079187410250155,
+        "ci95_24h": [
+          -0.008397410439049126,
+          0.0044373335071812015
+        ],
+        "median_24h": -0.004327301337529567,
+        "expectancy_72h": 0.006758188637430041,
+        "expectancy_24h_net": -0.007807918741025016,
+        "pct_up_24h": 45.54455445544554
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 50,
+        "expectancy_24h": -0.0015848092571736328,
+        "ci95_24h": [
+          -0.015046412689390595,
+          0.01181691704746625
+        ],
+        "median_24h": -0.009154348544352769,
+        "expectancy_72h": 0.029213033644853698,
+        "expectancy_24h_net": -0.007284809257173633,
+        "pct_up_24h": 44.0
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 323,
+        "expectancy_24h": -0.0012227461884664337,
+        "ci95_24h": [
+          -0.007384848600904,
+          0.004783766124407712
+        ],
+        "median_24h": -0.004327301337529567,
+        "expectancy_72h": 0.011227538299602881,
+        "expectancy_24h_net": -0.006922746188466434,
+        "pct_up_24h": 45.82043343653251
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 57,
+        "expectancy_24h": -0.00021290489367634574,
+        "ci95_24h": [
+          -0.008607654185483656,
+          0.008138589768695133
+        ],
+        "median_24h": -0.002758620689655339,
+        "expectancy_72h": 0.0021914780316070375,
+        "expectancy_24h_net": -0.005912904893676346,
+        "pct_up_24h": 47.36842105263158
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 183,
+        "expectancy_24h": -0.004074197023580929,
+        "ci95_24h": [
+          -0.01069984030216373,
+          0.0023349697267675148
+        ],
+        "median_24h": -0.00842000990589405,
+        "expectancy_72h": 0.006637641346579465,
+        "expectancy_24h_net": -0.009774197023580929,
+        "pct_up_24h": 42.622950819672134
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 197,
+        "expectancy_24h": 0.001718251053305077,
+        "ci95_24h": [
+          -0.007049940371190284,
+          0.010581883833041258
+        ],
+        "median_24h": -0.0005277044854880823,
+        "expectancy_72h": 0.012876755087052232,
+        "expectancy_24h_net": -0.003981748946694923,
+        "pct_up_24h": 49.23857868020305
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 142,
+        "expectancy_24h": 0.0033986680625055945,
+        "ci95_24h": [
+          -0.004386608957271888,
+          0.011407337920341829
+        ],
+        "median_24h": 0.0027326173962760624,
+        "expectancy_72h": 0.019970848493094842,
+        "expectancy_24h_net": -0.0023013319374944057,
+        "pct_up_24h": 51.40845070422535
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 238,
+        "expectancy_24h": -0.0037382078264285895,
+        "ci95_24h": [
+          -0.01078972473635839,
+          0.004042919724314378
+        ],
+        "median_24h": -0.006321148976573737,
+        "expectancy_72h": 0.0038468429939238005,
+        "expectancy_24h_net": -0.00943820782642859,
+        "pct_up_24h": 42.857142857142854
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "IS2",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 181,
+        "expectancy_24h": -0.0034167211773174755,
+        "ci95_24h": [
+          -0.008959318679561104,
+          0.0024510840785706427
+        ],
+        "median_24h": -0.00914745700695217,
+        "expectancy_72h": 0.006006441139968006,
+        "expectancy_24h_net": -0.009116721177317476,
+        "pct_up_24h": 43.0939226519337
+      },
+      null,
+      null,
+      null
+    ],
+    "ALERTE_PRÉCOCE|OOS": [
+      {
+        "label": "tous",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 464,
+        "expectancy_24h": -0.004064724348101165,
+        "ci95_24h": [
+          -0.009229247593052589,
+          0.0008484622503682578
+        ],
+        "median_24h": -0.005717829079244995,
+        "expectancy_72h": -0.0030455239329029984,
+        "expectancy_24h_net": -0.009764724348101165,
+        "pct_up_24h": 42.42424242424242
+      },
+      {
+        "label": "regime neutre (|tendance 30j| < 5 %)",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 87,
+        "expectancy_24h": 0.0029623505502096074,
+        "ci95_24h": [
+          -0.009077808930720396,
+          0.01760517806498684
+        ],
+        "median_24h": -0.003203416978109946,
+        "expectancy_72h": 0.006707884460466192,
+        "expectancy_24h_net": -0.002737649449790393,
+        "pct_up_24h": 43.529411764705884
+      },
+      {
+        "label": "regime en baisse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 203,
+        "expectancy_24h": -0.0033569263211534806,
+        "ci95_24h": [
+          -0.010779421838928263,
+          0.003627022738579486
+        ],
+        "median_24h": -0.005990586221651557,
+        "expectancy_72h": -0.002565073576088416,
+        "expectancy_24h_net": -0.00905692632115348,
+        "pct_up_24h": 42.364532019704434
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 174,
+        "expectancy_24h": -0.008323255186186197,
+        "ci95_24h": [
+          -0.016859416430247843,
+          0.0007987705915949401
+        ],
+        "median_24h": -0.01114309210526321,
+        "expectancy_72h": -0.008292956159158168,
+        "expectancy_24h_net": -0.014023255186186197,
+        "pct_up_24h": 41.95402298850575
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 403,
+        "expectancy_24h": -0.004382791386814592,
+        "ci95_24h": [
+          -0.01015395688129873,
+          0.0014938592561835283
+        ],
+        "median_24h": -0.005048380311316726,
+        "expectancy_72h": -0.0017755378195534498,
+        "expectancy_24h_net": -0.010082791386814591,
+        "pct_up_24h": 43.14214463840399
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 61,
+        "expectancy_24h": -0.00197382463459158,
+        "ci95_24h": [
+          -0.015968839424724032,
+          0.012843215524065262
+        ],
+        "median_24h": -0.010474090407938333,
+        "expectancy_72h": -0.011269204502953354,
+        "expectancy_24h_net": -0.00767382463459158,
+        "pct_up_24h": 37.704918032786885
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 254,
+        "expectancy_24h": -0.004554361290852934,
+        "ci95_24h": [
+          -0.011398707026982969,
+          0.0022097778729888
+        ],
+        "median_24h": -0.003977381359320033,
+        "expectancy_72h": -0.0021621846362096207,
+        "expectancy_24h_net": -0.010254361290852934,
+        "pct_up_24h": 44.04761904761905
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 210,
+        "expectancy_24h": -0.0034771600167990417,
+        "ci95_24h": [
+          -0.011688312752568836,
+          0.004527547309016246
+        ],
+        "median_24h": -0.006991495488064291,
+        "expectancy_72h": -0.004080292823315241,
+        "expectancy_24h_net": -0.009177160016799042,
+        "pct_up_24h": 40.476190476190474
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 190,
+        "expectancy_24h": 0.00012094508599137141,
+        "ci95_24h": [
+          -0.009977816972681538,
+          0.009243586181645592
+        ],
+        "median_24h": -0.00597309495164872,
+        "expectancy_72h": -0.0038696445175129086,
+        "expectancy_24h_net": -0.005579054914008629,
+        "pct_up_24h": 46.8421052631579
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 274,
+        "expectancy_24h": -0.0069885375557393326,
+        "ci95_24h": [
+          -0.012594766985586148,
+          -0.0012216739798388502
+        ],
+        "median_24h": -0.00560992892177571,
+        "expectancy_72h": -0.002456866372467348,
+        "expectancy_24h_net": -0.012688537555739333,
+        "pct_up_24h": 39.338235294117645
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 247,
+        "expectancy_24h": -0.0025793865591253865,
+        "ci95_24h": [
+          -0.009732425694455277,
+          0.0048387009700398866
+        ],
+        "median_24h": -0.0030012004801920848,
+        "expectancy_72h": -0.0031383644702057773,
+        "expectancy_24h_net": -0.008279386559125386,
+        "pct_up_24h": 46.12244897959184
+      },
+      {
+        "label": "regime neutre + BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 57,
+        "expectancy_24h": -0.0029384362841186427,
+        "ci95_24h": [
+          -0.01620118393677675,
+          0.011917550080965589
+        ],
+        "median_24h": -0.0033500837520937625,
+        "expectancy_72h": -0.000760556073933526,
+        "expectancy_24h_net": -0.008638436284118643,
+        "pct_up_24h": 45.45454545454545
+      },
+      {
+        "label": "regime neutre + BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 30,
+        "expectancy_24h": 0.013780459746478065,
+        "ci95_24h": [
+          -0.00668532662794445,
+          0.042785525460867856
+        ],
+        "median_24h": -0.0022910467243490826,
+        "expectancy_72h": 0.019653181386759037,
+        "expectancy_24h_net": 0.008080459746478065,
+        "pct_up_24h": 40.0
+      },
+      {
+        "label": "regime neutre + TEL/BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "ALERTE_PRÉCOCE",
+        "n": 60,
+        "expectancy_24h": -0.0043169600022997245,
+        "ci95_24h": [
+          -0.014097959942161791,
+          0.005768398554079058
+        ],
+        "median_24h": -0.00415301544432885,
+        "expectancy_72h": 0.008594938703040143,
+        "expectancy_24h_net": -0.010016960002299725,
+        "pct_up_24h": 41.37931034482759
+      }
+    ],
+    "CONFIRMATION|NEW": [
+      {
+        "label": "tous",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 964,
+        "expectancy_24h": 0.00016367947989202753,
+        "ci95_24h": [
+          -0.004225264685740202,
+          0.004515853491335228
+        ],
+        "median_24h": 0.0014542058041939997,
+        "expectancy_72h": -0.007297754510732757,
+        "expectancy_24h_net": -0.005536320520107972,
+        "pct_up_24h": 51.03734439834025
+      },
+      {
+        "label": "regime neutre (|tendance 30j| < 5 %)",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 62,
+        "expectancy_24h": 0.006820470702774026,
+        "ci95_24h": [
+          -0.005795131956452585,
+          0.019306938972571335
+        ],
+        "median_24h": 0.012943955979945854,
+        "expectancy_72h": 0.014878572736237534,
+        "expectancy_24h_net": 0.0011204707027740258,
+        "pct_up_24h": 56.45161290322581
+      },
+      {
+        "label": "regime en baisse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 531,
+        "expectancy_24h": -0.002567479739155043,
+        "ci95_24h": [
+          -0.008369905008735952,
+          0.003054987288021527
+        ],
+        "median_24h": 0.0007961783439489776,
+        "expectancy_72h": -0.004435362711684091,
+        "expectancy_24h_net": -0.008267479739155044,
+        "pct_up_24h": 50.47080979284369
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 371,
+        "expectancy_24h": 0.002960241446186665,
+        "ci95_24h": [
+          -0.00421963229734786,
+          0.009925214937631743
+        ],
+        "median_24h": 0.0011494252873563498,
+        "expectancy_72h": -0.015100617946331139,
+        "expectancy_24h_net": -0.002739758553813335,
+        "pct_up_24h": 50.943396226415096
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 840,
+        "expectancy_24h": 0.001857917118073715,
+        "ci95_24h": [
+          -0.0026427297845192494,
+          0.006494312517190097
+        ],
+        "median_24h": 0.0028319911088286603,
+        "expectancy_72h": -0.006166858058244728,
+        "expectancy_24h_net": -0.003842082881926285,
+        "pct_up_24h": 52.26190476190476
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 124,
+        "expectancy_24h": -0.011313414198112952,
+        "ci95_24h": [
+          -0.024614530692445236,
+          0.002046241467622413
+        ],
+        "median_24h": -0.007455438857252689,
+        "expectancy_72h": -0.014958665963071023,
+        "expectancy_24h_net": -0.017013414198112954,
+        "pct_up_24h": 42.74193548387097
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 495,
+        "expectancy_24h": -9.31567908945834e-06,
+        "ci95_24h": [
+          -0.006558820832377542,
+          0.006481620716989515
+        ],
+        "median_24h": 0.0028618152085035276,
+        "expectancy_72h": -0.01011334382414348,
+        "expectancy_24h_net": -0.005709315679089459,
+        "pct_up_24h": 52.121212121212125
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 469,
+        "expectancy_24h": 0.0003462649888383719,
+        "ci95_24h": [
+          -0.0054815505452760795,
+          0.006425643112917443
+        ],
+        "median_24h": -0.0001852537977028775,
+        "expectancy_72h": -0.004326077090395216,
+        "expectancy_24h_net": -0.005353735011161628,
+        "pct_up_24h": 49.89339019189765
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 392,
+        "expectancy_24h": -0.003841144830941841,
+        "ci95_24h": [
+          -0.011179836185894127,
+          0.003472226924472094
+        ],
+        "median_24h": 0.0014745917215492135,
+        "expectancy_72h": -0.007558645672010283,
+        "expectancy_24h_net": -0.009541144830941841,
+        "pct_up_24h": 51.275510204081634
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 572,
+        "expectancy_24h": 0.0029082443922117413,
+        "ci95_24h": [
+          -0.0024139662680121676,
+          0.007838688499562735
+        ],
+        "median_24h": 0.0013306542695428803,
+        "expectancy_72h": -0.007118961966640467,
+        "expectancy_24h_net": -0.002791755607788259,
+        "pct_up_24h": 50.87412587412587
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 471,
+        "expectancy_24h": -9.823035499648052e-05,
+        "ci95_24h": [
+          -0.006560436187038975,
+          0.00577811757047921
+        ],
+        "median_24h": 0.0035629453681709795,
+        "expectancy_72h": -0.01021318660389643,
+        "expectancy_24h_net": -0.005798230354996481,
+        "pct_up_24h": 53.92781316348195
+      },
+      {
+        "label": "regime neutre + BTC 24h en hausse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 32,
+        "expectancy_24h": 0.0096796545558601,
+        "ci95_24h": [
+          -0.008894277134312931,
+          0.02786530554542124
+        ],
+        "median_24h": 0.019473371047151217,
+        "expectancy_72h": 0.02565274026544828,
+        "expectancy_24h_net": 0.0039796545558601,
+        "pct_up_24h": 62.5
+      },
+      {
+        "label": "regime neutre + BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 30,
+        "expectancy_24h": 0.0037706745928155453,
+        "ci95_24h": [
+          -0.01349874230343979,
+          0.021627362980409046
+        ],
+        "median_24h": 0.005323507000548566,
+        "expectancy_72h": 0.0033861273717460663,
+        "expectancy_24h_net": -0.001929325407184455,
+        "pct_up_24h": 50.0
+      },
+      {
+        "label": "regime neutre + TEL/BTC 24h en baisse",
+        "segment": "NEW",
+        "status": "CONFIRMATION",
+        "n": 31,
+        "expectancy_24h": -0.005354029329353233,
+        "ci95_24h": [
+          -0.02118368753977528,
+          0.01096548290147004
+        ],
+        "median_24h": -0.00629396519807482,
+        "expectancy_72h": 0.001106096690153592,
+        "expectancy_24h_net": -0.011054029329353232,
+        "pct_up_24h": 41.935483870967744
+      }
+    ],
+    "CONFIRMATION|IS1": [
+      {
+        "label": "tous",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 366,
+        "expectancy_24h": -0.0006197309341666693,
+        "ci95_24h": [
+          -0.010064193879649498,
+          0.007945096857412478
+        ],
+        "median_24h": -0.0020002797040414508,
+        "expectancy_72h": 0.010726026611057819,
+        "expectancy_24h_net": -0.006319730934166669,
+        "pct_up_24h": 48.63387978142077
+      },
+      null,
+      {
+        "label": "regime en baisse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 213,
+        "expectancy_24h": -3.868888250996403e-05,
+        "ci95_24h": [
+          -0.0148713804017523,
+          0.012232843273570269
+        ],
+        "median_24h": 0.0009170946441672406,
+        "expectancy_72h": 0.00810205486086607,
+        "expectancy_24h_net": -0.005738688882509964,
+        "pct_up_24h": 50.23474178403756
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 129,
+        "expectancy_24h": -0.005247675362212482,
+        "ci95_24h": [
+          -0.016545656458216824,
+          0.0064324762122668746
+        ],
+        "median_24h": -0.010061311114604593,
+        "expectancy_72h": 0.004611170209955387,
+        "expectancy_24h_net": -0.010947675362212483,
+        "pct_up_24h": 43.41085271317829
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 326,
+        "expectancy_24h": -0.003409269662051377,
+        "ci95_24h": [
+          -0.013544240666402444,
+          0.00560939323881338
+        ],
+        "median_24h": -0.004048903228287361,
+        "expectancy_72h": 0.010652143565473143,
+        "expectancy_24h_net": -0.009109269662051377,
+        "pct_up_24h": 47.852760736196316
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 40,
+        "expectancy_24h": 0.022115009698093702,
+        "ci95_24h": [
+          0.005569043723331059,
+          0.03979411880150659
+        ],
+        "median_24h": 0.01674680644356622,
+        "expectancy_72h": 0.01132817343257293,
+        "expectancy_24h_net": 0.016415009698093702,
+        "pct_up_24h": 55.0
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 199,
+        "expectancy_24h": -0.004467147238048637,
+        "ci95_24h": [
+          -0.01505891243743116,
+          0.0052116600322645356
+        ],
+        "median_24h": -0.0025542784163473517,
+        "expectancy_72h": 0.002735426818105579,
+        "expectancy_24h_net": -0.010167147238048638,
+        "pct_up_24h": 47.73869346733668
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 167,
+        "expectancy_24h": 0.003964914841117832,
+        "ci95_24h": [
+          -0.01105382997686079,
+          0.017366397463354426
+        ],
+        "median_24h": -0.0002129471890971322,
+        "expectancy_72h": 0.020247759298467973,
+        "expectancy_24h_net": -0.0017350851588821686,
+        "pct_up_24h": 49.70059880239521
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 147,
+        "expectancy_24h": 0.007594904637871419,
+        "ci95_24h": [
+          -0.0010241852632962539,
+          0.016523012648526812
+        ],
+        "median_24h": 0.007452441655226483,
+        "expectancy_72h": 0.005327258684506625,
+        "expectancy_24h_net": 0.001894904637871419,
+        "pct_up_24h": 55.10204081632653
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 219,
+        "expectancy_24h": -0.006133664400329222,
+        "ci95_24h": [
+          -0.02014953541146236,
+          0.006410322494864076
+        ],
+        "median_24h": -0.009071607797722479,
+        "expectancy_72h": 0.014349857137099029,
+        "expectancy_24h_net": -0.011833664400329222,
+        "pct_up_24h": 44.29223744292238
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "IS1",
+        "status": "CONFIRMATION",
+        "n": 191,
+        "expectancy_24h": -0.0034287876515890683,
+        "ci95_24h": [
+          -0.014687835378782767,
+          0.006442361090907831
+        ],
+        "median_24h": -0.0025542784163473517,
+        "expectancy_72h": -0.0010910697241836268,
+        "expectancy_24h_net": -0.009128787651589068,
+        "pct_up_24h": 48.167539267015705
+      },
+      null,
+      null,
+      null
+    ],
+    "CONFIRMATION|IS2": [
+      {
+        "label": "tous",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 314,
+        "expectancy_24h": 0.005181330701992995,
+        "ci95_24h": [
+          -0.0005888400227490068,
+          0.01109440415622996
+        ],
+        "median_24h": 0.004084527682522869,
+        "expectancy_72h": 0.0070902025449602795,
+        "expectancy_24h_net": -0.0005186692980070056,
+        "pct_up_24h": 53.82165605095541
+      },
+      null,
+      {
+        "label": "regime en baisse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 256,
+        "expectancy_24h": 0.00470368495241867,
+        "ci95_24h": [
+          -0.002072600879689066,
+          0.011540006815705751
+        ],
+        "median_24h": 0.004084527682522869,
+        "expectancy_72h": 0.005664522834980449,
+        "expectancy_24h_net": -0.0009963150475813306,
+        "pct_up_24h": 53.125
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 35,
+        "expectancy_24h": 0.0002794909827950163,
+        "ci95_24h": [
+          -0.014308815512516384,
+          0.014405522948470325
+        ],
+        "median_24h": -0.004010938924339165,
+        "expectancy_72h": 0.005522064325325537,
+        "expectancy_24h_net": -0.0054205090172049835,
+        "pct_up_24h": 45.714285714285715
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 247,
+        "expectancy_24h": 0.0047679551336573065,
+        "ci95_24h": [
+          -0.002300082639121999,
+          0.012315540985743655
+        ],
+        "median_24h": 0.002334630350194694,
+        "expectancy_72h": 0.00898441493448824,
+        "expectancy_24h_net": -0.0009320448663426937,
+        "pct_up_24h": 52.63157894736842
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 67,
+        "expectancy_24h": 0.006705267498693221,
+        "ci95_24h": [
+          -0.002145013701237485,
+          0.015051219444634069
+        ],
+        "median_24h": 0.009167583425009273,
+        "expectancy_72h": 0.00010706134774526041,
+        "expectancy_24h_net": 0.001005267498693221,
+        "pct_up_24h": 58.208955223880594
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 163,
+        "expectancy_24h": 0.004211593279277986,
+        "ci95_24h": [
+          -0.002240046293341086,
+          0.010371700427040819
+        ],
+        "median_24h": 0.005907372400756108,
+        "expectancy_72h": 0.011874180903930212,
+        "expectancy_24h_net": -0.0014884067207220145,
+        "pct_up_24h": 54.60122699386503
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 151,
+        "expectancy_24h": 0.00622813335035423,
+        "ci95_24h": [
+          -0.0036337208016567844,
+          0.016627736779415387
+        ],
+        "median_24h": 0.002631578947368428,
+        "expectancy_72h": 0.001926040475343731,
+        "expectancy_24h_net": 0.0005281333503542301,
+        "pct_up_24h": 52.980132450331126
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 123,
+        "expectancy_24h": 0.008749810074615194,
+        "ci95_24h": [
+          0.0002036570772535404,
+          0.01637032736426617
+        ],
+        "median_24h": 0.017286537454164506,
+        "expectancy_72h": 0.01594386381006203,
+        "expectancy_24h_net": 0.0030498100746151943,
+        "pct_up_24h": 60.97560975609756
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 191,
+        "expectancy_24h": 0.0028833047185766046,
+        "ci95_24h": [
+          -0.004999601646394744,
+          0.01179012343368016
+        ],
+        "median_24h": -0.0004547521600728207,
+        "expectancy_72h": 0.0013886301072245967,
+        "expectancy_24h_net": -0.0028166952814233956,
+        "pct_up_24h": 49.21465968586387
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "IS2",
+        "status": "CONFIRMATION",
+        "n": 152,
+        "expectancy_24h": 0.009288293236306113,
+        "ci95_24h": [
+          0.003492457944312278,
+          0.015534975548061783
+        ],
+        "median_24h": 0.011069131397067226,
+        "expectancy_72h": 0.01438774331511677,
+        "expectancy_24h_net": 0.003588293236306113,
+        "pct_up_24h": 59.21052631578947
+      },
+      null,
+      null,
+      null
+    ],
+    "CONFIRMATION|OOS": [
+      {
+        "label": "tous",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 457,
+        "expectancy_24h": -0.0032353325383208047,
+        "ci95_24h": [
+          -0.007867467416383257,
+          0.0021183902579332806
+        ],
+        "median_24h": -0.006813733668961415,
+        "expectancy_72h": -0.003574505458388703,
+        "expectancy_24h_net": -0.008935332538320805,
+        "pct_up_24h": 44.95614035087719
+      },
+      {
+        "label": "regime neutre (|tendance 30j| < 5 %)",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 78,
+        "expectancy_24h": 0.007917644648876026,
+        "ci95_24h": [
+          -0.0052950928124340145,
+          0.024329644749896993
+        ],
+        "median_24h": 0.0,
+        "expectancy_72h": 0.006411565263075265,
+        "expectancy_24h_net": 0.0022176446488760253,
+        "pct_up_24h": 49.35064935064935
+      },
+      {
+        "label": "regime en baisse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 204,
+        "expectancy_24h": -0.005841605871228638,
+        "ci95_24h": [
+          -0.011769867232095029,
+          -0.0002983979076865877
+        ],
+        "median_24h": -0.007040582028327391,
+        "expectancy_72h": -0.004590112395925924,
+        "expectancy_24h_net": -0.011541605871228638,
+        "pct_up_24h": 44.6078431372549
+      },
+      {
+        "label": "regime en hausse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 175,
+        "expectancy_24h": -0.005104472444040564,
+        "ci95_24h": [
+          -0.01319850096758432,
+          0.0036979618185064705
+        ],
+        "median_24h": -0.011337868480725532,
+        "expectancy_72h": -0.006742759779161828,
+        "expectancy_24h_net": -0.010804472444040564,
+        "pct_up_24h": 43.42857142857143
+      },
+      {
+        "label": "mouvement anterieur oppose (vrai retournement)",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 397,
+        "expectancy_24h": -0.0021161782851928193,
+        "ci95_24h": [
+          -0.007221624864998061,
+          0.003419057230369924
+        ],
+        "median_24h": -0.005473521697717117,
+        "expectancy_72h": -0.0033826310636915053,
+        "expectancy_24h_net": -0.007816178285192819,
+        "pct_up_24h": 45.707070707070706
+      },
+      {
+        "label": "mouvement anterieur dans le sens (continuation)",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 60,
+        "expectancy_24h": -0.01062175060896551,
+        "ci95_24h": [
+          -0.02110054696778849,
+          -0.0006251685566746629
+        ],
+        "median_24h": -0.01531213191990576,
+        "expectancy_72h": -0.004821689023920487,
+        "expectancy_24h_net": -0.01632175060896551,
+        "pct_up_24h": 40.0
+      },
+      {
+        "label": "BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 240,
+        "expectancy_24h": -0.0033549766823186924,
+        "ci95_24h": [
+          -0.010578790735156112,
+          0.0036704295726531933
+        ],
+        "median_24h": -0.0031250000000000756,
+        "expectancy_72h": -0.0005890091408543009,
+        "expectancy_24h_net": -0.009054976682318692,
+        "pct_up_24h": 46.86192468619247
+      },
+      {
+        "label": "BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 217,
+        "expectancy_24h": -0.0031035585732724406,
+        "ci95_24h": [
+          -0.009772108827471915,
+          0.0030375264473010296
+        ],
+        "median_24h": -0.009675858732462322,
+        "expectancy_72h": -0.006866921958099539,
+        "expectancy_24h_net": -0.008803558573272441,
+        "pct_up_24h": 42.857142857142854
+      },
+      {
+        "label": "TEL/BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 180,
+        "expectancy_24h": 0.004622243397978578,
+        "ci95_24h": [
+          -0.004097896722029788,
+          0.014771151258806887
+        ],
+        "median_24h": 0.0004854368932038426,
+        "expectancy_72h": 0.005805432531809855,
+        "expectancy_24h_net": -0.0010777566020214223,
+        "pct_up_24h": 50.0
+      },
+      {
+        "label": "TEL/BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 277,
+        "expectancy_24h": -0.008359838583733447,
+        "ci95_24h": [
+          -0.013669719721148051,
+          -0.0031995512900987763
+        ],
+        "median_24h": -0.008888172071324769,
+        "expectancy_72h": -0.009827797451854407,
+        "expectancy_24h_net": -0.014059838583733447,
+        "pct_up_24h": 41.666666666666664
+      },
+      {
+        "label": "ETH 24h en hausse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 242,
+        "expectancy_24h": -0.002973877418838462,
+        "ci95_24h": [
+          -0.00980395989369273,
+          0.004375875229883667
+        ],
+        "median_24h": -0.0029673590504451113,
+        "expectancy_72h": 4.701261298106849e-05,
+        "expectancy_24h_net": -0.008673877418838462,
+        "pct_up_24h": 46.88796680497925
+      },
+      {
+        "label": "regime neutre + BTC 24h en hausse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 49,
+        "expectancy_24h": 0.010408646008268846,
+        "ci95_24h": [
+          -0.0096133241202722,
+          0.034323661300506264
+        ],
+        "median_24h": -0.0019236267315577585,
+        "expectancy_72h": 0.014375256640207654,
+        "expectancy_24h_net": 0.004708646008268846,
+        "pct_up_24h": 45.833333333333336
+      },
+      null,
+      {
+        "label": "regime neutre + TEL/BTC 24h en baisse",
+        "segment": "OOS",
+        "status": "CONFIRMATION",
+        "n": 52,
+        "expectancy_24h": -2.1475649743329317e-05,
+        "ci95_24h": [
+          -0.010051086796645986,
+          0.010525063191158002
+        ],
+        "median_24h": -0.0008798944126704055,
+        "expectancy_72h": 0.006939644623261286,
+        "expectancy_24h_net": -0.00572147564974333,
+        "pct_up_24h": 47.05882352941177
+      }
+    ]
+  }
+}
