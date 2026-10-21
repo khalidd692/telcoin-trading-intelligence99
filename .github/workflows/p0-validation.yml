@@ -38,3 +38,7 @@ jobs:
         run: node tests/test_dashboard.js
       - name: Test realtime fail-closed protocol
         run: node tests/test_realtime.js
+      - name: Verify operational states and project invariants
+        run: |
+          python scripts/verify_states.py
+          python scripts/verify_project.py

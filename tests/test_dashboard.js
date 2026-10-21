@@ -258,6 +258,28 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   // les observations restent visibles malgre l'absence d'exploitabilite
   assert.match(trendCase.elements.get("agent-reversal-evidence").innerHTML, /macd_histogram_turn/);
 
+  // cas : INVALIDATION (le scenario est contredit) -> jamais exploitable, jamais vert
+  const invalidated = agentPayload(new Date(start - 10_000).toISOString());
+  invalidated.early_reversal.signal_status = "INVALIDATION";
+  invalidated.early_reversal.exploitable = false;
+  invalidated.early_reversal.exploitable_reason =
+    "Scenario invalide : l'ancre structurelle est rompue.";
+  invalidated.early_reversal.setup = null;
+  const invalidCase = await boot(new Date(start - 10_000).toISOString(), start, {
+    byUrl: {
+      "agent_analysis.json": invalidated,
+      "tel_snapshot.json": null,
+      "report.json": report(new Date(start - 10_000).toISOString())
+    }
+  });
+  assert.match(invalidCase.elements.get("agent-reversal-status").textContent, /INVALIDATION/);
+  assert.doesNotMatch(invalidCase.elements.get("agent-reversal-status").className, /pass/);
+  const invalidQuality = invalidCase.elements.get("agent-reversal-quality");
+  assert.match(invalidQuality.innerHTML, /Signal non exploitable/);
+  assert.match(invalidCase.elements.get("agent-reversal-detail").innerHTML, /ancre structurelle est rompue/);
+  // une invalidation n'affiche ni ancre ni objectif : le scenario est contredit
+  assert.doesNotMatch(invalidCase.elements.get("agent-reversal-detail").innerHTML, /Ancre structurelle/);
+
   // cas : rapport d'une version d'agent anterieure (ni regime ni exploitable)
   const legacy = agentPayload(new Date(start - 10_000).toISOString());
   delete legacy.early_reversal.regime;
