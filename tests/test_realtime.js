@@ -133,5 +133,66 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
   assert.equal(new URL(FakeSocket.instances[1].url).searchParams.get("venue"), "kucoin");
   assert.equal(relayFetches, 0, "relay mode must not fetch KuCoin token from the browser");
   relayController.stop();
+
+  // Panneau visible : des flux frais ne suffisent pas sans snapshot verifie.
+  FakeSocket.instances = [];
+  const gateRoot = fakeEnvironment(FakeSocket);
+  const gateController = rt.mount(gateRoot);
+  await Promise.resolve(); await Promise.resolve();
+  const gateMexc = FakeSocket.instances[0], gateKucoin = FakeSocket.instances[1];
+  gateMexc.open(); gateKucoin.open();
+  gateKucoin.message(JSON.stringify({ type: "welcome" }));
+  const freshAt = Date.now();
+  gateMexc.message(deal("0.00123", freshAt));
+  gateMexc.message(book("0.001229", "0.001231", freshAt));
+  gateKucoin.message(JSON.stringify({
+    type: "message",
+    topic: "/market/ticker:TEL-USDT",
+    data: {
+      sequence: "42",
+      price: "0.001231",
+      bestBid: "0.001230",
+      bestAsk: "0.001232",
+      Time: freshAt
+    }
+  }));
+  gateRoot.telcoinReportIsFresh = true;
+  gateRoot.telcoinReportStatus = "SURVEILLER";
+  gateRoot.telcoinReportChecksPass = true;
+  gateRoot.telcoinSnapshotQuality = {
+    verified: false,
+    state: "INDISPONIBLE",
+    reasons: ["snapshot indisponible"],
+    confirmation: null
+  };
+  rt.refresh();
+  assert.match(gateRoot.elements["realtime-status"].textContent, /ATTENDRE/);
+  assert.doesNotMatch(gateRoot.elements["realtime-status"].className, /ok/);
+  assert.match(gateRoot.elements["main-status"].textContent, /ATTENDRE/);
+  assert.doesNotMatch(gateRoot.elements["main-status"].className, /ok/);
+  assert.match(gateRoot.elements["header-state"].textContent, /ATTENDRE/);
+  assert.match(gateRoot.elements["wait-reasons"].textContent, /snapshot/i);
+  assert.match(gateRoot.elements["rt-mexc-state"].textContent, /TICK FRAIS/);
+  assert.match(gateRoot.elements["rt-mexc-state"].className, /pass/);
+  assert.match(gateRoot.elements["rt-kucoin-state"].textContent, /TICK FRAIS/);
+  assert.match(gateRoot.elements["rt-kucoin-state"].className, /pass/);
+
+  gateRoot.telcoinSnapshotQuality = {
+    verified: true,
+    state: "VÉRIFIÉE",
+    reasons: [],
+    confirmation: "OUI"
+  };
+  rt.refresh();
+  assert.match(gateRoot.elements["realtime-status"].textContent, /SURVEILLER/);
+  assert.match(gateRoot.elements["realtime-status"].className, /ok/);
+  assert.match(gateRoot.elements["main-status"].textContent, /SURVEILLER/);
+  assert.match(gateRoot.elements["main-status"].className, /ok/);
+  assert.match(
+    gateRoot.elements["header-state"].textContent,
+    /SURVEILLER|contrôles passés/,
+  );
+  gateController.stop();
+
   process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });

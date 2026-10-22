@@ -246,6 +246,23 @@ async function boot(generatedAt, initialNow, payloadOverride) {
     }
   });
 
+  function assertAgentContextBlocked(screen, reason) {
+    assert.match(screen.elements.get("main-status").innerHTML, /ATTENDRE/);
+    assert.doesNotMatch(screen.elements.get("main-status").className, /ok/);
+    assert.match(
+      screen.elements.get("agent-status").textContent,
+      /ATTENDRE · contexte non vérifié/,
+    );
+    assert.doesNotMatch(screen.elements.get("agent-status").className, /pass/);
+    assert.match(screen.elements.get("agent-meta").textContent, /contexte non vérifié/);
+    assert.match(screen.elements.get("agent-meta").textContent, reason);
+    assert.match(screen.elements.get("agent-flags").textContent, /Contexte non vérifié/);
+    assert.doesNotMatch(
+      screen.elements.get("agent-reversal-status").className,
+      /pass/,
+    );
+  }
+
   const agent = await boot(new Date(start - 10_000).toISOString(), start, {
     byUrl: {
       "agent_analysis.json": agentPayload(new Date(start - 10_000).toISOString()),
@@ -288,16 +305,111 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   const okCase = await boot(new Date(start - 10_000).toISOString(), start, {
     byUrl: {
       "agent_analysis.json": confirmOk,
-      "tel_snapshot.json": null,
+      "tel_snapshot.json": snapshot(new Date(start - 10_000).toISOString()),
       "report.json": report(new Date(start - 10_000).toISOString())
     }
   });
   const okQuality = okCase.elements.get("agent-reversal-quality");
+  assert.match(okCase.elements.get("agent-status").textContent, /SURVEILLER/);
+  assert.match(okCase.elements.get("agent-status").className, /pass/);
   assert.match(okCase.elements.get("agent-reversal-status").textContent, /CONFIRMATION/);
   assert.match(okQuality.innerHTML, /Signal exploitable/);
   assert.match(okQuality.innerHTML, /quality-chip ok/);
   assert.match(okCase.elements.get("agent-reversal-status").className, /pass/);
   assert.match(okCase.elements.get("agent-reversal-detail").innerHTML, /en regime neutre/);
+
+  // --- Contexte agent : un rapport frais ET un snapshot verifie sont requis ---
+  const agentContextAt = new Date(start - 10_000).toISOString();
+  const agentFresh = agentPayload(agentContextAt);
+
+  const agentMissingSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": null,
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assertAgentContextBlocked(agentMissingSnapshot, /snapshot temps réel indisponible/);
+
+  const agentStaleSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(new Date(start - 31 * 60 * 1000).toISOString()),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assertAgentContextBlocked(agentStaleSnapshot, /snapshot temps réel périmée/);
+
+  const agentPartialSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(agentContextAt, value => {
+        value.sources.mexc.status.book = { verdict: "PÉRIMÉ", reason: "âge 13.3s" };
+        value.cross_check.both_books_usable = false;
+        value.cross_check.independent_confirmation = "NON ÉTABLIE";
+      }),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(agentPartialSnapshot.elements.get("snapshot-quality-status").textContent, /PARTIELLE/);
+  assertAgentContextBlocked(agentPartialSnapshot, /snapshot temps réel partielle/);
+
+  const agentInvalidSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": { schema_version: 2, symbol: "TELUSDT" },
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(agentInvalidSnapshot.elements.get("snapshot-quality-status").textContent, /INCOHÉRENTE/);
+  assertAgentContextBlocked(agentInvalidSnapshot, /snapshot temps réel incohérente/);
+
+  for (const reportPayload of [
+    null,
+    { schema_version: 2 },
+    report(new Date(start - 31 * 60 * 1000).toISOString())
+  ]) {
+    const blockedReport = await boot(agentContextAt, start, {
+      byUrl: {
+        "report.json": reportPayload,
+        "tel_snapshot.json": snapshot(agentContextAt),
+        "agent_analysis.json": agentFresh
+      }
+    });
+    assertAgentContextBlocked(blockedReport, /rapport périodique non validé/);
+  }
+
+  // Une CONFIRMATION exploitable ne suffit pas : sans snapshot, le badge de
+  // retournement ne doit pas etre vert.
+  const exploitableMissingSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": null,
+      "agent_analysis.json": confirmOk
+    }
+  });
+  assertAgentContextBlocked(exploitableMissingSnapshot, /snapshot temps réel indisponible/);
+  assert.match(
+    exploitableMissingSnapshot.elements.get("agent-reversal-detail").innerHTML,
+    /Contexte non vérifié/,
+  );
+
+  // Champs de carnets absents : etat partiel, jamais vert global.
+  const missingBooks = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(agentContextAt, value => {
+        delete value.cross_check.both_books_usable;
+        delete value.sources.mexc.status.book;
+      }),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(missingBooks.elements.get("snapshot-quality-status").textContent, /PARTIELLE/);
+  assert.doesNotMatch(missingBooks.elements.get("snapshot-quality-status").className, /ok/);
+  assert.match(missingBooks.elements.get("snapshot-both-books-state").textContent, /INDISPONIBLE/);
+  assert.match(missingBooks.elements.get("snapshot-mexc-book-state").textContent, /INDISPONIBLE/);
+  assertAgentContextBlocked(missingBooks, /snapshot temps réel partielle/);
 
   // cas : CONFIRMATION contre une tendance -> exploitable = false, badge NON vert
   const confirmTrend = agentPayload(new Date(start - 10_000).toISOString());
@@ -440,8 +552,22 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   assert.match(persistent.elements.get("report-error").textContent, /provenance incohérente|collection_id/);
   assert.equal(persistent.elements.get("last-price").textContent, "—");
   assert.match(persistent.elements.get("report-age").textContent, /NON VALIDÉ/);
+  assert.doesNotMatch(persistent.elements.get("main-status").className, /ok/);
   assert.match(persistent.elements.get("agent-status").textContent, /ATTENDRE/);
+  assert.doesNotMatch(persistent.elements.get("agent-status").className, /pass/);
   assert.match(persistent.elements.get("agent-meta").textContent, /collection_id incohérent/);
+  assert.match(
+    persistent.elements.get("snapshot-quality-status").textContent,
+    /INDISPONIBLE/,
+  );
+  assert.match(
+    persistent.elements.get("snapshot-confirmation-state").textContent,
+    /INDISPONIBLE/,
+  );
+  assert.doesNotMatch(
+    persistent.elements.get("snapshot-quality-status").className,
+    /ok/,
+  );
   assert.equal(persistent.fetchCount, 9, "three coordinated attempts are made before fail-closed");
 
   // A page that was already stuck on a mixed collection must be able to

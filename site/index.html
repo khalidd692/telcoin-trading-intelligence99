@@ -1985,6 +1985,46 @@
                 " " +
                 flags.textContent;
             renderReversal(d);
+            // L'analyse de l'agent reste informative, mais elle ne peut pas
+            // afficher un statut vert si le contexte indispensable n'est pas
+            // verifie : rapport frais et snapshot qualite VÉRIFIÉE.
+            var snapshotQuality = window.telcoinSnapshotQuality;
+            var contextVerified =
+              window.telcoinReportIsFresh === true &&
+              snapshotQuality &&
+              snapshotQuality.verified === true;
+            if (!contextVerified) {
+              var contextReason =
+                window.telcoinReportIsFresh !== true
+                  ? "rapport périodique non validé"
+                  : "snapshot temps réel " +
+                    (snapshotQuality && snapshotQuality.state
+                      ? snapshotQuality.state.toLowerCase()
+                      : "indisponible");
+              meta.textContent =
+                "Analyse indépendante : " +
+                d.status +
+                " · contexte non vérifié (" +
+                contextReason +
+                ") · " +
+                meta.textContent;
+              state.textContent = "ATTENDRE · contexte non vérifié";
+              state.className = "agent-state";
+              flags.textContent =
+                "Contexte non vérifié : l’analyse reste informative, sans conclusion globale. " +
+                flags.textContent.replace(
+                  "dans les données validées",
+                  "dans les données de l’analyse",
+                );
+              if (revStatus.className.indexOf("pass") !== -1) {
+                revStatus.className = "agent-state";
+              }
+              if (revDetail.innerHTML.indexOf("Contexte non vérifié") === -1) {
+                revDetail.innerHTML =
+                  '<span class="agent-reversal-warn">Contexte non vérifié : ce statut de retournement n’est pas validé par les carnets.</span><br />' +
+                  revDetail.innerHTML;
+              }
+            }
           } catch (err) {
             state.textContent = "ATTENDRE · rapport absent/périmé";
             state.className = "agent-state";
