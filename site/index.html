@@ -1566,10 +1566,11 @@
           else if (signal !== "SURVEILLER" || window.telcoinReportChecksPass !== true)
             blocking = "un contrôle du rapport impose l’attente";
           var safe = function (value) {
-            return String(value === null || value === undefined ? "" : value).replace(
-              /[&<>"]/g,
-              "",
-            );
+            return String(value === null || value === undefined ? "" : value)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;");
           };
           $("main-status").className = "status " + (ok ? "ok" : "");
           $("main-status").innerHTML =
@@ -1589,6 +1590,10 @@
             : "Rapport périodique · ATTENDRE";
           $("header-dot").style.background = ok ? "var(--green)" : "var(--amber)";
         }
+        // Le module temps reel rafraichit son panneau chaque seconde. Sans ce
+        // point d'entree, il ecraserait la banniere periodique composee avec
+        // un message generique et ferait perdre les axes donnees/confirmation.
+        window.telcoinRenderPeriodicStatus = renderPeriodicStatus;
         async function loadSnapshot(prefetched) {
           var quality = null;
           try {

@@ -192,6 +192,25 @@ FakeSocket.prototype.close = function () { this.readyState = 3; if (this.onclose
     gateRoot.elements["header-state"].textContent,
     /SURVEILLER|contrôles passés/,
   );
+
+  // La banniere periodique composee doit rester proprietaire du statut
+  // principal : le tick live ne doit pas l'ecraser avec un message generique.
+  let periodicCalls = 0;
+  gateRoot.telcoinRenderPeriodicStatus = function () {
+    periodicCalls++;
+    gateRoot.elements["main-status"].textContent = "PERIODIQUE · axes composes";
+    gateRoot.elements["main-status"].className = "status";
+    gateRoot.elements["header-state"].textContent = "Rapport periodique";
+  };
+  rt.refresh();
+  assert.equal(periodicCalls, 1, "le rendu live doit deleguer la banniere au statut periodique");
+  assert.match(gateRoot.elements["main-status"].textContent, /PERIODIQUE/);
+  assert.match(gateRoot.elements["main-status"].textContent, /axes composes/);
+
+  gateRoot.telcoinReportIsFresh = false;
+  rt.refresh();
+  assert.equal(periodicCalls, 1, "sans rapport frais, le live garde la main");
+  assert.match(gateRoot.elements["main-status"].textContent, /ATTENDRE/);
   gateController.stop();
 
   process.stdout.write("Real-time stream protocol/fail-closed tests: OK\n");

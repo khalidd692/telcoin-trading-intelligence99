@@ -339,6 +339,11 @@ async function boot(generatedAt, initialNow, payloadOverride) {
     }
   });
   assertAgentContextBlocked(agentStaleSnapshot, /snapshot temps réel périmée/);
+  assert.match(
+    agentStaleSnapshot.elements.get("main-status").innerHTML,
+    /&gt; 30 min/,
+    "le seuil de péremption doit rester lisible, pas être supprimé",
+  );
 
   const agentPartialSnapshot = await boot(agentContextAt, start, {
     byUrl: {

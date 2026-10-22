@@ -488,17 +488,25 @@
         ? "Les sources publiques et le rapport d’indicateurs sont frais. Ce statut n’est pas un signal de trading."
         : r.reasons.join(" · ");
       var signal = r.reportStatus || "ATTENDRE";
-      el("main-status").textContent = r.ok
-        ? "● SURVEILLER · flux live, rapport et snapshot validés"
-        : "● ATTENDRE · " +
-          (r.reasons[0] || "contrôles incomplets") +
-          " — signal de marché : " +
-          signal;
-      el("main-status").className = "status " + (r.ok ? "ok" : "");
-      el("header-state").textContent = r.ok
-        ? "Flux publics en direct · contrôles passés"
-        : "Flux publics · ATTENDRE";
-      el("header-dot").style.background = r.ok ? "var(--green)" : "var(--amber)";
+      // La banniere principale est composee par le rapport periodique des
+      // qu'il est frais. Le module live ne doit pas l'ecraser chaque seconde
+      // avec un message generique qui perd les axes donnees/confirmation.
+      var periodicOwnsStatus =
+        root.telcoinReportIsFresh === true &&
+        typeof root.telcoinRenderPeriodicStatus === "function";
+      if (!periodicOwnsStatus) {
+        el("main-status").textContent = r.ok
+          ? "● SURVEILLER · flux live, rapport et snapshot validés"
+          : "● ATTENDRE · " +
+            (r.reasons[0] || "contrôles incomplets") +
+            " — signal de marché : " +
+            signal;
+        el("main-status").className = "status " + (r.ok ? "ok" : "");
+        el("header-state").textContent = r.ok
+          ? "Flux publics en direct · contrôles passés"
+          : "Flux publics · ATTENDRE";
+        el("header-dot").style.background = r.ok ? "var(--green)" : "var(--amber)";
+      }
       var mf = freshTrade(s.mexc, t),
         mb = freshBook(s.mexc, t),
         kf = freshTrade(s.kucoin, t);
@@ -550,6 +558,7 @@
         ].forEach(function (id) {
           if (el(id)) el(id).textContent = "—";
         });
+      if (periodicOwnsStatus) root.telcoinRenderPeriodicStatus();
     }
     refreshMounted = render;
     function delta(n, v) {
