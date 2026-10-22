@@ -32,6 +32,8 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   let now = initialNow;
   let fetchCount = 0;
   const timers = [];
+  const requests = [];
+  const perUrlCounts = new Map();
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) {
@@ -55,15 +57,25 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   const payload = payloadOverride || report(generatedAt);
   const context = {
     document: { getElementById: element },
-    window: { setInterval(callback, delay) { timers.push({ callback, delay }); return timers.length; } },
+    window: {
+      setInterval(callback, delay) { timers.push({ callback, delay, kind: "interval" }); return timers.length; },
+      setTimeout(callback, delay) { timers.push({ callback, delay, kind: "timeout" }); callback(); return timers.length; }
+    },
     fetch: async (url) => {
       fetchCount += 1;
       const key = String(url || "");
+      requests.push({ url: key, at: now });
       let served = payload;
       if (payload && payload.byUrl) {
         for (const fragment of Object.keys(payload.byUrl)) {
           if (key.indexOf(fragment) !== -1) {
-            served = payload.byUrl[fragment];
+            let candidate = payload.byUrl[fragment];
+            if (Array.isArray(candidate)) {
+              const index = perUrlCounts.get(fragment) || 0;
+              perUrlCounts.set(fragment, index + 1);
+              candidate = candidate[Math.min(index, candidate.length - 1)];
+            }
+            served = candidate;
             break;
           }
         }
@@ -77,9 +89,16 @@ async function boot(generatedAt, initialNow, payloadOverride) {
     console
   };
   vm.runInNewContext(script, context);
-  await new Promise(resolve => setImmediate(resolve));
+  async function settle() {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+      const refresh = elements.get("refresh");
+      if (refresh && refresh.disabled === false && elements.get("main-status").innerHTML) return;
+    }
+  }
+  await settle();
   return {
-    elements, timers,
+    elements, timers, requests, settle,
     get fetchCount() { return fetchCount; },
     advance(ms) { now += ms; },
     tickAge() { timers.find(timer => timer.delay === 1000).callback(); }
@@ -321,7 +340,88 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   assert.match(broken.elements.get("agent-reversal-status").textContent, /ATTENDRE/);
   assert.match(broken.elements.get("agent-reversal-detail").textContent, /indisponible/);
 
+  // ------------------------------------------------------------------
+  // Provenance: one coordinated refresh cycle, transient mismatch retried
+  // ------------------------------------------------------------------
+  const cidA = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+  const cidB = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+  const reportA = report(new Date(start - 10_000).toISOString());
+  const reportB = report(new Date(start - 10_000).toISOString());
+  reportA.collection_id = cidA;
+  reportB.collection_id = cidB;
+  const snapshotB = {
+    schema_version: 1,
+    symbol: "TELUSDT",
+    collection_id: cidB,
+    generated_at: new Date(start - 10_000).toISOString()
+  };
+  const agentA = agentPayload(new Date(start - 10_000).toISOString());
+  const agentB = agentPayload(new Date(start - 10_000).toISOString());
+  agentA.collection_id = cidA;
+  agentB.collection_id = cidB;
+
+  const recovery = await boot(new Date(start - 10_000).toISOString(), start, {
+    byUrl: {
+      "report.json": [reportA, reportB],
+      "tel_snapshot.json": [snapshotB, snapshotB],
+      "agent_analysis.json": [agentB, agentB]
+    }
+  });
+  assert.match(recovery.elements.get("main-status").innerHTML, /SURVEILLER/);
+  assert.notEqual(recovery.elements.get("last-price").textContent, "—");
+  assert.match(recovery.elements.get("agent-status").textContent, /SURVEILLER/);
+  assert.doesNotMatch(recovery.elements.get("report-error").textContent, /collection_id/);
+  assert.equal(
+    recovery.elements.get("report-error").textContent.includes("provenance"),
+    false,
+    "a transient mixed publication must recover, not stay rejected"
+  );
+  assert.ok(recovery.fetchCount >= 6, "a mixed publication must trigger a coordinated retry");
+  assert.equal(
+    recovery.timers.filter(timer => timer.kind === "interval" && timer.delay === 60_000).length,
+    1,
+    "there must be one artifact refresh coordinator, not three independent pollers"
+  );
+  assert.equal(recovery.requests.length, 6);
+  const firstCycleTokens = recovery.requests.slice(0, 3).map(request =>
+    new URL(request.url, "https://dashboard.test").searchParams.get("t")
+  );
+  assert.equal(new Set(firstCycleTokens).size, 1, "one cycle must use one cache-busting token");
+
+  const persistent = await boot(new Date(start - 10_000).toISOString(), start, {
+    byUrl: {
+      "report.json": [reportA, reportA, reportA],
+      "tel_snapshot.json": [snapshotB, snapshotB, snapshotB],
+      "agent_analysis.json": [agentA, agentA, agentA]
+    }
+  });
+  assert.match(persistent.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(persistent.elements.get("report-error").textContent, /provenance incohérente|collection_id/);
+  assert.equal(persistent.elements.get("last-price").textContent, "—");
+  assert.match(persistent.elements.get("report-age").textContent, /NON VALIDÉ/);
+  assert.match(persistent.elements.get("agent-status").textContent, /ATTENDRE/);
+  assert.match(persistent.elements.get("agent-meta").textContent, /collection_id incohérent/);
+  assert.equal(persistent.fetchCount, 9, "three coordinated attempts are made before fail-closed");
+
+  // A page that was already stuck on a mixed collection must be able to
+  // recover on the next coordinated refresh: the old code compared the new
+  // report against the stale snapshot/agent ids before replacing its own id.
+  const recoverAfterReject = await boot(new Date(start - 10_000).toISOString(), start, {
+    byUrl: {
+      "report.json": [reportA, reportA, reportA, reportB],
+      "tel_snapshot.json": [snapshotB, snapshotB, snapshotB, snapshotB],
+      "agent_analysis.json": [agentA, agentA, agentA, agentB]
+    }
+  });
+  assert.match(recoverAfterReject.elements.get("main-status").innerHTML, /ATTENDRE/);
+  recoverAfterReject.elements.get("refresh").listeners.click();
+  await recoverAfterReject.settle();
+  assert.match(recoverAfterReject.elements.get("main-status").innerHTML, /SURVEILLER/);
+  assert.doesNotMatch(recoverAfterReject.elements.get("report-error").textContent, /collection_id/);
+  assert.equal(recoverAfterReject.fetchCount, 12);
+
   process.stdout.write("Dashboard freshness tests: OK\n");
+  process.stdout.write("Dashboard provenance refresh tests: OK\n");
   process.stdout.write("Dashboard early-reversal panel tests: OK\n");
 })().catch(error => {
   console.error(error);
