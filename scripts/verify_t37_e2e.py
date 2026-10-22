@@ -141,7 +141,12 @@ else:
     print("  qualite affichee:", parsed.get("QUALITE"))
     print("  detail          :", (parsed.get("DETAIL") or "")[:220])
     quality = parsed.get("QUALITE", "")
-    check("le regime est affiche", ("R" in quality and ("gime" in quality)))
+    # Le libelle depend de l'etat : "Regime ..." pour NEUTRE/INDETERMINE,
+    # "Tendance ..." pour TENDANCE_HAUSSIERE/BAISSIERE. Verifier le libelle
+    # reellement produit evite un faux negatif les jours de tendance.
+    check("le regime est affiche",
+          ("Régime" in quality or "Tendance" in quality),
+          f"qualite={quality}")
     check("l'exploitabilite est affichee", "exploitable" in quality.lower())
     check("la valeur du regime est en pourcentage", "%" in quality)
     check("une non-exploitabilite est signalee", "non exploitable" in quality.lower() or "Signal exploitable" in quality)
