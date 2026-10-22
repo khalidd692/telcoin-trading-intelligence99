@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "site", "index.html"), "utf8");
+const realtime = require("../site/realtime.js");
 const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i);
 assert.ok(match, "dashboard script exists");
 const script = match[1];
@@ -26,6 +27,45 @@ function report(generatedAt) {
     checks: [{ name: "test quality check", status: "PASS" }],
     indicators: { timeframe: "15m", last_closed_candle_at: generatedAt, close_series: [] }
   };
+}
+
+function snapshot(generatedAt, mutation) {
+  const value = {
+    schema_version: 1,
+    symbol: "TELUSDT",
+    mode: "READ_ONLY_PUBLIC_DATA",
+    generated_at: generatedAt,
+    collection_status: "VALID",
+    sources: {
+      mexc: {
+        status: {
+          book: { verdict: "VÉRIFIÉ", reason: "horodatage source de la dernière passe, âge 0.5s" },
+          trades: { verdict: "VÉRIFIÉ", reason: "dernière transaction il y a 12s" }
+        },
+        buy_cost_300_usdt: {
+          complete: true,
+          slippage_vs_best_ask_pct: 0.12,
+          fees: "EXCLUDED_NOT_VERIFIED",
+          filled_usdt: 300
+        }
+      },
+      kucoin: {
+        status: {
+          book: { verdict: "VÉRIFIÉ", reason: "horodatage source de la dernière passe, âge 0.4s" },
+          trades: { verdict: "VÉRIFIÉ", reason: "dernière transaction il y a 20s" }
+        },
+        buy_cost_300_usdt: {
+          complete: true,
+          slippage_vs_best_ask_pct: 0.08,
+          fees: "EXCLUDED_NOT_VERIFIED",
+          filled_usdt: 300
+        }
+      }
+    },
+    cross_check: { both_books_usable: true, independent_confirmation: "OUI", divergence_bps: 30 }
+  };
+  if (mutation) mutation(value);
+  return value;
 }
 
 async function boot(generatedAt, initialNow, payloadOverride) {
@@ -58,6 +98,7 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   const context = {
     document: { getElementById: element },
     window: {
+      TelcoinRealtime: realtime,
       setInterval(callback, delay) { timers.push({ callback, delay, kind: "interval" }); return timers.length; },
       setTimeout(callback, delay) { timers.push({ callback, delay, kind: "timeout" }); callback(); return timers.length; }
     },
@@ -79,6 +120,10 @@ async function boot(generatedAt, initialNow, payloadOverride) {
             break;
           }
         }
+      } else if (key.indexOf("tel_snapshot.json") !== -1) {
+        served = snapshot(generatedAt);
+      } else if (key.indexOf("agent_analysis.json") !== -1) {
+        served = null;
       }
       if (served === null) {
         return { ok: false, status: 404, json: async () => ({}) };
@@ -201,6 +246,23 @@ async function boot(generatedAt, initialNow, payloadOverride) {
     }
   });
 
+  function assertAgentContextBlocked(screen, reason) {
+    assert.match(screen.elements.get("main-status").innerHTML, /ATTENDRE/);
+    assert.doesNotMatch(screen.elements.get("main-status").className, /ok/);
+    assert.match(
+      screen.elements.get("agent-status").textContent,
+      /ATTENDRE · contexte non vérifié/,
+    );
+    assert.doesNotMatch(screen.elements.get("agent-status").className, /pass/);
+    assert.match(screen.elements.get("agent-meta").textContent, /contexte non vérifié/);
+    assert.match(screen.elements.get("agent-meta").textContent, reason);
+    assert.match(screen.elements.get("agent-flags").textContent, /Contexte non vérifié/);
+    assert.doesNotMatch(
+      screen.elements.get("agent-reversal-status").className,
+      /pass/,
+    );
+  }
+
   const agent = await boot(new Date(start - 10_000).toISOString(), start, {
     byUrl: {
       "agent_analysis.json": agentPayload(new Date(start - 10_000).toISOString()),
@@ -243,16 +305,124 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   const okCase = await boot(new Date(start - 10_000).toISOString(), start, {
     byUrl: {
       "agent_analysis.json": confirmOk,
-      "tel_snapshot.json": null,
+      "tel_snapshot.json": snapshot(new Date(start - 10_000).toISOString()),
       "report.json": report(new Date(start - 10_000).toISOString())
     }
   });
   const okQuality = okCase.elements.get("agent-reversal-quality");
+  assert.match(okCase.elements.get("agent-status").textContent, /SURVEILLER/);
+  assert.match(okCase.elements.get("agent-status").className, /pass/);
   assert.match(okCase.elements.get("agent-reversal-status").textContent, /CONFIRMATION/);
   assert.match(okQuality.innerHTML, /Signal exploitable/);
   assert.match(okQuality.innerHTML, /quality-chip ok/);
   assert.match(okCase.elements.get("agent-reversal-status").className, /pass/);
   assert.match(okCase.elements.get("agent-reversal-detail").innerHTML, /en regime neutre/);
+
+  // --- Contexte agent : un rapport frais ET un snapshot verifie sont requis ---
+  const agentContextAt = new Date(start - 10_000).toISOString();
+  const agentFresh = agentPayload(agentContextAt);
+
+  const agentMissingSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": null,
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assertAgentContextBlocked(agentMissingSnapshot, /snapshot temps réel indisponible/);
+
+  const agentStaleSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(new Date(start - 31 * 60 * 1000).toISOString()),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assertAgentContextBlocked(agentStaleSnapshot, /snapshot temps réel périmée/);
+  assert.match(
+    agentStaleSnapshot.elements.get("main-status").innerHTML,
+    /&gt; 30 min/,
+    "le seuil de péremption doit rester lisible, pas être supprimé",
+  );
+
+  const agentPartialSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(agentContextAt, value => {
+        value.sources.mexc.status.book = { verdict: "PÉRIMÉ", reason: "âge 13.3s" };
+        value.cross_check.both_books_usable = false;
+        value.cross_check.independent_confirmation = "NON ÉTABLIE";
+      }),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(agentPartialSnapshot.elements.get("snapshot-quality-status").textContent, /PARTIELLE/);
+  assertAgentContextBlocked(agentPartialSnapshot, /snapshot temps réel partielle/);
+
+  const agentInvalidSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": { schema_version: 2, symbol: "TELUSDT" },
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(agentInvalidSnapshot.elements.get("snapshot-quality-status").textContent, /INCOHÉRENTE/);
+  assertAgentContextBlocked(agentInvalidSnapshot, /snapshot temps réel incohérente/);
+
+  for (const reportPayload of [
+    null,
+    { schema_version: 2 },
+    report(new Date(start - 31 * 60 * 1000).toISOString())
+  ]) {
+    const blockedReport = await boot(agentContextAt, start, {
+      byUrl: {
+        "report.json": reportPayload,
+        "tel_snapshot.json": snapshot(agentContextAt),
+        "agent_analysis.json": agentFresh
+      }
+    });
+    assertAgentContextBlocked(blockedReport, /rapport périodique non validé/);
+  }
+
+  // Une CONFIRMATION exploitable ne suffit pas : sans snapshot, le badge de
+  // retournement ne doit pas etre vert.
+  const exploitableMissingSnapshot = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": null,
+      "agent_analysis.json": confirmOk
+    }
+  });
+  assertAgentContextBlocked(exploitableMissingSnapshot, /snapshot temps réel indisponible/);
+  assert.doesNotMatch(
+    exploitableMissingSnapshot.elements.get("agent-reversal-quality").innerHTML,
+    /quality-chip ok/,
+  );
+  assert.match(
+    exploitableMissingSnapshot.elements.get("agent-reversal-quality").innerHTML,
+    /Contexte non vérifié/,
+  );
+  assert.match(
+    exploitableMissingSnapshot.elements.get("agent-reversal-detail").innerHTML,
+    /Contexte non vérifié/,
+  );
+
+  // Champs de carnets absents : etat partiel, jamais vert global.
+  const missingBooks = await boot(agentContextAt, start, {
+    byUrl: {
+      "report.json": report(agentContextAt),
+      "tel_snapshot.json": snapshot(agentContextAt, value => {
+        delete value.cross_check.both_books_usable;
+        delete value.sources.mexc.status.book;
+      }),
+      "agent_analysis.json": agentFresh
+    }
+  });
+  assert.match(missingBooks.elements.get("snapshot-quality-status").textContent, /PARTIELLE/);
+  assert.doesNotMatch(missingBooks.elements.get("snapshot-quality-status").className, /ok/);
+  assert.match(missingBooks.elements.get("snapshot-both-books-state").textContent, /INDISPONIBLE/);
+  assert.match(missingBooks.elements.get("snapshot-mexc-book-state").textContent, /INDISPONIBLE/);
+  assertAgentContextBlocked(missingBooks, /snapshot temps réel partielle/);
 
   // cas : CONFIRMATION contre une tendance -> exploitable = false, badge NON vert
   const confirmTrend = agentPayload(new Date(start - 10_000).toISOString());
@@ -349,12 +519,8 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   const reportB = report(new Date(start - 10_000).toISOString());
   reportA.collection_id = cidA;
   reportB.collection_id = cidB;
-  const snapshotB = {
-    schema_version: 1,
-    symbol: "TELUSDT",
-    collection_id: cidB,
-    generated_at: new Date(start - 10_000).toISOString()
-  };
+  const snapshotB = snapshot(new Date(start - 10_000).toISOString());
+  snapshotB.collection_id = cidB;
   const agentA = agentPayload(new Date(start - 10_000).toISOString());
   const agentB = agentPayload(new Date(start - 10_000).toISOString());
   agentA.collection_id = cidA;
@@ -399,8 +565,22 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   assert.match(persistent.elements.get("report-error").textContent, /provenance incohérente|collection_id/);
   assert.equal(persistent.elements.get("last-price").textContent, "—");
   assert.match(persistent.elements.get("report-age").textContent, /NON VALIDÉ/);
+  assert.doesNotMatch(persistent.elements.get("main-status").className, /ok/);
   assert.match(persistent.elements.get("agent-status").textContent, /ATTENDRE/);
+  assert.doesNotMatch(persistent.elements.get("agent-status").className, /pass/);
   assert.match(persistent.elements.get("agent-meta").textContent, /collection_id incohérent/);
+  assert.match(
+    persistent.elements.get("snapshot-quality-status").textContent,
+    /INDISPONIBLE/,
+  );
+  assert.match(
+    persistent.elements.get("snapshot-confirmation-state").textContent,
+    /INDISPONIBLE/,
+  );
+  assert.doesNotMatch(
+    persistent.elements.get("snapshot-quality-status").className,
+    /ok/,
+  );
   assert.equal(persistent.fetchCount, 9, "three coordinated attempts are made before fail-closed");
 
   // A page that was already stuck on a mixed collection must be able to
@@ -419,6 +599,137 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   assert.match(recoverAfterReject.elements.get("main-status").innerHTML, /SURVEILLER/);
   assert.doesNotMatch(recoverAfterReject.elements.get("report-error").textContent, /collection_id/);
   assert.equal(recoverAfterReject.fetchCount, 12);
+
+  // ------------------------------------------------------------------
+  // Qualite du snapshot temps reel : le statut principal ne doit jamais
+  // etre rassurant si les carnets sont perimes ou la confirmation absente.
+  // ------------------------------------------------------------------
+  const at = new Date(start - 10_000).toISOString();
+  const staleBookSnapshot = snapshot(at, value => {
+    value.sources.mexc.status.book = {
+      verdict: "PÉRIMÉ",
+      reason: "horodatage source de la dernière passe, âge 13.3s"
+    };
+    value.cross_check.both_books_usable = false;
+    value.cross_check.independent_confirmation = "NON ÉTABLIE";
+  });
+  const staleBook = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": staleBookSnapshot,
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(staleBook.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(staleBook.elements.get("main-status").innerHTML, /signal de marché : SURVEILLER/);
+  assert.match(staleBook.elements.get("snapshot-quality-status").textContent, /PARTIELLE/);
+  assert.match(staleBook.elements.get("snapshot-mexc-book-state").textContent, /PÉRIMÉ/);
+  assert.match(staleBook.elements.get("snapshot-both-books-state").textContent, /NON/);
+  assert.match(staleBook.elements.get("snapshot-confirmation-state").textContent, /NON ÉTABLIE/);
+  assert.doesNotMatch(staleBook.elements.get("main-status").innerHTML, /vente|sell/i);
+
+  // Les carnets sont verifies mais la confirmation manque : ATTENDRE, sans
+  // transformer cette absence en signal baissier ou en consigne de vente.
+  const unconfirmedSnapshot = snapshot(at, value => {
+    value.cross_check.independent_confirmation = "NON ÉTABLIE";
+  });
+  const unconfirmed = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": unconfirmedSnapshot,
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(unconfirmed.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(unconfirmed.elements.get("main-status").innerHTML, /confirmation indépendante non établie/);
+  assert.match(unconfirmed.elements.get("snapshot-confirmation-state").textContent, /NON ÉTABLIE/);
+  assert.match(unconfirmed.elements.get("snapshot-mexc-book-state").textContent, /VÉRIFIÉ/);
+  assert.doesNotMatch(unconfirmed.elements.get("main-status").innerHTML, /vente|sell/i);
+
+  // Snapshot absent : aucune valeur inventee, statut fail-closed.
+  const missingSnapshot = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": null,
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(missingSnapshot.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(missingSnapshot.elements.get("main-status").innerHTML, /snapshot indisponible/i);
+  assert.match(missingSnapshot.elements.get("snapshot-quality-status").textContent, /INDISPONIBLE/);
+  assert.match(missingSnapshot.elements.get("snapshot-confirmation-state").textContent, /INDISPONIBLE/);
+
+  // Snapshot incoherent : schema inattendu -> rejet explicite.
+  const invalid = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": { schema_version: 2, symbol: "TELUSDT" },
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(invalid.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(invalid.elements.get("snapshot-quality-status").textContent, /INCOHÉRENTE/);
+  assert.match(invalid.elements.get("snapshot-quality-note").textContent, /schéma|invalide/i);
+
+  // Donnees valides et confirmation etablie : seul cas rassurant.
+  const confirmed = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(confirmed.elements.get("main-status").innerHTML, /SURVEILLER/);
+  assert.match(confirmed.elements.get("main-status").innerHTML, /données vérifiées/);
+  assert.match(confirmed.elements.get("main-status").innerHTML, /confirmation OUI/);
+  assert.match(confirmed.elements.get("snapshot-quality-status").textContent, /VÉRIFIÉE/);
+  assert.match(confirmed.elements.get("snapshot-both-books-state").textContent, /OUI/);
+  assert.match(confirmed.elements.get("snapshot-confirmation-state").textContent, /OUI/);
+  assert.match(confirmed.elements.get("snapshot-exec-mexc-detail").textContent, /0,12 %/);
+  assert.match(confirmed.elements.get("snapshot-exec-mexc-detail").textContent, /frais exclus/);
+
+  // Donnees et confirmation verifiees mais signal de marche ATTENDRE :
+  // le statut reste non rassurant sans masquer la qualite ni la confirmation.
+  const reportAttendre = report(at);
+  reportAttendre.status = "ATTENDRE";
+  const reportWaiting = await boot(at, start, {
+    byUrl: {
+      "report.json": reportAttendre,
+      "tel_snapshot.json": snapshot(at),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(reportWaiting.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(reportWaiting.elements.get("main-status").innerHTML, /un contrôle du rapport impose l’attente/);
+  assert.match(reportWaiting.elements.get("main-status").innerHTML, /données : VÉRIFIÉE/);
+  assert.match(reportWaiting.elements.get("main-status").innerHTML, /confirmation : OUI/);
+
+  // Champ d'execution absent : "indisponible", aucune estimation inventee.
+  const noExecution = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, value => {
+        delete value.sources.mexc.buy_cost_300_usdt;
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(noExecution.elements.get("snapshot-exec-mexc-state").textContent, /INDISPONIBLE/);
+  assert.match(noExecution.elements.get("snapshot-exec-mexc-detail").textContent, /Indisponible/);
+
+  // Confirmation absente du snapshot : indisponible, jamais supposee OUI.
+  const noConfirmationField = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, value => {
+        delete value.cross_check.independent_confirmation;
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(noConfirmationField.elements.get("main-status").innerHTML, /ATTENDRE/);
+  assert.match(noConfirmationField.elements.get("main-status").innerHTML, /confirmation indépendante indisponible/);
+  assert.match(noConfirmationField.elements.get("snapshot-confirmation-state").textContent, /INDISPONIBLE/);
 
   process.stdout.write("Dashboard freshness tests: OK\n");
   process.stdout.write("Dashboard provenance refresh tests: OK\n");

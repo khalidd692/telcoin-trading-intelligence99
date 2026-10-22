@@ -940,6 +940,77 @@
           <div class="caption" id="report-error" style="margin-top: 12px"></div>
         </article>
       </section>
+      <section class="panel" aria-labelledby="snapshot-quality-title">
+        <div class="panel-head">
+          <div>
+            <h3 id="snapshot-quality-title">Qualité du snapshot temps réel</h3>
+            <div class="caption">
+              Carnets, confirmation indépendante et estimation d’exécution · lecture seule. Le
+              statut de marché (SURVEILLER/ATTENDRE) reste celui du rapport périodique.
+            </div>
+          </div>
+          <span id="snapshot-quality-status" class="status">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">MEXC · carnet d’ordres</div>
+            <div class="source-detail" id="snapshot-mexc-book-detail">Aucun snapshot chargé</div>
+          </div>
+          <span class="source-state fail" id="snapshot-mexc-book-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">MEXC · transactions récentes</div>
+            <div class="source-detail" id="snapshot-mexc-trades-detail">Aucun snapshot chargé</div>
+          </div>
+          <span class="source-state fail" id="snapshot-mexc-trades-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">KuCoin · carnet d’ordres</div>
+            <div class="source-detail" id="snapshot-kucoin-book-detail">Aucun snapshot chargé</div>
+          </div>
+          <span class="source-state fail" id="snapshot-kucoin-book-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">KuCoin · transactions récentes</div>
+            <div class="source-detail" id="snapshot-kucoin-trades-detail">Aucun snapshot chargé</div>
+          </div>
+          <span class="source-state fail" id="snapshot-kucoin-trades-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">Carnets utilisables (both_books_usable)</div>
+            <div class="source-detail" id="snapshot-both-books-detail">Indisponible</div>
+          </div>
+          <span class="source-state fail" id="snapshot-both-books-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">Confirmation indépendante</div>
+            <div class="source-detail" id="snapshot-confirmation-detail">Indisponible</div>
+          </div>
+          <span class="source-state fail" id="snapshot-confirmation-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">Exécution 300 USDT · MEXC</div>
+            <div class="source-detail" id="snapshot-exec-mexc-detail">Indisponible</div>
+          </div>
+          <span class="source-state fail" id="snapshot-exec-mexc-state">INDISPONIBLE</span>
+        </div>
+        <div class="source-row">
+          <div>
+            <div class="source-name">Exécution 300 USDT · KuCoin</div>
+            <div class="source-detail" id="snapshot-exec-kucoin-detail">Indisponible</div>
+          </div>
+          <span class="source-state fail" id="snapshot-exec-kucoin-state">INDISPONIBLE</span>
+        </div>
+        <div class="caption" id="snapshot-quality-note" style="margin-top: 12px">
+          Snapshot non encore chargé. Aucune valeur n’est déduite d’un champ absent.
+        </div>
+      </section>
       <aside class="notice">
         <div class="notice-icon">ⓘ</div>
         <div>
@@ -969,7 +1040,7 @@
       </footer>
     </div>
     <script src="./realtime-config.js?v=relay-fix-1"></script>
-    <script src="./realtime.js?v=relay-fix-1"></script>
+    <script src="./realtime.js?v=snapshot-quality-1"></script>
     <script>
       (function () {
         "use strict";
@@ -1122,6 +1193,7 @@
         window.telcoinReportCollectionId = null;
         window.telcoinSnapshotCollectionId = null;
         window.telcoinAgentCollectionId = null;
+        window.telcoinSnapshotQuality = null;
         function setWaiting(message) {
           window.telcoinReportIsFresh = false;
           window.telcoinReportStatus = "ATTENDRE";
@@ -1265,9 +1337,7 @@
             var t = d.sources.mexc_ticker,
               c = d.sources.mexc_candles,
               k = d.sources.kucoin_level1,
-              i = d.indicators,
-              status = d.status,
-              passed = status === "SURVEILLER" && !window.TelcoinRealtime;
+              i = d.indicators;
             if (
               t &&
               t.status === "OK" &&
@@ -1294,16 +1364,8 @@
             window.telcoinIndicators = i || null;
             window.telcoinReportCollectionId = d.collection_id || null;
             updateReportAge();
-            $("main-status").className = "status " + (passed ? "ok" : "");
-            $("main-status").innerHTML =
-              "<span>●</span><span>" +
-              (passed ? "SURVEILLER · contrôles passés" : "ATTENDRE · données à vérifier") +
-              "</span>";
-            $("header-state").textContent = passed
-              ? "Rapport périodique · contrôles passés"
-              : "Rapport périodique · ATTENDRE";
-            $("header-dot").style.background = passed ? "var(--green)" : "var(--amber)";
-            if (!window.TelcoinRealtime) {
+            renderPeriodicStatus();
+            if (!window.__telcoinRealtimeMounted) {
               $("last-price").textContent = t ? price(t.last) : "—";
               $("price-time").textContent =
                 t && t.observed_at
@@ -1381,28 +1443,197 @@
             button.textContent = "↻ Actualiser";
           }
         }
+        function snapshotVerdictText(v) {
+          return v && v.verdict ? v.verdict : "INDISPONIBLE";
+        }
+        function snapshotVerdictDetail(v) {
+          return v && v.verdict ? v.verdict + (v.reason ? " · " + v.reason : "") : "Indisponible";
+        }
+        function setSnapshotRow(stateId, detailId, stateText, detailText, good) {
+          var badge = $(stateId);
+          badge.textContent = stateText;
+          badge.className = "source-state " + (good ? "pass" : "fail");
+          $(detailId).textContent = detailText;
+        }
+        function executionDetail(ex) {
+          if (!ex || ex.slippagePct === null) return "Indisponible";
+          var fees =
+            ex.fees === "EXCLUDED_NOT_VERIFIED"
+              ? "frais exclus (non vérifiés)"
+              : ex.fees
+                ? "frais : " + ex.fees
+                : "frais indisponibles";
+          return (
+            "Slippage " +
+            fmt(ex.slippagePct, 4) +
+            " % · " +
+            (ex.complete ? "estimation complète" : "estimation incomplète") +
+            " · " +
+            fees
+          );
+        }
+        function renderSnapshotQuality(q) {
+          var state = q && q.state ? q.state : "INDISPONIBLE";
+          var badge = $("snapshot-quality-status");
+          badge.textContent = state;
+          badge.className = "status" + (state === "VÉRIFIÉE" ? " ok" : "");
+          ["mexc", "kucoin"].forEach(function (venue) {
+            var prefix = venue === "mexc" ? "snapshot-mexc" : "snapshot-kucoin";
+            var data = (q && q[venue]) || {};
+            setSnapshotRow(
+              prefix + "-book-state",
+              prefix + "-book-detail",
+              snapshotVerdictText(data.book),
+              snapshotVerdictDetail(data.book),
+              !!(data.book && data.book.verdict === "VÉRIFIÉ"),
+            );
+            setSnapshotRow(
+              prefix + "-trades-state",
+              prefix + "-trades-detail",
+              snapshotVerdictText(data.trades),
+              snapshotVerdictDetail(data.trades),
+              !!(data.trades && data.trades.verdict === "VÉRIFIÉ"),
+            );
+          });
+          var both = q ? q.bothBooksUsable : null;
+          setSnapshotRow(
+            "snapshot-both-books-state",
+            "snapshot-both-books-detail",
+            both === true ? "OUI" : both === false ? "NON" : "INDISPONIBLE",
+            both === true
+              ? "Les deux carnets sont utilisables"
+              : both === false
+                ? "Au moins un carnet n’est pas utilisable"
+                : "Indisponible",
+            both === true,
+          );
+          var conf = q && q.confirmation ? q.confirmation : "INDISPONIBLE";
+          setSnapshotRow(
+            "snapshot-confirmation-state",
+            "snapshot-confirmation-detail",
+            conf,
+            conf === "OUI"
+              ? "Confirmation indépendante établie"
+              : conf === "INDISPONIBLE"
+                ? "Indisponible"
+                : "Confirmation indépendante non établie",
+            conf === "OUI",
+          );
+          ["mexc", "kucoin"].forEach(function (venue) {
+            var prefix = venue === "mexc" ? "snapshot-exec-mexc" : "snapshot-exec-kucoin";
+            var ex = q && q[venue] ? q[venue].execution : null;
+            setSnapshotRow(
+              prefix + "-state",
+              prefix + "-detail",
+              ex ? (ex.complete ? "COMPLÈTE" : "INCOMPLÈTE") : "INDISPONIBLE",
+              executionDetail(ex),
+              !!(ex && ex.complete),
+            );
+          });
+          var note = [];
+          if (q && q.generatedAt) {
+            note.push(
+              "Snapshot " +
+                date(q.generatedAt) +
+                " · âge " +
+                (Number.isFinite(q.ageSeconds) ? Math.max(0, q.ageSeconds) + " s" : "inconnu"),
+            );
+          } else note.push("Snapshot indisponible");
+          if (q && q.divergenceBps !== null && q.divergenceBps !== undefined)
+            note.push("divergence " + fmt(q.divergenceBps, 2) + " bps");
+          if (q && q.reasons && q.reasons.length) note.push("blocage : " + q.reasons[0]);
+          else if (q && q.verified) note.push("qualité vérifiée");
+          $("snapshot-quality-note").textContent =
+            note.join(" · ") + ". Aucune valeur n’est déduite d’un champ absent.";
+        }
+        function renderPeriodicStatus() {
+          if (!window.telcoinReportIsFresh) return;
+          var q = window.telcoinSnapshotQuality;
+          var signal = window.telcoinReportStatus;
+          var dataOk = !!(q && q.verified === true);
+          var confOk = !!(q && q.confirmation === "OUI");
+          var ok =
+            signal === "SURVEILLER" &&
+            window.telcoinReportChecksPass === true &&
+            dataOk &&
+            confOk;
+          var blocking = "";
+          if (!dataOk) blocking = (q && q.reasons && q.reasons[0]) || "snapshot indisponible";
+          else if (!confOk)
+            blocking =
+              "confirmation indépendante " +
+              (q && q.confirmation ? q.confirmation.toLowerCase() : "indisponible");
+          else if (signal !== "SURVEILLER" || window.telcoinReportChecksPass !== true)
+            blocking = "un contrôle du rapport impose l’attente";
+          var safe = function (value) {
+            return String(value === null || value === undefined ? "" : value)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;");
+          };
+          $("main-status").className = "status " + (ok ? "ok" : "");
+          $("main-status").innerHTML =
+            "<span>●</span><span>" +
+            (ok
+              ? "SURVEILLER · données vérifiées · confirmation OUI"
+              : "ATTENDRE · " +
+                safe(blocking) +
+                " · données : " +
+                (q ? q.state : "INDISPONIBLE") +
+                " · confirmation : " +
+                (q && q.confirmation ? q.confirmation : "INDISPONIBLE") +
+                (signal === "SURVEILLER" ? " — signal de marché : SURVEILLER" : "")) +
+            "</span>";
+          $("header-state").textContent = ok
+            ? "Rapport périodique · données et confirmation vérifiées"
+            : "Rapport périodique · ATTENDRE";
+          $("header-dot").style.background = ok ? "var(--green)" : "var(--amber)";
+        }
+        // Le module temps reel rafraichit son panneau chaque seconde. Sans ce
+        // point d'entree, il ecraserait la banniere periodique composee avec
+        // un message generique et ferait perdre les axes donnees/confirmation.
+        window.telcoinRenderPeriodicStatus = renderPeriodicStatus;
         async function loadSnapshot(prefetched) {
+          var quality = null;
           try {
             var d;
             if (prefetched !== undefined) {
-              if (!prefetched) {
-                window.telcoinSnapshotCollectionId = null;
-                return;
-              }
+              if (!prefetched) throw new Error("Snapshot indisponible");
               d = prefetched;
             } else {
               var response = await fetch("./tel_snapshot.json?t=" + Date.now(), {
                 cache: "no-store",
               });
-              if (!response.ok) throw new Error("Snapshot indisponible");
+              if (!response.ok)
+                throw new Error("Snapshot indisponible (HTTP " + response.status + ")");
               d = await response.json();
             }
-            if (d.schema_version !== 1 || d.symbol !== "TELUSDT")
-              throw new Error("Snapshot invalide");
-            window.telcoinSnapshotCollectionId = d.collection_id || null;
+            window.telcoinSnapshotCollectionId = d && d.collection_id ? d.collection_id : null;
+            if (
+              !window.TelcoinRealtime ||
+              typeof window.TelcoinRealtime.assessSnapshot !== "function"
+            )
+              throw new Error("Contrôle de qualité du snapshot indisponible");
+            quality = window.TelcoinRealtime.assessSnapshot(d, Date.now());
           } catch (err) {
             window.telcoinSnapshotCollectionId = null;
+            quality = {
+              state: "INDISPONIBLE",
+              verified: false,
+              reasons: [err.message || "snapshot indisponible"],
+              generatedAt: null,
+              ageSeconds: null,
+              mexc: { book: null, trades: null, execution: null },
+              kucoin: { book: null, trades: null, execution: null },
+              bothBooksUsable: null,
+              confirmation: null,
+              divergenceBps: null,
+            };
           }
+          window.telcoinSnapshotQuality = quality;
+          renderSnapshotQuality(quality);
+          renderPeriodicStatus();
         }
         function rejectAgentPanel(message) {
           var state = $("agent-status"),
@@ -1759,6 +1990,49 @@
                 " " +
                 flags.textContent;
             renderReversal(d);
+            // L'analyse de l'agent reste informative, mais elle ne peut pas
+            // afficher un statut vert si le contexte indispensable n'est pas
+            // verifie : rapport frais et snapshot qualite VÉRIFIÉE.
+            var snapshotQuality = window.telcoinSnapshotQuality;
+            var contextVerified =
+              window.telcoinReportIsFresh === true &&
+              snapshotQuality &&
+              snapshotQuality.verified === true;
+            if (!contextVerified) {
+              var contextReason =
+                window.telcoinReportIsFresh !== true
+                  ? "rapport périodique non validé"
+                  : "snapshot temps réel " +
+                    (snapshotQuality && snapshotQuality.state
+                      ? snapshotQuality.state.toLowerCase()
+                      : "indisponible");
+              meta.textContent =
+                "Analyse indépendante : " +
+                d.status +
+                " · contexte non vérifié (" +
+                contextReason +
+                ") · " +
+                meta.textContent;
+              state.textContent = "ATTENDRE · contexte non vérifié";
+              state.className = "agent-state";
+              flags.textContent =
+                "Contexte non vérifié : l’analyse reste informative, sans conclusion globale. " +
+                flags.textContent.replace(
+                  "dans les données validées",
+                  "dans les données de l’analyse",
+                );
+              if (revStatus.className.indexOf("pass") !== -1) {
+                revStatus.className = "agent-state";
+              }
+              revQuality.innerHTML =
+                revQuality.innerHTML.replace(/quality-chip ok/g, "quality-chip warn") +
+                '<span class="quality-chip warn">Contexte non vérifié</span>';
+              if (revDetail.innerHTML.indexOf("Contexte non vérifié") === -1) {
+                revDetail.innerHTML =
+                  '<span class="agent-reversal-warn">Contexte non vérifié : ce statut de retournement n’est pas validé par les carnets.</span><br />' +
+                  revDetail.innerHTML;
+              }
+            }
           } catch (err) {
             state.textContent = "ATTENDRE · rapport absent/périmé";
             state.className = "agent-state";
@@ -1840,6 +2114,8 @@
               window.telcoinReportCollectionId = null;
               window.telcoinSnapshotCollectionId = null;
               window.telcoinAgentCollectionId = null;
+              window.telcoinSnapshotQuality = null;
+              renderSnapshotQuality(null);
               clearMarketView(
                 currentGeneratedAt,
                 currentGeneratedAt ? Date.now() - Date.parse(currentGeneratedAt) : NaN,

@@ -18,6 +18,9 @@
     MAX_FUTURE = 60000,
     MAX_SPREAD = 0.5,
     MAX_DIVERGENCE = 1,
+    // Meme fenetre de fraicheur que le rapport periodique deja affiche
+    // (30 min) : aucun nouveau seuil de trading n'est introduit.
+    MAX_SNAPSHOT_AGE = 30 * 60 * 1000,
     refreshMounted = function () {};
   function asBytes(input) {
     if (input instanceof Uint8Array) return input;
@@ -144,7 +147,119 @@
     var a = q && Number.isFinite(q.bookEventAt) ? n - q.bookEventAt : age(q, n);
     return !!q && a >= 0 && a <= MAX_AGE;
   }
-  function assess(s, n, r) {
+  function snapshotVerdict(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var verdict = typeof raw.verdict === "string" ? raw.verdict.trim() : "";
+    if (!verdict) return null;
+    return {
+      verdict: verdict,
+      reason: typeof raw.reason === "string" ? raw.reason : "",
+    };
+  }
+  function snapshotExecution(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var slippage = Number(raw.slippage_vs_best_ask_pct);
+    return {
+      complete: raw.complete === true,
+      slippagePct: Number.isFinite(slippage) ? slippage : null,
+      fees: typeof raw.fees === "string" ? raw.fees : null,
+    };
+  }
+  // Evalue la qualite du snapshot publie, independamment du signal de marche.
+  // Toute donnee manquante reste "indisponible" : rien n'est deduit ni invente.
+  function assessSnapshot(d, n) {
+    var q = {
+      state: "INDISPONIBLE",
+      verified: false,
+      reasons: [],
+      generatedAt: null,
+      ageSeconds: null,
+      mexc: { book: null, trades: null, execution: null },
+      kucoin: { book: null, trades: null, execution: null },
+      bothBooksUsable: null,
+      confirmation: null,
+      divergenceBps: null,
+    };
+    if (!d || typeof d !== "object") {
+      q.reasons.push("snapshot indisponible");
+      return q;
+    }
+    if (d.schema_version !== 1 || d.symbol !== "TELUSDT" || d.mode !== "READ_ONLY_PUBLIC_DATA") {
+      q.state = "INCOHÉRENTE";
+      q.reasons.push("schéma ou mode du snapshot invalide");
+      return q;
+    }
+    var generated = Date.parse(d.generated_at);
+    if (!Number.isFinite(generated)) {
+      q.state = "INCOHÉRENTE";
+      q.reasons.push("horodatage du snapshot illisible");
+      return q;
+    }
+    q.generatedAt = d.generated_at;
+    q.ageSeconds = Math.floor((n - generated) / 1000);
+    if (q.ageSeconds < -MAX_FUTURE / 1000) {
+      q.state = "INCOHÉRENTE";
+      q.reasons.push("horodatage du snapshot incohérent");
+      return q;
+    }
+    if (q.ageSeconds > MAX_SNAPSHOT_AGE / 1000) {
+      q.state = "PÉRIMÉE";
+      q.reasons.push("snapshot périmé (> " + MAX_SNAPSHOT_AGE / 60000 + " min)");
+      return q;
+    }
+    if (d.collection_status !== "VALID") {
+      q.state = "INCOHÉRENTE";
+      q.reasons.push("collecte du snapshot non validée");
+      return q;
+    }
+    ["mexc", "kucoin"].forEach(function (venue) {
+      var src = d.sources && d.sources[venue];
+      q[venue].book = snapshotVerdict(src && src.status && src.status.book);
+      q[venue].trades = snapshotVerdict(src && src.status && src.status.trades);
+      q[venue].execution = snapshotExecution(src && src.buy_cost_300_usdt);
+    });
+    var cross = d.cross_check || {};
+    q.bothBooksUsable =
+      typeof cross.both_books_usable === "boolean" ? cross.both_books_usable : null;
+    q.confirmation =
+      typeof cross.independent_confirmation === "string" &&
+      cross.independent_confirmation.trim() !== ""
+        ? cross.independent_confirmation
+        : null;
+    q.divergenceBps = Number.isFinite(Number(cross.divergence_bps))
+      ? Number(cross.divergence_bps)
+      : null;
+
+    if (!q.mexc.book || !q.mexc.trades || !q.kucoin.book || !q.kucoin.trades) {
+      q.state = "PARTIELLE";
+      q.reasons.push("verdicts de carnet ou de trades manquants");
+    }
+    ["mexc", "kucoin"].forEach(function (venue) {
+      var label = venue === "mexc" ? "MEXC" : "KuCoin";
+      ["book", "trades"].forEach(function (kind) {
+        var verdict = q[venue][kind];
+        if (verdict && verdict.verdict !== "VÉRIFIÉ")
+          q.reasons.push(label + " " + (kind === "book" ? "carnet" : "trades") + " : " + verdict.verdict);
+      });
+    });
+    if (q.bothBooksUsable !== true) {
+      q.reasons.push(
+        q.bothBooksUsable === false
+          ? "les deux carnets ne sont pas utilisables"
+          : "both_books_usable indisponible",
+      );
+    }
+    if (!q.confirmation) q.reasons.push("confirmation indépendante indisponible");
+    else if (q.confirmation !== "OUI") q.reasons.push("confirmation indépendante non établie");
+    if (q.reasons.length) {
+      if (q.state === "INDISPONIBLE") q.state = "PARTIELLE";
+    } else {
+      q.verified = true;
+      q.state = "VÉRIFIÉE";
+    }
+    return q;
+  }
+  function assess(s, n, r, snap) {
     var reasons = [],
       m = s.mexc,
       k = s.kucoin;
@@ -186,6 +301,12 @@
     if (!r || r.fresh !== true) reasons.push("Rapport d'indicateurs périodiques absent ou périmé");
     else if (r.status !== "SURVEILLER" || r.checksPass !== true)
       reasons.push("Un contrôle du rapport périodique impose ATTENDRE");
+    if (!snap || snap.verified !== true) {
+      if (!snap) reasons.push("Snapshot temps réel indisponible ou non vérifié");
+      else if (Array.isArray(snap.reasons) && snap.reasons.length)
+        reasons.push("Snapshot temps réel non vérifié : " + snap.reasons[0]);
+      else reasons.push("Snapshot temps réel non vérifié");
+    }
     var reportCid = typeof root !== "undefined" && root.telcoinReportCollectionId,
       snapshotCid = typeof root !== "undefined" && root.telcoinSnapshotCollectionId,
       agentCid = typeof root !== "undefined" && root.telcoinAgentCollectionId;
@@ -203,6 +324,7 @@
       reasons: reasons,
       spreadPct: spread,
       divergencePct: div,
+      reportStatus: r && r.status ? r.status : "ATTENDRE",
     };
   }
   function isOutOfOrder(a, b) {
@@ -337,11 +459,16 @@
     }
     function render() {
       var t = now(),
-        r = assess(Object.assign({}, s, { errors: s.error }), t, {
-          fresh: root.telcoinReportIsFresh === true,
-          status: root.telcoinReportStatus || "ATTENDRE",
-          checksPass: root.telcoinReportChecksPass === true,
-        });
+        r = assess(
+          Object.assign({}, s, { errors: s.error }),
+          t,
+          {
+            fresh: root.telcoinReportIsFresh === true,
+            status: root.telcoinReportStatus || "ATTENDRE",
+            checksPass: root.telcoinReportChecksPass === true,
+          },
+          root.telcoinSnapshotQuality,
+        );
       row("mexc", t);
       row("kucoin", t);
       el("rt-spread").textContent =
@@ -360,14 +487,26 @@
       el("wait-reasons").textContent = r.ok
         ? "Les sources publiques et le rapport d’indicateurs sont frais. Ce statut n’est pas un signal de trading."
         : r.reasons.join(" · ");
-      el("main-status").textContent = r.ok
-        ? "● SURVEILLER · flux live et rapport validés"
-        : "● ATTENDRE · flux live/rapport incomplet";
-      el("main-status").className = "status " + (r.ok ? "ok" : "");
-      el("header-state").textContent = r.ok
-        ? "Flux publics en direct · contrôles passés"
-        : "Flux publics · ATTENDRE";
-      el("header-dot").style.background = r.ok ? "var(--green)" : "var(--amber)";
+      var signal = r.reportStatus || "ATTENDRE";
+      // La banniere principale est composee par le rapport periodique des
+      // qu'il est frais. Le module live ne doit pas l'ecraser chaque seconde
+      // avec un message generique qui perd les axes donnees/confirmation.
+      var periodicOwnsStatus =
+        root.telcoinReportIsFresh === true &&
+        typeof root.telcoinRenderPeriodicStatus === "function";
+      if (!periodicOwnsStatus) {
+        el("main-status").textContent = r.ok
+          ? "● SURVEILLER · flux live, rapport et snapshot validés"
+          : "● ATTENDRE · " +
+            (r.reasons[0] || "contrôles incomplets") +
+            " — signal de marché : " +
+            signal;
+        el("main-status").className = "status " + (r.ok ? "ok" : "");
+        el("header-state").textContent = r.ok
+          ? "Flux publics en direct · contrôles passés"
+          : "Flux publics · ATTENDRE";
+        el("header-dot").style.background = r.ok ? "var(--green)" : "var(--amber)";
+      }
       var mf = freshTrade(s.mexc, t),
         mb = freshBook(s.mexc, t),
         kf = freshTrade(s.kucoin, t);
@@ -419,6 +558,7 @@
         ].forEach(function (id) {
           if (el(id)) el(id).textContent = "—";
         });
+      if (periodicOwnsStatus) root.telcoinRenderPeriodicStatus();
     }
     refreshMounted = render;
     function delta(n, v) {
@@ -703,6 +843,7 @@
     decodeMexcFrame: decodeMexc,
     parseKucoinTicker: parseKucoin,
     assess: assess,
+    assessSnapshot: assessSnapshot,
     isOutOfOrder: isOutOfOrder,
     reconnectDelay: reconnectDelay,
     mount: mount,
