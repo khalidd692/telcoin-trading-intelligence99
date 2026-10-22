@@ -241,7 +241,24 @@ jobs:
           git add site/report.json site/tel_snapshot.json site/agent_analysis.json alerts/
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
-            git push origin HEAD:main
+            # A PR merge or another publisher may advance main after checkout.
+            # Rebase the generated report commit on the latest main and retry a
+            # bounded number of times instead of failing on a non-fast-forward push.
+            for attempt in 1 2 3; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+                echo "::error::Published reports conflict with newer main; refusing to overwrite them."
+                exit 1
+              fi
+              if git push origin HEAD:main; then
+                exit 0
+              fi
+              echo "Push attempt $attempt failed; refreshing main before retry."
+              sleep 2
+            done
+            echo "::error::Could not publish after 3 attempts because main kept advancing."
+            exit 1
           fi
       - name: Add report reference to summary
         if: always()
