@@ -7,6 +7,16 @@ function fv(f,x){return [...vi(f<<3),...vi(x)];}
 function deal(price,time){const item=[...fb(1,price),...fb(2,"12.5"),...fv(3,1),...fv(4,time)],d=[...fb(1,item),...fb(2,"deals")];return new Uint8Array([...fb(1,"spot@public.aggre.deals.v3.api.pb@100ms@TELUSDT"),...fb(314,d),...fb(3,"TELUSDT"),...fv(4,time)]);}
 function book(bid,ask,time){const b=[...fb(1,bid),...fb(2,"4"),...fb(3,ask),...fb(4,"5")];return new Uint8Array([...fb(1,"spot@public.aggre.bookTicker.v3.api.pb@100ms@TELUSDT"),...fb(315,b),...fb(3,"TELUSDT"),...fv(6,time)]);}
 const now=Date.now(),src=(last,bid,ask,t,connected=true)=>({last,bid,ask,eventAt:t,bookEventAt:t,receivedAt:now,connected}),sources={mexc:src(.00123,.001229,.001231,now),kucoin:src(.001231,.00123,.001232,now)};
+const snapDoc=(generated=now)=>({
+  schema_version:1,symbol:"TELUSDT",mode:"READ_ONLY_PUBLIC_DATA",
+  generated_at:new Date(generated).toISOString(),collection_status:"VALID",
+  sources:{
+    mexc:{status:{book:{verdict:"VÉRIFIÉ",reason:"ok"},trades:{verdict:"VÉRIFIÉ",reason:"ok"}},buy_cost_300_usdt:{complete:true,slippage_vs_best_ask_pct:0.1,fees:"EXCLUDED_NOT_VERIFIED"}},
+    kucoin:{status:{book:{verdict:"VÉRIFIÉ",reason:"ok"},trades:{verdict:"VÉRIFIÉ",reason:"ok"}},buy_cost_300_usdt:{complete:true,slippage_vs_best_ask_pct:0.1,fees:"EXCLUDED_NOT_VERIFIED"}}
+  },
+  cross_check:{both_books_usable:true,independent_confirmation:"OUI",divergence_bps:20}
+});
+const snapOk=rt.assessSnapshot(snapDoc(),now);
 const trade=rt.decodeMexcFrame(deal("0.00123",now));assert.equal(trade.symbol,"TELUSDT");assert.equal(trade.trades[0].price,.00123);assert.equal(trade.trades[0].eventAt,now);
 const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);assert.equal(b.bookTicker.eventAt,now,"MEXC book timestamp must come from wrapper sendTime field 6");
 assert.throws(()=>rt.decodeMexcFrame(new Uint8Array([255,255])),/protobuf|field/i);
@@ -15,22 +25,41 @@ assert.throws(()=>rt.decodeMexcFrame(book("0.002","0.001",now)),/below bid/i);
 const ku=rt.parseKucoinTicker({type:"message",topic:"/market/ticker:TEL-USDT",data:{sequence:"42",price:"0.001231",bestBid:"0.001230",bestAsk:"0.001232",Time:now}});assert.equal(ku.last,.001231);assert.equal(ku.sequence,42);
 assert.throws(()=>rt.parseKucoinTicker({type:"message",topic:"/market/ticker:OTHER-USDT",data:{}}),/Unexpected/i);
 assert.throws(()=>rt.parseKucoinTicker({type:"message",topic:"/market/ticker:TEL-USDT",data:{sequence:"42",price:"0",bestBid:"1",bestAsk:"2",Time:now}}),/last price/i);
-const good=rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true});assert.equal(good.ok,true);assert.ok(good.spreadPct>0&&good.divergencePct>0);
-assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,connected:false}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
-assert.equal(rt.assess({...sources,mexc:{...sources.mexc,eventAt:now-31000,bookEventAt:now}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
-assert.equal(rt.assess(sources,now,{fresh:false,status:"SURVEILLER",checksPass:true}).ok,false);
-assert.equal(rt.assess(sources,now,{fresh:true,status:"ATTENDRE",checksPass:false}).ok,false);
-assert.equal(rt.assess({...sources,mexc:{...sources.mexc,ask:.00124}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
-assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,last:.0013}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
+const good=rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk);assert.equal(good.ok,true);assert.ok(good.spreadPct>0&&good.divergencePct>0);
+assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,connected:false}},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk).ok,false);
+assert.equal(rt.assess({...sources,mexc:{...sources.mexc,eventAt:now-31000,bookEventAt:now}},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk).ok,false);
+assert.equal(rt.assess(sources,now,{fresh:false,status:"SURVEILLER",checksPass:true}, snapOk).ok,false);
+assert.equal(rt.assess(sources,now,{fresh:true,status:"ATTENDRE",checksPass:false}, snapOk).ok,false);
+assert.equal(rt.assess({...sources,mexc:{...sources.mexc,ask:.00124}},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk).ok,false);
+assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,last:.0013}},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk).ok,false);
 const kucoinOldTrade={...sources.kucoin,eventAt:now-31000,bookEventAt:now,receivedAt:now};
-const kucoinOldResult=rt.assess({...sources,kucoin:kucoinOldTrade},now,{fresh:true,status:"SURVEILLER",checksPass:true});
+const kucoinOldResult=rt.assess({...sources,kucoin:kucoinOldTrade},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk);
 assert.equal(kucoinOldResult.ok,false,"a stale KuCoin last trade must still fail closed");
 assert.ok(kucoinOldResult.reasons.some(x=>x.includes("dernier trade périmé")),"stale last trade must be explicit");
 assert.ok(!kucoinOldResult.reasons.some(x=>x.includes("KUCOIN : bid/ask périmé")),"fresh KuCoin book must not be judged by last-trade timestamp");
 assert.equal(kucoinOldResult.spreadPct!==null,true,"fresh MEXC book spread remains measurable");
 assert.equal(kucoinOldResult.divergencePct,null,"cross-exchange divergence must be suppressed when KuCoin last trade is stale");
-const oldBookResult=rt.assess({...sources,kucoin:{...sources.kucoin,bookEventAt:now-31001}},now,{fresh:true,status:"SURVEILLER",checksPass:true});
+const oldBookResult=rt.assess({...sources,kucoin:{...sources.kucoin,bookEventAt:now-31001}},now,{fresh:true,status:"SURVEILLER",checksPass:true}, snapOk);
 assert.ok(oldBookResult.reasons.some(x=>x.includes("KUCOIN : bid/ask périmé")),"stale book must still fail closed");
+assert.equal(rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false,"un snapshot absent doit rester fail-closed");
+const noSnap=rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true});
+assert.ok(noSnap.reasons.some(x=>x.includes("Snapshot temps réel")),"missing snapshot must be explicit");
+assert.equal(good.reportStatus,"SURVEILLER");
+const snapUnconfirmed={...snapOk,verified:false,state:"PARTIELLE",confirmation:"NON ÉTABLIE",reasons:["confirmation indépendante non établie"]};
+const unconfirmed=rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true},snapUnconfirmed);
+assert.equal(unconfirmed.ok,false);
+assert.ok(unconfirmed.reasons.join(" ").includes("confirmation indépendante non établie"));
+assert.doesNotMatch(unconfirmed.reasons.join(" "),/vente|sell/i,"absence de confirmation n'est pas un signal de vente");
+assert.equal(rt.assess(sources,now,{fresh:true,status:"SURVEILLER",checksPass:true},{verified:false,state:"PARTIELLE",reasons:["MEXC carnet : PÉRIMÉ"]}).ok,false);
+assert.equal(snapOk.verified,true);assert.equal(snapOk.state,"VÉRIFIÉE");assert.equal(snapOk.confirmation,"OUI");
+const staleSnap=rt.assessSnapshot(snapDoc(now-31*60*1000),now);assert.equal(staleSnap.state,"PÉRIMÉE");assert.equal(staleSnap.verified,false);
+const badBookDoc=snapDoc();badBookDoc.sources.mexc.status.book={verdict:"PÉRIMÉ",reason:"âge 13.3s"};badBookDoc.cross_check.both_books_usable=false;badBookDoc.cross_check.independent_confirmation="NON ÉTABLIE";
+const badBook=rt.assessSnapshot(badBookDoc,now);assert.equal(badBook.verified,false);assert.equal(badBook.state,"PARTIELLE");assert.ok(badBook.reasons.some(x=>x.includes("MEXC carnet : PÉRIMÉ")));
+const invalidSnap=rt.assessSnapshot({schema_version:2},now);assert.equal(invalidSnap.state,"INCOHÉRENTE");
+const noConfDoc=snapDoc();delete noConfDoc.cross_check.independent_confirmation;
+const noConf=rt.assessSnapshot(noConfDoc,now);assert.equal(noConf.verified,false);assert.ok(noConf.reasons.includes("confirmation indépendante indisponible"));
+const noExecDoc=snapDoc();delete noExecDoc.sources.mexc.buy_cost_300_usdt;
+const noExec=rt.assessSnapshot(noExecDoc,now);assert.equal(noExec.verified,true);assert.equal(noExec.mexc.execution,null,"champ absent = indisponible, pas d'estimation inventée");
 assert.equal(rt.isOutOfOrder(100,99),true);assert.equal(rt.isOutOfOrder(100,100),false);assert.equal(rt.reconnectDelay(1),1000);assert.equal(rt.reconnectDelay(2),2000);assert.equal(rt.reconnectDelay(10),30000);
 
 function fakeEnvironment(WebSocketImpl) {
