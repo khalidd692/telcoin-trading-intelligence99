@@ -1210,7 +1210,7 @@
           }
           $("report-age").textContent = "Âge du rapport : " + Math.floor(ageMs / 1000) + " s";
         }
-        async function load() {
+        async function load(prefetched) {
           var reportGeneratedAt = currentGeneratedAt,
             reportAgeMs = reportGeneratedAt ? Date.now() - Date.parse(reportGeneratedAt) : NaN,
             freshnessState = "invalid";
@@ -1218,11 +1218,17 @@
           button.disabled = true;
           button.textContent = "Chargement…";
           try {
-            var response = await fetch("./report.json?t=" + Date.now(), { cache: "no-store" });
-            if (!response.ok)
-              throw new Error("Rapport indisponible (HTTP " + response.status + ")");
-            var d = await response.json(),
-              generatedMs = Date.parse(d.generated_at);
+            var d;
+            if (prefetched !== undefined) {
+              if (!prefetched) throw new Error("Rapport indisponible · ATTENDRE");
+              d = prefetched;
+            } else {
+              var response = await fetch("./report.json?t=" + Date.now(), { cache: "no-store" });
+              if (!response.ok)
+                throw new Error("Rapport indisponible (HTTP " + response.status + ")");
+              d = await response.json();
+            }
+            var generatedMs = Date.parse(d.generated_at);
             reportAgeMs = Date.now() - generatedMs;
             if (Number.isFinite(generatedMs)) {
               reportGeneratedAt = d.generated_at;
@@ -1297,11 +1303,19 @@
               ? "Rapport périodique · contrôles passés"
               : "Rapport périodique · ATTENDRE";
             $("header-dot").style.background = passed ? "var(--green)" : "var(--amber)";
-            $("last-price").textContent = t ? price(t.last) : "—";
-            $("price-time").textContent =
-              t && t.observed_at
-                ? "Observation " + date(t.observed_at)
-                : "Aucune observation disponible";
+            if (!window.TelcoinRealtime) {
+              $("last-price").textContent = t ? price(t.last) : "—";
+              $("price-time").textContent =
+                t && t.observed_at
+                  ? "Observation " + date(t.observed_at)
+                  : "Aucune observation disponible";
+              $("spread").textContent =
+                t && t.spread_pct != null ? fmt(t.spread_pct, 4) + " %" : "—";
+              $("spread-foot").textContent =
+                t && t.bid != null && t.ask != null
+                  ? "Bid " + price(t.bid) + " · Ask " + price(t.ask)
+                  : "Pas de cotations disponibles";
+            }
             $("change-24h").textContent = t ? pct(t.change_pct_24h) : "—";
             $("change-24h").style.color =
               t && t.change_pct_24h > 0
@@ -1309,11 +1323,6 @@
                 : t && t.change_pct_24h < 0
                   ? "var(--red)"
                   : "var(--text)";
-            $("spread").textContent = t && t.spread_pct != null ? fmt(t.spread_pct, 4) + " %" : "—";
-            $("spread-foot").textContent =
-              t && t.bid != null && t.ask != null
-                ? "Bid " + price(t.bid) + " · Ask " + price(t.ask)
-                : "Pas de cotations disponibles";
             $("volume-24h").textContent =
               t && t.quote_volume_24h != null ? fmt(t.quote_volume_24h, 0) : "—";
             $("ema12").textContent = i && i.ema12 != null ? price(i.ema12) : "—";
@@ -1372,13 +1381,22 @@
             button.textContent = "↻ Actualiser";
           }
         }
-        async function loadSnapshot() {
+        async function loadSnapshot(prefetched) {
           try {
-            var response = await fetch("./tel_snapshot.json?t=" + Date.now(), {
-              cache: "no-store",
-            });
-            if (!response.ok) throw new Error("Snapshot indisponible");
-            var d = await response.json();
+            var d;
+            if (prefetched !== undefined) {
+              if (!prefetched) {
+                window.telcoinSnapshotCollectionId = null;
+                return;
+              }
+              d = prefetched;
+            } else {
+              var response = await fetch("./tel_snapshot.json?t=" + Date.now(), {
+                cache: "no-store",
+              });
+              if (!response.ok) throw new Error("Snapshot indisponible");
+              d = await response.json();
+            }
             if (d.schema_version !== 1 || d.symbol !== "TELUSDT")
               throw new Error("Snapshot invalide");
             window.telcoinSnapshotCollectionId = d.collection_id || null;
@@ -1386,7 +1404,31 @@
             window.telcoinSnapshotCollectionId = null;
           }
         }
-        async function loadAgentAnalysis() {
+        function rejectAgentPanel(message) {
+          var state = $("agent-status"),
+            meta = $("agent-meta"),
+            grid = $("agent-grid"),
+            flags = $("agent-flags"),
+            revStatus = $("agent-reversal-status"),
+            revQuality = $("agent-reversal-quality"),
+            revDetail = $("agent-reversal-detail"),
+            revEvidence = $("agent-reversal-evidence");
+          state.textContent = "ATTENDRE — données rejetées";
+          state.className = "agent-state fail";
+          meta.textContent = message;
+          grid.innerHTML =
+            '<div class="empty">Analyse multi-unités indisponible. Aucune conclusion d’entrée.</div>';
+          flags.textContent =
+            "Provenance incohérente : les artefacts ne sont pas remplacés par des estimations.";
+          revStatus.textContent = "ATTENDRE";
+          revStatus.className = "agent-state";
+          revQuality.innerHTML = "";
+          revDetail.textContent =
+            message +
+            ". Aucun statut de retournement n’est affiché tant que les données ne sont pas cohérentes.";
+          revEvidence.innerHTML = "";
+        }
+        async function loadAgentAnalysis(prefetched) {
           var state = $("agent-status"),
             meta = $("agent-meta"),
             grid = $("agent-grid"),
@@ -1602,12 +1644,18 @@
           revEvidence.innerHTML = chips;
         }
           try {
-            var response = await fetch("./agent_analysis.json?t=" + Date.now(), {
-              cache: "no-store",
-            });
-            if (!response.ok) throw new Error("Rapport agent indisponible");
-            var d = await response.json(),
-              generated = Date.parse(d.generated_at),
+            var d;
+            if (prefetched !== undefined) {
+              if (!prefetched) throw new Error("Rapport agent indisponible");
+              d = prefetched;
+            } else {
+              var response = await fetch("./agent_analysis.json?t=" + Date.now(), {
+                cache: "no-store",
+              });
+              if (!response.ok) throw new Error("Rapport agent indisponible");
+              d = await response.json();
+            }
+            var generated = Date.parse(d.generated_at),
               age = Date.now() - generated;
             if (
               d.schema_version !== 1 ||
@@ -1727,17 +1775,105 @@
             );
           }
         }
+        function delay(ms) {
+          return new Promise(function (resolve) {
+            (window.setTimeout || setTimeout)(resolve, ms);
+          });
+        }
+        function artifactId(artifact) {
+          return artifact &&
+            artifact.collection_id !== null &&
+            artifact.collection_id !== undefined &&
+            String(artifact.collection_id).trim() !== ""
+            ? String(artifact.collection_id)
+            : null;
+        }
+        async function fetchArtifact(url, bust) {
+          try {
+            var response = await fetch(url + "?t=" + bust, { cache: "no-store" });
+            if (!response.ok) return { data: null, error: "HTTP " + response.status };
+            return { data: await response.json() };
+          } catch (err) {
+            return { data: null, error: err.message || "erreur réseau" };
+          }
+        }
+        var refreshInFlight = false;
+        async function refreshAll() {
+          if (refreshInFlight) return;
+          refreshInFlight = true;
+          var button = $("refresh");
+          button.disabled = true;
+          try {
+            var report = null,
+              snapshot = null,
+              agent = null,
+              mismatch = false,
+              attempts = 3;
+            // Fetch the three artifacts as one cycle. A publication writes them
+            // sequentially: without a coordinated cycle, report/snapshot/agent
+            // from two different collections can be mixed and falsely rejected.
+            for (var attempt = 0; attempt < attempts; attempt++) {
+              var bust = Date.now(),
+                results = await Promise.all([
+                  fetchArtifact("./report.json", bust),
+                  fetchArtifact("./tel_snapshot.json", bust),
+                  fetchArtifact("./agent_analysis.json", bust),
+                ]);
+              report = results[0].data;
+              snapshot = results[1].data;
+              agent = results[2].data;
+              var ids = [
+                artifactId(report),
+                artifactId(snapshot),
+                artifactId(agent),
+              ].filter(function (value) {
+                return value !== null;
+              });
+              mismatch = ids.length > 1 && new Set(ids).size > 1;
+              if (!mismatch) break;
+              if (attempt < attempts - 1) {
+                button.textContent = "Publication en cours…";
+                await delay(2000);
+              }
+            }
+            if (mismatch) {
+              window.telcoinReportCollectionId = null;
+              window.telcoinSnapshotCollectionId = null;
+              window.telcoinAgentCollectionId = null;
+              clearMarketView(
+                currentGeneratedAt,
+                currentGeneratedAt ? Date.now() - Date.parse(currentGeneratedAt) : NaN,
+                "invalid",
+              );
+              setWaiting(
+                "ATTENDRE — provenance incohérente : collection_id différent entre report, snapshot et analyse",
+              );
+              rejectAgentPanel("collection_id incohérent entre les artefacts");
+              return;
+            }
+            // Set all three identifiers before applying any artifact: every
+            // loader then validates the same collection, and no panel is shown
+            // from a mixed publication.
+            window.telcoinReportCollectionId = artifactId(report);
+            window.telcoinSnapshotCollectionId = artifactId(snapshot);
+            window.telcoinAgentCollectionId = artifactId(agent);
+            await load(report);
+            await loadSnapshot(snapshot);
+            await loadAgentAnalysis(agent);
+          } finally {
+            refreshInFlight = false;
+            button.disabled = false;
+            button.textContent = "↻ Actualiser";
+          }
+        }
         $("refresh").addEventListener("click", function () {
-          load();
-          loadSnapshot();
-          loadAgentAnalysis();
+          refreshAll();
         });
-        load();
-        loadSnapshot();
-        loadAgentAnalysis();        // Collection runs about every 15 minutes. Poll the published report once per minute.
-        window.setInterval(load, 60 * 1000);
-        window.setInterval(loadSnapshot, 60 * 1000);
-        window.setInterval(loadAgentAnalysis, 60 * 1000);
+        refreshAll();
+        // The collection runs about every 15 minutes. One coordinator refreshes
+        // the three artifacts together; independent 60 s pollers could mix two
+        // collections and produce a false provenance rejection.
+        window.setInterval(refreshAll, 60 * 1000);
         // This clock updates report age only; it never refreshes or invents a market price.
         window.setInterval(updateReportAge, 1000);
       })();
