@@ -136,6 +136,14 @@
   function age(q, n) {
     return q && Number.isFinite(q.eventAt) ? n - q.eventAt : Infinity;
   }
+  function tradeFresh(q, n) {
+    var a = age(q, n);
+    return !!q && a >= 0 && a <= MAX_AGE;
+  }
+  function bookFresh(q, n) {
+    var a = q && Number.isFinite(q.bookEventAt) ? n - q.bookEventAt : age(q, n);
+    return !!q && a >= 0 && a <= MAX_AGE;
+  }
   function assess(s, n, r) {
     var reasons = [],
       m = s.mexc,
@@ -156,7 +164,7 @@
         return;
       }
       var a = age(q, n),
-        ba = name === "mexc" ? n - (q.bookEventAt || 0) : a;
+        ba = Number.isFinite(q.bookEventAt) ? n - q.bookEventAt : a;
       if (a < 0) reasons.push(name.toUpperCase() + " : horodatage futur");
       else if (a > MAX_AGE)
         reasons.push(name.toUpperCase() + " : dernier trade périmé (>" + MAX_AGE / 1000 + " s)");
@@ -165,12 +173,12 @@
     });
     var spread = null,
       div = null;
-    if (m && m.bid > 0 && m.ask >= m.bid) {
+    if (m && bookFresh(m, n) && m.bid > 0 && m.ask >= m.bid) {
       spread = ((m.ask - m.bid) / ((m.ask + m.bid) / 2)) * 100;
       if (spread > MAX_SPREAD)
         reasons.push("Spread MEXC supérieur au contrôle existant (" + MAX_SPREAD + " %)");
     }
-    if (m && k && m.last > 0 && k.last > 0) {
+    if (m && tradeFresh(m, n) && tradeFresh(k, n) && m.last > 0 && k.last > 0) {
       div = (Math.abs(m.last - k.last) / ((m.last + k.last) / 2)) * 100;
       if (div > MAX_DIVERGENCE)
         reasons.push("Écart MEXC/KuCoin supérieur au contrôle existant (" + MAX_DIVERGENCE + " %)");
@@ -259,13 +267,10 @@
           }) + " UTC"
         : "inconnue";
     }
+    function freshTrade(q, n) { return tradeFresh(q, n); }
+    function freshBook(q, n) { return bookFresh(q, n); }
     function fresh(q, n) {
-      return (
-        q &&
-        age(q, n) >= 0 &&
-        age(q, n) <= MAX_AGE &&
-        (!q.bookEventAt || (n - q.bookEventAt >= 0 && n - q.bookEventAt <= MAX_AGE))
-      );
+      return freshTrade(q, n) && freshBook(q, n);
     }
     function trend() {
       var i = root.telcoinIndicators;
@@ -296,10 +301,12 @@
     }
     function row(n, t) {
       var q = s[n],
-        ok = fresh(q, t),
+        tradeOk = freshTrade(q, t),
+        bookOk = freshBook(q, t),
+        ok = tradeOk && bookOk,
         p = n === "mexc" ? "rt-mexc" : "rt-kucoin";
-      el(p + "-last").textContent = ok ? fp(q.last) : "—";
-      el(p + "-book").textContent = ok
+      el(p + "-last").textContent = q && Number.isFinite(q.last) ? fp(q.last) : "—";
+      el(p + "-book").textContent = bookOk
         ? "Bid " + fp(q.bid) + " · Ask " + fp(q.ask)
         : "Bid/Ask indisponibles ou périmés";
       el(p + "-detail").textContent =
@@ -314,13 +321,15 @@
           : s.error[n] || "En attente d’un événement réel";
       el(p + "-state").textContent = ok
         ? "TICK FRAIS"
-        : q.connected
-          ? "ATTENTE / PÉRIMÉ"
-          : q.status;
+        : q.connected && bookOk && !tradeOk
+          ? "FLUX ACTIF · DERNIER TRADE ANCIEN"
+          : q.connected
+            ? "ATTENTE / PÉRIMÉ"
+            : q.status;
       el(p + "-state").className = "rt-state " + (ok ? "pass" : "");
       var delta = s.delta[n];
       el(p + "-move").textContent =
-        ok && Number.isFinite(delta)
+        tradeOk && Number.isFinite(delta)
           ? (delta > 0 ? "+" : "") +
             delta.toLocaleString("fr-FR", { maximumFractionDigits: 4 }) +
             " % depuis le tick précédent"
@@ -359,28 +368,42 @@
         ? "Flux publics en direct · contrôles passés"
         : "Flux publics · ATTENDRE";
       el("header-dot").style.background = r.ok ? "var(--green)" : "var(--amber)";
-      var mf = fresh(s.mexc, t),
-        kf = fresh(s.kucoin, t);
-      el("last-price").textContent = mf ? fp(s.mexc.last) : "—";
-      el("price-time").textContent = mf
-        ? "MEXC · événement " + ft(s.mexc.eventAt) + " · reçu " + ft(s.mexc.receivedAt)
-        : "Aucun trade MEXC frais";
+      var mf = freshTrade(s.mexc, t),
+        mb = freshBook(s.mexc, t),
+        kf = freshTrade(s.kucoin, t);
+      el("last-price").textContent =
+        s.mexc && Number.isFinite(s.mexc.last) ? fp(s.mexc.last) : "—";
+      el("price-time").textContent = s.mexc && Number.isFinite(s.mexc.eventAt)
+        ? (mf ? "MEXC · dernier trade " : "DERNIER PRIX CONNU — TRADE PÉRIMÉ · ") +
+          "événement " + ft(s.mexc.eventAt) + " · reçu " + ft(s.mexc.receivedAt) +
+          " · âge " + Math.floor(Math.max(0, age(s.mexc, t)) / 1000) + " s"
+        : "Aucun trade reçu";
       el("spread").textContent =
-        !mf || r.spreadPct === null
+        !mb || r.spreadPct === null
           ? "—"
           : r.spreadPct.toLocaleString("fr-FR", { maximumFractionDigits: 4 }) + " %";
-      el("spread-foot").textContent = mf
+      el("spread-foot").textContent = mb
         ? "MEXC bid " + fp(s.mexc.bid) + " · ask " + fp(s.mexc.ask)
         : "Cotation MEXC indisponible ou périmée";
-      el("mexc-ticker-state").textContent = mf ? "FLUX LIVE" : s.mexc.status;
-      el("mexc-ticker-state").className = "source-state " + (mf ? "pass" : "fail");
-      el("mexc-ticker-detail").textContent = mf
-        ? "MEXC WebSocket public · événement " + ft(s.mexc.eventAt)
+      el("mexc-ticker-state").textContent = mf
+        ? "FLUX LIVE"
+        : mb && s.mexc.connected
+          ? "FLUX ACTIF · DERNIER TRADE ANCIEN"
+          : s.mexc.status;
+      el("mexc-ticker-state").className = "source-state " + (mf || (mb && s.mexc.connected) ? "pass" : "fail");
+      el("mexc-ticker-detail").textContent = s.mexc && Number.isFinite(s.mexc.eventAt)
+        ? "MEXC WebSocket public · dernier trade " + ft(s.mexc.eventAt) +
+          " · reçu " + ft(s.mexc.receivedAt)
         : s.error.mexc || "En attente du flux MEXC";
-      el("kucoin-state").textContent = kf ? "FLUX LIVE" : s.kucoin.status;
-      el("kucoin-state").className = "source-state " + (kf ? "pass" : "fail");
-      el("kucoin-detail").textContent = kf
-        ? "KuCoin WebSocket public · " + fp(s.kucoin.last) + " · événement " + ft(s.kucoin.eventAt)
+      el("kucoin-state").textContent = kf
+        ? "FLUX LIVE"
+        : bookFresh(s.kucoin, t) && s.kucoin.connected
+          ? "FLUX ACTIF · DERNIER TRADE ANCIEN"
+          : s.kucoin.status;
+      el("kucoin-state").className = "source-state " + (kf || (bookFresh(s.kucoin, t) && s.kucoin.connected) ? "pass" : "fail");
+      el("kucoin-detail").textContent = s.kucoin && Number.isFinite(s.kucoin.eventAt)
+        ? "KuCoin WebSocket public · dernier trade " + ft(s.kucoin.eventAt) +
+          " · reçu " + ft(s.kucoin.receivedAt)
         : s.error.kucoin || "En attente du flux KuCoin";
       if (!root.telcoinReportIsFresh)
         [
@@ -618,7 +641,12 @@
               return;
             }
             delta("kucoin", q.last);
-            Object.assign(s.kucoin, q, { connected: true, status: "TICK FRAIS", receivedAt: recv });
+            Object.assign(s.kucoin, q, {
+              connected: true,
+              status: "TICK FRAIS",
+              receivedAt: recv,
+              bookEventAt: recv,
+            });
             s.error.kucoin = "";
             render();
           } catch (err) {
