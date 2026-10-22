@@ -1,6 +1,24 @@
 # LISTE DE TÂCHES — TELCOIN TRADING INTELLIGENCE
 
-Mise à jour : 21 octobre 2026 (réconciliation Git locale exécutée — opération T40/1 ; étapes 2 à 5 non autorisées). États : **TERMINÉ** · **EN COURS** · **À FAIRE** · **BLOQUÉ** · **ÉCARTÉ**.
+Mise à jour : 23 octobre 2026 (finalisation de la PR #47 — réserves documentées, contrôles avant fusion). États : **TERMINÉ** · **EN COURS** · **À FAIRE** · **BLOQUÉ** · **ÉCARTÉ**.
+
+---
+
+## ÉTAT DE LA PR #47 (23 OCTOBRE 2026)
+
+- **PR** : [#47](https://github.com/khalidd692/telcoin-trading-intelligence99/pull/47), ouverte, base `main`, 5 commits de code + ce commit de documentation ; `mergeable = MERGEABLE`, `mergeStateStatus = CLEAN`.
+- **CI PR** : run `39871536673`, job `120146883473` — **succès**.
+- **Workflow live** : run `39870790997` — **succès** (collecte, tests, analyse, alertes, provenance, commit des artefacts, upload et déploiement GitHub Pages).
+- **Artefacts `main` au commit `aa89a52`** : rapport `ATTENDRE`, `collection_status = VALID`, seul contrôle en échec `MEXC spread` (`0,6408 % > 0,5 %`) ; snapshot `VÉRIFIÉ`, `both_books_usable = true`, confirmation indépendante `OUI`, divergence `24,98 bps` ; agent `SURVEILLER`, `early_reversal = ATTENDRE`, `exploitable = false`, `orders_sent = 0`.
+- **Provenance** : même `collection_id` (`a122609c-671c-4c43-a30f-dec2da3bb5ce`) sur les trois artefacts ; `python -m src.publication_gate` OK.
+- **Lecture seule** : aucun ordre, aucune clé privée de trading, aucune modification de la logique d'exécution ou des seuils.
+
+## RÉSERVES STATISTIQUES ET LIMITES (INCHANGÉES)
+
+- **OOS** : `n = 77`, rendement net `+0,2218 %`, IC 95 % `[−0,514 % ; +2,394 %]` — **l'intervalle inclut zéro** ; la rentabilité n'est **pas démontrée**.
+- **Frais** : `0,57 %` aller-retour est une **hypothèse de scénario**, pas une mesure live vérifiée ; le snapshot live indique `fees.verified = false` et exclut les frais.
+- **Détecteur** : inchangé, empreinte SHA-256 `ca7f46ee2b7e1a06122eaf584ce18db1450fc6b766a8ec843a69ee5b08f0a600`.
+- **Signal live** : `ATTENDRE` pour cause de spread MEXC hors limite ; ce n'est **ni un achat ni une vente**.
 
 ---
 
@@ -62,6 +80,8 @@ Mise à jour : 21 octobre 2026 (réconciliation Git locale exécutée — opéra
 | T62 | **Boucle de publications (~50 s) due au checkout de profondeur 1** : l'historique des publications était indisponible, l'âge restait inconnu et le module relançait à chaque exécution. L'âge est désormais lu dans l'artefact publié au commit de checkout, et un âge inconnu ne déclenche plus rien | 22 tests de cadence ; la boucle est arrêtée | `src/publication_cadence.py`, `tests/test_publication_cadence.py`, `.github/workflows/monitor.yml` |
 | T63 | **Évaluation prospective** : le journal consigne les champs `returns_24h_*` mais rien ne les remplissait. `scripts/backtest/evaluate_prospective.py` croise le journal avec une série de prix 15 m et n'évalue **que** les observations dont l'échéance de 24 h est atteinte ; le journal n'est jamais modifié, et aucun résultat n'est annoncé avant l'échéance | 12 tests (échéance non atteinte, série insuffisante, prix d'entrée absent, journal intact) ; sur le journal réel : 7 observations, 0 évaluée, 0 rendement renseigné | `scripts/backtest/evaluate_prospective.py`, `tests/test_evaluate_prospective.py` |
 | T64 | **Cadence de publication rétablie** : le garde-fou de cadence lisait l'âge de l'artefact **que l'exécution venait de publier** (l'étape de publication commite sur la branche locale *avant* l'étape de cadence) → âge ≈ 0,2 min → la chaîne s'arrêtait **à chaque maillon** (logs des runs `39677731012`, `39679590669`, `39680693855`, `39682444089` : « 0,1/0,7/0,2/0,2 min → inutile »). Le cron ne compense pas : **44 exécutions planifiées sur 168 h** pour un `*/15` (livraison 6,5 %, intervalle médian 252 min, min 104, max 387). Correctif : le maillon **attend le créneau** (13 min) avant de relancer au lieu de décider « rien à faire », une **porte de publication** (12 min) interdit deux publications trop rapprochées, et **seuls les maillons de chaîne** (`workflow_dispatch` avec `mode=chain`) se relancent — une exécution ponctuelle ne relance que si la chaîne est arrêtée (30 min), sinon chaque push créait une chaîne parallèle | 48 tests de cadence (26 nouveaux) dont une **simulation du runner** sur 24 tours (intervalles 12-16 min) ; intervalle moyen simulé 15 min ; la suite complète passe (283 tests) | `src/publication_cadence.py`, `tests/test_publication_cadence.py`, `.github/workflows/monitor.yml`, `EXPLOITATION.md` §1.1 |
+| T65 | **Cohérence du statut du dashboard (PR #47)** : badge vert de l'agent et chip d'analyse conditionnés à un snapshot vérifié **et** à un rapport frais ; la bannière périodique composée reste prioritaire ; les raisons composées sont échappées HTML ; le contrôle e2e T37 accepte les libellés réels `Régime ...` / `Tendance ...` | 295 tests Python (3 skipped), 14 tests collecteur, `node tests/test_dashboard.js`, `node tests/test_realtime.js`, `verify_states.py` 40/40, `verify_t37_e2e.py` 0 échec, `git diff --check` OK, CI `39871536673` verte | `site/index.html`, `site/realtime.js`, `tests/test_dashboard.js`, `tests/test_realtime.js`, `scripts/verify_t37_e2e.py` |
+| T66 | **Vérification live et provenance avant fusion** : run `39870790997` vert ; artefacts `main` au commit `aa89a52` avec `collection_id` commun ; snapshot `VÉRIFIÉ` et confirmation `OUI` ; rapport `ATTENDRE` dû au spread MEXC, pas à une panne ; porte de provenance OK ; lecture seule (`orders_sent = 0`) | preuves ci-dessus et `python -m src.publication_gate` OK | `site/report.json`, `site/tel_snapshot.json`, `site/agent_analysis.json`, `src/publication_gate.py` |
 ## À FAIRE (décisions ou travaux restants)
 
 | # | Tâche | Justification / condition |
@@ -77,8 +97,13 @@ Mise à jour : 21 octobre 2026 (réconciliation Git locale exécutée — opéra
 | # | Tâche | Blocage | Sortie possible |
 |---|---|---|---|
 | T41 | Collecte MEXC en local | `api.mexc.com` ne résout pas (DNS) depuis ce poste | la CI a un DNS normal ; en local l'analyse reste fail-closed |
-| T42 | Opérations Git 2 à 5 (commit / push / merge `main` / publication) | autorité non accordée | dépôt réconcilié et sûr (HEAD `ee77552`, 0 ahead / 0 behind), sauvegardes vérifiées, répétition à blanc de l'étape 2 validée en bac à sable |
-| T43 | Déploiement / publication | autorité non accordée | aucun artefact publié |
+
+## EN COURS
+
+| # | Tâche | Condition / prochaine action |
+|---|---|---|
+| T42 | **Fusion de la PR #47 avec merge commit** | Autorisée ; à exécuter après le commit de cette mise à jour, avec `mergeable = MERGEABLE`, `mergeStateStatus = CLEAN` et contrôles verts. |
+| T43 | **Vérification post-fusion** | Contrôler `main`, la CI, le workflow `monitor.yml` et le déploiement GitHub Pages ; ne déclarer terminé qu'avec preuve. |
 
 ## ÉCARTÉ (décidé et documenté)
 
