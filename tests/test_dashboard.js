@@ -389,6 +389,14 @@ async function boot(generatedAt, initialNow, payloadOverride) {
     }
   });
   assertAgentContextBlocked(exploitableMissingSnapshot, /snapshot temps réel indisponible/);
+  assert.doesNotMatch(
+    exploitableMissingSnapshot.elements.get("agent-reversal-quality").innerHTML,
+    /quality-chip ok/,
+  );
+  assert.match(
+    exploitableMissingSnapshot.elements.get("agent-reversal-quality").innerHTML,
+    /Contexte non vérifié/,
+  );
   assert.match(
     exploitableMissingSnapshot.elements.get("agent-reversal-detail").innerHTML,
     /Contexte non vérifié/,

@@ -2019,6 +2019,9 @@
               if (revStatus.className.indexOf("pass") !== -1) {
                 revStatus.className = "agent-state";
               }
+              revQuality.innerHTML =
+                revQuality.innerHTML.replace(/quality-chip ok/g, "quality-chip warn") +
+                '<span class="quality-chip warn">Contexte non vérifié</span>';
               if (revDetail.innerHTML.indexOf("Contexte non vérifié") === -1) {
                 revDetail.innerHTML =
                   '<span class="agent-reversal-warn">Contexte non vérifié : ce statut de retournement n’est pas validé par les carnets.</span><br />' +
