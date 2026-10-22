@@ -93,6 +93,34 @@ class ReportTests(unittest.TestCase):
         finally:
             output.unlink(missing_ok=True)
 
+    def test_valid_attendre_report_exits_zero(self):
+        """A valid ATTENDRE is a fail-closed decision, not a collection failure."""
+        output = Path(__file__).with_name("_report_test.json")
+        valid_attendre = {
+            "schema_version": 1, "generated_at": self.now.isoformat(),
+            "symbol": "TELUSDT", "mode": "READ_ONLY_ALERTS",
+            "status": "ATTENDRE", "collection_status": "VALID",
+            "sources": {"mexc_ticker": {"status": "OK"}}, "checks": [],
+            "indicators": None,
+        }
+        try:
+            with patch.object(sys, "argv", ["monitor", "--output", str(output)]):
+                with patch.object(monitor, "build_report", return_value=valid_attendre):
+                    self.assertEqual(monitor.main(), 0)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "ATTENDRE")
+        finally:
+            output.unlink(missing_ok=True)
+
+    def test_fallback_report_exits_nonzero(self):
+        """Missing or incoherent market data must still fail the collection step."""
+        output = Path(__file__).with_name("_report_test.json")
+        try:
+            with patch.object(sys, "argv", ["monitor", "--output", str(output)]):
+                with patch.object(monitor, "build_report", return_value=monitor.fallback_report("offline")):
+                    self.assertEqual(monitor.main(), 1)
+        finally:
+            output.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()

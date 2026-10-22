@@ -233,8 +233,12 @@ def main() -> int:
             report["collection_id"] = args.collection_id
     Path(args.output).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    # ATTENDRE is a valid report, but a critical data-quality failure must fail the workflow.
-    return 0 if report.get("status") == "SURVEILLER" else 1
+    # The exit code reports whether collection produced a valid artifact, not whether
+    # the market passed every quality check. A valid ATTENDRE (for example a spread
+    # above the threshold) is a legitimate fail-closed decision and must not be
+    # retried as if the collection itself had failed. Only a FALLBACK report means
+    # that required market data is missing or incoherent.
+    return 0 if report.get("collection_status") == "VALID" else 1
 
 
 if __name__ == "__main__":
