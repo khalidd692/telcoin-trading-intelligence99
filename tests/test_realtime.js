@@ -22,6 +22,15 @@ assert.equal(rt.assess(sources,now,{fresh:false,status:"SURVEILLER",checksPass:t
 assert.equal(rt.assess(sources,now,{fresh:true,status:"ATTENDRE",checksPass:false}).ok,false);
 assert.equal(rt.assess({...sources,mexc:{...sources.mexc,ask:.00124}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
 assert.equal(rt.assess({...sources,kucoin:{...sources.kucoin,last:.0013}},now,{fresh:true,status:"SURVEILLER",checksPass:true}).ok,false);
+const kucoinOldTrade={...sources.kucoin,eventAt:now-31000,bookEventAt:now,receivedAt:now};
+const kucoinOldResult=rt.assess({...sources,kucoin:kucoinOldTrade},now,{fresh:true,status:"SURVEILLER",checksPass:true});
+assert.equal(kucoinOldResult.ok,false,"a stale KuCoin last trade must still fail closed");
+assert.ok(kucoinOldResult.reasons.some(x=>x.includes("dernier trade périmé")),"stale last trade must be explicit");
+assert.ok(!kucoinOldResult.reasons.some(x=>x.includes("KUCOIN : bid/ask périmé")),"fresh KuCoin book must not be judged by last-trade timestamp");
+assert.equal(kucoinOldResult.spreadPct!==null,true,"fresh MEXC book spread remains measurable");
+assert.equal(kucoinOldResult.divergencePct,null,"cross-exchange divergence must be suppressed when KuCoin last trade is stale");
+const oldBookResult=rt.assess({...sources,kucoin:{...sources.kucoin,bookEventAt:now-31001}},now,{fresh:true,status:"SURVEILLER",checksPass:true});
+assert.ok(oldBookResult.reasons.some(x=>x.includes("KUCOIN : bid/ask périmé")),"stale book must still fail closed");
 assert.equal(rt.isOutOfOrder(100,99),true);assert.equal(rt.isOutOfOrder(100,100),false);assert.equal(rt.reconnectDelay(1),1000);assert.equal(rt.reconnectDelay(2),2000);assert.equal(rt.reconnectDelay(10),30000);
 
 function fakeEnvironment(WebSocketImpl) {
