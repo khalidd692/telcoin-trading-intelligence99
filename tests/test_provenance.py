@@ -90,7 +90,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
             "symbol": "TELUSDT",
             "generated_at": generated_at,
             "collection_id": test_id,
-            "snapshot_id": compute_snapshot_fingerprint(valid_sources, self._valid_cross_check()),
+            "snapshot_id": compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()}),
             "sources": valid_sources,
             "cross_check": {"independent_confirmation": "OUI", **self._valid_cross_check()}
         }
@@ -121,7 +121,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
         generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         valid_sources = self._valid_sources()
         valid_sources["mexc"]["candles"] = {"15m": {"status": "OK", "rows": [{"open_time": generated_at, "open": 0.0015, "high": 0.0016, "low": 0.0014, "close": 0.00155, "volume": 1000000}] * 60}}
-        valid_hash = compute_snapshot_fingerprint(valid_sources, self._valid_cross_check())
+        valid_hash = compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()})
         snapshot = {
             "schema_version": 1,
             "symbol": "TELUSDT",
@@ -269,7 +269,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
             "generated_at": generated_at,
             "collection_id": test_id,
             "collection_status": "VALID",
-            "snapshot_id": compute_snapshot_fingerprint(valid_sources, self._valid_cross_check()),
+            "snapshot_id": compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()}),
             "sources": valid_sources,
             "cross_check": {"independent_confirmation": "OUI", **self._valid_cross_check()},
         }
