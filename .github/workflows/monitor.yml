@@ -226,6 +226,23 @@ jobs:
           else:
               print("\n".join(lines))
           PY
+      - name: Audit pipeline with read-only autonomous supervisor
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          python -m src.autonomous_supervisor --analysis site/agent_analysis.json --snapshot site/tel_snapshot.json --alert-decision alerts/last_decision.json --output site/supervisor_report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("site/supervisor_report.json")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          summary = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
+          lines = ["## Superviseur opérationnel autonome", f"- État : **{d['status']}**", f"- {d['summary']}", f"- Diagnostics : {len(d['issues'])}"]
+          for item in d["issues"]:
+              lines.append(f"- [{item['severity']}] {item['code']} — {item['detail']}")
+              lines.append(f"  - Suite recommandée : {item['recommended_recovery']}")
+          summary.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+          PY
       - name: Validate collection provenance before publication
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
