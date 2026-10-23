@@ -90,7 +90,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
             "symbol": "TELUSDT",
             "generated_at": generated_at,
             "collection_id": test_id,
-            "snapshot_id": compute_snapshot_fingerprint(valid_sources, self._valid_cross_check()),
+            "snapshot_id": compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()}),
             "sources": valid_sources,
             "cross_check": {"independent_confirmation": "OUI", **self._valid_cross_check()}
         }
@@ -121,7 +121,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
         generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         valid_sources = self._valid_sources()
         valid_sources["mexc"]["candles"] = {"15m": {"status": "OK", "rows": [{"open_time": generated_at, "open": 0.0015, "high": 0.0016, "low": 0.0014, "close": 0.00155, "volume": 1000000}] * 60}}
-        valid_hash = compute_snapshot_fingerprint(valid_sources, self._valid_cross_check())
+        valid_hash = compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()})
         snapshot = {
             "schema_version": 1,
             "symbol": "TELUSDT",
@@ -269,7 +269,7 @@ class TestProvenanceDeterministic(unittest.TestCase):
             "generated_at": generated_at,
             "collection_id": test_id,
             "collection_status": "VALID",
-            "snapshot_id": compute_snapshot_fingerprint(valid_sources, self._valid_cross_check()),
+            "snapshot_id": compute_snapshot_fingerprint(valid_sources, {"independent_confirmation": "OUI", **self._valid_cross_check()}),
             "sources": valid_sources,
             "cross_check": {"independent_confirmation": "OUI", **self._valid_cross_check()},
         }
@@ -416,6 +416,41 @@ class TestProvenanceLiveIntegration(unittest.TestCase):
             self.assertTrue(all(c in "0123456789abcdef" for c in rep["snapshot_id"]))
         else:
             self.assertIn("provenance_error", rep.get("cross_check", {}))
+
+    def test_snapshot_fingerprint_covers_candles_trades_and_quality(self):
+        sources = self._valid_sources()
+        for venue in ("mexc", "kucoin"):
+            sources[venue]["candles"] = {
+                "15m": {
+                    "status": "OK",
+                    "contiguous_tail_count": 60,
+                    "rows": [{"open_time": "2026-10-23T00:00:00Z", "open": 1.0,
+                              "high": 1.1, "low": 0.9, "close": 1.05, "volume": 100.0}],
+                }
+            }
+            sources[venue]["trades"] = [{"time_ms": 1792713600000, "price": 1.05,
+                                         "qty": 10.0, "side": "buy", "id": "trade-1"}]
+            sources[venue]["status"] = {"book": {"verdict": "VÉRIFIÉ"},
+                                        "trades": {"verdict": "VÉRIFIÉ"}}
+        baseline = compute_snapshot_fingerprint(sources, self._valid_cross_check())
+
+        changed_candle = json.loads(json.dumps(sources))
+        changed_candle["mexc"]["candles"]["15m"]["rows"][0]["close"] = 1.06
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_candle, self._valid_cross_check()))
+
+        changed_trade = json.loads(json.dumps(sources))
+        changed_trade["kucoin"]["trades"][0]["qty"] = 11.0
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_trade, self._valid_cross_check()))
+
+        changed_quality = json.loads(json.dumps(sources))
+        changed_quality["mexc"]["candles"]["15m"]["status"] = "PARTIEL"
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_quality, self._valid_cross_check()))
+
+    def test_snapshot_fingerprint_rejects_non_finite_decision_data(self):
+        sources = self._valid_sources()
+        sources["mexc"]["candles"] = {"15m": {"rows": [{"close": float("nan")}]}}
+        with self.assertRaises(ValueError):
+            compute_snapshot_fingerprint(sources, self._valid_cross_check())
 
 
 if __name__ == "__main__":

@@ -1149,6 +1149,34 @@ def analyze_timeframe(source: dict[str, Any], timeframe: str, now: datetime) -> 
             "status": "UNAVAILABLE", "reason": f"historique insuffisant ou incohérent ({len(rows)} bougies valides)",
             "candle_count": len(rows), "trend": "INDETERMINE",
         }
+
+    # Do not silently promote a PARTIEL collector section to a healthy analysis.
+    # Old gaps outside the indicator window are tolerated only when the collector
+    # proves a sufficiently long uninterrupted closed-candle tail. Unknown quality
+    # states fail closed; legacy fixtures with status OK remain compatible.
+    source_status = section.get("status")
+    if source_status not in (None, "OK", "PARTIEL"):
+        return {
+            "status": "UNAVAILABLE", "reason": f"statut de source inconnu ou inutilisable: {source_status!r}",
+            "candle_count": len(rows), "trend": "INDETERMINE",
+        }
+    if source_status == "PARTIEL":
+        contiguous = section.get("contiguous_tail_count")
+        if not isinstance(contiguous, int) or isinstance(contiguous, bool) or contiguous < MIN_CANDLES[timeframe]:
+            return {
+                "status": "UNAVAILABLE",
+                "reason": f"source PARTIEL: queue continue insuffisante ({contiguous!r}; minimum {MIN_CANDLES[timeframe]})",
+                "candle_count": len(rows), "trend": "INDETERMINE",
+            }
+        # Zero-volume candles inside the required tail undermine volume-based
+        # evidence. Do not reject old zero-volume candles outside that window.
+        recent_rows = rows[-MIN_CANDLES[timeframe]:]
+        if any(row["volume"] <= 0 for row in recent_rows):
+            return {
+                "status": "UNAVAILABLE",
+                "reason": "source PARTIEL: volume nul dans la fenêtre de bougies utilisée",
+                "candle_count": len(rows), "trend": "INDETERMINE",
+            }
     last_close_at = parse_time(section.get("last_closed_at"))
     if last_close_at is None:
         last_open = parse_time(rows[-1].get("open_time"))

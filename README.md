@@ -158,7 +158,35 @@ substitution ni simulation n'est effectuée.
 | `JOURNAL_APPRENTISSAGE*.md` | journal des retournements détectés, manqués et contradictoires |
 | `CONFLIT_GIT.md` | audit des workflows et résolution de divergence recommandée |
 
-## 9. Sécurité et limites
+## 9. Superviseur opérationnel autonome
+
+`src/autonomous_supervisor.py` contrôle les artefacts produits par le pipeline : fraîcheur du rapport,
+intégrité du symbole, état des six unités de temps, cohérence du `collection_id`, qualité des sources
+MEXC/KuCoin et état du suivi des alertes. Il publie `site/supervisor_report.json` avec un état
+`HEALTHY`, `DEGRADED` ou `UNAVAILABLE`, des diagnostics explicites et les prochaines étapes de
+récupération recommandées. Le workflow ajoute ce diagnostic au résumé de l'exécution.
+
+Ce premier superviseur est volontairement déterministe : il détecte et explique les problèmes, mais
+n'exécute pas encore de réparation autonome et n'utilise pas de modèle de langage. Une étape de
+récupération contrôlée doit toujours relancer les contrôles ensuite. Il ne modifie pas les règles de
+trading, n'invente aucune donnée et ne passe aucun ordre.
+
+Test dédié : `python -m unittest tests.test_autonomous_supervisor -v` (ou via la découverte globale).
+
+### Qualité des bougies et empreinte du snapshot
+
+Une source marquée `PARTIEL` n'est pas automatiquement considérée comme saine. Le moteur exige
+une queue continue suffisante pour la fenêtre d'indicateurs et refuse le calcul si un volume nul
+apparaît dans cette fenêtre. Un défaut ancien hors de la fenêtre utile peut être toléré lorsque la
+queue récente est continue et valide.
+
+Le `snapshot_id` est calculé sur les blocs `sources` et `cross_check` canoniquement sérialisés :
+les bougies OHLCV, trades, profondeur du carnet, verdicts de qualité et diagnostics sont donc
+couverts. Une modification d'un de ces champs change l'empreinte; les données non sérialisables
+ou non finies sont rejetées. Cela renforce la traçabilité, sans prouver à lui seul que les données
+de marché sont exactes ou que le signal est rentable.
+
+## 10. Sécurité et limites
 
 * Lecture seule stricte : aucun ordre, aucune clé, aucun accès compte.
 * Le dashboard **fail-closed** : donnée absente, périmée ou incohérente ⇒ `ATTENDRE`.
