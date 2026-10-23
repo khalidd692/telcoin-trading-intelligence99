@@ -158,7 +158,22 @@ substitution ni simulation n'est effectuée.
 | `JOURNAL_APPRENTISSAGE*.md` | journal des retournements détectés, manqués et contradictoires |
 | `CONFLIT_GIT.md` | audit des workflows et résolution de divergence recommandée |
 
-## 9. Sécurité et limites
+## 9. Superviseur opérationnel autonome
+
+`src/autonomous_supervisor.py` contrôle les artefacts produits par le pipeline : fraîcheur du rapport,
+intégrité du symbole, état des six unités de temps, cohérence du `collection_id`, qualité des sources
+MEXC/KuCoin et état du suivi des alertes. Il publie `site/supervisor_report.json` avec un état
+`HEALTHY`, `DEGRADED` ou `UNAVAILABLE`, des diagnostics explicites et les prochaines étapes de
+récupération recommandées. Le workflow ajoute ce diagnostic au résumé de l'exécution.
+
+Ce premier superviseur est volontairement déterministe : il détecte et explique les problèmes, mais
+n'exécute pas encore de réparation autonome et n'utilise pas de modèle de langage. Une étape de
+récupération contrôlée doit toujours relancer les contrôles ensuite. Il ne modifie pas les règles de
+trading, n'invente aucune donnée et ne passe aucun ordre.
+
+Test dédié : `python -m unittest tests.test_autonomous_supervisor -v` (ou via la découverte globale).
+
+## 10. Sécurité et limites
 
 * Lecture seule stricte : aucun ordre, aucune clé, aucun accès compte.
 * Le dashboard **fail-closed** : donnée absente, périmée ou incohérente ⇒ `ATTENDRE`.
