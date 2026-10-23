@@ -47,11 +47,12 @@ Les décisions quantitatives doivent rester déterministes, explicables et read-
 3. Ajout d'un déclencheur `pull_request` afin que les tests puissent s'exécuter sans lancer la collecte de marché ni publier.
 4. Le fingerprint du snapshot couvre maintenant l'ensemble des blocs `sources` et `cross_check` en JSON canonique, au lieu de ne hacher qu'un sous-ensemble de prix/carnet.
 5. `analyze_timeframe()` refuse une source `PARTIEL` lorsque la queue continue est insuffisante, lorsque la qualité requise est inconnue, ou lorsque la fenêtre utilisée contient un volume nul. Un trou ancien hors fenêtre peut être toléré si la queue utilisée reste continue et saine.
-6. Tests ajoutés pour les mutations de bougies, transactions, statuts qualité et historiques partiels.
+6. Les tests de provenance ont été ajustés pour hacher le même `cross_check` complet que celui présent dans le snapshot; le vérificateur de projet recalcule son empreinte uniquement en mémoire pour tester la forme de l'analyse sur un ancien artefact de démonstration. La porte runtime continue de refuser les empreintes incohérentes.
+7. Tests ajoutés pour les mutations de bougies, transactions, statuts qualité et historiques partiels.
 
 ## Ce qui n'est PAS encore terminé
 
-- Les tests de la branche doivent passer dans l'exécution CI déclenchée par la pull request; aucun succès n'est revendiqué avant lecture du résultat.
+- CI vérifiée sur le commit courant : suite principale réussie, tests Python et Node réussis; contrôle projet rapide **32/32 vérifications réussies**. Cinq tests sont ignorés dans la suite principale parce qu'ils nécessitent l'accès réseau de marché public. La collecte de marché est volontairement ignorée sur pull request.
 - Le watchdog extérieur et la livraison d'alertes avec accusé de réception ne sont pas encore implémentés.
 - Le journal prospectif des outcomes n'est pas encore finalisé.
 - La valeur prédictive de la microstructure et du contexte BTC/ETH n'est pas démontrée.
