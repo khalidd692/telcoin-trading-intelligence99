@@ -173,6 +173,19 @@ trading, n'invente aucune donnée et ne passe aucun ordre.
 
 Test dédié : `python -m unittest tests.test_autonomous_supervisor -v` (ou via la découverte globale).
 
+### Qualité des bougies et empreinte du snapshot
+
+Une source marquée `PARTIEL` n'est pas automatiquement considérée comme saine. Le moteur exige
+une queue continue suffisante pour la fenêtre d'indicateurs et refuse le calcul si un volume nul
+apparaît dans cette fenêtre. Un défaut ancien hors de la fenêtre utile peut être toléré lorsque la
+queue récente est continue et valide.
+
+Le `snapshot_id` est calculé sur les blocs `sources` et `cross_check` canoniquement sérialisés :
+les bougies OHLCV, trades, profondeur du carnet, verdicts de qualité et diagnostics sont donc
+couverts. Une modification d'un de ces champs change l'empreinte; les données non sérialisables
+ou non finies sont rejetées. Cela renforce la traçabilité, sans prouver à lui seul que les données
+de marché sont exactes ou que le signal est rentable.
+
 ## 10. Sécurité et limites
 
 * Lecture seule stricte : aucun ordre, aucune clé, aucun accès compte.
