@@ -417,6 +417,41 @@ class TestProvenanceLiveIntegration(unittest.TestCase):
         else:
             self.assertIn("provenance_error", rep.get("cross_check", {}))
 
+    def test_snapshot_fingerprint_covers_candles_trades_and_quality(self):
+        sources = self._valid_sources()
+        for venue in ("mexc", "kucoin"):
+            sources[venue]["candles"] = {
+                "15m": {
+                    "status": "OK",
+                    "contiguous_tail_count": 60,
+                    "rows": [{"open_time": "2026-10-23T00:00:00Z", "open": 1.0,
+                              "high": 1.1, "low": 0.9, "close": 1.05, "volume": 100.0}],
+                }
+            }
+            sources[venue]["trades"] = [{"time_ms": 1792713600000, "price": 1.05,
+                                         "qty": 10.0, "side": "buy", "id": "trade-1"}]
+            sources[venue]["status"] = {"book": {"verdict": "VÉRIFIÉ"},
+                                        "trades": {"verdict": "VÉRIFIÉ"}}
+        baseline = compute_snapshot_fingerprint(sources, self._valid_cross_check())
+
+        changed_candle = json.loads(json.dumps(sources))
+        changed_candle["mexc"]["candles"]["15m"]["rows"][0]["close"] = 1.06
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_candle, self._valid_cross_check()))
+
+        changed_trade = json.loads(json.dumps(sources))
+        changed_trade["kucoin"]["trades"][0]["qty"] = 11.0
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_trade, self._valid_cross_check()))
+
+        changed_quality = json.loads(json.dumps(sources))
+        changed_quality["mexc"]["candles"]["15m"]["status"] = "PARTIEL"
+        self.assertNotEqual(baseline, compute_snapshot_fingerprint(changed_quality, self._valid_cross_check()))
+
+    def test_snapshot_fingerprint_rejects_non_finite_decision_data(self):
+        sources = self._valid_sources()
+        sources["mexc"]["candles"] = {"15m": {"rows": [{"close": float("nan")}]}}
+        with self.assertRaises(ValueError):
+            compute_snapshot_fingerprint(sources, self._valid_cross_check())
+
 
 if __name__ == "__main__":
     unittest.main()
