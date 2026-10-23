@@ -258,6 +258,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p alerts
           git add site/report.json site/tel_snapshot.json site/agent_analysis.json alerts/
+          if [ -f site/supervisor_report.json ]; then
+            git add site/supervisor_report.json
+          fi
           if ! git diff --cached --quiet; then
             git commit -m "Refresh published TEL/USDT market report [skip ci]"
             # A PR merge or another publisher may advance main after checkout.
