@@ -945,5 +945,36 @@ class DivergenceRobustnessTests(unittest.TestCase):
                 self.assertFalse(has_rsi_divergence(rsi, price, bad_lookback))
 
 
+    def test_partial_source_with_short_contiguous_tail_is_unavailable(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now)
+        section = snapshot["sources"]["mexc"]["candles"]["15m"]
+        section["status"] = "PARTIEL"
+        section["contiguous_tail_count"] = 12
+        result = analyze_timeframe(snapshot["sources"]["mexc"], "15m", now)
+        self.assertEqual(result["status"], "UNAVAILABLE")
+        self.assertIn("queue continue insuffisante", result["reason"])
+
+    def test_partial_source_with_zero_volume_in_required_tail_is_unavailable(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now)
+        section = snapshot["sources"]["mexc"]["candles"]["15m"]
+        section["status"] = "PARTIEL"
+        section["contiguous_tail_count"] = len(section["rows"])
+        section["rows"][-1]["volume"] = 0
+        result = analyze_timeframe(snapshot["sources"]["mexc"], "15m", now)
+        self.assertEqual(result["status"], "UNAVAILABLE")
+        self.assertIn("volume nul", result["reason"])
+
+    def test_partial_source_with_old_gap_and_healthy_tail_can_be_analyzed(self):
+        now = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        snapshot = make_snapshot(now)
+        section = snapshot["sources"]["mexc"]["candles"]["15m"]
+        section["status"] = "PARTIEL"
+        section["contiguous_tail_count"] = 60
+        result = analyze_timeframe(snapshot["sources"]["mexc"], "15m", now)
+        self.assertEqual(result["status"], "OK")
+
+
 if __name__ == "__main__":
     unittest.main()
