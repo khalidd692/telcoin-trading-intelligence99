@@ -12,7 +12,9 @@ publies. Elle refuse tout artefact qui n'est pas entierement tracable :
   - les trois artefacts doivent partager le meme `collection_id`, et celui-ci
     doit correspondre a celui du tour de collecte de la CI ;
   - l'instantane doit porter un `snapshot_id` egal a l'empreinte deterministe
-    de ses propres donnees (sources + controle croise).
+    de ses propres donnees (sources + controle croise) ;
+  - tout frais marque `verified` doit porter une signature HMAC valide,
+    verifiee avec `FEES_PROVENANCE_KEY` (fail-closed si la cle manque).
 
 La logique habitait dans le workflow, en script inline : elle n'etait donc
 ni testee, ni reutilisable, et une divergence entre la porte et le collecteur
@@ -31,7 +33,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from collector.tel_collector import compute_snapshot_fingerprint
+from collector.tel_collector import compute_snapshot_fingerprint, verify_fees_provenance
 
 #: Artefacts publies, dans l'ordre de verification.
 ARTIFACTS = (
@@ -46,6 +48,51 @@ ACCEPTED_COLLECTION_STATUS = {"VALID", "FALLBACK"}
 
 class PublicationRejected(Exception):
     """Raised when the artifacts cannot be published (fail-closed)."""
+
+
+def _validate_fee_provenance(snapshot: Any) -> None:
+    """Refuse tout frais marque verifie sans signature HMAC valide.
+
+    La cle vit hors du JSON (FEES_PROVENANCE_KEY). Sans cle, la porte est
+    volontairement fail-closed : un simple `fees.verified=true` ne suffit
+    jamais. Le navigateur ne peut pas verifier ce HMAC sans exposer le secret;
+    la porte de publication est donc l'autorite de verification.
+    """
+    if not isinstance(snapshot, dict):
+        return
+
+    def check(fees: Any, label: str) -> bool:
+        if not isinstance(fees, dict) or fees.get("verified") is not True:
+            return False
+        status = verify_fees_provenance(fees)
+        if status != "VERIFIED":
+            raise PublicationRejected(
+                f"verified fees without valid provenance in {label}: {status}")
+        return True
+
+    top = snapshot.get("fees")
+    check(top, "snapshot.fees")
+
+    sources = snapshot.get("sources")
+    if not isinstance(sources, dict):
+        return
+    for venue, source in sources.items():
+        if not isinstance(source, dict):
+            continue
+        check(source.get("fees"), f"sources.{venue}.fees")
+        liquidity = source.get("liquidity_cost")
+        if not isinstance(liquidity, dict):
+            continue
+        fees_valid = check(liquidity.get("fees"), f"sources.{venue}.liquidity_cost.fees")
+        for index, scenario in enumerate(liquidity.get("scenarios") or []):
+            if not isinstance(scenario, dict):
+                continue
+            check(scenario.get("fees"),
+                  f"sources.{venue}.liquidity_cost.scenarios[{index}].fees")
+            round_trip = scenario.get("round_trip")
+            if isinstance(round_trip, dict) and round_trip.get("fees_verified") is True and not fees_valid:
+                raise PublicationRejected(
+                    f"scenario {index} in sources.{venue} claims verified fees without a valid fee envelope")
 
 
 def validate_artifacts(snapshot: Any, report: Any, analysis: Any,
@@ -88,6 +135,8 @@ def validate_artifacts(snapshot: Any, report: Any, analysis: Any,
     if snapshot.get("snapshot_id") != expected_hash:
         raise PublicationRejected(
             "snapshot_id does not match the deterministic fingerprint of the snapshot payload")
+
+    _validate_fee_provenance(snapshot)
 
 
 def load_artifacts(root: Any = ".") -> tuple[dict, dict, dict]:

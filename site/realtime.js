@@ -162,7 +162,95 @@
     return {
       complete: raw.complete === true,
       slippagePct: Number.isFinite(slippage) ? slippage : null,
-      fees: typeof raw.fees === "string" ? raw.fees : null,
+      // Only the collector's explicit exclusion marker is trusted. Any other
+      // string is reduced to an unverified state instead of being echoed.
+      fees:
+        raw.fees === "EXCLUDED_NOT_VERIFIED"
+          ? "EXCLUDED_NOT_VERIFIED"
+          : typeof raw.fees === "string" && raw.fees
+            ? "UNVERIFIED"
+            : null,
+    };
+  }
+  function finiteOrNull(value) {
+    if (value === null || value === undefined || value === "") return null;
+    var number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function feeSignaturePresent(rawFees) {
+    if (!rawFees || typeof rawFees !== "object" || rawFees.verified !== true) return false;
+    var provenance = rawFees.provenance;
+    return !!(
+      provenance &&
+      typeof provenance === "object" &&
+      provenance.algorithm === "HMAC-SHA256" &&
+      typeof provenance.signature === "string" &&
+      /^[0-9a-fA-F]{64}$/.test(provenance.signature)
+    );
+  }
+  function snapshotLiquidity(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var spread = raw.initial_spread && typeof raw.initial_spread === "object" ? raw.initial_spread : {};
+    var book = raw.book && typeof raw.book === "object" ? raw.book : {};
+    var feeSignature = feeSignaturePresent(raw.fees);
+    var feeDeclaredVerified =
+      !!(raw.fees && typeof raw.fees === "object" && raw.fees.verified === true);
+    var feeProvenanceStatus = "NOT_DECLARED";
+    if (feeDeclaredVerified) {
+      feeProvenanceStatus = feeSignature ? "SIGNATURE_PRESENT" : "MISSING_SIGNATURE";
+    }
+    var fees = raw.fees && typeof raw.fees === "object"
+      ? {
+          // Le navigateur ne peut pas authentifier un HMAC sans exposer le secret.
+          // La presence d'une signature n'est donc jamais une preuve : `verified`
+          // reste toujours false ici, et seule la porte de publication peut
+          // certifier la provenance. Une signature presente est seulement
+          // signalee comme "non authentifiee" par l'interface.
+          verified: false,
+          authenticated: false,
+          declaredVerified: feeDeclaredVerified,
+          signaturePresent: feeSignature,
+          provenanceStatus: feeProvenanceStatus,
+          pctPerSide: finiteOrNull(raw.fees.pct_per_side),
+          note: typeof raw.fees.note === "string" ? raw.fees.note : null,
+        }
+      : null;
+    var scenarios = Array.isArray(raw.scenarios)
+      ? raw.scenarios.map(function (item) {
+          var scenario = item && typeof item === "object" ? item : {};
+          var trip = scenario.round_trip && typeof scenario.round_trip === "object" ? scenario.round_trip : null;
+          return {
+            amountUsdt: finiteOrNull(scenario.amount_usdt),
+            costPct: finiteOrNull(trip && trip.cost_pct),
+            depthSufficient: scenario.depth_sufficient === true,
+            status: typeof scenario.execution_status === "string" ? scenario.execution_status : null,
+            reason: typeof scenario.reason === "string" ? scenario.reason : null,
+          };
+        })
+      : [];
+    return {
+      usable: raw.usable === true,
+      usableAtPublication:
+        raw.usable_at_publication === true
+          ? true
+          : raw.usable_at_publication === false
+            ? false
+            : null,
+      publicationWarning: typeof raw.publication_warning === "string" ? raw.publication_warning : null,
+      reason: typeof raw.reason === "string" ? raw.reason : null,
+      initialSpreadPct: finiteOrNull(spread.pct_mid),
+      bookAgeSeconds: finiteOrNull(book.age_at_calculation_seconds),
+      bookSourceTime: typeof book.source_time === "string" ? book.source_time : null,
+      bookFresh: book.fresh === true,
+      bookFreshAtPublication:
+        book.fresh_at_publication === true
+          ? true
+          : book.fresh_at_publication === false
+            ? false
+            : null,
+      fees: fees,
+      scenarios: scenarios,
+      limits: Array.isArray(raw.limits) ? raw.limits.filter(function (value) { return typeof value === "string"; }) : [],
     };
   }
   // Evalue la qualite du snapshot publie, independamment du signal de marche.
@@ -174,8 +262,8 @@
       reasons: [],
       generatedAt: null,
       ageSeconds: null,
-      mexc: { book: null, trades: null, execution: null },
-      kucoin: { book: null, trades: null, execution: null },
+      mexc: { book: null, trades: null, execution: null, liquidity: null },
+      kucoin: { book: null, trades: null, execution: null, liquidity: null },
       bothBooksUsable: null,
       confirmation: null,
       divergenceBps: null,
@@ -217,6 +305,7 @@
       q[venue].book = snapshotVerdict(src && src.status && src.status.book);
       q[venue].trades = snapshotVerdict(src && src.status && src.status.trades);
       q[venue].execution = snapshotExecution(src && src.buy_cost_300_usdt);
+      q[venue].liquidity = snapshotLiquidity(src && src.liquidity_cost);
     });
     var cross = d.cross_check || {};
     q.bothBooksUsable =

@@ -12,6 +12,7 @@ Stdlib uniquement (contrainte CI : aucun requirements.txt).
 """
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,9 +79,38 @@ def valid_analysis():
             "early_reversal": {"signal_status": "ATTENDRE", "direction": "INDETERMINE"}}
 
 
+def signed_fee_claim(key="test-publication-fees"):
+    claim = {"verified": True, "pct": 0.1, "value": None, "provenance": {
+        "source": "exchange_fee_schedule",
+        "source_url": "https://example.test/fees",
+        "retrieved_at": "2026-10-23T00:00:00Z",
+        "evidence_sha256": "b" * 64,
+        "algorithm": "HMAC-SHA256",
+        "key_id": "publication-test-key",
+    }}
+    return tc.sign_fees_provenance(claim, key=key)
+
+
 class TestGateAccepts(unittest.TestCase):
     def test_valid_triple_is_accepted(self):
         validate_artifacts(valid_snapshot(), valid_report(), valid_analysis(), COLLECTION_ID)
+
+    def test_signed_verified_fees_are_accepted(self):
+        key = "test-publication-fees"
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": signed_fee_claim(key)}
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: key}):
+            validate_artifacts(valid_snapshot(sources=sources), valid_report(),
+                               valid_analysis(), COLLECTION_ID)
+
+    def test_collector_normalized_signed_fees_are_accepted(self):
+        key = "test-publication-fees"
+        sources = valid_sources()
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: key}):
+            normalized = tc.normalize_fees(signed_fee_claim(key))
+            sources["mexc"]["liquidity_cost"] = {"fees": normalized}
+            validate_artifacts(valid_snapshot(sources=sources), valid_report(),
+                               valid_analysis(), COLLECTION_ID)
 
     def test_valid_triple_on_disk_is_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -148,6 +178,67 @@ class TestGateRejects(unittest.TestCase):
         snapshot["snapshot_id"] = "0" * 64
         self._assert_rejected(snapshot=snapshot, fragment="does not match the deterministic fingerprint")
 
+    def test_verified_liquidity_fees_without_provenance_are_rejected(self):
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": {"verified": True, "pct": 0.1}}
+        self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                              fragment="verified fees without valid provenance")
+
+    def test_verified_legacy_fees_without_provenance_are_rejected(self):
+        sources = valid_sources()
+        sources["mexc"]["fees"] = {"verified": True, "pct": 0.1}
+        self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                              fragment="verified fees without valid provenance")
+
+    def test_verified_fees_with_invalid_signature_are_rejected(self):
+        fees = signed_fee_claim()
+        fees["provenance"]["signature"] = "0" * 64
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": fees}
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: "test-publication-fees"}):
+            self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                                  fragment="INVALID_SIGNATURE")
+
+    def test_verified_fees_with_modified_metadata_are_rejected(self):
+        fees = signed_fee_claim()
+        fees["provenance"]["source_url"] = "https://evil.example/fees"
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": fees}
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: "test-publication-fees"}):
+            self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                                  fragment="INVALID_SIGNATURE")
+
+    def test_verified_fees_with_modified_pct_are_rejected(self):
+        fees = signed_fee_claim()
+        fees["pct"] = 0.01
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": fees}
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: "test-publication-fees"}):
+            self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                                  fragment="INVALID_SIGNATURE")
+
+    def test_verified_fees_without_key_are_rejected(self):
+        fees = signed_fee_claim()
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {"fees": fees}
+        with patch.dict(os.environ, {tc.FEES_PROVENANCE_ENV: ""}):
+            self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                                  fragment="KEY_UNAVAILABLE")
+
+    def test_scenario_claiming_verified_fees_without_envelope_is_rejected(self):
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {
+            "scenarios": [{"round_trip": {"fees_verified": True}}]}
+        self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                              fragment="without a valid fee envelope")
+
+    def test_scenario_fee_object_without_envelope_is_rejected(self):
+        sources = valid_sources()
+        sources["mexc"]["liquidity_cost"] = {
+            "scenarios": [{"fees": {"verified": True, "pct": 0.1}}]}
+        self._assert_rejected(snapshot=valid_snapshot(sources=sources),
+                              fragment="scenarios[0].fees")
+
     def test_missing_artifact_on_disk_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -172,7 +263,7 @@ class TestCollectorCompatibility(unittest.TestCase):
     """L'instantane REELLEMENT produit par le collecteur doit etre publiable."""
 
     def _run_collector(self):
-        def fake_source_report(client, notional, passes, interval, max_book_age, max_trade_age):
+        def fake_source_report(client, notional, passes, interval, max_book_age, max_trade_age, amounts=None):
             mid = 0.0015 if client.venue == "mexc" else 0.00151
             return valid_sources(mid, mid * 1.007)["mexc" if client.venue == "mexc" else "kucoin"]
         with patch.object(tc, "source_report", side_effect=fake_source_report):
@@ -193,7 +284,7 @@ class TestCollectorCompatibility(unittest.TestCase):
         validate_artifacts(snapshot, report, analysis, COLLECTION_ID)
 
     def test_incomplete_data_yields_a_fallback_snapshot_that_cannot_be_published(self):
-        def broken_source_report(client, notional, passes, interval, max_book_age, max_trade_age):
+        def broken_source_report(client, notional, passes, interval, max_book_age, max_trade_age, amounts=None):
             block = valid_sources()["mexc"]
             block["mid"] = None
             return block

@@ -47,6 +47,20 @@ function snapshot(generatedAt, mutation) {
           slippage_vs_best_ask_pct: 0.12,
           fees: "EXCLUDED_NOT_VERIFIED",
           filled_usdt: 300
+        },
+        liquidity_cost: {
+          schema_version: 1,
+          usable: true,
+          usable_at_publication: true,
+          reason: null,
+          initial_spread: { pct_mid: 0.6 },
+          book: { age_at_calculation_seconds: 0.5, source_time: "2026-10-22T00:00:00.000Z", fresh: true },
+          fees: { verified: false, pct_per_side: null, note: "frais non vérifiés; coût réel >= estimation hors frais" },
+          scenarios: [
+            { amount_usdt: 50, depth_sufficient: true, execution_status: "COMPLET", round_trip: { cost_pct: 1.2 } },
+            { amount_usdt: 1000, depth_sufficient: false, execution_status: "PROFONDEUR_ACHAT_INSUFFISANTE", round_trip: null }
+          ],
+          limits: ["Estimation statique sur les niveaux publics observés; aucun ordre réel n'est envoyé."]
         }
       },
       kucoin: {
@@ -59,6 +73,19 @@ function snapshot(generatedAt, mutation) {
           slippage_vs_best_ask_pct: 0.08,
           fees: "EXCLUDED_NOT_VERIFIED",
           filled_usdt: 300
+        },
+        liquidity_cost: {
+          schema_version: 1,
+          usable: true,
+          usable_at_publication: true,
+          reason: null,
+          initial_spread: { pct_mid: 0.5 },
+          book: { age_at_calculation_seconds: 0.4, source_time: "2026-10-22T00:00:00.000Z", fresh: true },
+          fees: { verified: false, pct_per_side: null, note: "frais non vérifiés; coût réel >= estimation hors frais" },
+          scenarios: [
+            { amount_usdt: 50, depth_sufficient: true, execution_status: "COMPLET", round_trip: { cost_pct: 0.9 } }
+          ],
+          limits: ["Estimation statique sur les niveaux publics observés; aucun ordre réel n'est envoyé."]
         }
       }
     },
@@ -687,6 +714,88 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   assert.match(confirmed.elements.get("snapshot-confirmation-state").textContent, /OUI/);
   assert.match(confirmed.elements.get("snapshot-exec-mexc-detail").textContent, /0,12 %/);
   assert.match(confirmed.elements.get("snapshot-exec-mexc-detail").textContent, /frais exclus/);
+  assert.match(confirmed.elements.get("snapshot-liquidity-mexc-state").textContent, /ESTIMATION/);
+  assert.match(confirmed.elements.get("snapshot-liquidity-mexc-detail").textContent, /spread initial 0,6 %/);
+  assert.match(confirmed.elements.get("snapshot-liquidity-mexc-detail").textContent, /50 USDT : 1,2 %/);
+  assert.match(confirmed.elements.get("snapshot-liquidity-mexc-detail").textContent, /profondeur insuffisante/);
+  assert.match(confirmed.elements.get("snapshot-liquidity-mexc-detail").textContent, /frais exclus/);
+
+  // Un statut de frais arbitraire dans buy_cost_300_usdt ne doit jamais etre
+  // repris tel quel dans l'interface.
+  const weirdExec = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, (value) => {
+        value.sources.mexc.buy_cost_300_usdt.fees = "VERIFIED";
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(weirdExec.elements.get("snapshot-exec-mexc-detail").textContent, /frais non authentifiés/);
+  assert.doesNotMatch(weirdExec.elements.get("snapshot-exec-mexc-detail").textContent, /frais : VERIFIED/);
+
+  // Un simple fees.verified=true sans signature ne doit pas etre affiche comme verifie.
+  const unsignedFees = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, (value) => {
+        value.sources.mexc.liquidity_cost.fees = {
+          verified: true, pct_per_side: 0.1, note: "frais déclarés vérifiés"
+        };
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(unsignedFees.elements.get("snapshot-liquidity-mexc-detail").textContent, /frais exclus \(signature absente\)/);
+
+  // Une signature presente reste non authentifiee : le navigateur ne peut pas
+  // verifier un HMAC, donc l'interface ne doit jamais afficher "frais verifies".
+  const signedFees = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, (value) => {
+        value.sources.mexc.liquidity_cost.fees = {
+          verified: true, pct_per_side: 0.1,
+          provenance: { algorithm: "HMAC-SHA256", signature: "a".repeat(64) }
+        };
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(signedFees.elements.get("snapshot-liquidity-mexc-detail").textContent, /frais déclarés signés \(non authentifiés côté navigateur\)/);
+  assert.doesNotMatch(signedFees.elements.get("snapshot-liquidity-mexc-detail").textContent, /frais vérifiés/);
+
+  // Signature falsifiee et metadonnees modifiees : toujours non authentifiees.
+  const forgedFees = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, (value) => {
+        value.sources.mexc.liquidity_cost.fees = {
+          verified: true, pct_per_side: 0.1,
+          provenance: {
+            algorithm: "HMAC-SHA256", signature: "f".repeat(64),
+            source_url: "https://evil.example/fees"
+          }
+        };
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(forgedFees.elements.get("snapshot-liquidity-mexc-detail").textContent, /non authentifiés côté navigateur/);
+  assert.doesNotMatch(forgedFees.elements.get("snapshot-liquidity-mexc-detail").textContent, /frais vérifiés/);
+
+  // Un diagnostic DNS explicite ne doit pas etre presente comme un carnet vide.
+  const dnsLiquidity = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, (value) => {
+        value.sources.mexc.liquidity_cost.usable = false;
+        value.sources.mexc.liquidity_cost.reason = "DNS_RESOLUTION";
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(dnsLiquidity.elements.get("snapshot-liquidity-mexc-detail").textContent, /DNS_RESOLUTION/);
 
   // Donnees et confirmation verifiees mais signal de marche ATTENDRE :
   // le statut reste non rassurant sans masquer la qualite ni la confirmation.
@@ -716,6 +825,46 @@ async function boot(generatedAt, initialNow, payloadOverride) {
   });
   assert.match(noExecution.elements.get("snapshot-exec-mexc-state").textContent, /INDISPONIBLE/);
   assert.match(noExecution.elements.get("snapshot-exec-mexc-detail").textContent, /Indisponible/);
+
+  // Diagnostic de coût absent : indisponible, aucune valeur inventée.
+  const noLiquidity = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, value => {
+        delete value.sources.mexc.liquidity_cost;
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(noLiquidity.elements.get("snapshot-liquidity-mexc-state").textContent, /INDISPONIBLE/);
+  assert.match(noLiquidity.elements.get("snapshot-liquidity-mexc-detail").textContent, /Indisponible/);
+
+  // Fraîcheur de publication absente : fail-closed, aucune estimation courante.
+  const noPublicationAge = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, value => {
+        delete value.sources.mexc.liquidity_cost.usable_at_publication;
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(noPublicationAge.elements.get("snapshot-liquidity-mexc-state").textContent, /NON UTILISABLE/);
+  assert.match(noPublicationAge.elements.get("snapshot-liquidity-mexc-detail").textContent, /fraîcheur à la publication inconnue/);
+
+  // Mesure valide au calcul mais périmée à la publication : non utilisable.
+  const stalePublication = await boot(at, start, {
+    byUrl: {
+      "report.json": report(at),
+      "tel_snapshot.json": snapshot(at, value => {
+        value.sources.mexc.liquidity_cost.usable_at_publication = false;
+        value.sources.mexc.liquidity_cost.publication_warning = "Carnet périmé au moment de la publication";
+      }),
+      "agent_analysis.json": null
+    }
+  });
+  assert.match(stalePublication.elements.get("snapshot-liquidity-mexc-state").textContent, /NON UTILISABLE/);
+  assert.match(stalePublication.elements.get("snapshot-liquidity-mexc-detail").textContent, /Non utilisable à la publication/);
 
   // Confirmation absente du snapshot : indisponible, jamais supposee OUI.
   const noConfirmationField = await boot(at, start, {

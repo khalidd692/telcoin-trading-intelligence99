@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Read-only public TEL/USDT market collector. Missing fields remain null."""
-import argparse, os, json, time, math, hashlib, random, uuid
+import argparse, os, json, time, math, hashlib, hmac, random, uuid
 import socket
 import ssl
 import urllib.error
@@ -32,6 +32,12 @@ INTERVALS = {
     "1M": {"mexc": "1M", "kucoin": "1month", "seconds": None},
 }
 UA = "telcoin-trading-intelligence-read-only/1.0"
+DEFAULT_ROUND_TRIP_AMOUNTS_USDT = (50.0, 100.0, 300.0, 500.0, 1000.0)
+BOOK_ENDPOINTS = {
+    "mexc": "/api/v3/depth",
+    "kucoin": "/api/v1/market/orderbook/level2_100",
+}
+FEES_PROVENANCE_ENV = "FEES_PROVENANCE_KEY"
 
 def now_ms(): return int(time.time() * 1000)
 def iso(ms):
@@ -42,6 +48,49 @@ def num(v):
         x = float(v)
         return x if math.isfinite(x) else None
     except (TypeError, ValueError): return None
+
+def remaining_tolerance(target):
+    """Relative tolerance for a fully consumed amount, never an absolute 1e-8."""
+    target=abs(target)
+    return target*1e-12 if target else 0.0
+
+def median(values):
+    ordered=sorted(values)
+    if not ordered: return None
+    middle=len(ordered)//2
+    return ordered[middle] if len(ordered)%2 else (ordered[middle-1]+ordered[middle])/2
+
+def percentile_rank(values,value):
+    """Percentile rank of value in values (0-100), or None without a sample."""
+    if value is None: return None
+    sample=sorted(v for v in (num(x) for x in (values or [])) if v is not None)
+    if not sample: return None
+    target=float(value)
+    if not math.isfinite(target): return None
+    below=sum(1 for v in sample if v<target)
+    equal=sum(1 for v in sample if v==target)
+    return (below+0.5*equal)/len(sample)*100
+
+def normalize_amounts(amounts):
+    """Return unique positive USDT amounts. Strings may be comma-separated."""
+    if amounts is None:
+        raw=list(DEFAULT_ROUND_TRIP_AMOUNTS_USDT)
+    elif isinstance(amounts,str):
+        raw=[part for part in amounts.split(",") if part.strip()]
+    elif isinstance(amounts,(int,float)):
+        raw=[amounts]
+    else:
+        raw=list(amounts)
+    result=[]
+    for item in raw:
+        value=num(item)
+        if value is None or value<=0:
+            raise ValueError("amounts must contain positive finite USDT values")
+        if not any(abs(value-existing)<=1e-12 for existing in result):
+            result.append(value)
+    if not result:
+        raise ValueError("at least one positive USDT amount is required")
+    return result
 
 def classify(exc):
     e = getattr(exc, "reason", exc)
@@ -78,6 +127,21 @@ class Client:
             self.log.append(entry)
         return None
 
+def book_transport_reason(c):
+    """Classify the last order-book request: DNS, HTTP failure, or no transport error."""
+    endpoint=BOOK_ENDPOINTS.get(getattr(c,"venue",None))
+    entries=[e for e in (getattr(c,"log",None) or [])
+      if isinstance(e,dict) and e.get("endpoint")==endpoint]
+    if not entries: return None
+    last=entries[-1]
+    if last.get("error")=="DNS_RESOLUTION": return "DNS_RESOLUTION"
+    status=last.get("http_status")
+    error=last.get("error")
+    if isinstance(status,int) and status>=400: return "HTTP_ERROR"
+    if isinstance(error,str) and error.startswith("HTTP_"): return "HTTP_ERROR"
+    if error: return "NETWORK_ERROR"
+    return None
+
 def parse_levels(rows):
     out=[]
     for row in rows or []:
@@ -93,18 +157,288 @@ def spread(bid,ask):
     return {"absolute":ask-bid,"pct_mid":(ask-bid)/mid*100,"mid":mid}
 
 def buy_cost(asks,notional):
-    asks=sorted(asks); best=asks[0][0] if asks else None
-    remain=notional; qty=spent=0.0; worst=None; used=0
+    asks=sorted(asks or []); best=asks[0][0] if asks else None
+    target=num(notional) or 0.0
+    tolerance=remaining_tolerance(target)
+    remain=target; qty=spent=0.0; worst=None; used=0
     for p,q in asks:
         take=min(remain,p*q)
         if take<=0: continue
         qty+=take/p; spent+=take; remain-=take; worst=p; used+=1
-        if remain<=1e-8: break
+        if remain<=tolerance: break
     avg=spent/qty if qty else None
-    return {"target_usdt":notional,"filled_usdt":spent,"complete":remain<=1e-8 and spent>0,
-      "qty_tel":qty if qty else None,"avg_price":avg,"worst_price":worst,"levels_used":used,
+    return {"target_usdt":target,"filled_usdt":spent,"remaining_usdt":max(0.0,remain),
+      "complete":remain<=tolerance and spent>0,
+      "qty_tel":qty if qty else None,"avg_price":avg,"worst_price":worst,"levels_used":used,"best_price":best,
       "slippage_vs_best_ask_pct":(avg/best-1)*100 if avg and best else None,
       "fees":"EXCLUDED_NOT_VERIFIED"}
+
+def sell_proceeds(bids,qty_tel):
+    """Sell an exact TEL quantity into observed bids; never infer missing depth."""
+    bids=sorted(bids or [],reverse=True); best=bids[0][0] if bids else None
+    target=max(0.0,num(qty_tel) or 0.0)
+    tolerance=remaining_tolerance(target)
+    remain=target; sold=proceeds=0.0; worst=None; used=0
+    for p,q in bids:
+        take=min(remain,q)
+        if take<=0: continue
+        sold+=take; proceeds+=take*p; remain-=take; worst=p; used+=1
+        if remain<=tolerance: break
+    avg=proceeds/sold if sold else None
+    return {"target_qty_tel":target,"filled_qty_tel":sold,"remaining_qty_tel":max(0.0,remain),
+      "proceeds_usdt":proceeds,"complete":target>0 and remain<=tolerance,
+      "avg_price":avg,"worst_price":worst,"levels_used":used,"best_price":best,
+      "slippage_vs_best_bid_pct":(1-avg/best)*100 if avg and best else None,
+      "fees":"EXCLUDED_NOT_VERIFIED"}
+
+def _hex64(value):
+    return isinstance(value,str) and len(value)==64 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+def _fee_provenance_metadata(provenance):
+    if not isinstance(provenance,dict): return False
+    return (isinstance(provenance.get("source"),str) and bool(provenance["source"].strip())
+      and isinstance(provenance.get("source_url"),str) and bool(provenance["source_url"].strip())
+      and isinstance(provenance.get("retrieved_at"),str) and bool(provenance["retrieved_at"].strip())
+      and _hex64(provenance.get("evidence_sha256"))
+      and provenance.get("algorithm")=="HMAC-SHA256"
+      and isinstance(provenance.get("key_id"),str) and bool(provenance["key_id"].strip()))
+
+def _fee_provenance_payload(fees):
+    provenance=fees.get("provenance") if isinstance(fees.get("provenance"),dict) else {}
+    return {"verified":True,"pct_per_side":num(fees.get("pct")),"value":fees.get("value"),
+      "source":provenance.get("source"),"source_url":provenance.get("source_url"),
+      "retrieved_at":provenance.get("retrieved_at"),"evidence_sha256":provenance.get("evidence_sha256"),
+      "algorithm":provenance.get("algorithm"),"key_id":provenance.get("key_id")}
+
+def _fees_key(key=None):
+    return key if key is not None else os.environ.get(FEES_PROVENANCE_ENV)
+
+def sign_fees_provenance(fees,key=None):
+    """Sign a fee claim with the trusted HMAC key; the key never enters the JSON."""
+    if not isinstance(fees,dict): raise ValueError("fees must be a dict")
+    pct=num(fees.get("pct"))
+    if pct is None or pct<0: raise ValueError("fees.pct must be finite and >= 0")
+    secret=_fees_key(key)
+    if not secret: raise ValueError(FEES_PROVENANCE_ENV+" is required to sign fees")
+    provenance=dict(fees.get("provenance") or {})
+    provenance.setdefault("algorithm","HMAC-SHA256")
+    provenance.setdefault("key_id","default")
+    provenance.pop("signature",None)
+    payload=_fee_provenance_payload({**fees,"pct":pct,"provenance":provenance})
+    signature=hmac.new(secret.encode("utf-8"),
+      json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode("utf-8"),
+      hashlib.sha256).hexdigest()
+    return {**fees,"pct":pct,"provenance":{**provenance,"signature":signature}}
+
+def verify_fees_provenance(fees,key=None):
+    """Return VERIFIED only for an HMAC-signed fee claim; fail closed otherwise."""
+    if not isinstance(fees,dict) or fees.get("verified") is not True: return "NOT_DECLARED"
+    secret=_fees_key(key)
+    if not secret: return "KEY_UNAVAILABLE"
+    provenance=fees.get("provenance")
+    if not isinstance(provenance,dict): return "MISSING_PROVENANCE"
+    if not _fee_provenance_metadata(provenance): return "INVALID_PROVENANCE"
+    if not _hex64(provenance.get("signature")): return "MISSING_SIGNATURE"
+    # A raw claim carries `pct`; a normalized claim (as stored in a snapshot)
+    # carries `pct_per_side`. Both must re-verify against the same payload, and
+    # two different declared percentages are never accepted.
+    pct=num(fees.get("pct")); side=num(fees.get("pct_per_side"))
+    if pct is None: pct=side
+    elif side is not None and side!=pct: return "INVALID_PCT"
+    if pct is None or pct<0: return "INVALID_PCT"
+    payload=_fee_provenance_payload({**fees,"pct":pct,"provenance":provenance})
+    expected=hmac.new(secret.encode("utf-8"),
+      json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode("utf-8"),
+      hashlib.sha256).hexdigest()
+    return "VERIFIED" if hmac.compare_digest(expected,provenance["signature"]) else "INVALID_SIGNATURE"
+
+def normalize_fees(fees=None):
+    """Only a caller-declared, HMAC-provenanced fee value is ever applied."""
+    if isinstance(fees,dict) and fees.get("verified") is True:
+        pct=num(fees.get("pct"))
+        if pct is not None and pct>=0:
+            status=verify_fees_provenance(fees)
+            if status=="VERIFIED":
+                return {"verified":True,"pct_per_side":pct,"value":fees.get("value"),
+                  "note":"frais vérifiés par provenance HMAC-SHA256",
+                  "provenance":fees.get("provenance"),"provenance_status":"VERIFIED"}
+            return {"verified":False,"pct_per_side":None,"provided_pct":pct,"value":None,
+              "note":f"frais déclarés vérifiés mais provenance non authentifiée ({status}); ignorés; coût réel >= estimation hors frais",
+              "provenance":fees.get("provenance") if isinstance(fees.get("provenance"),dict) else None,
+              "provenance_status":status}
+        return {"verified":False,"pct_per_side":None,"provided_pct":None,"value":None,
+          "note":"frais déclarés vérifiés mais pourcentage invalide; ignorés; coût réel >= estimation hors frais",
+          "provenance":fees.get("provenance") if isinstance(fees.get("provenance"),dict) else None,
+          "provenance_status":"INVALID_PCT"}
+    provided=num(fees.get("pct")) if isinstance(fees,dict) else None
+    note="frais non vérifiés; coût réel >= estimation hors frais"
+    if provided is not None:
+        note="frais fournis mais non vérifiés; ignorés; coût réel >= estimation hors frais"
+    return {"verified":False,"pct_per_side":None,"provided_pct":provided,"value":None,"note":note,
+      "provenance":None,"provenance_status":"NOT_DECLARED"}
+
+def round_trip_scenarios(bids,asks,amounts,fees=None):
+    """Static round-trip estimate for any positive USDT amounts.
+
+    Buys consume asks, then the acquired TEL is sold into observed bids. If
+    either side lacks depth, the round trip is null (no extrapolation).
+    """
+    amounts=normalize_amounts(amounts)
+    asks=sorted(asks or []); bids=sorted(bids or [],reverse=True)
+    best_bid=bids[0][0] if bids else None; best_ask=asks[0][0] if asks else None
+    initial=spread(best_bid,best_ask)
+    fee_info=normalize_fees(fees)
+    scenarios=[]
+    for amount in amounts:
+        buy=buy_cost(asks,amount)
+        sell=None; round_trip=None
+        if not bids and not asks:
+            status="CARNET_VIDE"; reason="aucun niveau acheteur ni vendeur"
+        elif not asks:
+            status="PROFONDEUR_ACHAT_INSUFFISANTE"; reason="aucun niveau vendeur observé"
+        elif not buy["complete"]:
+            status="PROFONDEUR_ACHAT_INSUFFISANTE"
+            reason=f"profondeur vendeuse insuffisante: {buy['filled_usdt']:.8g}/{amount:.8g} USDT"
+        else:
+            sell=sell_proceeds(bids,buy["qty_tel"])
+            if not sell["complete"]:
+                status="PROFONDEUR_VENTE_INSUFFISANTE"
+                reason=f"profondeur acheteuse insuffisante: {sell['filled_qty_tel']:.8g}/{buy['qty_tel']:.8g} TEL"
+            else:
+                spent=buy["filled_usdt"]; proceeds=sell["proceeds_usdt"]
+                cost=spent-proceeds
+                cost_pct=cost/spent*100 if spent>0 else None
+                round_trip={"cost_usdt":cost,"cost_pct":cost_pct,
+                  "return_pct":-cost_pct if cost_pct is not None else None,
+                  "fees_verified":fee_info["verified"],"fees_pct_per_side":fee_info["pct_per_side"],
+                  "fees_usdt":None,"net_cost_usdt":None,"net_cost_pct":None,"net_return_pct":None}
+                if fee_info["verified"]:
+                    fee_usdt=spent*fee_info["pct_per_side"]/100+proceeds*fee_info["pct_per_side"]/100
+                    net_proceeds=proceeds-fee_usdt
+                    round_trip.update(fees_usdt=fee_usdt,net_cost_usdt=spent-net_proceeds,
+                      net_cost_pct=(spent-net_proceeds)/spent*100 if spent>0 else None,
+                      net_return_pct=(net_proceeds/spent-1)*100 if spent>0 else None)
+                status="COMPLET"; reason=None
+        scenarios.append({"amount_usdt":amount,"initial_spread_pct":initial["pct_mid"],
+          "buy":buy,"sell":sell,"round_trip":round_trip,
+          "depth_sufficient":status=="COMPLET","insufficient_depth":status!="COMPLET",
+          "execution_status":status,"reason":reason,"fees":fee_info})
+    return {"initial_spread":initial,"scenarios":scenarios,"fees":fee_info}
+
+def liquidity_cost_report(bids,asks,amounts,*,calculated_at_ms=None,book_source_time_ms=None,
+                          max_book_age_ms=10000,book_verdict=None,anomalies=None,
+                          shape_problems=None,fees=None,history=None,transport_reason=None):
+    """Fail-closed diagnostic wrapper around round_trip_scenarios.
+
+    A stale, incomplete or unverified book yields no usable scenarios. Fresh
+    books still flag each amount whose depth is insufficient.
+    """
+    amounts=normalize_amounts(amounts)
+    calculated_at_ms=now_ms() if calculated_at_ms is None else int(calculated_at_ms)
+    max_book_age_ms=max(0,int(max_book_age_ms))
+    age_ms=(calculated_at_ms-int(book_source_time_ms)) if book_source_time_ms is not None else None
+    bids=sorted(bids or [],reverse=True); asks=sorted(asks or [])
+    initial=spread(bids[0][0] if bids else None,asks[0][0] if asks else None)
+    anomalies=list(anomalies or []); shape_problems=list(shape_problems or [])
+    reason=None
+    if transport_reason=="DNS_RESOLUTION": reason="DNS_RESOLUTION"
+    elif transport_reason=="HTTP_ERROR": reason="HTTP_ERROR"
+    elif transport_reason=="NETWORK_ERROR": reason="NETWORK_ERROR"
+    elif not bids and not asks: reason="CARNET_VIDE"
+    elif not bids or not asks: reason="CARNET_INCOMPLET"
+    elif anomalies: reason="CARNET_ANOMAL"
+    elif shape_problems: reason="CARNET_INVALIDE"
+    elif age_ms is None: reason="AGE_DU_CARNET_INCONNU"
+    elif age_ms<0: reason="HORLOGE_DU_CARNET_INCOHERENTE"
+    elif age_ms>max_book_age_ms: reason="STALE_DATA"
+    elif book_verdict!="VÉRIFIÉ": reason="CARNET_NON_VERIFIE"
+    elif initial["pct_mid"] is None: reason="SPREAD_INVALIDE"
+    usable=reason is None
+    mid=initial["mid"]
+    reason_details={
+      "DNS_RESOLUTION":"Résolution DNS du carnet impossible; aucun niveau reçu.",
+      "HTTP_ERROR":"Erreur HTTP lors de la récupération du carnet; aucun niveau exploitable.",
+      "NETWORK_ERROR":"Erreur réseau non HTTP lors de la récupération du carnet; aucun niveau exploitable.",
+      "CARNET_VIDE":"Aucun niveau acheteur ni vendeur reçu.",
+      "STALE_DATA":"Horodatage du carnet trop ancien; données périmées.",
+    }
+    result={"schema_version":1,"read_only":True,"orders_sent":0,
+      "calculated_at_utc":iso(calculated_at_ms),
+      "transport_reason":transport_reason,
+      "book":{"source_time":iso(int(book_source_time_ms)) if book_source_time_ms is not None else None,
+        "source_time_ms":int(book_source_time_ms) if book_source_time_ms is not None else None,
+        "age_at_calculation_ms":age_ms,
+        "age_at_calculation_seconds":round(age_ms/1000,3) if age_ms is not None else None,
+        "max_age_seconds":max_book_age_ms/1000,"fresh":usable,"verdict":book_verdict,
+        "anomalies":anomalies,"shape_problems":shape_problems},
+      "initial_spread":initial,
+      "depth_usdt_by_band":{"bids_0_5pct":sum(p*q for p,q in bids if mid and p>=mid*0.995) if mid else None,
+        "asks_0_5pct":sum(p*q for p,q in asks if mid and p<=mid*1.005) if mid else None,
+        "bids_1pct":sum(p*q for p,q in bids if mid and p>=mid*0.99) if mid else None,
+        "asks_1pct":sum(p*q for p,q in asks if mid and p<=mid*1.01) if mid else None},
+      "default_amounts_usdt":list(DEFAULT_ROUND_TRIP_AMOUNTS_USDT),
+      "requested_amounts_usdt":amounts,"usable":usable,"reason":reason,
+      "reason_detail":None if usable else reason_details.get(reason,"Estimation non utilisable: "+str(reason)),
+      "scenarios":[],"fees":normalize_fees(fees),
+      "limits":["Estimation statique sur les niveaux publics observés; aucun ordre réel n'est envoyé.",
+        "Aucune extrapolation au-delà de la profondeur observée; un montant trop grand est signalé.",
+        "Frais exclus sauf s'ils sont couverts par une provenance HMAC vérifiée; le coût réel est supérieur ou égal.",
+        "Le carnet peut changer entre la collecte et l'exécution; latence et rejets non modélisés.",
+        "Spread initial et slippages sont mesurés séparément; le total est recalculé sur les flux réels.",
+        "La fraîcheur est évaluée à l'heure de calcul; la publication peut être plus tardive."]}
+    if usable:
+        result.update(round_trip_scenarios(bids,asks,amounts,fees=fees))
+        result["all_scenarios_deep_enough"]=all(s["depth_sufficient"] for s in result["scenarios"])
+    else:
+        result["all_scenarios_deep_enough"]=False
+    ranks={}
+    if isinstance(history,dict):
+        spread_rank=percentile_rank(history.get("spread_pct_mid"),initial["pct_mid"])
+        depth_value=result["depth_usdt_by_band"]["bids_1pct"]
+        depth_rank=percentile_rank(history.get("depth_1pct_bids_usdt"),depth_value)
+        if spread_rank is not None: ranks["spread_pct_mid"]={"rank_pct":spread_rank,"sample_size":len(history.get("spread_pct_mid") or [])}
+        if depth_rank is not None: ranks["depth_1pct_bids_usdt"]={"rank_pct":depth_rank,"sample_size":len(history.get("depth_1pct_bids_usdt") or [])}
+    result["percentiles"]=({"status":"OK","ranks":ranks} if ranks else
+      {"status":"UNAVAILABLE","reason":"historique non fourni ou insuffisant; aucun percentile calculé"})
+    return result
+
+def spread_passes(runs):
+    entries=[]; values=[]
+    for run in runs:
+        best=run.get("best") or {}
+        value=spread(best.get("bid"),best.get("ask"))
+        entries.append({"observed_at":iso(run["local_mid_ms"]),"best_bid":best.get("bid"),
+          "best_ask":best.get("ask"),"spread_pct_mid":value["pct_mid"],"valid":value["pct_mid"] is not None})
+        if value["pct_mid"] is not None: values.append(value["pct_mid"])
+    return {"count":len(entries),"valid_count":len(values),"complete":len(values)==len(entries),
+      "min_pct":min(values) if values else None,"median_pct":median(values) if values else None,
+      "max_pct":max(values) if values else None,"passes":entries}
+
+def annotate_liquidity_publication(sources,publication_ms,max_book_age_ms):
+    for source in sources.values():
+        liquidity=source.get("liquidity_cost") if isinstance(source,dict) else None
+        if not isinstance(liquidity,dict): continue
+        book=liquidity.get("book") if isinstance(liquidity.get("book"),dict) else {}
+        source_ms=book.get("source_time_ms")
+        age=publication_ms-source_ms if source_ms is not None else None
+        book["age_at_publication_ms"]=age
+        book["fresh_at_publication"]=age is not None and 0<=age<=max_book_age_ms
+        # The scenarios were measured when the book was fresh at calculation
+        # time. Publication latency is reported separately; it must not erase
+        # a valid measurement, but it must be visible to fail-closed consumers.
+        liquidity["publication_stale"]=not book["fresh_at_publication"]
+        liquidity["usable_at_publication"]=bool(liquidity.get("usable")) and book["fresh_at_publication"]
+        if not book["fresh_at_publication"]:
+            if age is None:
+                warning="Âge du carnet inconnu à la publication; estimation non certifiée."
+            elif age<0:
+                warning="Horodatage du carnet incohérent à la publication; estimation non certifiée."
+            else:
+                warning="Carnet périmé au moment de la publication; ne pas utiliser comme estimation courante."
+            liquidity["publication_warning"]=warning
+            # Preserve an earlier, more specific failure (empty/invalid book).
+            if liquidity.get("usable") and not liquidity.get("reason"):
+                liquidity["reason_detail"]="Mesure valide au calcul, mais non utilisable à la publication: "+warning
 
 def server_time(c):
     d=c.get("/api/v3/time") if c.venue=="mexc" else c.get("/api/v1/timestamp")
@@ -149,6 +483,8 @@ def fast(c):
             raw=x.get("time"); tms=(int(raw)//1_000_000 if str(raw).isdigit() else None)
             tx.append({"time_ms":tms,"price":num(x.get("price")),"qty":num(x.get("size")),"quote_qty":None,"side":x.get("side"),"id":x.get("sequence")})
     tx.sort(key=lambda x: x.get("time_ms") or 0,reverse=True)
+    if v=="mexc" and isinstance(best,dict):
+        best["last"]=tx[0]["price"] if tx else None
     return {"server_time_ms":st,"local_mid_ms":(t0+t1)//2,"best":best,"bids":bids,"asks":asks,"sequence":seq,
       "book_time_ms":book_ts,"trades":tx}
 
@@ -245,9 +581,13 @@ def observe(r):
     st=r["server_time_ms"]; book_ts=r["book_time_ms"]
     # MEXC order-book responses generally have no source timestamp; never infer absolute age.
     if book_ts and st and book_ts < 10**12: book_ts=int(book_ts)*1000
-    return {"observed_at":iso(r["local_mid_ms"]),"server_time":iso(st) if st else None,"clock_skew_ms":st-r["local_mid_ms"] if st else None,
+    return {"observed_at":iso(r["local_mid_ms"]),"observed_at_ms":r["local_mid_ms"],
+      "server_time":iso(st) if st else None,"clock_skew_ms":st-r["local_mid_ms"] if st else None,
       "book_sequence":r["sequence"],"book_source_time":iso(book_ts) if book_ts else None,
+      "book_source_time_ms":int(book_ts) if book_ts else None,
       "book_age_ms":st-book_ts if st and book_ts else None,"book_hash":hashlib.sha256(top.encode()).hexdigest()[:16],
+      "best_bid":(r.get("best") or {}).get("bid"),"best_ask":(r.get("best") or {}).get("ask"),
+      "spread_pct_mid":spread((r.get("best") or {}).get("bid"),(r.get("best") or {}).get("ask"))["pct_mid"],
       "newest_trade_ms":newest.get("time_ms") if newest else None,
       "newest_trade_age_ms":st-newest["time_ms"] if st and newest and newest.get("time_ms") else None}
 
@@ -280,7 +620,7 @@ def book_anomalies(bids,asks,best):
         anomalies.append("L1_ABSENT")
     return anomalies
 
-def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
+def source_report(c,notional,passes,interval,max_book_age,max_trade_age,amounts=None,fees=None):
     runs=[]
     for i in range(passes):
         if i: time.sleep(interval)
@@ -300,12 +640,19 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
     shape_quality=validate_order_book(last["bids"],asks)
     if shape_quality["problems"]:
         status["book"]={"verdict":"NON VÉRIFIÉ","reason":"contrôle qualité du carnet: "+", ".join(shape_quality["problems"])}
+    liquidity=liquidity_cost_report(last["bids"],asks,amounts,calculated_at_ms=now_ms(),
+      book_source_time_ms=obs[-1].get("book_source_time_ms"),max_book_age_ms=max_book_age*1000,
+      book_verdict=status["book"]["verdict"],anomalies=anomalies,
+      shape_problems=shape_quality["problems"],fees=fees,
+      transport_reason=book_transport_reason(c))
     return {"status":status,"quality_diagnostics":{"order_book_shape":shape_quality},"server_time_utc":iso(st) if st else None,
-      "mid":s["mid"],"best":last["best"],"spread":s,"book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
+      "mid":s["mid"],"best":last["best"],"spread":s,"spread_passes":spread_passes(runs),
+      "book":{"bids":last["bids"][:50],"asks":last["asks"][:50],
       "bid_levels":len(last["bids"]),"ask_levels":len(asks),"depth_usdt_by_band":{f"{b}%":{"bids":sum(p*q for p,q in last["bids"] if p>=s["mid"]*(1-b/100)) if s["mid"] else None,
       "asks":sum(p*q for p,q in asks if p<=s["mid"]*(1+b/100)) if s["mid"] else None} for b in (.5,1,2,5)},
       "anomalies":anomalies},
-      "buy_cost_300_usdt":buy_cost(asks,notional),"trades":last["trades"][:100] or None,
+      "buy_cost_300_usdt":buy_cost(asks,notional),"liquidity_cost":liquidity,
+      "trades":last["trades"][:100] or None,
       "candles":cs,"fees":{"verified":False,"value":None,"note":"frais non vérifiés; exclus du coût simulé"},
       "observations":obs,"best_ask_source":c.venue}
 
@@ -381,11 +728,13 @@ def compute_snapshot_fingerprint(sources, cross_check):
     fingerprint_json = json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(fingerprint_json.encode("utf-8")).hexdigest()
 
-def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,collection_id=None):
+def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,collection_id=None,amounts=None):
+    amounts=normalize_amounts(amounts)
     started=now_ms(); clients={v:Client(v) for v in SYMBOLS}; sources={}
     for v,c in clients.items():
-        try: sources[v]=source_report(c,notional,passes,interval,max_book_age,max_trade_age)
-        except Exception as e: sources[v]={"status":{"book":{"verdict":"ERREUR","reason":type(e).__name__},"trades":{"verdict":"ERREUR","reason":type(e).__name__}},"error":str(e)[:200],"mid":None,"best":None,"book":None,"trades":None,"candles":{},"fees":{"verified":False,"value":None}}
+        try: sources[v]=source_report(c,notional,passes,interval,max_book_age,max_trade_age,amounts=amounts)
+        except Exception as e: sources[v]={"status":{"book":{"verdict":"ERREUR","reason":type(e).__name__},"trades":{"verdict":"ERREUR","reason":type(e).__name__}},"error":str(e)[:200],"mid":None,"best":None,"book":None,"trades":None,"candles":{},"fees":{"verified":False,"value":None},
+          "liquidity_cost":{"schema_version":1,"read_only":True,"orders_sent":0,"usable":False,"reason":"ERREUR_COLLECTE","scenarios":[],"requested_amounts_usdt":amounts}}
     m,k=sources["mexc"],sources["kucoin"]
     identical=bool(m.get("book") and k.get("book") and m["book"]["bids"][:5]==k["book"]["bids"][:5] and m["book"]["bids"][:5])
     mids=[m.get("mid"),k.get("mid")]
@@ -397,6 +746,9 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
       ["mid","bid","ask"],
     )
     divergence=((mids[0]-mids[1])/mids[1]*10000) if all(x is not None and x>0 for x in mids) else None
+    last_mexc=(m.get("best") or {}).get("last"); last_kucoin=(k.get("best") or {}).get("last")
+    last_divergence=(abs(last_mexc-last_kucoin)/((last_mexc+last_kucoin)/2)*100
+      if all(x is not None and x>0 for x in (last_mexc,last_kucoin)) else None)
     # A fresh book on each venue is not independent confirmation if their mids
     # disagree by more than the existing 1% cross-venue tolerance.
     both=(m["status"]["book"]["verdict"]=="VÉRIFIÉ" and k["status"]["book"]["verdict"]=="VÉRIFIÉ"
@@ -407,8 +759,15 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
     if collection_id is None:
         collection_id = str(uuid.uuid4())
     
+    generated_ms=now_ms()
+    annotate_liquidity_publication(sources,generated_ms,max_book_age*1000)
     # Compute snapshot fingerprint only for complete source data. Otherwise fail closed.
     cross_check_temp = {"mid_mexc":m.get("mid"),"mid_kucoin":k.get("mid"),"divergence_bps":divergence,
+       "divergence_basis":"mid","divergence_mid_pct":divergence/100 if divergence is not None else None,
+       "last_mexc":last_mexc,"last_kucoin":last_kucoin,"last_price_divergence_pct":last_divergence,
+       "definitions":{"divergence_bps":"écart signé entre les mid(s) (MEXC - KuCoin), en points de base",
+         "divergence_mid_pct":"écart signé entre les mid(s), en pourcentage",
+         "last_price_divergence_pct":"écart absolu entre les derniers prix observés, en pourcentage"},
        "identical_top_bids_alert":identical,"venue_data_diagnostic":venue_data_diagnostic,"both_books_usable":both,"independent_confirmation":"OUI" if both else "NON ÉTABLIE"}
     try:
         snapshot_fingerprint = compute_snapshot_fingerprint(sources, cross_check_temp)
@@ -416,7 +775,8 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
         snapshot_fingerprint = None
         cross_check_temp["provenance_error"] = str(exc)
 
-    snapshot = {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(now_ms()),
+    publication_ages={v:(s.get("liquidity_cost",{}).get("book",{}).get("age_at_publication_ms") if isinstance(s.get("liquidity_cost"),dict) else None) for v,s in sources.items()}
+    snapshot = {"schema_version":1,"symbol":"TELUSDT","mode":"READ_ONLY_PUBLIC_DATA","generated_at":iso(generated_ms),
       "collection_id": collection_id,
       # Marqueur de fiabilite de la collecte, exigé par la porte de publication
       # (src/publication_gate.py) : VALID uniquement lorsque l'empreinte
@@ -425,12 +785,15 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
       # est marque FALLBACK et ne peut pas etre publie.
       "collection_status": "VALID" if snapshot_fingerprint is not None else "FALLBACK",
       "collector":{"name":"collector/tel_collector.py","read_only":True,"orders_sent":0,"github_actions":os.environ.get("GITHUB_ACTIONS")=="true",
-       "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional},
-      "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms())},
+       "passes":passes,"interval_seconds":interval,"buy_cost_notional_usdt":notional,
+       "round_trip_amounts_usdt":amounts,"round_trip_default_amounts_usdt":list(DEFAULT_ROUND_TRIP_AMOUNTS_USDT)},
+      "collection":{"start_utc":iso(started),"end_utc":iso(now_ms()),"start_paris":paris(started),"end_paris":paris(now_ms()),
+       "book_age_at_publication_ms":publication_ages},
       "sources":sources,"cross_check":cross_check_temp,
       "request_log":sum((c.log for c in clients.values()),[]),
-      "limits":["Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.","Les frais sont inconnus et exclus.",
+      "limits":["Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.","Les frais sont inconnus et exclus sauf provenance HMAC vérifiée.",
        "Les transactions récentes ne prouvent pas à elles seules la fraîcheur absolue du carnet.",
+       "Les scénarios de coût aller-retour sont statiques, hors frais non vérifiés, et ne sont pas des ordres.",
        "Un succès de collecte n'est pas un signal d'achat."]}
     if snapshot_fingerprint is not None:
         snapshot["snapshot_id"] = snapshot_fingerprint
@@ -438,12 +801,17 @@ def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,colle
 
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument("--out",default="tel_snapshot.json"); p.add_argument("--passes",type=int,default=3)
-    p.add_argument("--interval",type=float,default=3); p.add_argument("--notional",type=float,default=300)
+    p.add_argument("--interval",type=float,default=3); p.add_argument("--notional",type=float,default=300,
+      help="montant du champ historique buy_cost_300_usdt")
+    p.add_argument("--amounts",default=None,
+      help="scénarios de coût A/R en USDT, séparés par des virgules (défaut: 50,100,300,500,1000)")
     p.add_argument("--max-book-age-s",type=float,default=10); p.add_argument("--max-trade-age-s",type=float,default=900)
     p.add_argument("--collection-id",default=None,help="Collection ID for provenance tracking (UUID)")
     a=p.parse_args(argv)
     if a.passes<1 or a.interval<0 or a.notional<=0: p.error("invalid positive collection parameters")
-    rep=run(a.passes,a.interval,a.notional,a.max_book_age_s,a.max_trade_age_s,a.collection_id)
+    try: amounts=normalize_amounts(a.amounts)
+    except ValueError as exc: p.error(str(exc))
+    rep=run(a.passes,a.interval,a.notional,a.max_book_age_s,a.max_trade_age_s,a.collection_id,amounts)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)),exist_ok=True)
     with open(a.out,"w",encoding="utf-8") as f: json.dump(rep,f,ensure_ascii=False,indent=2)
     for v,s in rep["sources"].items(): print(f'{v}: book={s["status"]["book"]["verdict"]}; trades={s["status"]["trades"]["verdict"]}; mid={s.get("mid")}')
