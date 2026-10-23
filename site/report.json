@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-23T22:00:12.794692+00:00",
+  "generated_at": "2026-10-23T22:13:50.547998+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
-  "status": "ATTENDRE",
+  "status": "SURVEILLER",
   "collection_status": "VALID",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001423,
-      "bid": 0.001415,
-      "ask": 0.001425,
-      "spread_pct": 0.7042253521126779,
-      "quote_volume_24h": 99697.438345,
-      "change_pct_24h": 0.0056,
+      "last": 0.001419,
+      "bid": 0.001424,
+      "ask": 0.001427,
+      "spread_pct": 0.21045247281656831,
+      "quote_volume_24h": 99419.292467,
+      "change_pct_24h": -0.0063,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-23T22:00:13.229088+00:00"
+      "observed_at": "2026-10-23T22:13:50.593996+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001423,
-      "bid": 0.001421,
-      "ask": 0.001423,
-      "observed_at": "2026-10-23T22:00:13.613935+00:00"
+      "last": 0.001426,
+      "bid": 0.001426,
+      "ask": 0.001427,
+      "observed_at": "2026-10-23T22:13:50.872341+00:00"
     }
   },
   "checks": [
@@ -37,21 +37,21 @@
     },
     {
       "name": "MEXC spread",
-      "status": "FAIL",
-      "value_pct": 0.7042,
+      "status": "PASS",
+      "value_pct": 0.2105,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0,
+      "divergence_pct": 0.4921,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-23T22:00:00+00:00",
-    "candle_age_seconds": 13,
+    "candle_age_seconds": 830,
     "close": 0.001421,
     "ema12": 0.001437044850774321,
     "ema26": 0.0014528428134924906,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "72dc5edb-8d0b-4422-a76f-5f7d1387534f",
+  "collection_id": "d847cdba-97ad-4907-8a09-7d951fb6763c",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0
+    "last_price_divergence_pct": 0.4921
   },
-  "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
+  "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
