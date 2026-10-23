@@ -311,15 +311,16 @@ def source_report(c,notional,passes,interval,max_book_age,max_trade_age):
 
 def compute_snapshot_fingerprint(sources, cross_check):
     """
-    Compute a deterministic SHA-256 fingerprint for the validated snapshot payload.
+    Fingerprint every stable decision-relevant source field, not just top-of-book.
 
-    Deterministic serialization used here: JSON with sort_keys=True and ensure_ascii=False,
-    then SHA-256 over the UTF-8 bytes. This covers the stable source data and the
-    derived cross-check summary used for provenance validation, while excluding volatile
-    fields such as generated_at, collection timing and request_log metadata.
+    The canonical payload includes candles/OHLCV, their quality metadata, trades,
+    order-book depth, spreads, freshness verdicts and cross-venue diagnostics.
+    Collection/request timestamps are retained because this fingerprint identifies
+    one exact collected snapshot. Volatile fields outside these inputs (for example
+    the outer artifact's generated_at) are intentionally not included.
 
-    Any missing, null or malformed source block is rejected explicitly instead of
-    generating a misleading fingerprint over incomplete data.
+    JSON is canonicalized with sorted keys and compact separators. NaN/Infinity
+    and non-serializable data are rejected rather than producing ambiguous hashes.
     """
     if not isinstance(sources, dict):
         raise ValueError("sources must be a dict")
@@ -332,12 +333,11 @@ def compute_snapshot_fingerprint(sources, cross_check):
             raise ValueError(f"{label} missing or invalid")
         return float(number)
 
-    normalized = {}
     for venue in ("mexc", "kucoin"):
         src = sources.get(venue)
-        if src is None or not isinstance(src, dict):
+        if not isinstance(src, dict):
             raise ValueError(f"sources.{venue} missing or malformed")
-        mid = _finite_positive(src.get("mid"), f"sources.{venue}.mid")
+        _finite_positive(src.get("mid"), f"sources.{venue}.mid")
         best = src.get("best")
         if not isinstance(best, dict):
             raise ValueError(f"sources.{venue}.best missing or malformed")
@@ -348,39 +348,30 @@ def compute_snapshot_fingerprint(sources, cross_check):
         book = src.get("book")
         if not isinstance(book, dict):
             raise ValueError(f"sources.{venue}.book missing or malformed")
-        bids = book.get("bids")
-        asks = book.get("asks")
-        if not isinstance(bids, list) or not isinstance(asks, list):
-            raise ValueError(f"sources.{venue}.book bids/asks must be lists")
-        if not bids or not asks:
-            raise ValueError(f"sources.{venue}.book bids/asks cannot be empty")
-        normalized[venue] = {
-            "mid": mid,
-            "best": {"bid": bid, "ask": ask},
-            "book_bids_top5": [[_finite_positive(level[0], f"sources.{venue}.book.bids[{i}][0]"), _finite_positive(level[1], f"sources.{venue}.book.bids[{i}][1]")] for i, level in enumerate(bids[:5])],
-            "book_asks_top5": [[_finite_positive(level[0], f"sources.{venue}.book.asks[{i}][0]"), _finite_positive(level[1], f"sources.{venue}.book.asks[{i}][1]")] for i, level in enumerate(asks[:5])],
-        }
+        for side in ("bids", "asks"):
+            levels = book.get(side)
+            if not isinstance(levels, list) or not levels:
+                raise ValueError(f"sources.{venue}.book.{side} missing or empty")
+            for i, level in enumerate(levels):
+                if not isinstance(level, (list, tuple)) or len(level) < 2:
+                    raise ValueError(f"sources.{venue}.book.{side}[{i}] malformed")
+                _finite_positive(level[0], f"sources.{venue}.book.{side}[{i}][0]")
+                _finite_positive(level[1], f"sources.{venue}.book.{side}[{i}][1]")
 
-    required_fields = ("mid_mexc", "mid_kucoin", "divergence_bps")
-    for field in required_fields:
-        if field not in cross_check or cross_check.get(field) is None:
-            raise ValueError(f"cross_check.{field} missing or null")
-        if field in ("mid_mexc", "mid_kucoin") and not math.isfinite(float(cross_check.get(field))):
-            raise ValueError(f"cross_check.{field} invalid")
-        if field == "divergence_bps" and not math.isfinite(float(cross_check.get(field))):
-            raise ValueError(f"cross_check.{field} invalid")
+    for field in ("mid_mexc", "mid_kucoin", "divergence_bps"):
+        value = num(cross_check.get(field))
+        if value is None or not math.isfinite(value):
+            raise ValueError(f"cross_check.{field} missing or invalid")
 
-    fingerprint_data = {
-        "sources": normalized,
-        "cross_check": {
-            "mid_mexc": float(cross_check.get("mid_mexc")),
-            "mid_kucoin": float(cross_check.get("mid_kucoin")),
-            "divergence_bps": float(cross_check.get("divergence_bps")),
-        },
-    }
-    fingerprint_json = json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False)
+    fingerprint_data = {"sources": sources, "cross_check": cross_check}
+    try:
+        fingerprint_json = json.dumps(
+            fingerprint_data, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"snapshot contains non-canonical data: {exc}") from exc
     return hashlib.sha256(fingerprint_json.encode("utf-8")).hexdigest()
-
 def run(passes=3,interval=3,notional=300,max_book_age=10,max_trade_age=900,collection_id=None):
     started=now_ms(); clients={v:Client(v) for v in SYMBOLS}; sources={}
     for v,c in clients.items():
