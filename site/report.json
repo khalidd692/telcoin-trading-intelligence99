@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T12:46:11.333804+00:00",
+  "generated_at": "2026-10-24T12:59:46.648486+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
-  "status": "SURVEILLER",
+  "status": "ATTENDRE",
   "collection_status": "VALID",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001399,
-      "bid": 0.001399,
-      "ask": 0.0014,
-      "spread_pct": 0.07145409074668922,
-      "quote_volume_24h": 91480.835838,
-      "change_pct_24h": -0.0457,
+      "last": 0.001392,
+      "bid": 0.001386,
+      "ask": 0.001395,
+      "spread_pct": 0.6472491909385036,
+      "quote_volume_24h": 91341.271351,
+      "change_pct_24h": -0.06,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-24T12:46:11.408292+00:00"
+      "observed_at": "2026-10-24T12:59:46.730678+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -25,9 +25,9 @@
     "kucoin_level1": {
       "status": "OK",
       "last": 0.001394,
-      "bid": 0.001389,
-      "ask": 0.001394,
-      "observed_at": "2026-10-24T12:46:11.885639+00:00"
+      "bid": 0.001394,
+      "ask": 0.001395,
+      "observed_at": "2026-10-24T12:59:47.007505+00:00"
     }
   },
   "checks": [
@@ -37,21 +37,21 @@
     },
     {
       "name": "MEXC spread",
-      "status": "PASS",
-      "value_pct": 0.0715,
+      "status": "FAIL",
+      "value_pct": 0.6472,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.358,
+      "divergence_pct": 0.1436,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-24T12:45:00+00:00",
-    "candle_age_seconds": 71,
+    "candle_age_seconds": 886,
     "close": 0.001399,
     "ema12": 0.0014067940948101782,
     "ema26": 0.0014110143918687045,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "f3b6070c-5421-409d-8bcf-5d2c705a2fc8",
+  "collection_id": "f46a6711-329e-44a4-a059-13df2c74b6f9",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.358
+    "last_price_divergence_pct": 0.1436
   },
-  "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
+  "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
 }
