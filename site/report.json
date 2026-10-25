@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T19:30:41.318010+00:00",
+  "generated_at": "2026-10-25T19:44:21.295763+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "ATTENDRE",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001429,
-      "bid": 0.001423,
-      "ask": 0.001432,
-      "spread_pct": 0.6304728546409734,
-      "quote_volume_24h": 70260.113889,
-      "change_pct_24h": -0.011,
+      "last": 0.00143,
+      "bid": 0.001425,
+      "ask": 0.001433,
+      "spread_pct": 0.5598320503848829,
+      "quote_volume_24h": 70309.597636,
+      "change_pct_24h": -0.0117,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-25T19:30:41.801819+00:00"
+      "observed_at": "2026-10-25T19:44:21.428424+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -26,8 +26,8 @@
       "status": "OK",
       "last": 0.001429,
       "bid": 0.001426,
-      "ask": 0.001429,
-      "observed_at": "2026-10-25T19:30:42.225882+00:00"
+      "ask": 0.00143,
+      "observed_at": "2026-10-25T19:44:21.924872+00:00"
     }
   },
   "checks": [
@@ -38,20 +38,20 @@
     {
       "name": "MEXC spread",
       "status": "FAIL",
-      "value_pct": 0.6305,
+      "value_pct": 0.5598,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0,
+      "divergence_pct": 0.07,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-25T19:30:00+00:00",
-    "candle_age_seconds": 42,
+    "candle_age_seconds": 861,
     "close": 0.001429,
     "ema12": 0.0014248851188042465,
     "ema26": 0.0014222309424947509,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "d5f24451-52b4-46bd-8741-3a582bdaa32c",
+  "collection_id": "f2d68756-57e1-40a6-bcf3-d8c04770fca7",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0
+    "last_price_divergence_pct": 0.07
   },
   "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
 }
