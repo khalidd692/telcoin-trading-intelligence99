@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T07:15:04.398186+00:00",
+  "generated_at": "2026-10-25T07:28:42.431396+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
-  "status": "ATTENDRE",
+  "status": "SURVEILLER",
   "collection_status": "VALID",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001446,
-      "bid": 0.001441,
-      "ask": 0.001452,
-      "spread_pct": 0.7604562737642546,
-      "quote_volume_24h": 78445.575727,
-      "change_pct_24h": 0.0204,
+      "last": 0.00144,
+      "bid": 0.001433,
+      "ask": 0.00144,
+      "spread_pct": 0.4872955099199485,
+      "quote_volume_24h": 78135.76609,
+      "change_pct_24h": 0.0006,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-25T07:15:05.046979+00:00"
+      "observed_at": "2026-10-25T07:28:42.848364+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001446,
-      "bid": 0.001446,
-      "ask": 0.001447,
-      "observed_at": "2026-10-25T07:15:05.469023+00:00"
+      "last": 0.00144,
+      "bid": 0.001438,
+      "ask": 0.001442,
+      "observed_at": "2026-10-25T07:28:43.339825+00:00"
     }
   },
   "checks": [
@@ -37,8 +37,8 @@
     },
     {
       "name": "MEXC spread",
-      "status": "FAIL",
-      "value_pct": 0.7605,
+      "status": "PASS",
+      "value_pct": 0.4873,
       "limit_pct": 0.5
     },
     {
@@ -51,7 +51,7 @@
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-25T07:15:00+00:00",
-    "candle_age_seconds": 5,
+    "candle_age_seconds": 823,
     "close": 0.001446,
     "ema12": 0.0014527934722891162,
     "ema26": 0.0014540637953558227,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "60c6607f-7a1b-434f-89a9-eae9f3089cf6",
+  "collection_id": "98780e9c-e88f-4eaf-9a91-26f835401351",
   "cross_exchange": {
     "last_price_divergence_pct": 0.0
   },
-  "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
+  "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
 }
