@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T02:15:03.875587+00:00",
+  "generated_at": "2026-10-25T02:28:41.905262+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "ATTENDRE",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001464,
-      "bid": 0.00146,
-      "ask": 0.001469,
-      "spread_pct": 0.6145442130420014,
-      "quote_volume_24h": 79227.109007,
-      "change_pct_24h": 0.0397,
+      "last": 0.00146,
+      "bid": 0.001453,
+      "ask": 0.001462,
+      "spread_pct": 0.6174957118353271,
+      "quote_volume_24h": 79159.010808,
+      "change_pct_24h": 0.0384,
       "source": "MEXC public ticker",
-      "observed_at": "2026-10-25T02:15:04.297984+00:00"
+      "observed_at": "2026-10-25T02:28:42.080532+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001463,
-      "bid": 0.001468,
-      "ask": 0.001473,
-      "observed_at": "2026-10-25T02:15:05.034054+00:00"
+      "last": 0.001468,
+      "bid": 0.001458,
+      "ask": 0.001462,
+      "observed_at": "2026-10-25T02:28:42.408452+00:00"
     }
   },
   "checks": [
@@ -38,20 +38,20 @@
     {
       "name": "MEXC spread",
       "status": "FAIL",
-      "value_pct": 0.6145,
+      "value_pct": 0.6175,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0683,
+      "divergence_pct": 0.5464,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-10-25T02:15:00+00:00",
-    "candle_age_seconds": 4,
+    "candle_age_seconds": 822,
     "close": 0.001464,
     "ema12": 0.0014616294732306004,
     "ema26": 0.001451672617307327,
@@ -257,9 +257,9 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "a3ab7da6-7d00-4707-8ba9-6ec66abeab87",
+  "collection_id": "34d06352-3746-40ac-9e5f-a53c11e1e088",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0683
+    "last_price_divergence_pct": 0.5464
   },
   "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
 }
