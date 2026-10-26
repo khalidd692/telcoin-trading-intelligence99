@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_PUBLIC_DATA",
-  "generated_at": "2026-10-26T01:25:16.562Z",
-  "collection_id": "724f9d47-549a-4977-9c74-5af7e810b740",
+  "generated_at": "2026-10-26T01:38:55.089Z",
+  "collection_id": "f50a0fe0-6db9-47d1-a654-5b109fc04edc",
   "collection_status": "VALID",
   "collector": {
     "name": "collector/tel_collector.py",
@@ -12,13 +12,31 @@
     "github_actions": true,
     "passes": 3,
     "interval_seconds": 3.0,
-    "buy_cost_notional_usdt": 300.0
+    "buy_cost_notional_usdt": 300.0,
+    "round_trip_amounts_usdt": [
+      50.0,
+      100.0,
+      300.0,
+      500.0,
+      1000.0
+    ],
+    "round_trip_default_amounts_usdt": [
+      50.0,
+      100.0,
+      300.0,
+      500.0,
+      1000.0
+    ]
   },
   "collection": {
-    "start_utc": "2026-10-26T01:24:55.694Z",
-    "end_utc": "2026-10-26T01:25:16.562Z",
-    "start_paris": "2026-10-26T02:24:55+01:00",
-    "end_paris": "2026-10-26T02:25:16+01:00"
+    "start_utc": "2026-10-26T01:38:34.373Z",
+    "end_utc": "2026-10-26T01:38:55.089Z",
+    "start_paris": "2026-10-26T02:38:34+01:00",
+    "end_paris": "2026-10-26T02:38:55+01:00",
+    "book_age_at_publication_ms": {
+      "mexc": 12475,
+      "kucoin": 1785
+    }
   },
   "sources": {
     "mexc": {
@@ -29,7 +47,7 @@
         },
         "trades": {
           "verdict": "VÉRIFIÉ",
-          "reason": "dernière transaction il y a 67s"
+          "reason": "dernière transaction il y a 32s"
         }
       },
       "quality_diagnostics": {
@@ -40,18 +58,50 @@
           "best_ask": 0.001403
         }
       },
-      "server_time_utc": "2026-10-26T01:25:05.230Z",
+      "server_time_utc": "2026-10-26T01:38:43.873Z",
       "mid": 0.0014015,
       "best": {
         "bid": 0.0014,
         "bid_qty": 13651871.63,
         "ask": 0.001403,
-        "ask_qty": 11709.43
+        "ask_qty": 925.91,
+        "last": 0.001401
       },
       "spread": {
         "absolute": 2.9999999999999645e-06,
         "pct_mid": 0.21405636817695076,
         "mid": 0.0014015
+      },
+      "spread_passes": {
+        "count": 3,
+        "valid_count": 3,
+        "complete": true,
+        "min_pct": 0.21405636817695076,
+        "median_pct": 0.2853067047075676,
+        "max_pct": 0.2853067047075676,
+        "passes": [
+          {
+            "observed_at": "2026-10-26T01:38:35.410Z",
+            "best_bid": 0.0014,
+            "best_ask": 0.001404,
+            "spread_pct_mid": 0.2853067047075676,
+            "valid": true
+          },
+          {
+            "observed_at": "2026-10-26T01:38:39.672Z",
+            "best_bid": 0.0014,
+            "best_ask": 0.001404,
+            "spread_pct_mid": 0.2853067047075676,
+            "valid": true
+          },
+          {
+            "observed_at": "2026-10-26T01:38:43.834Z",
+            "best_bid": 0.0014,
+            "best_ask": 0.001403,
+            "spread_pct_mid": 0.21405636817695076,
+            "valid": true
+          }
+        ]
       },
       "book": {
         "bids": [
@@ -61,47 +111,47 @@
           ],
           [
             0.001394,
-            13976.24
+            26668.89
           ],
           [
             0.001393,
-            36923.71
+            25433.92
           ],
           [
             0.001392,
-            51040.1
+            5098.18
           ],
           [
             0.001391,
-            274750.34
+            52840.91
           ],
           [
             0.00139,
-            30076.59
+            30420.38
           ],
           [
             0.001389,
-            35562.16
+            281823.32
           ],
           [
             0.001388,
-            61043.62
+            21429.83
           ],
           [
             0.001387,
-            88724.85
+            34258.56
           ],
           [
             0.001386,
-            6064.51
+            48255.32
           ],
           [
             0.001385,
-            140746.6
+            146209.56
           ],
           [
             0.001384,
-            16808.0
+            72612.49
           ],
           [
             0.001383,
@@ -113,7 +163,7 @@
           ],
           [
             0.001381,
-            30749.37
+            68579.49
           ],
           [
             0.00138,
@@ -133,7 +183,7 @@
           ],
           [
             0.001376,
-            35907.75
+            35917.55
           ],
           [
             0.001375,
@@ -141,11 +191,11 @@
           ],
           [
             0.001374,
-            893.69
+            997.89
           ],
           [
             0.001373,
-            19390.49
+            15936.29
           ],
           [
             0.001372,
@@ -153,7 +203,7 @@
           ],
           [
             0.001371,
-            14285.66
+            14264.78
           ],
           [
             0.00137,
@@ -165,7 +215,7 @@
           ],
           [
             0.001368,
-            205219.86
+            5219.86
           ],
           [
             0.001366,
@@ -185,19 +235,27 @@
           ],
           [
             0.00136,
-            12115.25
+            12016.59
+          ],
+          [
+            0.001359,
+            200000.0
           ],
           [
             0.001358,
-            6207.77
+            6194.54
+          ],
+          [
+            0.001357,
+            589744.34
           ],
           [
             0.001356,
-            595877.12
+            6106.69
           ],
           [
             0.001354,
-            6130.03
+            6118.94
           ],
           [
             0.001353,
@@ -205,7 +263,7 @@
           ],
           [
             0.001352,
-            1014.01
+            1036.56
           ],
           [
             0.001351,
@@ -213,15 +271,15 @@
           ],
           [
             0.00135,
-            506209.32
+            500919.75
           ],
           [
             0.001348,
-            8538.48
+            890.21
           ],
           [
             0.001346,
-            5098.85
+            995.73
           ],
           [
             0.001345,
@@ -229,7 +287,7 @@
           ],
           [
             0.001343,
-            595818.84
+            595792.21
           ],
           [
             0.001339,
@@ -246,36 +304,28 @@
           [
             0.001333,
             26218.77
-          ],
-          [
-            0.001332,
-            600600.6
-          ],
-          [
-            0.001329,
-            2677.35
           ]
         ],
         "asks": [
           [
             0.001403,
-            11709.43
+            925.91
           ],
           [
             0.001404,
-            953.34
+            10171.31
           ],
           [
             0.001405,
-            949.08
+            34997.96
           ],
           [
             0.001407,
-            3824.13
+            22145.24
           ],
           [
             0.001408,
-            7651.0
+            10897.97
           ],
           [
             0.001409,
@@ -283,11 +333,11 @@
           ],
           [
             0.00141,
-            30280.48
+            8631.86
           ],
           [
             0.001411,
-            20043.7
+            5098.85
           ],
           [
             0.001412,
@@ -318,76 +368,76 @@
             27521.95
           ],
           [
-            0.001419,
-            24165.82
-          ],
-          [
             0.00142,
-            8537.98
+            938.91
           ],
           [
             0.001421,
-            15099.65
+            14820.72
           ],
           [
             0.001422,
-            250927.97
+            36818.0
           ],
           [
             0.001423,
+            250843.29
+          ],
+          [
+            0.001424,
             22562.83
           ],
           [
-            0.001431,
+            0.001432,
             26045.46
           ],
           [
-            0.001438,
-            834.78
-          ],
-          [
             0.001439,
-            12244.55
+            12228.4
           ],
           [
-            0.001447,
-            30617.37
+            0.00144,
+            955.14
           ],
           [
-            0.001449,
-            828.16
+            0.001448,
+            828.73
           ],
           [
-            0.001451,
-            827.02
+            0.00145,
+            827.59
           ],
           [
-            0.001453,
-            825.88
+            0.001452,
+            826.45
           ],
           [
-            0.001455,
-            860.73
+            0.001454,
+            825.31
           ],
           [
-            0.001457,
-            921.15
+            0.001456,
+            824.18
           ],
           [
-            0.001459,
-            937.42
+            0.001458,
+            823.05
           ],
           [
             0.001461,
             821.36
           ],
           [
-            0.001463,
-            918.57
+            0.001464,
+            929.85
           ],
           [
-            0.001465,
-            838.92
+            0.001467,
+            818.0
+          ],
+          [
+            0.00147,
+            816.33
           ],
           [
             0.001476,
@@ -407,7 +457,7 @@
           ],
           [
             0.001749,
-            308196.47
+            214846.54
           ],
           [
             0.001759,
@@ -463,35 +513,622 @@
         "depth_usdt_by_band": {
           "0.5%": {
             "bids": 19112.620282,
-            "asks": 35.25343596
+            "asks": 111.25439921
           },
           "1%": {
-            "bids": 19812.69427563,
-            "asks": 137.75597378
+            "bids": 19729.30606131,
+            "asks": 162.14519948
           },
           "2%": {
-            "bids": 25208.55895292,
-            "asks": 642.2908626000001
+            "bids": 25245.30212211,
+            "asks": 673.70993795
           },
           "5%": {
-            "bids": 30429.56123909,
-            "asks": 754.02065099
+            "bids": 30437.14150823,
+            "asks": 742.14044999
           }
         },
         "anomalies": []
       },
       "buy_cost_300_usdt": {
         "target_usdt": 300.0,
-        "filled_usdt": 300.0,
+        "filled_usdt": 300.00000000000006,
+        "remaining_usdt": 0.0,
         "complete": true,
-        "qty_tel": 212006.0731293952,
-        "avg_price": 0.001415053802807332,
-        "worst_price": 0.001422,
+        "qty_tel": 212243.19665495437,
+        "avg_price": 0.001413472868521259,
+        "worst_price": 0.001423,
         "levels_used": 19,
-        "slippage_vs_best_ask_pct": 0.8591448900450604,
+        "best_price": 0.001403,
+        "slippage_vs_best_ask_pct": 0.7464624747868243,
         "fees": "EXCLUDED_NOT_VERIFIED"
       },
+      "liquidity_cost": {
+        "schema_version": 1,
+        "read_only": true,
+        "orders_sent": 0,
+        "calculated_at_utc": "2026-10-26T01:38:45.364Z",
+        "transport_reason": null,
+        "book": {
+          "source_time": "2026-10-26T01:38:42.614Z",
+          "source_time_ms": 1792978722614,
+          "age_at_calculation_ms": 2750,
+          "age_at_calculation_seconds": 2.75,
+          "max_age_seconds": 10.0,
+          "fresh": true,
+          "verdict": "VÉRIFIÉ",
+          "anomalies": [],
+          "shape_problems": [],
+          "age_at_publication_ms": 12475,
+          "fresh_at_publication": false
+        },
+        "initial_spread": {
+          "absolute": 2.9999999999999645e-06,
+          "pct_mid": 0.21405636817695076,
+          "mid": 0.0014015
+        },
+        "depth_usdt_by_band": {
+          "bids_0_5pct": 19112.620282,
+          "asks_0_5pct": 111.25439921,
+          "bids_1pct": 19729.30606131,
+          "asks_1pct": 162.14519948
+        },
+        "default_amounts_usdt": [
+          50.0,
+          100.0,
+          300.0,
+          500.0,
+          1000.0
+        ],
+        "requested_amounts_usdt": [
+          50.0,
+          100.0,
+          300.0,
+          500.0,
+          1000.0
+        ],
+        "usable": true,
+        "reason": null,
+        "reason_detail": "Mesure valide au calcul, mais non utilisable à la publication: Carnet périmé au moment de la publication; ne pas utiliser comme estimation courante.",
+        "scenarios": [
+          {
+            "amount_usdt": 50.0,
+            "initial_spread_pct": 0.21405636817695076,
+            "buy": {
+              "target_usdt": 50.0,
+              "filled_usdt": 49.99999999999999,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 35595.74599999999,
+              "avg_price": 0.0014046622312677477,
+              "worst_price": 0.001405,
+              "levels_used": 3,
+              "best_price": 0.001403,
+              "slippage_vs_best_ask_pct": 0.11847692571258506,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 35595.74599999999,
+              "filled_qty_tel": 35595.74599999999,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 49.83404439999999,
+              "complete": true,
+              "avg_price": 0.0014,
+              "worst_price": 0.0014,
+              "levels_used": 1,
+              "best_price": 0.0014,
+              "slippage_vs_best_bid_pct": 0.0,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 0.16595560000000376,
+              "cost_pct": 0.3319112000000075,
+              "return_pct": -0.3319112000000075,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 100.0,
+            "initial_spread_pct": 0.21405636817695076,
+            "buy": {
+              "target_usdt": 100.0,
+              "filled_usdt": 100.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 71145.20874289772,
+              "avg_price": 0.001405576029179657,
+              "worst_price": 0.001408,
+              "levels_used": 5,
+              "best_price": 0.001403,
+              "slippage_vs_best_ask_pct": 0.18360863718154263,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 71145.20874289772,
+              "filled_qty_tel": 71145.20874289772,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 99.60329224005682,
+              "complete": true,
+              "avg_price": 0.0014,
+              "worst_price": 0.0014,
+              "levels_used": 1,
+              "best_price": 0.0014,
+              "slippage_vs_best_bid_pct": 0.0,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 0.3967077599431832,
+              "cost_pct": 0.3967077599431832,
+              "return_pct": -0.3967077599431832,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 300.0,
+            "initial_spread_pct": 0.21405636817695076,
+            "buy": {
+              "target_usdt": 300.0,
+              "filled_usdt": 300.00000000000006,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 212243.19665495437,
+              "avg_price": 0.001413472868521259,
+              "worst_price": 0.001423,
+              "levels_used": 19,
+              "best_price": 0.001403,
+              "slippage_vs_best_ask_pct": 0.7464624747868243,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 212243.19665495437,
+              "filled_qty_tel": 212243.19665495437,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 297.1404753169361,
+              "complete": true,
+              "avg_price": 0.0013999999999999998,
+              "worst_price": 0.0014,
+              "levels_used": 1,
+              "best_price": 0.0014,
+              "slippage_vs_best_bid_pct": 1.1102230246251565e-14,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 2.8595246830639667,
+              "cost_pct": 0.9531748943546553,
+              "return_pct": -0.9531748943546553,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 500.0,
+            "initial_spread_pct": 0.21405636817695076,
+            "buy": {
+              "target_usdt": 500.0,
+              "filled_usdt": 500.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 352791.3343921293,
+              "avg_price": 0.0014172683715758378,
+              "worst_price": 0.001423,
+              "levels_used": 19,
+              "best_price": 0.001403,
+              "slippage_vs_best_ask_pct": 1.0169901337019116,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 352791.3343921293,
+              "filled_qty_tel": 352791.3343921293,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 493.90786814898104,
+              "complete": true,
+              "avg_price": 0.0014,
+              "worst_price": 0.0014,
+              "levels_used": 1,
+              "best_price": 0.0014,
+              "slippage_vs_best_bid_pct": 0.0,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 6.092131851018962,
+              "cost_pct": 1.2184263702037925,
+              "return_pct": -1.2184263702037925,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 1000.0,
+            "initial_spread_pct": 0.21405636817695076,
+            "buy": {
+              "target_usdt": 1000.0,
+              "filled_usdt": 1000.0000000000002,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 696970.6195672754,
+              "avg_price": 0.0014347807094377452,
+              "worst_price": 0.001479,
+              "levels_used": 35,
+              "best_price": 0.001403,
+              "slippage_vs_best_ask_pct": 2.2651966812363034,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 696970.6195672754,
+              "filled_qty_tel": 696970.6195672754,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 975.7588673941856,
+              "complete": true,
+              "avg_price": 0.0014,
+              "worst_price": 0.0014,
+              "levels_used": 1,
+              "best_price": 0.0014,
+              "slippage_vs_best_bid_pct": 0.0,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 24.24113260581464,
+              "cost_pct": 2.4241132605814637,
+              "return_pct": -2.4241132605814637,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          }
+        ],
+        "fees": {
+          "verified": false,
+          "pct_per_side": null,
+          "provided_pct": null,
+          "value": null,
+          "note": "frais non vérifiés; coût réel >= estimation hors frais",
+          "provenance": null,
+          "provenance_status": "NOT_DECLARED"
+        },
+        "limits": [
+          "Estimation statique sur les niveaux publics observés; aucun ordre réel n'est envoyé.",
+          "Aucune extrapolation au-delà de la profondeur observée; un montant trop grand est signalé.",
+          "Frais exclus sauf s'ils sont couverts par une provenance HMAC vérifiée; le coût réel est supérieur ou égal.",
+          "Le carnet peut changer entre la collecte et l'exécution; latence et rejets non modélisés.",
+          "Spread initial et slippages sont mesurés séparément; le total est recalculé sur les flux réels.",
+          "La fraîcheur est évaluée à l'heure de calcul; la publication peut être plus tardive."
+        ],
+        "all_scenarios_deep_enough": true,
+        "percentiles": {
+          "status": "UNAVAILABLE",
+          "reason": "historique non fourni ou insuffisant; aucun percentile calculé"
+        },
+        "publication_stale": true,
+        "usable_at_publication": false,
+        "publication_warning": "Carnet périmé au moment de la publication; ne pas utiliser comme estimation courante."
+      },
       "trades": [
+        {
+          "time_ms": 1792978691847,
+          "price": 0.001401,
+          "qty": 17047.2,
+          "quote_qty": 23.8831272,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978691847,
+          "price": 0.001401,
+          "qty": 3048.39,
+          "quote_qty": 4.27079439,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978691822,
+          "price": 0.001401,
+          "qty": 877.37,
+          "quote_qty": 1.22919537,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978691039,
+          "price": 0.001403,
+          "qty": 2079.06,
+          "quote_qty": 2.91692118,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978691039,
+          "price": 0.001402,
+          "qty": 920.94,
+          "quote_qty": 1.29115788,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978633680,
+          "price": 0.001402,
+          "qty": 4982.1,
+          "quote_qty": 6.9849042,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978633179,
+          "price": 0.001401,
+          "qty": 3964.08,
+          "quote_qty": 5.55367608,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978566680,
+          "price": 0.001402,
+          "qty": 7616.31,
+          "quote_qty": 10.67806662,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978560684,
+          "price": 0.001403,
+          "qty": 16113.24,
+          "quote_qty": 22.60687572,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978511179,
+          "price": 0.001402,
+          "qty": 2751.98,
+          "quote_qty": 3.85827596,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978499678,
+          "price": 0.001403,
+          "qty": 16113.56,
+          "quote_qty": 22.60732468,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978455182,
+          "price": 0.001402,
+          "qty": 2036.46,
+          "quote_qty": 2.85511692,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978454679,
+          "price": 0.001401,
+          "qty": 19807.2,
+          "quote_qty": 27.7498872,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978395180,
+          "price": 0.001402,
+          "qty": 2162.23,
+          "quote_qty": 3.03144646,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978394180,
+          "price": 0.001401,
+          "qty": 24518.39,
+          "quote_qty": 34.35026439,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978334679,
+          "price": 0.001402,
+          "qty": 21983.23,
+          "quote_qty": 30.82048846,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978334179,
+          "price": 0.001403,
+          "qty": 17123.63,
+          "quote_qty": 24.02445289,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978263681,
+          "price": 0.001402,
+          "qty": 25484.33,
+          "quote_qty": 35.72903066,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978261680,
+          "price": 0.001403,
+          "qty": 13458.27,
+          "quote_qty": 18.88195281,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978204187,
+          "price": 0.001402,
+          "qty": 22072.31,
+          "quote_qty": 30.94537862,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978203684,
+          "price": 0.001401,
+          "qty": 10333.47,
+          "quote_qty": 14.47719147,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978126180,
+          "price": 0.001402,
+          "qty": 8726.95,
+          "quote_qty": 12.2351839,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978086160,
+          "price": 0.001403,
+          "qty": 11207.3,
+          "quote_qty": 15.7238419,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978069680,
+          "price": 0.001402,
+          "qty": 9311.0,
+          "quote_qty": 13.054022,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792978069180,
+          "price": 0.001401,
+          "qty": 6025.19,
+          "quote_qty": 8.44129119,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792978007679,
+          "price": 0.001402,
+          "qty": 9671.76,
+          "quote_qty": 13.55980752,
+          "side": "sell",
+          "id": null
+        },
+        {
+          "time_ms": 1792977952680,
+          "price": 0.001401,
+          "qty": 15138.19,
+          "quote_qty": 21.20860419,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792977952179,
+          "price": 0.001402,
+          "qty": 17595.53,
+          "quote_qty": 24.66893306,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792977895679,
+          "price": 0.001403,
+          "qty": 17765.98,
+          "quote_qty": 24.92566994,
+          "side": "buy",
+          "id": null
+        },
+        {
+          "time_ms": 1792977894680,
+          "price": 0.001401,
+          "qty": 13828.52,
+          "quote_qty": 19.37375652,
+          "side": "buy",
+          "id": null
+        },
         {
           "time_ms": 1792977838680,
           "price": 0.001403,
@@ -1051,246 +1688,6 @@
           "quote_qty": 1.15261985,
           "side": "buy",
           "id": null
-        },
-        {
-          "time_ms": 1792975991682,
-          "price": 0.001403,
-          "qty": 15173.95,
-          "quote_qty": 21.28905185,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975988182,
-          "price": 0.001402,
-          "qty": 18756.89,
-          "quote_qty": 26.29715978,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975936180,
-          "price": 0.001403,
-          "qty": 7752.7,
-          "quote_qty": 10.8770381,
-          "side": "sell",
-          "id": null
-        },
-        {
-          "time_ms": 1792975932680,
-          "price": 0.001404,
-          "qty": 6567.83,
-          "quote_qty": 9.22123332,
-          "side": "sell",
-          "id": null
-        },
-        {
-          "time_ms": 1792975874679,
-          "price": 0.001403,
-          "qty": 7939.68,
-          "quote_qty": 11.13937104,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975873691,
-          "price": 0.001401,
-          "qty": 7127.94,
-          "quote_qty": 9.98624394,
-          "side": "sell",
-          "id": null
-        },
-        {
-          "time_ms": 1792975817876,
-          "price": 0.001407,
-          "qty": 1249.77,
-          "quote_qty": 1.75842639,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975817876,
-          "price": 0.001406,
-          "qty": 853.49,
-          "quote_qty": 1.20000694,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975817876,
-          "price": 0.001405,
-          "qty": 896.74,
-          "quote_qty": 1.2599197,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975791053,
-          "price": 0.001408,
-          "qty": 6498.29,
-          "quote_qty": 9.14959232,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975791053,
-          "price": 0.001408,
-          "qty": 2666.03,
-          "quote_qty": 3.75377024,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975791053,
-          "price": 0.001406,
-          "qty": 853.49,
-          "quote_qty": 1.20000694,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975791053,
-          "price": 0.001405,
-          "qty": 969.9,
-          "quote_qty": 1.3627095,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975739219,
-          "price": 0.001408,
-          "qty": 1240.22,
-          "quote_qty": 1.74622976,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975739219,
-          "price": 0.001406,
-          "qty": 853.49,
-          "quote_qty": 1.20000694,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975739219,
-          "price": 0.001405,
-          "qty": 906.29,
-          "quote_qty": 1.27333745,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975739219,
-          "price": 0.001404,
-          "qty": 7797.44,
-          "quote_qty": 10.94760576,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975707754,
-          "price": 0.001404,
-          "qty": 3000.0,
-          "quote_qty": 4.212,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975705259,
-          "price": 0.001407,
-          "qty": 1129.83,
-          "quote_qty": 1.58967081,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975705259,
-          "price": 0.001406,
-          "qty": 853.49,
-          "quote_qty": 1.20000694,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975705259,
-          "price": 0.001405,
-          "qty": 1016.68,
-          "quote_qty": 1.4284354,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975704179,
-          "price": 0.001402,
-          "qty": 13866.05,
-          "quote_qty": 19.4402021,
-          "side": "sell",
-          "id": null
-        },
-        {
-          "time_ms": 1792975648610,
-          "price": 0.001407,
-          "qty": 7167.04,
-          "quote_qty": 10.08402528,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975648610,
-          "price": 0.001406,
-          "qty": 853.49,
-          "quote_qty": 1.20000694,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975648610,
-          "price": 0.001405,
-          "qty": 892.82,
-          "quote_qty": 1.2544121,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975648164,
-          "price": 0.001405,
-          "qty": 0.01,
-          "quote_qty": 1.405e-05,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975648164,
-          "price": 0.001404,
-          "qty": 11709.43,
-          "quote_qty": 16.44003972,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975595679,
-          "price": 0.001401,
-          "qty": 10797.26,
-          "quote_qty": 15.12696126,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975594186,
-          "price": 0.001402,
-          "qty": 11535.22,
-          "quote_qty": 16.17237844,
-          "side": "buy",
-          "id": null
-        },
-        {
-          "time_ms": 1792975539679,
-          "price": 0.001403,
-          "qty": 14821.13,
-          "quote_qty": 20.79404539,
-          "side": "sell",
-          "id": null
         }
       ],
       "candles": {
@@ -1303,16 +1700,8 @@
           "zero_volume_count": 0,
           "contiguous_tail_count": 499,
           "week_anchor_utc": null,
-          "last_closed_at": "2026-10-26T01:15:00.000Z",
+          "last_closed_at": "2026-10-26T01:30:00.000Z",
           "rows": [
-            {
-              "open_time": "2026-10-22T22:15:00.000Z",
-              "open": 0.001425,
-              "high": 0.001454,
-              "low": 0.001422,
-              "close": 0.001445,
-              "volume": 2188757.72
-            },
             {
               "open_time": "2026-10-22T22:30:00.000Z",
               "open": 0.001445,
@@ -3704,6 +4093,14 @@
               "low": 0.001401,
               "close": 0.001401,
               "volume": 214550.15
+            },
+            {
+              "open_time": "2026-10-26T01:15:00.000Z",
+              "open": 0.001401,
+              "high": 0.001405,
+              "low": 0.0014,
+              "close": 0.001402,
+              "volume": 418516.75
             }
           ],
           "sufficient_for": {
@@ -12014,37 +12411,52 @@
       },
       "observations": [
         {
-          "observed_at": "2026-10-26T01:24:56.693Z",
-          "server_time": "2026-10-26T01:24:56.712Z",
-          "clock_skew_ms": 19,
-          "book_sequence": 4094306921,
-          "book_source_time": "2026-10-26T01:24:55.913Z",
-          "book_age_ms": 799,
-          "book_hash": "9306f15d28325be3",
-          "newest_trade_ms": 1792977838680,
-          "newest_trade_age_ms": 58032
+          "observed_at": "2026-10-26T01:38:35.410Z",
+          "observed_at_ms": 1792978715410,
+          "server_time": "2026-10-26T01:38:35.444Z",
+          "clock_skew_ms": 34,
+          "book_sequence": 4094310172,
+          "book_source_time": "2026-10-26T01:38:34.613Z",
+          "book_source_time_ms": 1792978714613,
+          "book_age_ms": 831,
+          "book_hash": "aaba116a8060550c",
+          "best_bid": 0.0014,
+          "best_ask": 0.001404,
+          "spread_pct_mid": 0.2853067047075676,
+          "newest_trade_ms": 1792978691847,
+          "newest_trade_age_ms": 23597
         },
         {
-          "observed_at": "2026-10-26T01:25:00.792Z",
-          "server_time": "2026-10-26T01:25:00.807Z",
-          "clock_skew_ms": 15,
-          "book_sequence": 4094306988,
-          "book_source_time": "2026-10-26T01:24:59.914Z",
-          "book_age_ms": 893,
-          "book_hash": "efd969f6b385a254",
-          "newest_trade_ms": 1792977838680,
-          "newest_trade_age_ms": 62127
+          "observed_at": "2026-10-26T01:38:39.672Z",
+          "observed_at_ms": 1792978719672,
+          "server_time": "2026-10-26T01:38:39.689Z",
+          "clock_skew_ms": 17,
+          "book_sequence": 4094310184,
+          "book_source_time": "2026-10-26T01:38:37.714Z",
+          "book_source_time_ms": 1792978717714,
+          "book_age_ms": 1975,
+          "book_hash": "170a60f6b2f245e9",
+          "best_bid": 0.0014,
+          "best_ask": 0.001404,
+          "spread_pct_mid": 0.2853067047075676,
+          "newest_trade_ms": 1792978691847,
+          "newest_trade_age_ms": 27842
         },
         {
-          "observed_at": "2026-10-26T01:25:05.029Z",
-          "server_time": "2026-10-26T01:25:05.230Z",
-          "clock_skew_ms": 201,
-          "book_sequence": 4094307051,
-          "book_source_time": "2026-10-26T01:25:03.914Z",
-          "book_age_ms": 1316,
-          "book_hash": "8137c0b479d94a34",
-          "newest_trade_ms": 1792977838680,
-          "newest_trade_age_ms": 66550
+          "observed_at": "2026-10-26T01:38:43.834Z",
+          "observed_at_ms": 1792978723834,
+          "server_time": "2026-10-26T01:38:43.873Z",
+          "clock_skew_ms": 39,
+          "book_sequence": 4094310222,
+          "book_source_time": "2026-10-26T01:38:42.614Z",
+          "book_source_time_ms": 1792978722614,
+          "book_age_ms": 1259,
+          "book_hash": "2381a6b5bfef51bf",
+          "best_bid": 0.0014,
+          "best_ask": 0.001403,
+          "spread_pct_mid": 0.21405636817695076,
+          "newest_trade_ms": 1792978691847,
+          "newest_trade_age_ms": 32026
         }
       ],
       "best_ask_source": "mexc"
@@ -12057,73 +12469,108 @@
         },
         "trades": {
           "verdict": "VÉRIFIÉ",
-          "reason": "dernière transaction il y a 306s"
+          "reason": "dernière transaction il y a 60s"
         }
       },
       "quality_diagnostics": {
         "order_book_shape": {
           "status": "VERIFIED",
           "problems": [],
-          "best_bid": 0.001395,
-          "best_ask": 0.001398
+          "best_bid": 0.001396,
+          "best_ask": 0.001399
         }
       },
-      "server_time_utc": "2026-10-26T01:25:15.153Z",
-      "mid": 0.0013965,
+      "server_time_utc": "2026-10-26T01:38:53.711Z",
+      "mid": 0.0013975,
       "best": {
-        "bid": 0.001395,
-        "bid_qty": 5778.0,
-        "ask": 0.001398,
-        "ask_qty": 14313.0,
-        "last": 0.001394,
-        "level1_time_ms": 1792977608957
+        "bid": 0.001396,
+        "bid_qty": 7155.0,
+        "ask": 0.001399,
+        "ask_qty": 159242.0,
+        "last": 0.001398,
+        "level1_time_ms": 1792978673887
       },
       "spread": {
         "absolute": 2.9999999999999645e-06,
-        "pct_mid": 0.21482277121374613,
-        "mid": 0.0013965
+        "pct_mid": 0.21466905187835164,
+        "mid": 0.0013975
+      },
+      "spread_passes": {
+        "count": 3,
+        "valid_count": 3,
+        "complete": true,
+        "min_pct": 0.21466905187835164,
+        "median_pct": 0.21466905187835164,
+        "max_pct": 0.21466905187835164,
+        "passes": [
+          {
+            "observed_at": "2026-10-26T01:38:46.074Z",
+            "best_bid": 0.001396,
+            "best_ask": 0.001399,
+            "spread_pct_mid": 0.21466905187835164,
+            "valid": true
+          },
+          {
+            "observed_at": "2026-10-26T01:38:49.896Z",
+            "best_bid": 0.001396,
+            "best_ask": 0.001399,
+            "spread_pct_mid": 0.21466905187835164,
+            "valid": true
+          },
+          {
+            "observed_at": "2026-10-26T01:38:53.702Z",
+            "best_bid": 0.001396,
+            "best_ask": 0.001399,
+            "spread_pct_mid": 0.21466905187835164,
+            "valid": true
+          }
+        ]
       },
       "book": {
         "bids": [
           [
+            0.001396,
+            7155.0
+          ],
+          [
             0.001395,
-            5778.0
+            14336.0
           ],
           [
             0.001394,
-            278478.0
+            216046.0
           ],
           [
             0.001392,
             7184.0
           ],
           [
-            0.001391,
-            9847.0
-          ],
-          [
             0.00139,
-            17815.0
+            14595.0
           ],
           [
             0.001389,
-            188443.0
+            110189.0
           ],
           [
             0.001388,
-            59847.0
+            127347.0
           ],
           [
             0.001387,
-            64301.0
+            67145.0
           ],
           [
             0.001386,
-            862551.0
+            612610.0
+          ],
+          [
+            0.001384,
+            139433.0
           ],
           [
             0.001383,
-            135304.0
+            385304.0
           ],
           [
             0.001382,
@@ -12131,7 +12578,7 @@
           ],
           [
             0.001381,
-            310627.0
+            50215.0
           ],
           [
             0.00138,
@@ -12139,7 +12586,7 @@
           ],
           [
             0.001379,
-            19957.0
+            131272.0
           ],
           [
             0.001378,
@@ -12147,19 +12594,19 @@
           ],
           [
             0.001377,
-            352248.0
+            3153305.0
           ],
           [
             0.001376,
-            184097.0
+            194097.0
           ],
           [
             0.001375,
-            689987.0
+            552987.0
           ],
           [
             0.001374,
-            359640.0
+            366294.0
           ],
           [
             0.001373,
@@ -12171,27 +12618,27 @@
           ],
           [
             0.001371,
-            7294.0
+            154294.0
           ],
           [
             0.00137,
-            393496.0
+            102096.0
           ],
           [
             0.001369,
-            279510.0
+            532394.0
           ],
           [
             0.001368,
-            1479021.0
+            1087805.0
           ],
           [
             0.001367,
-            3957468.0
+            3905268.0
           ],
           [
             0.001366,
-            247152.0
+            105969.0
           ],
           [
             0.001365,
@@ -12199,19 +12646,15 @@
           ],
           [
             0.001364,
-            50672.0
-          ],
-          [
-            0.001363,
-            621629.0
+            1772.0
           ],
           [
             0.001362,
-            256740.0
+            233740.0
           ],
           [
             0.001361,
-            2421475.0
+            2708838.0
           ],
           [
             0.00136,
@@ -12223,15 +12666,15 @@
           ],
           [
             0.001358,
-            13076.0
+            98076.0
           ],
           [
             0.001357,
-            3384.0
+            593128.0
           ],
           [
             0.001356,
-            604255.0
+            14485.0
           ],
           [
             0.001354,
@@ -12242,16 +12685,12 @@
             7391.0
           ],
           [
-            0.001352,
-            55864.0
-          ],
-          [
             0.001351,
-            2096.0
+            149096.0
           ],
           [
             0.00135,
-            5887535.0
+            6050128.0
           ],
           [
             0.001349,
@@ -12271,7 +12710,7 @@
           ],
           [
             0.001343,
-            661372.0
+            661346.0
           ],
           [
             0.001341,
@@ -12284,56 +12723,52 @@
           [
             0.001337,
             52437.0
+          ],
+          [
+            0.001336,
+            8960.0
           ]
         ],
         "asks": [
           [
-            0.001398,
-            14313.0
+            0.001399,
+            159242.0
           ],
           [
-            0.001399,
-            11488.0
+            0.0014,
+            76000.0
           ],
           [
             0.001401,
-            16985.0
+            95366.0
           ],
           [
             0.001402,
-            20476.0
+            81076.0
           ],
           [
             0.001403,
-            7128.0
+            13752.0
           ],
           [
-            0.001405,
-            332759.0
+            0.001404,
+            231203.0
           ],
           [
             0.001406,
-            59112.0
-          ],
-          [
-            0.001408,
-            748800.0
+            7112.0
           ],
           [
             0.001409,
             1772.0
           ],
           [
-            0.00141,
-            45900.0
-          ],
-          [
             0.001412,
-            253713.0
+            104513.0
           ],
           [
             0.001413,
-            185410.0
+            241610.0
           ],
           [
             0.001414,
@@ -12348,16 +12783,20 @@
             20240.0
           ],
           [
+            0.001417,
+            276500.0
+          ],
+          [
             0.001418,
-            7052.0
+            257052.0
           ],
           [
             0.001419,
-            159159.0
+            149659.0
           ],
           [
             0.00142,
-            1915189.0
+            1848491.0
           ],
           [
             0.001421,
@@ -12365,15 +12804,11 @@
           ],
           [
             0.001423,
-            256901.0
+            14901.0
           ],
           [
             0.001424,
             8794.0
-          ],
-          [
-            0.001425,
-            147000.0
           ],
           [
             0.001426,
@@ -12389,15 +12824,11 @@
           ],
           [
             0.00143,
-            10801.0
+            140301.0
           ],
           [
             0.001431,
             125650.0
-          ],
-          [
-            0.001432,
-            267723.0
           ],
           [
             0.001433,
@@ -12405,7 +12836,7 @@
           ],
           [
             0.001434,
-            181135.0
+            189858.0
           ],
           [
             0.001435,
@@ -12461,7 +12892,7 @@
           ],
           [
             0.001452,
-            92395.0
+            99282.0
           ],
           [
             0.001454,
@@ -12470,10 +12901,6 @@
           [
             0.001455,
             21316.0
-          ],
-          [
-            0.001456,
-            129500.0
           ],
           [
             0.001457,
@@ -12486,42 +12913,428 @@
           [
             0.00146,
             133273.0
+          ],
+          [
+            0.001462,
+            10801.0
+          ],
+          [
+            0.001465,
+            131433.0
+          ],
+          [
+            0.001466,
+            304091.0
+          ],
+          [
+            0.001467,
+            132345.0
           ]
         ],
         "bid_levels": 100,
         "ask_levels": 100,
         "depth_usdt_by_band": {
           "0.5%": {
-            "bids": 444.718797,
-            "asks": 98.585207
+            "bids": 341.15535200000005,
+            "asks": 920.3589440000001
           },
           "1%": {
-            "bids": 2261.340365,
-            "asks": 1770.7492220000001
+            "bids": 1826.435406,
+            "asks": 932.8551640000001
           },
           "2%": {
-            "bids": 10996.672112,
-            "asks": 6064.7855850000005
+            "bids": 13999.769893,
+            "asks": 5389.374567
           },
           "5%": {
-            "bids": 35082.233211,
-            "asks": 19723.237589
+            "bids": 37919.09562,
+            "asks": 18668.264056
           }
         },
         "anomalies": []
       },
       "buy_cost_300_usdt": {
         "target_usdt": 300.0,
-        "filled_usdt": 300.00000000000006,
+        "filled_usdt": 300.0,
+        "remaining_usdt": 0.0,
         "complete": true,
-        "qty_tel": 213745.72455516015,
-        "avg_price": 0.0014035368455876682,
-        "worst_price": 0.001405,
-        "levels_used": 6,
-        "slippage_vs_best_ask_pct": 0.3960547630663891,
+        "qty_tel": 214399.45857142855,
+        "avg_price": 0.0013992572649154014,
+        "worst_price": 0.0014,
+        "levels_used": 2,
+        "best_price": 0.001399,
+        "slippage_vs_best_ask_pct": 0.018389200529034255,
         "fees": "EXCLUDED_NOT_VERIFIED"
       },
+      "liquidity_cost": {
+        "schema_version": 1,
+        "read_only": true,
+        "orders_sent": 0,
+        "calculated_at_utc": "2026-10-26T01:38:55.089Z",
+        "transport_reason": null,
+        "book": {
+          "source_time": "2026-10-26T01:38:53.304Z",
+          "source_time_ms": 1792978733304,
+          "age_at_calculation_ms": 1785,
+          "age_at_calculation_seconds": 1.785,
+          "max_age_seconds": 10.0,
+          "fresh": true,
+          "verdict": "VÉRIFIÉ",
+          "anomalies": [],
+          "shape_problems": [],
+          "age_at_publication_ms": 1785,
+          "fresh_at_publication": true
+        },
+        "initial_spread": {
+          "absolute": 2.9999999999999645e-06,
+          "pct_mid": 0.21466905187835164,
+          "mid": 0.0013975
+        },
+        "depth_usdt_by_band": {
+          "bids_0_5pct": 341.15535200000005,
+          "asks_0_5pct": 920.3589440000001,
+          "bids_1pct": 1826.435406,
+          "asks_1pct": 932.8551640000001
+        },
+        "default_amounts_usdt": [
+          50.0,
+          100.0,
+          300.0,
+          500.0,
+          1000.0
+        ],
+        "requested_amounts_usdt": [
+          50.0,
+          100.0,
+          300.0,
+          500.0,
+          1000.0
+        ],
+        "usable": true,
+        "reason": null,
+        "reason_detail": null,
+        "scenarios": [
+          {
+            "amount_usdt": 50.0,
+            "initial_spread_pct": 0.21466905187835164,
+            "buy": {
+              "target_usdt": 50.0,
+              "filled_usdt": 50.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 35739.814152966406,
+              "avg_price": 0.0013989999999999999,
+              "worst_price": 0.001399,
+              "levels_used": 1,
+              "best_price": 0.001399,
+              "slippage_vs_best_ask_pct": -1.1102230246251565e-14,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 35739.814152966406,
+              "filled_qty_tel": 35739.814152966406,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 49.84994692923517,
+              "complete": true,
+              "avg_price": 0.0013948015150800001,
+              "worst_price": 0.001394,
+              "levels_used": 3,
+              "best_price": 0.001396,
+              "slippage_vs_best_bid_pct": 0.08585135530085886,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 0.15005307076482666,
+              "cost_pct": 0.3001061415296533,
+              "return_pct": -0.3001061415296533,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 100.0,
+            "initial_spread_pct": 0.21466905187835164,
+            "buy": {
+              "target_usdt": 100.0,
+              "filled_usdt": 100.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 71479.62830593281,
+              "avg_price": 0.0013989999999999999,
+              "worst_price": 0.001399,
+              "levels_used": 1,
+              "best_price": 0.001399,
+              "slippage_vs_best_ask_pct": -1.1102230246251565e-14,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 71479.62830593281,
+              "filled_qty_tel": 71479.62830593281,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 99.67124785847034,
+              "complete": true,
+              "avg_price": 0.00139440075754,
+              "worst_price": 0.001394,
+              "levels_used": 3,
+              "best_price": 0.001396,
+              "slippage_vs_best_bid_pct": 0.1145589154727844,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 0.32875214152966237,
+              "cost_pct": 0.32875214152966237,
+              "return_pct": -0.32875214152966237,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 300.0,
+            "initial_spread_pct": 0.21466905187835164,
+            "buy": {
+              "target_usdt": 300.0,
+              "filled_usdt": 300.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 214399.45857142855,
+              "avg_price": 0.0013992572649154014,
+              "worst_price": 0.0014,
+              "levels_used": 2,
+              "best_price": 0.001399,
+              "slippage_vs_best_ask_pct": 0.018389200529034255,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 214399.45857142855,
+              "filled_qty_tel": 214399.45857142855,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 298.9014912485714,
+              "complete": true,
+              "avg_price": 0.001394133610412036,
+              "worst_price": 0.001394,
+              "levels_used": 3,
+              "best_price": 0.001396,
+              "slippage_vs_best_bid_pct": 0.13369552922379846,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 1.0985087514285965,
+              "cost_pct": 0.3661695838095322,
+              "return_pct": -0.3661695838095322,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 500.0,
+            "initial_spread_pct": 0.21466905187835164,
+            "buy": {
+              "target_usdt": 500.0,
+              "filled_usdt": 500.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 357150.5649072753,
+              "avg_price": 0.001399969786215547,
+              "worst_price": 0.001402,
+              "levels_used": 4,
+              "best_price": 0.001399,
+              "slippage_vs_best_ask_pct": 0.06931995822350157,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 357150.5649072753,
+              "filled_qty_tel": 357150.5649072753,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 497.3346126562055,
+              "complete": true,
+              "avg_price": 0.0013925068627157996,
+              "worst_price": 0.001389,
+              "levels_used": 6,
+              "best_price": 0.001396,
+              "slippage_vs_best_bid_pct": 0.250224733825255,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 2.665387343794521,
+              "cost_pct": 0.5330774687589042,
+              "return_pct": -0.5330774687589042,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          },
+          {
+            "amount_usdt": 1000.0,
+            "initial_spread_pct": 0.21466905187835164,
+            "buy": {
+              "target_usdt": 1000.0,
+              "filled_usdt": 1000.0,
+              "remaining_usdt": 0.0,
+              "complete": true,
+              "qty_tel": 713076.0000000001,
+              "avg_price": 0.00140237506240569,
+              "worst_price": 0.001412,
+              "levels_used": 9,
+              "best_price": 0.001399,
+              "slippage_vs_best_ask_pct": 0.2412482062680521,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "sell": {
+              "target_qty_tel": 713076.0000000001,
+              "filled_qty_tel": 713076.0000000001,
+              "remaining_qty_tel": 0.0,
+              "proceeds_usdt": 991.0061680000002,
+              "complete": true,
+              "avg_price": 0.0013897623366934241,
+              "worst_price": 0.001386,
+              "levels_used": 9,
+              "best_price": 0.001396,
+              "slippage_vs_best_bid_pct": 0.446824019095704,
+              "fees": "EXCLUDED_NOT_VERIFIED"
+            },
+            "round_trip": {
+              "cost_usdt": 8.99383199999977,
+              "cost_pct": 0.899383199999977,
+              "return_pct": -0.899383199999977,
+              "fees_verified": false,
+              "fees_pct_per_side": null,
+              "fees_usdt": null,
+              "net_cost_usdt": null,
+              "net_cost_pct": null,
+              "net_return_pct": null
+            },
+            "depth_sufficient": true,
+            "insufficient_depth": false,
+            "execution_status": "COMPLET",
+            "reason": null,
+            "fees": {
+              "verified": false,
+              "pct_per_side": null,
+              "provided_pct": null,
+              "value": null,
+              "note": "frais non vérifiés; coût réel >= estimation hors frais",
+              "provenance": null,
+              "provenance_status": "NOT_DECLARED"
+            }
+          }
+        ],
+        "fees": {
+          "verified": false,
+          "pct_per_side": null,
+          "provided_pct": null,
+          "value": null,
+          "note": "frais non vérifiés; coût réel >= estimation hors frais",
+          "provenance": null,
+          "provenance_status": "NOT_DECLARED"
+        },
+        "limits": [
+          "Estimation statique sur les niveaux publics observés; aucun ordre réel n'est envoyé.",
+          "Aucune extrapolation au-delà de la profondeur observée; un montant trop grand est signalé.",
+          "Frais exclus sauf s'ils sont couverts par une provenance HMAC vérifiée; le coût réel est supérieur ou égal.",
+          "Le carnet peut changer entre la collecte et l'exécution; latence et rejets non modélisés.",
+          "Spread initial et slippages sont mesurés séparément; le total est recalculé sur les flux réels.",
+          "La fraîcheur est évaluée à l'heure de calcul; la publication peut être plus tardive."
+        ],
+        "all_scenarios_deep_enough": true,
+        "percentiles": {
+          "status": "UNAVAILABLE",
+          "reason": "historique non fourni ou insuffisant; aucun percentile calculé"
+        },
+        "publication_stale": false,
+        "usable_at_publication": true
+      },
       "trades": [
+        {
+          "time_ms": 1792978673887,
+          "price": 0.001398,
+          "qty": 7153.0,
+          "quote_qty": null,
+          "side": "buy",
+          "id": "10388145263095808"
+        },
+        {
+          "time_ms": 1792978673887,
+          "price": 0.001398,
+          "qty": 7160.0,
+          "quote_qty": null,
+          "side": "buy",
+          "id": "10388145263095809"
+        },
+        {
+          "time_ms": 1792978673887,
+          "price": 0.001398,
+          "qty": 5687.0,
+          "quote_qty": null,
+          "side": "buy",
+          "id": "10388145263095810"
+        },
         {
           "time_ms": 1792977608957,
           "price": 0.001396,
@@ -13297,30 +14110,6 @@
           "quote_qty": null,
           "side": "sell",
           "id": "10387538691371008"
-        },
-        {
-          "time_ms": 1792972383467,
-          "price": 0.0014,
-          "qty": 7143.0,
-          "quote_qty": null,
-          "side": "sell",
-          "id": "10387538688487424"
-        },
-        {
-          "time_ms": 1792972383467,
-          "price": 0.0014,
-          "qty": 2460.0,
-          "quote_qty": null,
-          "side": "sell",
-          "id": "10387538688487425"
-        },
-        {
-          "time_ms": 1792972383467,
-          "price": 0.0014,
-          "qty": 7630.0,
-          "quote_qty": null,
-          "side": "sell",
-          "id": "10387538688618496"
         }
       ],
       "candles": {
@@ -13333,16 +14122,8 @@
           "zero_volume_count": 41,
           "contiguous_tail_count": 499,
           "week_anchor_utc": null,
-          "last_closed_at": "2026-10-26T01:15:00.000Z",
+          "last_closed_at": "2026-10-26T01:30:00.000Z",
           "rows": [
-            {
-              "open_time": "2026-10-22T22:15:00.000Z",
-              "open": 0.001423,
-              "high": 0.001452,
-              "low": 0.001421,
-              "close": 0.001452,
-              "volume": 4767346.0
-            },
             {
               "open_time": "2026-10-22T22:30:00.000Z",
               "open": 0.00145,
@@ -15734,6 +16515,14 @@
               "low": 0.001394,
               "close": 0.001398,
               "volume": 725028.0
+            },
+            {
+              "open_time": "2026-10-26T01:15:00.000Z",
+              "open": 0.001399,
+              "high": 0.0014,
+              "low": 0.001394,
+              "close": 0.001394,
+              "volume": 1503896.0
             }
           ],
           "sufficient_for": {
@@ -26175,37 +26964,52 @@
       },
       "observations": [
         {
-          "observed_at": "2026-10-26T01:25:07.527Z",
-          "server_time": "2026-10-26T01:25:07.549Z",
-          "clock_skew_ms": 22,
-          "book_sequence": "6213299960",
-          "book_source_time": "2026-10-26T01:25:07.124Z",
-          "book_age_ms": 425,
-          "book_hash": "f0465b0827aaeb3a",
-          "newest_trade_ms": 1792977608957,
-          "newest_trade_age_ms": 298592
+          "observed_at": "2026-10-26T01:38:46.074Z",
+          "observed_at_ms": 1792978726074,
+          "server_time": "2026-10-26T01:38:46.090Z",
+          "clock_skew_ms": 16,
+          "book_sequence": "6213306482",
+          "book_source_time": "2026-10-26T01:38:45.698Z",
+          "book_source_time_ms": 1792978725698,
+          "book_age_ms": 392,
+          "book_hash": "92489a6fb24a5265",
+          "best_bid": 0.001396,
+          "best_ask": 0.001399,
+          "spread_pct_mid": 0.21466905187835164,
+          "newest_trade_ms": 1792978673887,
+          "newest_trade_age_ms": 52203
         },
         {
-          "observed_at": "2026-10-26T01:25:11.345Z",
-          "server_time": "2026-10-26T01:25:11.368Z",
-          "clock_skew_ms": 23,
-          "book_sequence": "6213300009",
-          "book_source_time": "2026-10-26T01:25:10.958Z",
-          "book_age_ms": 410,
-          "book_hash": "3ea9a5377da35186",
-          "newest_trade_ms": 1792977608957,
-          "newest_trade_age_ms": 302411
+          "observed_at": "2026-10-26T01:38:49.896Z",
+          "observed_at_ms": 1792978729896,
+          "server_time": "2026-10-26T01:38:49.920Z",
+          "clock_skew_ms": 24,
+          "book_sequence": "6213306486",
+          "book_source_time": "2026-10-26T01:38:49.504Z",
+          "book_source_time_ms": 1792978729504,
+          "book_age_ms": 416,
+          "book_hash": "412ab7c0598e1723",
+          "best_bid": 0.001396,
+          "best_ask": 0.001399,
+          "spread_pct_mid": 0.21466905187835164,
+          "newest_trade_ms": 1792978673887,
+          "newest_trade_age_ms": 56033
         },
         {
-          "observed_at": "2026-10-26T01:25:15.135Z",
-          "server_time": "2026-10-26T01:25:15.153Z",
-          "clock_skew_ms": 18,
-          "book_sequence": "6213300082",
-          "book_source_time": "2026-10-26T01:25:14.724Z",
-          "book_age_ms": 429,
-          "book_hash": "2768304c1502b214",
-          "newest_trade_ms": 1792977608957,
-          "newest_trade_age_ms": 306196
+          "observed_at": "2026-10-26T01:38:53.702Z",
+          "observed_at_ms": 1792978733702,
+          "server_time": "2026-10-26T01:38:53.711Z",
+          "clock_skew_ms": 9,
+          "book_sequence": "6213306500",
+          "book_source_time": "2026-10-26T01:38:53.304Z",
+          "book_source_time_ms": 1792978733304,
+          "book_age_ms": 407,
+          "book_hash": "6560fa6f7e9c5239",
+          "best_bid": 0.001396,
+          "best_ask": 0.001399,
+          "spread_pct_mid": 0.21466905187835164,
+          "newest_trade_ms": 1792978673887,
+          "newest_trade_age_ms": 59824
         }
       ],
       "best_ask_source": "kucoin"
@@ -26213,8 +27017,18 @@
   },
   "cross_check": {
     "mid_mexc": 0.0014015,
-    "mid_kucoin": 0.0013965,
-    "divergence_bps": 35.80379520229154,
+    "mid_kucoin": 0.0013975,
+    "divergence_bps": 28.622540250446367,
+    "divergence_basis": "mid",
+    "divergence_mid_pct": 0.28622540250446366,
+    "last_mexc": 0.001401,
+    "last_kucoin": 0.001398,
+    "last_price_divergence_pct": 0.21436227224008322,
+    "definitions": {
+      "divergence_bps": "écart signé entre les mid(s) (MEXC - KuCoin), en points de base",
+      "divergence_mid_pct": "écart signé entre les mid(s), en pourcentage",
+      "last_price_divergence_pct": "écart absolu entre les derniers prix observés, en pourcentage"
+    },
     "identical_top_bids_alert": false,
     "venue_data_diagnostic": {
       "status": "NON_SIGNALÉ",
@@ -26238,17 +27052,17 @@
       "params": {
         "symbol": "TELUSDT"
       },
-      "t_request_utc": "2026-10-26T01:24:55.694Z",
-      "t_request_paris": "2026-10-26T02:24:55+01:00",
+      "t_request_utc": "2026-10-26T01:38:34.373Z",
+      "t_request_paris": "2026-10-26T02:38:34+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 422,
-      "t_response_utc": "2026-10-26T01:24:56.116Z",
+      "latency_ms": 472,
+      "t_response_utc": "2026-10-26T01:38:34.845Z",
       "bytes": 107,
-      "body_sha256_16": "a6422e9b7022d373",
+      "body_sha256_16": "8ac3f953b5f82e2f",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:24:56 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:34 GMT",
         "X-Cache": "Miss from child, Miss from parent"
       }
     },
@@ -26259,17 +27073,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:24:56.117Z",
-      "t_request_paris": "2026-10-26T02:24:56+01:00",
+      "t_request_utc": "2026-10-26T01:38:34.845Z",
+      "t_request_paris": "2026-10-26T02:38:34+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 206,
-      "t_response_utc": "2026-10-26T01:24:56.323Z",
-      "bytes": 4842,
-      "body_sha256_16": "045fbcdad6412732",
+      "latency_ms": 227,
+      "t_response_utc": "2026-10-26T01:38:35.072Z",
+      "bytes": 4815,
+      "body_sha256_16": "98e00e0af7cfaab0",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:24:56 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:35 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26280,17 +27094,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:24:56.323Z",
-      "t_request_paris": "2026-10-26T02:24:56+01:00",
+      "t_request_utc": "2026-10-26T01:38:35.072Z",
+      "t_request_paris": "2026-10-26T02:38:35+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 270,
-      "t_response_utc": "2026-10-26T01:24:56.593Z",
-      "bytes": 16405,
-      "body_sha256_16": "491406d8d3d13078",
+      "latency_ms": 229,
+      "t_response_utc": "2026-10-26T01:38:35.301Z",
+      "bytes": 16423,
+      "body_sha256_16": "3b3f32bd2c397d5d",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:24:56 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:35 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26298,17 +27112,17 @@
       "source": "mexc",
       "endpoint": "/api/v3/time",
       "params": {},
-      "t_request_utc": "2026-10-26T01:24:56.593Z",
-      "t_request_paris": "2026-10-26T02:24:56+01:00",
+      "t_request_utc": "2026-10-26T01:38:35.301Z",
+      "t_request_paris": "2026-10-26T02:38:35+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 201,
-      "t_response_utc": "2026-10-26T01:24:56.794Z",
+      "latency_ms": 219,
+      "t_response_utc": "2026-10-26T01:38:35.520Z",
       "bytes": 28,
-      "body_sha256_16": "56f758325d7c92a8",
+      "body_sha256_16": "0f88e254d7f4b194",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:24:56 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:35 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26318,17 +27132,17 @@
       "params": {
         "symbol": "TELUSDT"
       },
-      "t_request_utc": "2026-10-26T01:24:59.794Z",
-      "t_request_paris": "2026-10-26T02:24:59+01:00",
+      "t_request_utc": "2026-10-26T01:38:38.521Z",
+      "t_request_paris": "2026-10-26T02:38:38+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 405,
-      "t_response_utc": "2026-10-26T01:25:00.199Z",
+      "latency_ms": 446,
+      "t_response_utc": "2026-10-26T01:38:38.967Z",
       "bytes": 107,
-      "body_sha256_16": "a6422e9b7022d373",
+      "body_sha256_16": "8ac3f953b5f82e2f",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:00 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:38 GMT",
         "X-Cache": "Miss from child, Miss from parent"
       }
     },
@@ -26339,17 +27153,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:25:00.199Z",
-      "t_request_paris": "2026-10-26T02:25:00+01:00",
+      "t_request_utc": "2026-10-26T01:38:38.967Z",
+      "t_request_paris": "2026-10-26T02:38:38+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 262,
-      "t_response_utc": "2026-10-26T01:25:00.461Z",
-      "bytes": 4868,
-      "body_sha256_16": "3e44aaf22733273e",
+      "latency_ms": 347,
+      "t_response_utc": "2026-10-26T01:38:39.314Z",
+      "bytes": 4864,
+      "body_sha256_16": "687985961a6081ae",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:00 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:39 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26360,17 +27174,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:25:00.461Z",
-      "t_request_paris": "2026-10-26T02:25:00+01:00",
+      "t_request_utc": "2026-10-26T01:38:39.314Z",
+      "t_request_paris": "2026-10-26T02:38:39+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 235,
-      "t_response_utc": "2026-10-26T01:25:00.696Z",
-      "bytes": 16405,
-      "body_sha256_16": "491406d8d3d13078",
+      "latency_ms": 268,
+      "t_response_utc": "2026-10-26T01:38:39.582Z",
+      "bytes": 16423,
+      "body_sha256_16": "3b3f32bd2c397d5d",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:00 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:39 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26378,17 +27192,17 @@
       "source": "mexc",
       "endpoint": "/api/v3/time",
       "params": {},
-      "t_request_utc": "2026-10-26T01:25:00.697Z",
-      "t_request_paris": "2026-10-26T02:25:00+01:00",
+      "t_request_utc": "2026-10-26T01:38:39.582Z",
+      "t_request_paris": "2026-10-26T02:38:39+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 190,
-      "t_response_utc": "2026-10-26T01:25:00.887Z",
+      "latency_ms": 180,
+      "t_response_utc": "2026-10-26T01:38:39.762Z",
       "bytes": 28,
-      "body_sha256_16": "9a0694a11aadf7a1",
+      "body_sha256_16": "ab0b3a506b581206",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:00 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:39 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26398,17 +27212,17 @@
       "params": {
         "symbol": "TELUSDT"
       },
-      "t_request_utc": "2026-10-26T01:25:03.887Z",
-      "t_request_paris": "2026-10-26T02:25:03+01:00",
+      "t_request_utc": "2026-10-26T01:38:42.763Z",
+      "t_request_paris": "2026-10-26T02:38:42+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 431,
-      "t_response_utc": "2026-10-26T01:25:04.318Z",
-      "bytes": 107,
-      "body_sha256_16": "a6422e9b7022d373",
+      "latency_ms": 469,
+      "t_response_utc": "2026-10-26T01:38:43.232Z",
+      "bytes": 105,
+      "body_sha256_16": "94f99514227b7833",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:04 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:43 GMT",
         "X-Cache": "Miss from child, Miss from parent"
       }
     },
@@ -26419,17 +27233,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:25:04.318Z",
-      "t_request_paris": "2026-10-26T02:25:04+01:00",
+      "t_request_utc": "2026-10-26T01:38:43.232Z",
+      "t_request_paris": "2026-10-26T02:38:43+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 218,
-      "t_response_utc": "2026-10-26T01:25:04.536Z",
-      "bytes": 4867,
-      "body_sha256_16": "382772aa012b59b7",
+      "latency_ms": 223,
+      "t_response_utc": "2026-10-26T01:38:43.455Z",
+      "bytes": 4857,
+      "body_sha256_16": "a3a1efd7b5e65b6f",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:04 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:43 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26440,17 +27254,17 @@
         "symbol": "TELUSDT",
         "limit": 100
       },
-      "t_request_utc": "2026-10-26T01:25:04.536Z",
-      "t_request_paris": "2026-10-26T02:25:04+01:00",
+      "t_request_utc": "2026-10-26T01:38:43.455Z",
+      "t_request_paris": "2026-10-26T02:38:43+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 217,
-      "t_response_utc": "2026-10-26T01:25:04.753Z",
-      "bytes": 16405,
-      "body_sha256_16": "491406d8d3d13078",
+      "latency_ms": 263,
+      "t_response_utc": "2026-10-26T01:38:43.718Z",
+      "bytes": 16423,
+      "body_sha256_16": "3b3f32bd2c397d5d",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:04 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:43 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26458,17 +27272,17 @@
       "source": "mexc",
       "endpoint": "/api/v3/time",
       "params": {},
-      "t_request_utc": "2026-10-26T01:25:04.753Z",
-      "t_request_paris": "2026-10-26T02:25:04+01:00",
+      "t_request_utc": "2026-10-26T01:38:43.719Z",
+      "t_request_paris": "2026-10-26T02:38:43+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 552,
-      "t_response_utc": "2026-10-26T01:25:05.305Z",
+      "latency_ms": 230,
+      "t_response_utc": "2026-10-26T01:38:43.949Z",
       "bytes": 28,
-      "body_sha256_16": "a0c74638ceac512b",
+      "body_sha256_16": "ebeb128e8b1ef229",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:05 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:43 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26480,17 +27294,17 @@
         "interval": "15m",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:05.305Z",
-      "t_request_paris": "2026-10-26T02:25:05+01:00",
+      "t_request_utc": "2026-10-26T01:38:43.950Z",
+      "t_request_paris": "2026-10-26T02:38:43+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 244,
-      "t_response_utc": "2026-10-26T01:25:05.549Z",
-      "bytes": 49405,
-      "body_sha256_16": "5686cdcd4b236282",
+      "latency_ms": 231,
+      "t_response_utc": "2026-10-26T01:38:44.181Z",
+      "bytes": 49404,
+      "body_sha256_16": "d71e836658effc49",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:05 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:44 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26502,17 +27316,17 @@
         "interval": "60m",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:05.551Z",
-      "t_request_paris": "2026-10-26T02:25:05+01:00",
+      "t_request_utc": "2026-10-26T01:38:44.184Z",
+      "t_request_paris": "2026-10-26T02:38:44+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 283,
-      "t_response_utc": "2026-10-26T01:25:05.834Z",
-      "bytes": 50151,
-      "body_sha256_16": "5590357e8f314d78",
+      "latency_ms": 254,
+      "t_response_utc": "2026-10-26T01:38:44.438Z",
+      "bytes": 50152,
+      "body_sha256_16": "b8d820efd9d66f3c",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:05 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:44 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26524,17 +27338,17 @@
         "interval": "4h",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:05.837Z",
-      "t_request_paris": "2026-10-26T02:25:05+01:00",
+      "t_request_utc": "2026-10-26T01:38:44.441Z",
+      "t_request_paris": "2026-10-26T02:38:44+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 220,
-      "t_response_utc": "2026-10-26T01:25:06.057Z",
-      "bytes": 50870,
-      "body_sha256_16": "7eab526b5b373c66",
+      "latency_ms": 217,
+      "t_response_utc": "2026-10-26T01:38:44.658Z",
+      "bytes": 50871,
+      "body_sha256_16": "3c8a70c4b285f49b",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:06 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:44 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26546,17 +27360,17 @@
         "interval": "1d",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:06.060Z",
-      "t_request_paris": "2026-10-26T02:25:06+01:00",
+      "t_request_utc": "2026-10-26T01:38:44.661Z",
+      "t_request_paris": "2026-10-26T02:38:44+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 206,
-      "t_response_utc": "2026-10-26T01:25:06.266Z",
-      "bytes": 51414,
-      "body_sha256_16": "353e60968ad16f86",
+      "latency_ms": 238,
+      "t_response_utc": "2026-10-26T01:38:44.899Z",
+      "bytes": 51415,
+      "body_sha256_16": "fda1dcc0d99a60a7",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:06 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:44 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26568,17 +27382,17 @@
         "interval": "1W",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:06.268Z",
-      "t_request_paris": "2026-10-26T02:25:06+01:00",
+      "t_request_utc": "2026-10-26T01:38:44.902Z",
+      "t_request_paris": "2026-10-26T02:38:44+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 256,
-      "t_response_utc": "2026-10-26T01:25:06.524Z",
-      "bytes": 10614,
-      "body_sha256_16": "b24c26b8d0183c4a",
+      "latency_ms": 234,
+      "t_response_utc": "2026-10-26T01:38:45.136Z",
+      "bytes": 10615,
+      "body_sha256_16": "48f4d31a23e6b8f8",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:06 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:45 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26590,17 +27404,17 @@
         "interval": "1M",
         "limit": 500
       },
-      "t_request_utc": "2026-10-26T01:25:06.525Z",
-      "t_request_paris": "2026-10-26T02:25:06+01:00",
+      "t_request_utc": "2026-10-26T01:38:45.137Z",
+      "t_request_paris": "2026-10-26T02:38:45+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 244,
-      "t_response_utc": "2026-10-26T01:25:06.769Z",
+      "latency_ms": 226,
+      "t_response_utc": "2026-10-26T01:38:45.363Z",
       "bytes": 2524,
-      "body_sha256_16": "01ccc65cb3cea00d",
+      "body_sha256_16": "3213787c094df857",
       "cache_headers": {
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Mon, 26 Oct 2026 01:25:06 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:45 GMT",
         "X-Cache": "NotCacheable from child"
       }
     },
@@ -26610,16 +27424,16 @@
       "params": {
         "symbol": "TEL-USDT"
       },
-      "t_request_utc": "2026-10-26T01:25:06.770Z",
-      "t_request_paris": "2026-10-26T02:25:06+01:00",
+      "t_request_utc": "2026-10-26T01:38:45.364Z",
+      "t_request_paris": "2026-10-26T02:38:45+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 233,
-      "t_response_utc": "2026-10-26T01:25:07.003Z",
-      "bytes": 192,
-      "body_sha256_16": "e13036cf20aaa9c2",
+      "latency_ms": 214,
+      "t_response_utc": "2026-10-26T01:38:45.578Z",
+      "bytes": 190,
+      "body_sha256_16": "b0abc6e7319271f1",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:06 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:45 GMT",
         "cf-cache-status": "DYNAMIC"
       }
     },
@@ -26629,53 +27443,128 @@
       "params": {
         "symbol": "TEL-USDT"
       },
-      "t_request_utc": "2026-10-26T01:25:07.004Z",
-      "t_request_paris": "2026-10-26T02:25:07+01:00",
+      "t_request_utc": "2026-10-26T01:38:45.578Z",
+      "t_request_paris": "2026-10-26T02:38:45+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 197,
+      "t_response_utc": "2026-10-26T01:38:45.775Z",
+      "bytes": 4291,
+      "body_sha256_16": "3ef0a3f05cd36659",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:45 GMT",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/market/histories",
+      "params": {
+        "symbol": "TEL-USDT"
+      },
+      "t_request_utc": "2026-10-26T01:38:45.775Z",
+      "t_request_paris": "2026-10-26T02:38:45+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 202,
+      "t_response_utc": "2026-10-26T01:38:45.977Z",
+      "bytes": 13728,
+      "body_sha256_16": "83e1cc10aa6fbd54",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:45 GMT",
+        "Cache-Control": "public,max-age=0",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/timestamp",
+      "params": {},
+      "t_request_utc": "2026-10-26T01:38:45.977Z",
+      "t_request_paris": "2026-10-26T02:38:45+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 195,
+      "t_response_utc": "2026-10-26T01:38:46.172Z",
+      "bytes": 38,
+      "body_sha256_16": "4397ec33550354f9",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:46 GMT",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/market/orderbook/level1",
+      "params": {
+        "symbol": "TEL-USDT"
+      },
+      "t_request_utc": "2026-10-26T01:38:49.173Z",
+      "t_request_paris": "2026-10-26T02:38:49+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 212,
+      "t_response_utc": "2026-10-26T01:38:49.385Z",
+      "bytes": 190,
+      "body_sha256_16": "b0abc6e7319271f1",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:49 GMT",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/market/orderbook/level2_100",
+      "params": {
+        "symbol": "TEL-USDT"
+      },
+      "t_request_utc": "2026-10-26T01:38:49.385Z",
+      "t_request_paris": "2026-10-26T02:38:49+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 205,
+      "t_response_utc": "2026-10-26T01:38:49.590Z",
+      "bytes": 4289,
+      "body_sha256_16": "0590547d039f1714",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:49 GMT",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/market/histories",
+      "params": {
+        "symbol": "TEL-USDT"
+      },
+      "t_request_utc": "2026-10-26T01:38:49.591Z",
+      "t_request_paris": "2026-10-26T02:38:49+01:00",
+      "http_status": 200,
+      "error": null,
+      "latency_ms": 206,
+      "t_response_utc": "2026-10-26T01:38:49.797Z",
+      "bytes": 13728,
+      "body_sha256_16": "83e1cc10aa6fbd54",
+      "cache_headers": {
+        "Date": "Mon, 26 Oct 2026 01:38:49 GMT",
+        "Cache-Control": "public,max-age=0",
+        "cf-cache-status": "DYNAMIC"
+      }
+    },
+    {
+      "source": "kucoin",
+      "endpoint": "/api/v1/timestamp",
+      "params": {},
+      "t_request_utc": "2026-10-26T01:38:49.797Z",
+      "t_request_paris": "2026-10-26T02:38:49+01:00",
       "http_status": 200,
       "error": null,
       "latency_ms": 198,
-      "t_response_utc": "2026-10-26T01:25:07.202Z",
-      "bytes": 4284,
-      "body_sha256_16": "296e61076ea00349",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:07 GMT",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/market/histories",
-      "params": {
-        "symbol": "TEL-USDT"
-      },
-      "t_request_utc": "2026-10-26T01:25:07.202Z",
-      "t_request_paris": "2026-10-26T02:25:07+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 227,
-      "t_response_utc": "2026-10-26T01:25:07.429Z",
-      "bytes": 13725,
-      "body_sha256_16": "96118081a164674e",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:07 GMT",
-        "Cache-Control": "public,max-age=0",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/timestamp",
-      "params": {},
-      "t_request_utc": "2026-10-26T01:25:07.429Z",
-      "t_request_paris": "2026-10-26T02:25:07+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 196,
-      "t_response_utc": "2026-10-26T01:25:07.625Z",
+      "t_response_utc": "2026-10-26T01:38:49.995Z",
       "bytes": 38,
-      "body_sha256_16": "d0f0c3210c37c441",
+      "body_sha256_16": "4931276dfd56355f",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:07 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:49 GMT",
         "cf-cache-status": "DYNAMIC"
       }
     },
@@ -26685,16 +27574,16 @@
       "params": {
         "symbol": "TEL-USDT"
       },
-      "t_request_utc": "2026-10-26T01:25:10.625Z",
-      "t_request_paris": "2026-10-26T02:25:10+01:00",
+      "t_request_utc": "2026-10-26T01:38:52.996Z",
+      "t_request_paris": "2026-10-26T02:38:52+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 218,
-      "t_response_utc": "2026-10-26T01:25:10.843Z",
-      "bytes": 192,
-      "body_sha256_16": "e13036cf20aaa9c2",
+      "latency_ms": 202,
+      "t_response_utc": "2026-10-26T01:38:53.198Z",
+      "bytes": 190,
+      "body_sha256_16": "b0abc6e7319271f1",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:10 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:53 GMT",
         "cf-cache-status": "DYNAMIC"
       }
     },
@@ -26704,16 +27593,16 @@
       "params": {
         "symbol": "TEL-USDT"
       },
-      "t_request_utc": "2026-10-26T01:25:10.843Z",
-      "t_request_paris": "2026-10-26T02:25:10+01:00",
+      "t_request_utc": "2026-10-26T01:38:53.198Z",
+      "t_request_paris": "2026-10-26T02:38:53+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 193,
-      "t_response_utc": "2026-10-26T01:25:11.036Z",
-      "bytes": 4286,
-      "body_sha256_16": "e709cf643b18a807",
+      "latency_ms": 182,
+      "t_response_utc": "2026-10-26T01:38:53.380Z",
+      "bytes": 4290,
+      "body_sha256_16": "0248869f679c05db",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:11 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:53 GMT",
         "cf-cache-status": "DYNAMIC"
       }
     },
@@ -26723,16 +27612,16 @@
       "params": {
         "symbol": "TEL-USDT"
       },
-      "t_request_utc": "2026-10-26T01:25:11.036Z",
-      "t_request_paris": "2026-10-26T02:25:11+01:00",
+      "t_request_utc": "2026-10-26T01:38:53.380Z",
+      "t_request_paris": "2026-10-26T02:38:53+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 211,
-      "t_response_utc": "2026-10-26T01:25:11.247Z",
-      "bytes": 13725,
-      "body_sha256_16": "96118081a164674e",
+      "latency_ms": 224,
+      "t_response_utc": "2026-10-26T01:38:53.604Z",
+      "bytes": 13728,
+      "body_sha256_16": "83e1cc10aa6fbd54",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:11 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:53 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26741,91 +27630,16 @@
       "source": "kucoin",
       "endpoint": "/api/v1/timestamp",
       "params": {},
-      "t_request_utc": "2026-10-26T01:25:11.247Z",
-      "t_request_paris": "2026-10-26T02:25:11+01:00",
+      "t_request_utc": "2026-10-26T01:38:53.604Z",
+      "t_request_paris": "2026-10-26T02:38:53+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 196,
-      "t_response_utc": "2026-10-26T01:25:11.443Z",
+      "latency_ms": 197,
+      "t_response_utc": "2026-10-26T01:38:53.801Z",
       "bytes": 38,
-      "body_sha256_16": "5d11064b87d157b6",
+      "body_sha256_16": "5443dda784ac6cc4",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:11 GMT",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/market/orderbook/level1",
-      "params": {
-        "symbol": "TEL-USDT"
-      },
-      "t_request_utc": "2026-10-26T01:25:14.444Z",
-      "t_request_paris": "2026-10-26T02:25:14+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 191,
-      "t_response_utc": "2026-10-26T01:25:14.635Z",
-      "bytes": 192,
-      "body_sha256_16": "e13036cf20aaa9c2",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:14 GMT",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/market/orderbook/level2_100",
-      "params": {
-        "symbol": "TEL-USDT"
-      },
-      "t_request_utc": "2026-10-26T01:25:14.635Z",
-      "t_request_paris": "2026-10-26T02:25:14+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 192,
-      "t_response_utc": "2026-10-26T01:25:14.827Z",
-      "bytes": 4283,
-      "body_sha256_16": "cdb953f2944b3aad",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:14 GMT",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/market/histories",
-      "params": {
-        "symbol": "TEL-USDT"
-      },
-      "t_request_utc": "2026-10-26T01:25:14.827Z",
-      "t_request_paris": "2026-10-26T02:25:14+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 216,
-      "t_response_utc": "2026-10-26T01:25:15.043Z",
-      "bytes": 13725,
-      "body_sha256_16": "96118081a164674e",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:15 GMT",
-        "Cache-Control": "public,max-age=0",
-        "cf-cache-status": "DYNAMIC"
-      }
-    },
-    {
-      "source": "kucoin",
-      "endpoint": "/api/v1/timestamp",
-      "params": {},
-      "t_request_utc": "2026-10-26T01:25:15.043Z",
-      "t_request_paris": "2026-10-26T02:25:15+01:00",
-      "http_status": 200,
-      "error": null,
-      "latency_ms": 184,
-      "t_response_utc": "2026-10-26T01:25:15.227Z",
-      "bytes": 38,
-      "body_sha256_16": "b9ab17d6eb38a501",
-      "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:15 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:53 GMT",
         "cf-cache-status": "DYNAMIC"
       }
     },
@@ -26835,19 +27649,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "15min",
-        "startAt": 1792527915,
-        "endAt": 1792977915
+        "startAt": 1792528733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:15.228Z",
-      "t_request_paris": "2026-10-26T02:25:15+01:00",
+      "t_request_utc": "2026-10-26T01:38:53.801Z",
+      "t_request_paris": "2026-10-26T02:38:53+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 222,
-      "t_response_utc": "2026-10-26T01:25:15.450Z",
-      "bytes": 39861,
-      "body_sha256_16": "48084fa175ee0723",
+      "latency_ms": 207,
+      "t_response_utc": "2026-10-26T01:38:54.008Z",
+      "bytes": 39853,
+      "body_sha256_16": "e0bd7271c9d62808",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:15 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:54 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26858,19 +27672,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "1hour",
-        "startAt": 1791177915,
-        "endAt": 1792977915
+        "startAt": 1791178733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:15.452Z",
-      "t_request_paris": "2026-10-26T02:25:15+01:00",
+      "t_request_utc": "2026-10-26T01:38:54.011Z",
+      "t_request_paris": "2026-10-26T02:38:54+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 225,
-      "t_response_utc": "2026-10-26T01:25:15.677Z",
+      "latency_ms": 204,
+      "t_response_utc": "2026-10-26T01:38:54.215Z",
       "bytes": 41188,
-      "body_sha256_16": "7f7d0f443c619a58",
+      "body_sha256_16": "123b1ff533e5cfb2",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:15 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:54 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26881,19 +27695,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "4hour",
-        "startAt": 1785777915,
-        "endAt": 1792977915
+        "startAt": 1785778733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:15.680Z",
-      "t_request_paris": "2026-10-26T02:25:15+01:00",
+      "t_request_utc": "2026-10-26T01:38:54.218Z",
+      "t_request_paris": "2026-10-26T02:38:54+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 212,
-      "t_response_utc": "2026-10-26T01:25:15.892Z",
+      "latency_ms": 206,
+      "t_response_utc": "2026-10-26T01:38:54.424Z",
       "bytes": 41912,
-      "body_sha256_16": "d245b320e034f100",
+      "body_sha256_16": "e47f0ffa124eb59d",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:15 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:54 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26904,19 +27718,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "1day",
-        "startAt": 1749777915,
-        "endAt": 1792977915
+        "startAt": 1749778733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:15.895Z",
-      "t_request_paris": "2026-10-26T02:25:15+01:00",
+      "t_request_utc": "2026-10-26T01:38:54.427Z",
+      "t_request_paris": "2026-10-26T02:38:54+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 222,
-      "t_response_utc": "2026-10-26T01:25:16.117Z",
+      "latency_ms": 217,
+      "t_response_utc": "2026-10-26T01:38:54.644Z",
       "bytes": 42635,
-      "body_sha256_16": "e324e3f93c629669",
+      "body_sha256_16": "4ff05a1cde48ebe0",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:16 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:54 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26927,19 +27741,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "1week",
-        "startAt": 1490577915,
-        "endAt": 1792977915
+        "startAt": 1490578733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:16.119Z",
-      "t_request_paris": "2026-10-26T02:25:16+01:00",
+      "t_request_utc": "2026-10-26T01:38:54.647Z",
+      "t_request_paris": "2026-10-26T02:38:54+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 210,
-      "t_response_utc": "2026-10-26T01:25:16.329Z",
+      "latency_ms": 204,
+      "t_response_utc": "2026-10-26T01:38:54.851Z",
       "bytes": 40546,
-      "body_sha256_16": "4045f0549b4362f1",
+      "body_sha256_16": "a5e2b012b3b1eaef",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:16 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:54 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26950,19 +27764,19 @@
       "params": {
         "symbol": "TEL-USDT",
         "type": "1month",
-        "startAt": 453777915,
-        "endAt": 1792977915
+        "startAt": 453778733,
+        "endAt": 1792978733
       },
-      "t_request_utc": "2026-10-26T01:25:16.331Z",
-      "t_request_paris": "2026-10-26T02:25:16+01:00",
+      "t_request_utc": "2026-10-26T01:38:54.853Z",
+      "t_request_paris": "2026-10-26T02:38:54+01:00",
       "http_status": 200,
       "error": null,
-      "latency_ms": 229,
-      "t_response_utc": "2026-10-26T01:25:16.560Z",
+      "latency_ms": 234,
+      "t_response_utc": "2026-10-26T01:38:55.087Z",
       "bytes": 9362,
-      "body_sha256_16": "6ba5b9cd198a393e",
+      "body_sha256_16": "66a73a57cde39d3d",
       "cache_headers": {
-        "Date": "Mon, 26 Oct 2026 01:25:16 GMT",
+        "Date": "Mon, 26 Oct 2026 01:38:55 GMT",
         "Cache-Control": "public,max-age=0",
         "cf-cache-status": "DYNAMIC"
       }
@@ -26970,9 +27784,10 @@
   ],
   "limits": [
     "Les statuts PARTIEL/NON VÉRIFIÉ sont conservés tels quels.",
-    "Les frais sont inconnus et exclus.",
+    "Les frais sont inconnus et exclus sauf provenance HMAC vérifiée.",
     "Les transactions récentes ne prouvent pas à elles seules la fraîcheur absolue du carnet.",
+    "Les scénarios de coût aller-retour sont statiques, hors frais non vérifiés, et ne sont pas des ordres.",
     "Un succès de collecte n'est pas un signal d'achat."
   ],
-  "snapshot_id": "5a17c4951635c4e7e0544978369e92ed673a328e58213fcb3d14820260c50bce"
+  "snapshot_id": "4b33b7fde6c91d73baa956d0568f860b7ef73d68272bd9e68dc6da3b482108d2"
 }
