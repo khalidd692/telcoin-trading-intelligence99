@@ -17,16 +17,21 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.backtest import engine, evaluation, history_store as store  # noqa: E402
 from scripts.backtest.harness import Bundle, call_detector, detection_state, fast_timeframe_state  # noqa: E402
-from scripts.backtest.protocol import CRITERION, IS_SHARE  # noqa: E402
+from scripts.backtest.protocol import CRITERION  # noqa: E402
 
 VENUE, SYMBOL = "kucoin", store.KUCOIN_SYMBOL
 ALL_TFS = ["15m", "1h", "4h", "1d", "1w", "1M"]
+
+# Date absolue de coupure IS/OOS, identique a run_oos.py (SEGMENT_DATES["OOS"][0]).
+# Une coupure en pourcentage se deplacerait si l'historique est prolonge.
+SPLIT_DATE = "2026-04-16"
 
 
 def pct(value):
@@ -51,7 +56,9 @@ def main() -> int:
     rows = store.load_timeframe(VENUE, SYMBOL, target)
     bundle = Bundle(target, rows)
     times = [store.close_time_ms(r, target) for r in rows]
-    split = times[0] + int((times[-1] - times[0]) * IS_SHARE)
+    # Date absolue de coupure (identique a run_oos.py) : une coupure en pourcentage
+    # se deplacerait si l'historique est prolonge.
+    split = int(datetime.fromisoformat(SPLIT_DATE + "+00:00").timestamp() * 1000)
     is_indices = [i for i, t in enumerate(times) if t <= split]
     if args.segment == "IS1":
         is_indices = is_indices[:len(is_indices) // 2]

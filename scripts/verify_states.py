@@ -66,6 +66,7 @@ def report_for(early: dict, timeframes: dict | None = None) -> dict:
         "status": "SURVEILLER",
         "collection_status": "VALID",
         "snapshot_age_seconds": 0,
+        "source_generated_at": "2026-10-21T11:59:30+00:00",
         "timeframes": timeframes,
         "early_reversal": early,
     }

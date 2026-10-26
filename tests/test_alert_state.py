@@ -39,7 +39,11 @@ REF = _load_reference_helpers()
 
 def make_report(signal_status="ALERTE_PRÉCOCE", direction="HAUSSIER", anchor=0.002,
                 setup=True, usable=True, exploitable=False, confidence=40):
-    """Rapport d'analyse minimal, conforme a la forme publiee."""
+    """Rapport d'analyse minimal, conforme a la forme publiee.
+
+    Toutes les unites de temps requises, la fraicheur et l'horodatage de source
+    sont presents : ce sont les conditions reelles d'un rapport exploitable.
+    """
     early = {
         "signal_status": signal_status,
         "direction": direction,
@@ -50,13 +54,19 @@ def make_report(signal_status="ALERTE_PRÉCOCE", direction="HAUSSIER", anchor=0.
     }
     if setup:
         early["setup"] = {"direction": direction, "anchor": anchor, "age_bars": 3}
+    timeframes = {timeframe: {"status": "OK"}
+                  for timeframe in ("15m", "1h", "4h", "1d", "1w", "1M")}
+    if not usable:
+        timeframes["15m"] = {"status": "PARTIEL"}
     return {
         "schema_version": 1,
         "symbol": "TELUSDT",
         "mode": "READ_ONLY_ANALYSIS",
         "status": "SURVEILLER" if usable else "ATTENDRE",
         "collection_status": "VALID" if usable else "FALLBACK",
-        "timeframes": {"15m": {"status": "OK" if usable else "PARTIEL"}},
+        "snapshot_age_seconds": 30 if usable else 4000,
+        "source_generated_at": "2026-10-21T11:59:30+00:00",
+        "timeframes": timeframes,
         "early_reversal": early,
     }
 
@@ -104,6 +114,48 @@ class TestEventExtraction(unittest.TestCase):
         no_15m["timeframes"] = {"1h": {"status": "OK"}}
         self.assertFalse(alerts.report_is_usable(no_15m))
         self.assertFalse(alerts.report_is_usable(None))
+
+    def test_global_attendre_report_is_not_usable(self):
+        """Un rapport globalement ATTENDRE est degrade, meme avec un signal residuel."""
+        report = make_report(signal_status="CONFIRMATION")
+        report["status"] = "ATTENDRE"
+        self.assertFalse(alerts.report_is_usable(report))
+
+    def test_stale_or_unknown_snapshot_age_is_not_usable(self):
+        report = make_report()
+        report["snapshot_age_seconds"] = alerts.MAX_REPORT_AGE_SECONDS + 1
+        self.assertFalse(alerts.report_is_usable(report))
+        for invalid in (None, "inconnu", float("nan"), -5):
+            report["snapshot_age_seconds"] = invalid
+            self.assertFalse(alerts.report_is_usable(report))
+
+    def test_snapshot_age_at_the_limit_is_usable(self):
+        report = make_report()
+        report["snapshot_age_seconds"] = alerts.MAX_REPORT_AGE_SECONDS
+        self.assertTrue(alerts.report_is_usable(report))
+
+    def test_missing_or_invalid_source_timestamp_is_not_usable(self):
+        report = make_report()
+        report.pop("source_generated_at")
+        self.assertFalse(alerts.report_is_usable(report))
+        report["source_generated_at"] = "pas une date"
+        self.assertFalse(alerts.report_is_usable(report))
+        report["source_generated_at"] = "2026-10-21T11:59:30"
+        self.assertFalse(alerts.report_is_usable(report))
+
+    def test_every_required_timeframe_must_be_validated(self):
+        for timeframe in alerts.REQUIRED_REPORT_TIMEFRAMES:
+            report = make_report()
+            report["timeframes"][timeframe] = {"status": "UNAVAILABLE"}
+            self.assertFalse(alerts.report_is_usable(report))
+
+    def test_monthly_partial_is_accepted_but_missing_monthly_is_not(self):
+        partial = make_report()
+        partial["timeframes"]["1M"] = {"status": "PARTIEL"}
+        self.assertTrue(alerts.report_is_usable(partial))
+        missing = make_report()
+        missing["timeframes"].pop("1M")
+        self.assertFalse(alerts.report_is_usable(missing))
 
     def test_anchor_rounding_absorbs_float_noise(self):
         first = alerts.setup_identity("TELUSDT", "HAUSSIER", 0.0020000000001)
@@ -312,6 +364,11 @@ class TestEngineIntegration(unittest.TestCase):
         return {
             "symbol": "TELUSDT",
             "collection_status": "VALID",
+            # Enveloppe de publication reelle : sans statut global, fraicheur et
+            # horodatage de source, le rapport n'est pas verifiable.
+            "status": "SURVEILLER",
+            "snapshot_age_seconds": 12,
+            "source_generated_at": "2026-10-21T11:59:30+00:00",
             "timeframes": timeframes,
             "early_reversal": early,
         }
@@ -420,6 +477,23 @@ class TestProspectiveLedger(unittest.TestCase):
         self.assertAlmostEqual(row["fees_appliquees"], 0.0057)
         self.assertIn("hypothese", row["fees_note"].lower())
 
+    def test_ledger_carries_the_economic_qualification(self):
+        """Le verdict économique est consigné tel quel, pour être mesuré ensuite."""
+        report = make_report()
+        report["early_reversal"]["economic_validation"] = {
+            "economic_validity": "NON_COUVERT",
+            "reason": "coût supérieur à l'objectif",
+            "coverage_ratio": 0.4,
+            "cost": {"round_trip_pct": 1.36, "method": "order_book",
+                     "fees_status": "NOT_VERIFIED"},
+        }
+        state, decision = alerts.advance(alerts.default_state(), report)
+        row = alerts.ledger_row(report, decision, state)
+        self.assertEqual(row["economic_validity"], "NON_COUVERT")
+        self.assertAlmostEqual(row["cost_round_trip_pct"], 1.36)
+        self.assertEqual(row["cost_method"], "order_book")
+        self.assertEqual(row["coverage_ratio"], 0.4)
+
     def test_ledger_row_handles_a_fallback_report(self):
         report = make_report(usable=False)
         report.pop("early_reversal")
@@ -474,6 +548,40 @@ class TestUnusableDataIsFailClosed(unittest.TestCase):
         state, _ = alerts.advance(state, degraded)
         self.assertEqual(state["open_alert"]["signal_status"], before)
         self.assertEqual(state["counters"]["evaluations"], 2)
+
+    def test_attendre_report_with_a_signal_opens_no_alert(self):
+        """Un rapport globalement ATTENDRE ne doit pas ouvrir d'alerte."""
+        report = make_report(signal_status="CONFIRMATION")
+        report["status"] = "ATTENDRE"
+        state, decision = alerts.advance(alerts.default_state(), report)
+        self.assertEqual(decision["action"], "INDISPONIBLE")
+        self.assertIsNone(state["open_alert"])
+        self.assertEqual(state["counters"]["alerts"], 0)
+
+    def test_stale_report_does_not_resolve_an_open_alert(self):
+        state, _ = alerts.advance(alerts.default_state(), make_report())
+        stale = make_report(signal_status="ATTENDRE", setup=False)
+        stale["snapshot_age_seconds"] = alerts.MAX_REPORT_AGE_SECONDS + 1
+        state, decision = alerts.advance(state, stale)
+        self.assertEqual(decision["action"], "INDISPONIBLE")
+        self.assertIsNotNone(state["open_alert"])
+        self.assertEqual(state["counters"]["resolutions"], 0)
+
+    def test_report_without_source_timestamp_does_not_resolve_an_alert(self):
+        state, _ = alerts.advance(alerts.default_state(), make_report())
+        unverifiable = make_report(signal_status="ATTENDRE", setup=False)
+        unverifiable.pop("source_generated_at")
+        state, decision = alerts.advance(state, unverifiable)
+        self.assertEqual(decision["action"], "INDISPONIBLE")
+        self.assertIsNotNone(state["open_alert"])
+
+    def test_a_valid_report_still_resolves_an_open_alert(self):
+        """Le durcissement ne doit pas empecher une resolution legitime."""
+        state, _ = alerts.advance(alerts.default_state(), make_report())
+        state, decision = alerts.advance(state, make_report(signal_status="ATTENDRE", setup=False))
+        self.assertEqual(decision["action"], "RESOLUTION")
+        self.assertIsNone(state["open_alert"])
+        self.assertEqual(state["counters"]["resolutions"], 1)
 
 
 

@@ -69,6 +69,34 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["status"], "ATTENDRE")
         self.assertEqual(report["checks"][-1]["status"], "FAIL")
 
+    def test_spread_threshold_is_unchanged_and_still_fails_closed(self):
+        self.assertEqual(monitor.MAX_SPREAD_PCT, 0.50)
+        wide = dict(self.ticker, spread_pct=0.7821)
+        with patch.object(monitor, "mexc_ticker", return_value=wide):
+            report = monitor.build_report()
+        self.assertEqual(report["status"], "ATTENDRE")
+        spread_check = next(c for c in report["checks"] if c["name"] == "MEXC spread")
+        self.assertEqual(spread_check["status"], "FAIL")
+        self.assertEqual(spread_check["limit_pct"], 0.50)
+
+    def test_cross_exchange_reports_last_and_mid_with_explicit_check_basis(self):
+        report = monitor.build_report()
+        cross = report["cross_exchange"]
+        self.assertIn("last_price_divergence_pct", cross)
+        self.assertIn("mid_price_divergence_pct", cross)
+        self.assertEqual(cross["check_basis"], "last_price")
+        self.assertIn("derniers prix", cross["definitions"]["last_price_divergence_pct"])
+        self.assertIn("milieux", cross["definitions"]["mid_price_divergence_pct"])
+
+    def test_mid_divergence_is_diagnostic_and_does_not_change_last_price_gate(self):
+        far_mid = {"last": 0.001781, "bid": 0.0015, "ask": 0.0016}
+        with patch.object(monitor, "kucoin_price", return_value=far_mid):
+            report = monitor.build_report()
+        self.assertEqual(report["status"], "SURVEILLER")
+        self.assertEqual(report["checks"][-1]["status"], "PASS")
+        self.assertGreater(report["cross_exchange"]["mid_price_divergence_pct"], 1.0)
+        self.assertLess(report["cross_exchange"]["last_price_divergence_pct"], 1.0)
+
     def test_mexc_schema_error_is_rejected(self):
         with patch.object(monitor, "mexc_ticker", REAL_MEXC_TICKER):
             with patch.object(monitor, "http_json", return_value={"symbol": "OTHER"}):

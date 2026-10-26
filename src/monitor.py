@@ -200,7 +200,21 @@ def build_report(collection_id: str | None = None) -> dict[str, Any]:
             ku = kucoin_price()
             report["sources"]["kucoin_level1"] = {"status": "OK", **ku, "observed_at": utc_now().isoformat()}
             divergence = abs(ticker["last"] - ku["last"]) / ((ticker["last"] + ku["last"]) / 2) * 100
-            report["cross_exchange"] = {"last_price_divergence_pct": round(divergence, 4)}
+            mexc_mid = (ticker["bid"] + ticker["ask"]) / 2
+            kucoin_mid = (ku["bid"] + ku["ask"]) / 2
+            mid_divergence = abs(mexc_mid - kucoin_mid) / ((mexc_mid + kucoin_mid) / 2) * 100
+            # Diagnostic only: the existing safety check below still uses last
+            # prices. The mid measure is displayed with an explicit definition.
+            report["cross_exchange"] = {
+                "last_price_divergence_pct": round(divergence, 4),
+                "mid_price_divergence_pct": round(mid_divergence, 4),
+                "check_basis": "last_price",
+                "limit_pct": 1.0,
+                "definitions": {
+                    "last_price_divergence_pct": "écart absolu entre les derniers prix MEXC et KuCoin, en pourcentage",
+                    "mid_price_divergence_pct": "écart absolu entre les milieux (bid+ask)/2 MEXC et KuCoin, en pourcentage",
+                },
+            }
             report["checks"].append({"name": "Cross-exchange price consistency",
                                      "status": "PASS" if divergence <= 1.0 else "FAIL",
                                      "divergence_pct": round(divergence, 4), "limit_pct": 1.0})

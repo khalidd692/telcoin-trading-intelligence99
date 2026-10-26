@@ -17,6 +17,78 @@ const snapDoc=(generated=now)=>({
   cross_check:{both_books_usable:true,independent_confirmation:"OUI",divergence_bps:20}
 });
 const snapOk=rt.assessSnapshot(snapDoc(),now);
+assert.equal(snapOk.mexc.liquidity,null,"liquidity_cost absent = indisponible, pas d'estimation inventée");
+const weirdExecDoc=snapDoc();
+weirdExecDoc.sources.mexc.buy_cost_300_usdt.fees="VERIFIED";
+const weirdExec=rt.assessSnapshot(weirdExecDoc,now);
+assert.equal(weirdExec.mexc.execution.fees,"UNVERIFIED","un statut de frais arbitraire ne doit jamais etre repris tel quel");
+const liqDoc=snapDoc();
+liqDoc.sources.mexc.liquidity_cost={
+  usable:true,usable_at_publication:true,reason:null,
+  initial_spread:{pct_mid:0.6},
+  book:{age_at_calculation_seconds:0.4,source_time:"2026-10-22T00:00:00.000Z",fresh:true},
+  fees:{verified:false,pct_per_side:null,note:"frais non vérifiés"},
+  scenarios:[
+    {amount_usdt:50,depth_sufficient:true,execution_status:"COMPLET",round_trip:{cost_pct:0.9}},
+    {amount_usdt:1000,depth_sufficient:false,execution_status:"PROFONDEUR_ACHAT_INSUFFISANTE",round_trip:null}
+  ],
+  limits:["estimation statique"]
+};
+const liq=rt.assessSnapshot(liqDoc,now);
+assert.equal(liq.verified,true,"un diagnostic de liquidité ne doit pas changer la validation du snapshot");
+assert.equal(liq.mexc.liquidity.usable,true);
+assert.equal(liq.mexc.liquidity.usableAtPublication,true);
+assert.equal(liq.mexc.liquidity.initialSpreadPct,0.6);
+assert.equal(liq.mexc.liquidity.scenarios.length,2);
+assert.equal(liq.mexc.liquidity.scenarios[0].costPct,0.9);
+assert.equal(liq.mexc.liquidity.scenarios[1].costPct,null);
+assert.equal(liq.mexc.liquidity.scenarios[1].depthSufficient,false);
+assert.equal(liq.mexc.liquidity.fees.verified,false);
+const unsignedFeeDoc=snapDoc();
+unsignedFeeDoc.sources.mexc.liquidity_cost={
+  usable:true,usable_at_publication:true,reason:null,
+  fees:{verified:true,pct_per_side:0.1,note:"frais déclarés vérifiés"},
+  scenarios:[]
+};
+const unsignedFee=rt.assessSnapshot(unsignedFeeDoc,now);
+assert.equal(unsignedFee.mexc.liquidity.fees.verified,false,"un simple fees.verified=true sans signature ne doit jamais être accepté");
+assert.equal(unsignedFee.mexc.liquidity.fees.provenanceStatus,"MISSING_SIGNATURE");
+const signedFeeDoc=snapDoc();
+signedFeeDoc.sources.mexc.liquidity_cost={
+  usable:true,usable_at_publication:true,reason:null,
+  fees:{verified:true,pct_per_side:0.1,provenance:{algorithm:"HMAC-SHA256",signature:"a".repeat(64)}},
+  scenarios:[]
+};
+const signedFee=rt.assessSnapshot(signedFeeDoc,now);
+assert.equal(signedFee.mexc.liquidity.fees.verified,false,"la presence d'une signature HMAC ne prouve rien dans le navigateur");
+assert.equal(signedFee.mexc.liquidity.fees.authenticated,false);
+assert.equal(signedFee.mexc.liquidity.fees.signaturePresent,true);
+assert.equal(signedFee.mexc.liquidity.fees.declaredVerified,true);
+assert.equal(signedFee.mexc.liquidity.fees.provenanceStatus,"SIGNATURE_PRESENT");
+const forgedFeeDoc=snapDoc();
+forgedFeeDoc.sources.mexc.liquidity_cost={
+  usable:true,usable_at_publication:true,reason:null,
+  fees:{verified:true,pct_per_side:0.1,provenance:{algorithm:"HMAC-SHA256",signature:"f".repeat(64),source_url:"https://evil.example/fees"}},
+  scenarios:[]
+};
+const forgedFee=rt.assessSnapshot(forgedFeeDoc,now);
+assert.equal(forgedFee.mexc.liquidity.fees.verified,false,"une signature falsifiee ou des metadonnees modifiees ne doivent jamais etre authentifiees");
+assert.equal(forgedFee.mexc.liquidity.fees.authenticated,false);
+assert.equal(forgedFee.mexc.liquidity.fees.signaturePresent,true);
+const badLiqDoc=snapDoc();
+badLiqDoc.sources.mexc.liquidity_cost={usable:false,reason:"STALE_DATA",scenarios:[]};
+const badLiq=rt.assessSnapshot(badLiqDoc,now);
+assert.equal(badLiq.verified,true,"un coût A/R non utilisable ne doit pas assouplir ni bloquer la validation du snapshot");
+assert.equal(badLiq.mexc.liquidity.usable,false);
+assert.equal(badLiq.mexc.liquidity.reason,"STALE_DATA");
+const stalePubDoc=snapDoc();
+stalePubDoc.sources.mexc.liquidity_cost={
+  usable:true,usable_at_publication:false,publication_warning:"carnet périmé à la publication",scenarios:[]
+};
+const stalePub=rt.assessSnapshot(stalePubDoc,now);
+assert.equal(stalePub.verified,true);
+assert.equal(stalePub.mexc.liquidity.usableAtPublication,false);
+assert.match(stalePub.mexc.liquidity.publicationWarning,/périmé/);
 const trade=rt.decodeMexcFrame(deal("0.00123",now));assert.equal(trade.symbol,"TELUSDT");assert.equal(trade.trades[0].price,.00123);assert.equal(trade.trades[0].eventAt,now);
 const b=rt.decodeMexcFrame(book("0.001229","0.001231",now));assert.equal(b.bookTicker.bid,.001229);assert.equal(b.bookTicker.ask,.001231);assert.equal(b.bookTicker.eventAt,now,"MEXC book timestamp must come from wrapper sendTime field 6");
 assert.throws(()=>rt.decodeMexcFrame(new Uint8Array([255,255])),/protobuf|field/i);

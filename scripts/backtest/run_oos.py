@@ -120,6 +120,20 @@ def main() -> int:
     first, last, split_ms, _ = split_index(bundles["15m"])
     print(f"axe 15m      : {iso(first)} -> {iso(last)}")
     print(f"frontieres absolues : NEW / IS1 / IS2 / OOS  (coupure IS-OOS : {iso(split_ms)})")
+
+    # Calculer la proportion reelle de donnees dans chaque segment (axe 15m)
+    times_15m = [store.close_time_ms(r, "15m") for r in bundles["15m"].rows]
+    total_bars = len(times_15m)
+    segment_counts = {}
+    for seg_name in ("NEW", "IS1", "IS2", "OOS"):
+        indices = segment_indices(bundles["15m"], times_15m, seg_name)
+        segment_counts[seg_name] = len(indices)
+    real_is_share = (segment_counts["NEW"] + segment_counts["IS1"] + segment_counts["IS2"]) / total_bars
+    print(f"repartmentition reelle (15m) : NEW={segment_counts['NEW']} "
+          f"IS1={segment_counts['IS1']} IS2={segment_counts['IS2']} "
+          f"OOS={segment_counts['OOS']} / {total_bars} total")
+    print(f"  part conception reelle = {real_is_share:.1%} "
+          f"(parametre de conception IS_SHARE = {IS_SHARE:.0%})")
     print()
 
     engines = {"ancien": load_old_engine().detect_early_reversal, "v2": None}
@@ -137,7 +151,10 @@ def main() -> int:
         "protocol": PROTOCOL,
         "split": {"first_ms": first, "last_ms": last, "split_ms": split_ms,
                   "first": iso(first), "last": iso(last), "split": iso(split_ms),
-                  "is_share": IS_SHARE},
+                  "is_share": IS_SHARE,
+                  "real_is_share": round(real_is_share, 4),
+                  "segment_bar_counts": segment_counts,
+                  "total_bars": total_bars},
         "results": {},
     }
 
@@ -158,9 +175,9 @@ def main() -> int:
                 summary = evaluation.summarise_segment(
                     bundle, indices, episodes, CRITERION, COST_SCENARIOS, args.null_iterations)
                 summary["status_counts_bars"] = {
-                    status: sum(1 for s in signals
-                                if start <= store.close_time_ms(bundle.rows[s["index"]], tf) < end)
-                    for status in sorted(status_counts)}
+                    status: sum(1 for e in episodes if e["status"] == status)
+                    for status in sorted(set(e["status"] for e in episodes))}
+                summary["status_counts_bars"]["TOTAL_EPISODES"] = len(episodes)
                 segments[segment_name] = summary
                 exploitable = summary["scenarios"]["S0_brut"].get("EXPLOITABLE", {})
                 print(f"  {tf:4s} {segment_name:3s} : barres={len(indices):>6} "

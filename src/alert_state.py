@@ -59,6 +59,19 @@ ALERT_STATUSES = ("ALERTE_PRÉCOCE", "CONFIRMATION", "INVALIDATION")
 #: Etats qui signifient "aucune donnee exploitable" : ils interdisent toute resolution.
 UNAVAILABLE_SIGNAL_STATUSES = ("DONNÉES INSUFFISANTES", "ATTENDRE", "INDISPONIBLE")
 
+#: Unite de temps sans laquelle aucune conclusion n'est possible. La liste est
+#: celle exigee par src.agent_analysis : un rapport qui n'a pas valide toutes ces
+#: unites est degrade, donc inutilisable pour ouvrir ou resoudre une alerte.
+REQUIRED_REPORT_TIMEFRAMES = ("15m", "1h", "4h", "1d", "1w")
+
+#: Le mois en cours peut etre PARTIEL (bougie non close) ; toute autre valeur
+#: (UNAVAILABLE, absente, inconnue) invalide le rapport.
+MONTHLY_TIMEFRAME_STATUSES = ("OK", "PARTIEL")
+
+#: Age maximal d'un rapport utilisable. Aligne sur MAX_SNAPSHOT_AGE_SECONDS de
+#: src.agent_analysis : au-dela, l'observation ne decrit plus le marche courant.
+MAX_REPORT_AGE_SECONDS = 20 * 60
+
 #: Nombre d'evenements conserves dans l'historique.
 MAX_HISTORY = 50
 
@@ -101,22 +114,100 @@ def setup_identity(symbol: str, direction: str, anchor: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+#: Fichiers qui composent le moteur de detection. L'empreinte est le SHA-256
+#: de la concatenation de leur contenu, dans cet ordre. Si un fichier est
+#: absent ou illisible, l'empreinte est None (statut « empreinte manquante »),
+#: jamais une valeur inventee.
+DETECTOR_FILES = (
+    "src/agent_analysis.py",
+    "src/economic_validation.py",
+    "scripts/backtest/harness.py",
+    "scripts/backtest/engine.py",
+    "scripts/backtest/protocol.py",
+)
+
+
+def detector_fingerprint(base_dir: Optional[Path] = None) -> tuple[Optional[str], list[str]]:
+    """Empreinte SHA-256 du code source du moteur, ou None si indisponible.
+
+    Retourne (sha256, liste_des_fichiers_trouves). Si un fichier manque ou
+    est illisible, sha256 vaut None et la liste indique le statut de chaque
+    fichier. Aucune valeur n'est inventee : l'absence est explicite.
+    """
+    base = Path(base_dir) if base_dir else Path(__file__).resolve().parent.parent
+    hasher = hashlib.sha256()
+    statuses = []
+    all_ok = True
+    for rel in DETECTOR_FILES:
+        path = base / rel
+        if not path.is_file():
+            statuses.append("{}: ABSENT".format(rel))
+            all_ok = False
+            continue
+        try:
+            hasher.update(path.read_bytes())
+            statuses.append("{}: OK ({} bytes)".format(rel, path.stat().st_size))
+        except OSError:
+            statuses.append("{}: ILLISIBLE".format(rel))
+            all_ok = False
+            continue
+    if not all_ok:
+        return None, statuses
+    return hasher.hexdigest(), statuses
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    """Horodatage ISO avec fuseau, ou None. Ne devine jamais un fuseau absent."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        return None
+    return stamp
+
+
 def report_is_usable(report: Any) -> bool:
     """Vrai si le rapport repose sur des donnees reellement exploitables.
 
     Un rapport de repli (FALLBACK), un instantane absent ou une unite 15m
     inexploitable ne permettent pas de conclure : dans ce cas une alerte ouverte
     ne doit PAS etre resolue.
+
+    Le controle est volontairement plus strict qu'un simple `collection_status` :
+    un rapport globalement `ATTENDRE` (unite de temps manquante, horodatage
+    incoherent) est un rapport degrade. Il ne doit ni ouvrir une alerte, ni en
+    resoudre une, meme s'il porte encore un signal residuel. De meme, un age
+    d'instantane inconnu ou perime interdit toute conclusion.
     """
     if not isinstance(report, dict):
         return False
     if report.get("collection_status") != "VALID":
         return False
+    # Fail-closed : seul un rapport non degrade autorise une decision.
+    if report.get("status") != "SURVEILLER":
+        return False
     timeframes = report.get("timeframes")
     if not isinstance(timeframes, dict) or not timeframes:
         return False
-    tf_15m = timeframes.get("15m")
-    if not isinstance(tf_15m, dict) or tf_15m.get("status") != "OK":
+    for timeframe in REQUIRED_REPORT_TIMEFRAMES:
+        section = timeframes.get(timeframe)
+        if not isinstance(section, dict) or section.get("status") != "OK":
+            return False
+    monthly = timeframes.get("1M")
+    if not isinstance(monthly, dict) or monthly.get("status") not in MONTHLY_TIMEFRAME_STATUSES:
+        return False
+    age = report.get("snapshot_age_seconds")
+    try:
+        age_seconds = float(age)
+    except (TypeError, ValueError):
+        return False
+    # `0 <= x <= max` est faux pour NaN et pour l'infini : les deux sont rejetes.
+    if not (0 <= age_seconds <= MAX_REPORT_AGE_SECONDS):
+        return False
+    if _parse_iso(report.get("source_generated_at")) is None:
         return False
     return True
 
@@ -481,12 +572,43 @@ def ledger_row(report: Any, decision: dict, state: dict, period_type: str = "his
         if isinstance(regime, dict):
             row["regime_state"] = regime.get("state")
             row["regime_value"] = regime.get("value")
+        # Qualification economique au moment du signal : sans elle, on ne
+        # pourrait jamais verifier si les signaux "couverts" performent mieux
+        # que les autres. Valeurs reprises telles quelles, jamais recalculees.
+        economic = early.get("economic_validation")
+        if isinstance(economic, dict):
+            row["economic_validity"] = economic.get("economic_validity")
+            row["economic_reason"] = economic.get("reason")
+            cost = economic.get("cost")
+            if isinstance(cost, dict):
+                row["cost_round_trip_pct"] = cost.get("round_trip_pct")
+                row["cost_method"] = cost.get("method")
+                row["fees_status"] = cost.get("fees_status")
+            row["coverage_ratio"] = economic.get("coverage_ratio")
     timeframes = (report or {}).get("timeframes") if isinstance(report, dict) else None
     if isinstance(timeframes, dict):
         tf_15m = timeframes.get("15m")
         if isinstance(tf_15m, dict):
             row["close_15m"] = tf_15m.get("close")
             row["tf_15m_status"] = tf_15m.get("status")
+    # Empreinte du moteur (SHA-256 du code source) : sans elle, on ne peut pas
+    # distinguer les lignes produites par differentes versions du detecteur.
+    # Le champ est "inconnu" si la provenance n'est pas disponible, jamais
+    # invente (regle de fail-closed du protocole).
+    # Empreinte calculee a partir du code source actuel (pas recopiee depuis
+    # un rapport potentiellement ancien). Si un fichier manque ou est
+    # illisible, le champ est "empreinte manquante" (None), jamais une valeur
+    # non verifiee.
+    computed_sha, fingerprint_statuses = detector_fingerprint()
+    reported_sha = (report or {}).get("detectors", {}).get("v2", {}).get("sha256") \
+        if isinstance((report or {}).get("detectors"), dict) else None
+    row["detector_sha256"] = computed_sha
+    row["detector_sha256_reported"] = reported_sha
+    row["detector_sha256_match"] = (
+        bool(computed_sha and reported_sha and computed_sha == reported_sha))
+    row["detector_fingerprint_status"] = fingerprint_statuses
+    row["detector_path"] = (report or {}).get("detectors", {}).get("v2", {}).get("path") \
+        if isinstance((report or {}).get("detectors"), dict) else None
     return row
 
 
