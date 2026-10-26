@@ -226,6 +226,20 @@ jobs:
           else:
               print("\n".join(lines))
           PY
+      - name: Evaluate matured prospective observations (measured, never guessed)
+        continue-on-error: true
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          # Ferme la boucle de mesure : le journal n'est jamais modifie, seules
+          # les echeances atteintes sont evaluees, et le prix de sortie doit etre
+          # frais. Le magasin de serie accumule les bougies 15 m de chaque
+          # instantane, sans quoi aucune echeance de 24 h ne serait couverte.
+          python -m scripts.backtest.evaluate_prospective \
+            --journal alerts/prospective.jsonl \
+            --snapshot site/tel_snapshot.json \
+            --series-store alerts/tel_15m_series.jsonl \
+            --output alerts/prospective_evaluation.json \
+            --summary
       - name: Validate collection provenance before publication
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:

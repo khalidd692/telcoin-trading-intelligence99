@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from scripts.backtest import engine, history_store as store  # noqa: E402
 from scripts.backtest.harness import Bundle, call_detector, detection_state, fast_timeframe_state  # noqa: E402
-from scripts.backtest.protocol import COST_SCENARIOS, IS_SHARE  # noqa: E402
+from scripts.backtest.protocol import COST_SCENARIOS  # noqa: E402
 
 VENUE, SYMBOL = "kucoin", store.KUCOIN_SYMBOL
 ALL_TFS = ["15m", "1h", "4h", "1d", "1w", "1M"]

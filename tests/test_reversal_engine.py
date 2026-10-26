@@ -20,7 +20,9 @@ import src.agent_analysis as agent
 from src.agent_analysis import (
     REVERSAL_PARAMS,
     detect_early_reversal,
+    has_engulfing_bearish,
     has_hammer_pattern,
+    has_level_rejection,
 )
 
 
@@ -513,6 +515,136 @@ class TestOutputs(unittest.TestCase):
         for item in result["evidence"]:
             self.assertIn(item["category"], ("structure", "momentum", "volume", "context"))
             self.assertIn("type", item)
+
+
+class TestEngulfingPatterns(unittest.TestCase):
+    def test_bearish_engulfing_detected(self):
+        # Previous candle: bullish (close > open). Current: bearish (close < open),
+        # body engulfs previous body.
+        self.assertTrue(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=0.995, prev_close=1.005,
+            curr_high=1.015, curr_low=0.995, curr_open=1.010, curr_close=0.990,
+        ))
+
+    def test_bullish_engulfing_not_bearish(self):
+        # A bullish engulfing must NOT be detected as bearish engulfing.
+        self.assertFalse(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=1.005, prev_close=0.995,
+            curr_high=1.015, curr_low=0.995, curr_open=0.990, curr_close=1.010,
+        ))
+
+    def test_non_engulfing_not_detected(self):
+        # Bodies do not overlap/engulf.
+        self.assertFalse(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=0.995, prev_close=1.000,
+            curr_high=1.005, curr_low=0.998, curr_open=0.999, curr_close=0.998,
+        ))
+
+    def test_bearish_engulfing_equal_opens_is_engulfing(self):
+        # curr_open == prev_close counts as engulfing (>= and <=).
+        self.assertTrue(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=0.995, prev_close=1.000,
+            curr_high=1.015, curr_low=0.995, curr_open=1.000, curr_close=0.995,
+        ))
+
+    def test_bearish_engulfing_prev_not_bullish(self):
+        # Previous candle must be bullish (close > open).
+        self.assertFalse(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=1.005, prev_close=0.995,
+            curr_high=1.015, curr_low=0.995, curr_open=1.000, curr_close=0.990,
+        ))
+
+    def test_bearish_engulfing_curr_not_bearish(self):
+        # Current candle must be bearish (close < open).
+        self.assertFalse(has_engulfing_bearish(
+            prev_high=1.01, prev_low=0.99, prev_open=0.995, prev_close=1.000,
+            curr_high=1.015, curr_low=0.995, curr_open=0.990, curr_close=0.995,
+        ))
+
+
+class TestLevelRejection(unittest.TestCase):
+    def test_support_rejection_lower_wick(self):
+        # Price dipped below support and closed back up: lower wick is long.
+        self.assertTrue(has_level_rejection(
+            high=1.010, low=0.990, open_price=1.000, close=1.005, level=1.000,
+            side="support",
+        ))
+
+    def test_support_rejection_no_lower_wick(self):
+        # Price touched level but low is at open (no dip below body): no lower wick.
+        self.assertFalse(has_level_rejection(
+            high=1.010, low=1.000, open_price=1.000, close=1.005, level=1.000,
+            side="support",
+        ))
+
+    def test_resistance_rejection_upper_wick(self):
+        # Price rose above resistance and closed back down: upper wick is long.
+        self.assertTrue(has_level_rejection(
+            high=1.015, low=0.995, open_price=1.000, close=0.995, level=1.010,
+            side="resistance",
+        ))
+
+    def test_resistance_rejection_no_upper_wick(self):
+        # Only lower wick, no upper wick: not a resistance rejection.
+        self.assertFalse(has_level_rejection(
+            high=1.002, low=0.985, open_price=1.000, close=1.001, level=1.010,
+            side="resistance",
+        ))
+
+    def test_support_rejection_wick_less_than_half_body(self):
+        # Wick is present but less than 50% of body: not a rejection.
+        self.assertFalse(has_level_rejection(
+            high=1.005, low=0.999, open_price=1.000, close=1.004, level=1.000,
+            side="support",
+        ))
+
+    def test_resistance_rejection_wick_less_than_half_body(self):
+        # Wick is present but less than 50% of body: not a rejection.
+        # Price approaches resistance from below; upper wick is small.
+        self.assertFalse(has_level_rejection(
+            high=1.0094, low=1.007, open_price=1.009, close=1.008, level=1.010,
+            side="resistance",
+        ))
+
+    def test_level_not_touched_is_not_rejection(self):
+        # Price never reached the level.
+        self.assertFalse(has_level_rejection(
+            high=1.005, low=0.995, open_price=1.000, close=1.001, level=1.010,
+            side="resistance",
+        ))
+
+    def test_resistance_rejection_closes_above_not_rejection(self):
+        # Candle crosses resistance and closes clearly above: not a bearish rejection.
+        self.assertFalse(has_level_rejection(
+            high=1.020, low=0.995, open_price=1.000, close=1.015, level=1.010,
+            side="resistance",
+        ))
+
+    def test_support_rejection_closes_below_not_rejection(self):
+        # Bearish breakout closing clearly below support: not a bullish rejection.
+        self.assertFalse(has_level_rejection(
+            high=1.005, low=0.980, open_price=1.000, close=0.985, level=1.000,
+            side="support",
+        ))
+
+    def test_doji_at_level_is_rejection_if_wick(self):
+        # Doji (zero body): any non-negative wick satisfies wick >= 0.
+        self.assertTrue(has_level_rejection(
+            high=1.015, low=0.995, open_price=1.000, close=1.000, level=1.010,
+            side="resistance",
+        ))
+
+    def test_tiny_body_requires_wick(self):
+        self.assertFalse(has_level_rejection(
+            high=1.002, low=0.998, open_price=1.000, close=1.0005, level=1.010,
+            side="resistance",
+        ))
+
+    def test_level_not_touched_support(self):
+        self.assertFalse(has_level_rejection(
+            high=0.999, low=0.990, open_price=0.995, close=0.998, level=1.000,
+            side="support",
+        ))
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ def build(payload: dict) -> str:
     A("# ÉVALUATION HORS ÉCHANTILLON — ANCIEN MOTEUR vs MOTEUR v2")
     A("")
     A(f"**Protocole** : {protocol['version']} (figé) · **coupure** : {split['split']} "
-      f"(conception = {split['is_share']:.0%} chronologique)")
+      f"(conception = {split['is_share']:.0%} de conception prevue, coupure par date absolue)")
     A(f"**Données** : {payload['venue']} {payload['symbol']} · axe 15m "
       f"{split['first']} → {split['last']}")
     A(f"**Généré** : {payload['generated_at']}")
@@ -62,6 +62,12 @@ def build(payload: dict) -> str:
     A("> Les chiffres ci-dessous proviennent exclusivement de `oos_results.json`. "
       "La séparation conception / validation est stricte : aucun paramètre n'a été modifié "
       "après lecture des résultats de validation.")
+    A("")
+    A(f"> **Note sur la coupure** : le protocole fixe `IS_SHARE = {protocol['is_share']:.0%}` "
+      "comme part chronologique de conception. La coupure effective est une **date absolue** "
+      f"({split['split']}), car l'historique a été prolongé après la conception : une coupure "
+      "en pourcentage se déplacerait silencieusement. La part réelle de la période de "
+      "conception dans l'axe 15m actuel est supérieure à la valeur de conception.")
     A("")
     A("## 0. Révision du protocole")
     A("")
@@ -78,8 +84,16 @@ def build(payload: dict) -> str:
                 if not seg:
                     continue
                 exploitable = seg["scenarios"]["S0_brut"].get("EXPLOITABLE", {})
+                exploitable_episodes = seg["status_counts_bars"].get("EXPLOITABLE", 0)
                 A(f"| {engine_name} | {tf} | {segment} | {seg['bars']} | {seg['episodes']} | "
-                  f"{pct(seg['density'])} | {exploitable.get('evaluated', 0)} |")
+                  f"{pct(seg['density'])} | {exploitable_episodes} |")
+    A("")
+    A("**Note sur le comptage** : le champ *Épisodes* est la somme des épisodes de chaque "
+      "statut (ALERTE_PRÉCOCE + CONFIRMATION + INVALIDATION). Une ALERTE_PRÉCOCE et sa "
+      "CONFIRMATION ultérieure sont comptées comme deux épisodes distincts : la première "
+      "est l'actionnable, la seconde est l'information attendue plus tard. Les deux séries "
+      "se recouvrent donc partiellement. Le champ *Exploitables* est le nombre d'épisodes "
+      "EXPLOITABLE (confirmation + régime 1j neutre), dédupliqué par statut.")
     A("")
 
     for tf in payload["results"]["ancien"]:
@@ -145,6 +159,19 @@ def build(payload: dict) -> str:
           "par signal). Avec un aller-retour de 0,57 %, l'espérance tombe à environ −1 %. "
           "Un taux de réussite mesuré contre une référence *relative* (quantile empirique) "
           "ne dit donc rien de l'exploitabilité : c'est l'espérance qui la dit.")
+        A("")
+        A("> **Limites méthodologiques** : (1) Le scénario S1 (0,57 %) exclut les frais de "
+          "courtage, qui sont des hypothèses non authentifiées. Le scénario S2 (0,77 %, avec "
+          "frais 0,10 %) est plus représentatif d'un compte réel. (2) La déduplication à 90 min "
+          "crée un chevauchement important avec les horizons de 24 h (96 barres) et 72 h "
+          "(288 barres) : les rendements de signaux proches ne sont pas indépendants. "
+          "L'intervalle de confiance public est donc artificiellement étroite. "
+          "(3) Aucune période du cache actuel (90 000 bougies 15m, 2024-03-27 → 2026-10-20) "
+          "n'est vierge : tous les segments NEW, IS1, IS2, OOS ont été consultés. "
+          "(4) L'estimation du nombre effectif d'observations (Neff ≈ 15-25) est indicative : "
+          "la déduplication à 90 min et les horizons longs réduisent fortement la puissance "
+          "statistique. Aucune conclusion sur la rentabilité ne peut être tirée de ces "
+          "données historiques.")
         A("")
         A("**Cas particulier de l'invalidation** : l'espérance y est mesurée **dans le sens "
           "du setup invalidé**. Une espérance négative y signifie donc que le prix est "

@@ -1743,6 +1743,12 @@
           BAISSIER: "baissier",
           INDETERMINE: "indéterminé"
         };
+        var ECONOMIC_LABELS = {
+          COUVERT: "Coût couvert",
+          COUVERT_MINORANT: "Couvert (minorant)",
+          NON_COUVERT: "Coût non couvert",
+          INDETERMINE: "Économie indéterminée"
+        };
         function resetReversal(title, detail) {
           revStatus.textContent = title;
           revStatus.className = "agent-state";
@@ -1787,6 +1793,16 @@
             chips +=
               '<span class="quality-chip">Exploitabilité : non communiquée par ce rapport</span>';
           }
+          var economic = er.economic_validation;
+          if (economic && economic.economic_validity) {
+            var validity = String(economic.economic_validity);
+            chips +=
+              '<span class="quality-chip ' +
+              (validity === "COUVERT" ? "ok" : validity === "NON_COUVERT" ? "warn" : "") +
+              '">' +
+              (ECONOMIC_LABELS[validity] || validity) +
+              "</span>";
+          }
           revQuality.innerHTML = chips;
         }
         function renderReversal(d) {
@@ -1825,6 +1841,39 @@
             lines.push(
               "<span class=\"agent-reversal-warn\">Une alerte précoce n’est pas une entrée : elle signale un retournement potentiel, pas une configuration exploitable.</span>"
             );
+          }
+          var economic = er.economic_validation;
+          if (economic && economic.cost && isFinite(Number(economic.cost.round_trip_pct))) {
+            var costPct = Number(economic.cost.round_trip_pct);
+            var depthLabel =
+              economic.cost.method === "order_book" || economic.cost.method === "liquidity_cost"
+                ? "carnet observé"
+                : "spread seul, minorant";
+            var feeLabel =
+              economic.cost.fees_status === "VERIFIED" ? "frais vérifiés" : "frais non vérifiés";
+            var coverage = economic.coverage_ratio;
+            var coverageLabel =
+              coverage !== null && coverage !== undefined && isFinite(Number(coverage))
+                ? " · couverture " + fmt(Number(coverage), 2) + "x"
+                : "";
+            lines.push(
+              "<strong>Économie :</strong> coût aller-retour " +
+                fmt(costPct, 2) +
+                " % (" +
+                depthLabel +
+                ", " +
+                feeLabel +
+                ")" +
+                coverageLabel +
+                "."
+            );
+            if (economic.reason) {
+              lines.push(
+                "<span class=\"agent-reversal-warn\">" +
+                  String(economic.reason).replace(/[&<>"]/g, "") +
+                  "</span>"
+              );
+            }
           }
           if (er.reason) lines.push(String(er.reason).replace(/[&<>"]/g, ""));
           if (er.setup && er.setup.anchor !== undefined && er.setup.anchor !== null) {

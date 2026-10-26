@@ -47,6 +47,21 @@ NULL_TEST_ITERATIONS = 2000
 SIGNAL_STATUSES = ("ALERTE_PRÉCOCE", "CONFIRMATION", "INVALIDATION")
 REFERENCE_REVERSAL_CRITERION = "quantile"   # phenomenon de marche : hors cout
 
+#: Choix des horizons presentes par unite de temps (status_timeframe_matrix.py).
+#: Pour chaque TF, on utilise les horizons d'indices 1 et 2 de la grille
+#: (horizons_in_bars). C'est une CONVENTION DE PRESENTATION : elle ne vise pas
+#: un optimum statistique et n'a pas ete validée par test. Les horizons retenus
+#: sont (valeurs reelles de horizons_in_bars) :
+#:   15m -> 6h (24 barres) et 24h (96 barres)
+#:   1h  -> 6h (6 barres) et 24h (24 barres)
+#:   4h  -> 72h (18 barres) et 168h (42 barres)
+#:   1d  -> 120h (5 barres) et 240h (10 barres)
+#: Le 1er horizon (indice 0) n'est pas utilises car trop proche du signal
+#: pour mesurer un mouvement dirige fiable.
+#: Aucun de ces horizons n'a ete choisi pour maximiser un score : ce sont les
+#: memes valeurs que celles du tableau de reference du protocole OOS-1.2.
+HORIZON_PRESENTATION_INDICES = (1, 2)
+
 PROTOCOL: dict[str, Any] = {
     "version": "OOS-1.2",
     "frozen": True,

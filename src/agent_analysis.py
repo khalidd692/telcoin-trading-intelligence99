@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from collector.tel_collector import compute_snapshot_fingerprint
+from src.economic_validation import validate_economics
 
 TIMEFRAMES = ("15m", "1h", "4h", "1d", "1w", "1M")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
@@ -421,6 +422,17 @@ def has_engulfing_bullish(prev_high: float, prev_low: float, prev_open: float, p
             curr_close >= prev_open)
 
 
+def has_engulfing_bearish(prev_high: float, prev_low: float, prev_open: float, prev_close: float,
+                          curr_high: float, curr_low: float, curr_open: float, curr_close: float) -> bool:
+    """Detect bearish engulfing pattern."""
+    prev_body_bullish = prev_close > prev_open
+    curr_body_bearish = curr_close < curr_open
+    return (prev_body_bullish and 
+            curr_body_bearish and 
+            curr_open >= prev_close and 
+            curr_close <= prev_open)
+
+
 def is_momentum_improving(momentum_series: list[float], lookback: int = 3) -> bool:
     """Check if momentum is consistently improving (rising)."""
     if len(momentum_series) < lookback + 1:
@@ -437,16 +449,31 @@ def is_macd_improving(macd_hist_series: list[float], lookback: int = 3) -> bool:
     return len(recent) >= 2 and all(a < b for a, b in zip(recent, recent[1:]))
 
 
-def has_level_rejection(high: float, low: float, open_price: float, close: float, level: float, tolerance: float = 0.001) -> bool:
-    """Check if price rejected a level (long wick near level)."""
+def has_level_rejection(high: float, low: float, open_price: float, close: float, level: float,
+                        tolerance: float = 0.001, side: str = "support") -> bool:
+    """Check if price rejected a level (long wick near level).
+
+    side="support": price dipped below level and closed back up (lower wick).
+    side="resistance": price rose above level and closed back down (upper wick).
+    """
     # Price touched level but closed away from it
     touched_level = low <= level * (1 + tolerance) and high >= level * (1 - tolerance)
     if not touched_level:
         return False
+    # Rejection requires close back on the correct side of the level
+    if side == "resistance":
+        if close > level:
+            return False
+    else:
+        if close < level:
+            return False
     # Wick at least 50% of body
     body = abs(close - open_price)
-    lower_wick = min(open_price, close) - low
-    return lower_wick >= 0.5 * body
+    if side == "resistance":
+        wick = high - max(open_price, close)
+    else:
+        wick = min(open_price, close) - low
+    return wick >= 0.5 * body
 
 
 def is_downtrend_ending(closes: list[float], lookback: int = 5) -> bool:
@@ -667,7 +694,7 @@ def _structure_evidence(closes: list[float], highs: list[float] | None, lows: li
         if bullish and has_engulfing_bullish(highs[index - 1], lows[index - 1], opens[index - 1], closes[index - 1],
                                              high, low, open_price, close_price):
             out.append({"category": "structure", "type": "bullish_engulfing"})
-        elif not bullish and has_engulfing_bullish(highs[index - 1], lows[index - 1], opens[index - 1], closes[index - 1],
+        elif not bullish and has_engulfing_bearish(highs[index - 1], lows[index - 1], opens[index - 1], closes[index - 1],
                                                    high, low, open_price, close_price):
             out.append({"category": "structure", "type": "bearish_engulfing"})
         # rejection of the previous structural level
@@ -677,11 +704,11 @@ def _structure_evidence(closes: list[float], highs: list[float] | None, lows: li
         if stop > start:
             if bullish:
                 level = min(v for v in lows[start:stop] if _is_finite(v))
-                if has_level_rejection(high, low, open_price, close_price, level):
+                if has_level_rejection(high, low, open_price, close_price, level, side="support"):
                     out.append({"category": "structure", "type": "support_rejection", "level": level})
             else:
                 level = max(v for v in highs[start:stop] if _is_finite(v))
-                if has_level_rejection(high, low, open_price, close_price, level):
+                if has_level_rejection(high, low, open_price, close_price, level, side="resistance"):
                     out.append({"category": "structure", "type": "resistance_rejection", "level": level})
     return out
 
@@ -1349,6 +1376,11 @@ def build_analysis(snapshot: Any, expected_collection_id: str | None = None, now
         macd_hist_15m=macd_hist_15m,
         ohlc_15m=ohlc_15m
     )
+    # Qualification économique (lecture seule) : le détecteur n'est pas modifié,
+    # on ajoute seulement la comparaison coût A/R observé / objectif structurel.
+    collector_meta = snapshot.get("collector")
+    notional = collector_meta.get("buy_cost_notional_usdt") if isinstance(collector_meta, dict) else None
+    early_reversal["economic_validation"] = validate_economics(early_reversal, mexc, notional)
     required_timeframes = ("15m", "1h", "4h", "1d", "1w")
     missing_required = [tf for tf in required_timeframes if timeframes[tf].get("status") != "OK"]
     monthly_unavailable = timeframes["1M"].get("status") not in ("OK", "PARTIEL")
