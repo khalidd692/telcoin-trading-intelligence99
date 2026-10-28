@@ -1,8 +1,8 @@
 {
   "counters": {
     "alerts": 18,
-    "evaluations": 650,
-    "resolutions": 7
+    "evaluations": 651,
+    "resolutions": 8
   },
   "history": [
     {
@@ -590,23 +590,29 @@
         "signal_status": "INVALIDATION",
         "symbol": "TELUSDT"
       }
+    },
+    {
+      "action": "RESOLUTION",
+      "alert": null,
+      "at": "2026-10-28T03:32:57.682356+00:00",
+      "resolved": {
+        "age_bars": 15,
+        "anchor": 0.001508,
+        "confidence": 40,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
+        "first_seen": "2026-10-27T23:41:19.508625+00:00",
+        "last_seen": "2026-10-28T03:19:21.908057+00:00",
+        "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained",
+        "seen_count": 17,
+        "setup_id": "2cfe9d3a93871d95",
+        "signal_status": "CONFIRMATION",
+        "symbol": "TELUSDT"
+      }
     }
   ],
-  "open_alert": {
-    "age_bars": 15,
-    "anchor": 0.001508,
-    "confidence": 40,
-    "direction": "HAUSSIER",
-    "exploitable": false,
-    "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
-    "first_seen": "2026-10-27T23:41:19.508625+00:00",
-    "last_seen": "2026-10-28T03:19:21.908057+00:00",
-    "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained",
-    "seen_count": 17,
-    "setup_id": "2cfe9d3a93871d95",
-    "signal_status": "CONFIRMATION",
-    "symbol": "TELUSDT"
-  },
+  "open_alert": null,
   "schema_version": 1,
-  "updated_at": "2026-10-28T03:19:21.908057+00:00"
+  "updated_at": "2026-10-28T03:32:57.682356+00:00"
 }
