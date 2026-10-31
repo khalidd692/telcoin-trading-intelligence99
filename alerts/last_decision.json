@@ -1,18 +1,18 @@
 {
-  "action": "NOUVELLE_ALERTE",
-  "reason": "Un nouveau setup d'alerte a ete detecte.",
+  "action": "EVOLUTION",
+  "reason": "Le setup ouvert a evolutionne : ALERTE_PRÉCOCE -> CONFIRMATION.",
   "alert": {
     "setup_id": "9b4a61c81adf063d",
     "symbol": "TELUSDT",
     "direction": "HAUSSIER",
     "anchor": 0.001435,
-    "age_bars": 0,
-    "signal_status": "ALERTE_PRÉCOCE",
-    "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
-    "confidence": 30,
+    "age_bars": 1,
+    "signal_status": "CONFIRMATION",
+    "reason": "Setup haussier confirme par intermediate_timeframe_turn",
+    "confidence": 55,
     "exploitable": false,
-    "exploitable_reason": "Aucun signal de retournement confirme a ce stade"
+    "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable"
   },
   "resolved": null,
-  "at": "2026-10-31T21:46:44.474532+00:00"
+  "at": "2026-10-31T22:00:18.243966+00:00"
 }
