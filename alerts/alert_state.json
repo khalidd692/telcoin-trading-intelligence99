@@ -1,30 +1,10 @@
 {
   "counters": {
     "alerts": 36,
-    "evaluations": 1258,
-    "resolutions": 15
+    "evaluations": 1259,
+    "resolutions": 16
   },
   "history": [
-    {
-      "action": "RESOLUTION",
-      "alert": null,
-      "at": "2026-10-22T11:27:26.329687+00:00",
-      "resolved": {
-        "age_bars": 15,
-        "anchor": 0.001413,
-        "confidence": 45,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "first_seen": "2026-10-22T07:19:21.738270+00:00",
-        "last_seen": "2026-10-22T11:13:49.013188+00:00",
-        "reason": "Ancre structurelle du setup rompue (0.001413, tolerance 0.000004)",
-        "seen_count": 18,
-        "setup_id": "9a4999329823287e",
-        "signal_status": "INVALIDATION",
-        "symbol": "TELUSDT"
-      }
-    },
     {
       "action": "NOUVELLE_ALERTE",
       "alert": {
@@ -1179,23 +1159,29 @@
       },
       "at": "2026-11-02T19:16:40.220223+00:00",
       "resolved": null
+    },
+    {
+      "action": "RESOLUTION",
+      "alert": null,
+      "at": "2026-11-02T23:23:19.107446+00:00",
+      "resolved": {
+        "age_bars": 15,
+        "anchor": 0.001371,
+        "confidence": 40,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
+        "first_seen": "2026-11-02T19:16:40.220223+00:00",
+        "last_seen": "2026-11-02T23:09:32.022980+00:00",
+        "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained",
+        "seen_count": 18,
+        "setup_id": "552cbe7fbde7fa17",
+        "signal_status": "CONFIRMATION",
+        "symbol": "TELUSDT"
+      }
     }
   ],
-  "open_alert": {
-    "age_bars": 15,
-    "anchor": 0.001371,
-    "confidence": 40,
-    "direction": "HAUSSIER",
-    "exploitable": false,
-    "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
-    "first_seen": "2026-11-02T19:16:40.220223+00:00",
-    "last_seen": "2026-11-02T23:09:32.022980+00:00",
-    "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained",
-    "seen_count": 18,
-    "setup_id": "552cbe7fbde7fa17",
-    "signal_status": "CONFIRMATION",
-    "symbol": "TELUSDT"
-  },
+  "open_alert": null,
   "schema_version": 1,
-  "updated_at": "2026-11-02T23:09:32.022980+00:00"
+  "updated_at": "2026-11-02T23:23:19.107446+00:00"
 }
