@@ -1,18 +1,32 @@
 {
-  "action": "REPETITION",
-  "reason": "Le meme setup d'alerte est toujours ouvert : aucune nouvelle alerte.",
+  "action": "NOUVELLE_ALERTE",
+  "reason": "Un nouveau setup d'alerte remplace le setup ouvert.",
   "alert": {
-    "setup_id": "9a4999329823287e",
+    "setup_id": "e14587d6f8fa25d3",
     "symbol": "TELUSDT",
     "direction": "HAUSSIER",
-    "anchor": 0.001413,
-    "age_bars": 3,
-    "signal_status": "INVALIDATION",
-    "reason": "Ancre structurelle du setup rompue (0.001413, tolerance 0.000002)",
+    "anchor": 0.001401,
+    "age_bars": 0,
+    "signal_status": "ALERTE_PRÉCOCE",
+    "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
     "confidence": 40,
     "exploitable": false,
     "exploitable_reason": "Aucun signal de retournement confirme a ce stade"
   },
-  "resolved": null,
-  "at": "2026-11-02T10:06:29.344841+00:00"
+  "resolved": {
+    "age_bars": 3,
+    "anchor": 0.001413,
+    "confidence": 40,
+    "direction": "HAUSSIER",
+    "exploitable": false,
+    "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+    "first_seen": "2026-11-02T09:25:42.527732+00:00",
+    "last_seen": "2026-11-02T10:06:29.344841+00:00",
+    "reason": "Ancre structurelle du setup rompue (0.001413, tolerance 0.000002)",
+    "seen_count": 4,
+    "setup_id": "9a4999329823287e",
+    "signal_status": "INVALIDATION",
+    "symbol": "TELUSDT"
+  },
+  "at": "2026-11-02T10:20:16.130337+00:00"
 }
