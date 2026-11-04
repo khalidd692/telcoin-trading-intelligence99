@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-04T07:45:34.890975+00:00",
+  "generated_at": "2026-11-04T07:59:14.160584+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001334,
+      "last": 0.001332,
       "bid": 0.001331,
       "ask": 0.001336,
       "spread_pct": 0.3749531308586436,
-      "quote_volume_24h": 92205.311783,
+      "quote_volume_24h": 91814.373812,
       "change_pct_24h": -0.0096,
       "source": "MEXC public ticker",
-      "observed_at": "2026-11-04T07:45:35.071212+00:00"
+      "observed_at": "2026-11-04T07:59:14.542794+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -25,9 +25,9 @@
     "kucoin_level1": {
       "status": "OK",
       "last": 0.001335,
-      "bid": 0.001329,
-      "ask": 0.001334,
-      "observed_at": "2026-11-04T07:45:35.414835+00:00"
+      "bid": 0.001332,
+      "ask": 0.001336,
+      "observed_at": "2026-11-04T07:59:14.887830+00:00"
     }
   },
   "checks": [
@@ -44,14 +44,14 @@
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.0749,
+      "divergence_pct": 0.225,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-11-04T07:45:00+00:00",
-    "candle_age_seconds": 35,
+    "candle_age_seconds": 854,
     "close": 0.001335,
     "ema12": 0.0013304875985793248,
     "ema26": 0.0013317627263215895,
@@ -257,10 +257,10 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "cd08bd62-c8cd-4e30-a037-8d90f1a18497",
+  "collection_id": "a5104312-6d81-4a08-a60c-5abaa8f6baa0",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.0749,
-    "mid_price_divergence_pct": 0.1501,
+    "last_price_divergence_pct": 0.225,
+    "mid_price_divergence_pct": 0.0375,
     "check_basis": "last_price",
     "limit_pct": 1.0,
     "definitions": {
