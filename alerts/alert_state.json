@@ -1,30 +1,10 @@
 {
   "counters": {
     "alerts": 41,
-    "evaluations": 1498,
-    "resolutions": 19
+    "evaluations": 1499,
+    "resolutions": 20
   },
   "history": [
-    {
-      "action": "RESOLUTION",
-      "alert": null,
-      "at": "2026-10-23T23:22:20.473179+00:00",
-      "resolved": {
-        "age_bars": 15,
-        "anchor": 0.001459,
-        "confidence": 15,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "first_seen": "2026-10-23T22:27:45.320639+00:00",
-        "last_seen": "2026-10-23T23:08:38.466257+00:00",
-        "reason": "Ancre structurelle du setup rompue (0.001459, tolerance 0.000004)",
-        "seen_count": 4,
-        "setup_id": "d7fc5b358ff7a804",
-        "signal_status": "INVALIDATION",
-        "symbol": "TELUSDT"
-      }
-    },
     {
       "action": "NOUVELLE_ALERTE",
       "alert": {
@@ -1129,23 +1109,29 @@
       },
       "at": "2026-11-05T03:17:05.347421+00:00",
       "resolved": null
+    },
+    {
+      "action": "RESOLUTION",
+      "alert": null,
+      "at": "2026-11-05T07:22:46.152578+00:00",
+      "resolved": {
+        "age_bars": 15,
+        "anchor": 0.0014,
+        "confidence": 35,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+        "first_seen": "2026-11-05T03:17:05.347421+00:00",
+        "last_seen": "2026-11-05T07:09:11.940930+00:00",
+        "reason": "Setup de retournement haussier a l'extreme, 1 famille(s) independante(s), non confirme",
+        "seen_count": 18,
+        "setup_id": "61567916de37e0b3",
+        "signal_status": "ALERTE_PRÉCOCE",
+        "symbol": "TELUSDT"
+      }
     }
   ],
-  "open_alert": {
-    "age_bars": 15,
-    "anchor": 0.0014,
-    "confidence": 35,
-    "direction": "HAUSSIER",
-    "exploitable": false,
-    "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-    "first_seen": "2026-11-05T03:17:05.347421+00:00",
-    "last_seen": "2026-11-05T07:09:11.940930+00:00",
-    "reason": "Setup de retournement haussier a l'extreme, 1 famille(s) independante(s), non confirme",
-    "seen_count": 18,
-    "setup_id": "61567916de37e0b3",
-    "signal_status": "ALERTE_PRÉCOCE",
-    "symbol": "TELUSDT"
-  },
+  "open_alert": null,
   "schema_version": 1,
-  "updated_at": "2026-11-05T07:09:11.940930+00:00"
+  "updated_at": "2026-11-05T07:22:46.152578+00:00"
 }
