@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-05T08:30:51.319862+00:00",
-  "source_generated_at": "2026-11-05T08:30:51.131000+00:00",
+  "generated_at": "2026-11-05T08:44:27.487520+00:00",
+  "source_generated_at": "2026-11-05T08:44:27.339000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
@@ -11,7 +11,7 @@
   "cross_check": {
     "independent_confirmation": "OUI",
     "venue_data_diagnostic": {
-      "status": "SUSPECT_IDENTIQUE",
+      "status": "NON_SIGNALÉ",
       "left_symbol": "MEXC:TELUSDT",
       "right_symbol": "KUCOIN:TEL-USDT",
       "checked_fields": [
@@ -19,14 +19,10 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [
-        "mid",
-        "bid",
-        "ask"
-      ],
-      "note": "Alerte diagnostique seulement : des valeurs identiques ne prouvent pas une corruption. Vérifier l'instrument, la source et le cache."
+      "matching_fields": [],
+      "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": 0.0
+    "divergence_bps": 25.044722719139994
   },
   "timeframes": {
     "15m": {
@@ -35,7 +31,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T08:30:00+00:00",
-      "candle_age_seconds": 51,
+      "candle_age_seconds": 867,
       "close": 0.001406,
       "ema20": 0.001409079449757615,
       "ema50": 0.001405629555148392,
@@ -69,7 +65,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T08:00:00+00:00",
-      "candle_age_seconds": 1851,
+      "candle_age_seconds": 2667,
       "close": 0.00141,
       "ema20": 0.0013971863878217711,
       "ema50": 0.0013852942181117665,
@@ -103,7 +99,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T08:00:00+00:00",
-      "candle_age_seconds": 1851,
+      "candle_age_seconds": 2667,
       "close": 0.00141,
       "ema20": 0.0013898616513025102,
       "ema50": 0.001416652383524921,
@@ -139,7 +135,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T00:00:00+00:00",
-      "candle_age_seconds": 30651,
+      "candle_age_seconds": 31467,
       "close": 0.001434,
       "ema20": 0.0014955953654119,
       "ema50": 0.0016170274827392308,
@@ -175,7 +171,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 289851,
+      "candle_age_seconds": 290667,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -209,7 +205,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 376251,
+      "candle_age_seconds": 377067,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -329,10 +325,10 @@
       "direction": "INDETERMINE",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 0.9172941019754907,
-        "measured_ex_fees_pct": 0.9172941019754907,
-        "spread_pct": 0.2853067047075676,
-        "slippage_pct": 0.6323938170751988,
+        "round_trip_pct": 0.7787982575886381,
+        "measured_ex_fees_pct": 0.7787982575886381,
+        "spread_pct": 0.2855103497501699,
+        "slippage_pct": 0.49369490762428453,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
         "method": "liquidity_cost",
@@ -365,6 +361,6 @@
       ]
     }
   },
-  "collection_id": "7563ba26-2bc1-4b70-b4ae-46e4c6ebd57c",
-  "snapshot_id": "89b09f763416fc4d188b66c2564f3f83a2e42bc7fa08d7945d236c6475b18ec1"
+  "collection_id": "c6dd3840-076a-4635-bd0d-2cc39d31ce0a",
+  "snapshot_id": "aed1cb848e78a1e3acb2ae4066d3509339c81a20b7bcaf719f823f5c9d6909ec"
 }
