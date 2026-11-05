@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-05T10:20:04.202300+00:00",
-  "source_generated_at": "2026-11-05T10:20:04.011000+00:00",
+  "generated_at": "2026-11-05T10:33:42.041489+00:00",
+  "source_generated_at": "2026-11-05T10:33:41.865000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
@@ -11,7 +11,7 @@
   "cross_check": {
     "independent_confirmation": "OUI",
     "venue_data_diagnostic": {
-      "status": "SUSPECT_IDENTIQUE",
+      "status": "NON_SIGNALÉ",
       "left_symbol": "MEXC:TELUSDT",
       "right_symbol": "KUCOIN:TEL-USDT",
       "checked_fields": [
@@ -19,14 +19,10 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [
-        "mid",
-        "bid",
-        "ask"
-      ],
-      "note": "Alerte diagnostique seulement : des valeurs identiques ne prouvent pas une corruption. Vérifier l'instrument, la source et le cache."
+      "matching_fields": [],
+      "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": 0.0
+    "divergence_bps": 7.243752263671973
   },
   "timeframes": {
     "15m": {
@@ -34,34 +30,36 @@
       "reason": null,
       "candle_status": "OK",
       "candle_count": 300,
-      "last_closed_at": "2026-11-05T10:15:00+00:00",
-      "candle_age_seconds": 304,
-      "close": 0.001384,
-      "ema20": 0.0013993068133822514,
-      "ema50": 0.0014018830121740186,
-      "sma10": 0.0013958,
-      "sma20": 0.0014022,
-      "sma50": 0.00141048,
-      "sma100": 0.00139627,
-      "sma200": 0.001370325,
-      "rsi14": 40.243902439024424,
-      "macd_histogram": -2.6542116008045835e-06,
-      "macd_histogram_previous": -2.5874135820505924e-06,
-      "atr14": 1.0740236642153063e-05,
-      "momentum10": -3.4999999999999875e-05,
-      "cci20": -145.40880503144555,
-      "stoch_k": 10.526315789473564,
-      "stoch_d": 4.189044038668002,
-      "di_plus": 29.873416420936984,
-      "di_minus": 25.755637619798616,
-      "adx14": 19.904027733567318,
-      "awesome_oscillator": -1.2694117647058922e-05,
-      "volume_last": 517506.74,
-      "volume_mean20": 538854.4745,
-      "volume_ratio_20": 0.9603831173160278,
+      "last_closed_at": "2026-11-05T10:30:00+00:00",
+      "candle_age_seconds": 222,
+      "close": 0.001383,
+      "ema20": 0.0013977537835363227,
+      "ema50": 0.0014011425042218862,
+      "sma10": 0.0013931,
+      "sma20": 0.0014017,
+      "sma50": 0.00140966,
+      "sma100": 0.0013966100000000002,
+      "sma200": 0.0013705700000000002,
+      "rsi14": 38.271604938271544,
+      "macd_histogram": -2.5950918360800027e-06,
+      "macd_histogram_previous": -2.6542116011264256e-06,
+      "atr14": 1.0258791167638123e-05,
+      "momentum10": -2.7000000000000114e-05,
+      "cci20": -137.35224586288507,
+      "stoch_k": 8.77192982456105,
+      "stoch_d": 7.113020646855019,
+      "di_plus": 29.041421531188547,
+      "di_minus": 25.03832565910551,
+      "adx14": 19.01104067665194,
+      "awesome_oscillator": -1.4082352941176615e-05,
+      "volume_last": 507291.44,
+      "volume_mean20": 535107.987,
+      "volume_ratio_20": 0.94801694671771,
       "trend": "BAISSIER",
-      "flags": [],
-      "change_30": -0.014245014245014231
+      "flags": [
+        "HISTOGRAMME_MACD_EN_AMELIORATION"
+      ],
+      "change_30": -0.015658362989323882
     },
     "1h": {
       "status": "OK",
@@ -69,7 +67,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T10:00:00+00:00",
-      "candle_age_seconds": 1204,
+      "candle_age_seconds": 2022,
       "close": 0.001387,
       "ema20": 0.0013962001950196333,
       "ema50": 0.0013858021842178632,
@@ -105,7 +103,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T08:00:00+00:00",
-      "candle_age_seconds": 8404,
+      "candle_age_seconds": 9222,
       "close": 0.00141,
       "ema20": 0.0013898616513025102,
       "ema50": 0.001416652383524921,
@@ -141,7 +139,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T00:00:00+00:00",
-      "candle_age_seconds": 37204,
+      "candle_age_seconds": 38022,
       "close": 0.001434,
       "ema20": 0.0014955953654119,
       "ema50": 0.0016170274827392308,
@@ -177,7 +175,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 296404,
+      "candle_age_seconds": 297222,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -211,7 +209,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 382804,
+      "candle_age_seconds": 383622,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -242,6 +240,10 @@
   },
   "alignment": "MIXTE",
   "flags": [
+    {
+      "timeframe": "15m",
+      "flag": "HISTOGRAMME_MACD_EN_AMELIORATION"
+    },
     {
       "timeframe": "1h",
       "flag": "RSI_EN_HAUSSE_SUR_LES_DERNIERES_CLOTURES"
@@ -293,26 +295,26 @@
     "objectives": {
       "resistance": {
         "level": 0.001435,
-        "distance_pct": 3.685,
-        "distance_atr": 4.75,
+        "distance_pct": 3.76,
+        "distance_atr": 5.07,
         "kind": "resistance (recent window)"
       },
       "support": {
         "level": 0.001378,
-        "distance_pct": 0.434,
-        "distance_atr": 0.56,
+        "distance_pct": 0.362,
+        "distance_atr": 0.49,
         "kind": "support (recent window)"
       },
       "short_term": {
         "level": 0.001435,
-        "distance_pct": 3.685,
-        "distance_atr": 4.75,
+        "distance_pct": 3.76,
+        "distance_atr": 5.07,
         "kind": "resistance (recent window)"
       },
       "swing": {
         "level": 0.001378,
-        "distance_pct": 0.434,
-        "distance_atr": 0.56,
+        "distance_pct": 0.362,
+        "distance_atr": 0.49,
         "kind": "support (recent window)"
       },
       "note": "Niveaux structurels informatifs : une localisation, pas une prediction. Aucun objectif n'entre dans la decision du detecteur."
@@ -335,10 +337,10 @@
       "direction": "INDETERMINE",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 0.9946588817720491,
-        "measured_ex_fees_pct": 0.9946588817720491,
-        "spread_pct": 0.36166365280289425,
-        "slippage_pct": 0.6336480514471383,
+        "round_trip_pct": 0.9657229914258398,
+        "measured_ex_fees_pct": 0.9657229914258398,
+        "spread_pct": 0.3619254433586691,
+        "slippage_pct": 0.6044513151252608,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
         "method": "liquidity_cost",
@@ -347,7 +349,7 @@
         "depth_failure": null
       },
       "objective": {
-        "move_pct": 3.685,
+        "move_pct": 3.76,
         "level": 0.001435,
         "kind": "resistance (recent window)",
         "source": "short_term"
@@ -371,6 +373,6 @@
       ]
     }
   },
-  "collection_id": "4a4d9f82-315f-4316-bd09-b2dd611845b7",
-  "snapshot_id": "d1d725951b659adc158aa6b1b02a4587e847d734dfba2f92704286265d13aaa4"
+  "collection_id": "d6e57486-8a5e-40a2-98aa-e92097ec6f46",
+  "snapshot_id": "3a91f64165be2bda3c6e84d03605a4e47e4451da001afacfe072b244b846519c"
 }
