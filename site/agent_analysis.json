@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-05T13:04:00.384948+00:00",
-  "source_generated_at": "2026-11-05T13:04:00.197000+00:00",
+  "generated_at": "2026-11-05T13:17:36.239901+00:00",
+  "source_generated_at": "2026-11-05T13:17:36.085000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
@@ -11,7 +11,7 @@
   "cross_check": {
     "independent_confirmation": "OUI",
     "venue_data_diagnostic": {
-      "status": "NON_SIGNALÉ",
+      "status": "SUSPECT_IDENTIQUE",
       "left_symbol": "MEXC:TELUSDT",
       "right_symbol": "KUCOIN:TEL-USDT",
       "checked_fields": [
@@ -19,10 +19,14 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [],
-      "note": "Aucune identité complète suspecte détectée sur les champs comparables."
+      "matching_fields": [
+        "mid",
+        "bid",
+        "ask"
+      ],
+      "note": "Alerte diagnostique seulement : des valeurs identiques ne prouvent pas une corruption. Vérifier l'instrument, la source et le cache."
     },
-    "divergence_bps": 22.197558268590193
+    "divergence_bps": 0.0
   },
   "timeframes": {
     "15m": {
@@ -30,36 +34,36 @@
       "reason": null,
       "candle_status": "OK",
       "candle_count": 300,
-      "last_closed_at": "2026-11-05T13:00:00+00:00",
-      "candle_age_seconds": 240,
-      "close": 0.001355,
-      "ema20": 0.001379271761201072,
-      "ema50": 0.0013908290130148378,
-      "sma10": 0.0013707,
-      "sma20": 0.0013819,
-      "sma50": 0.0013978999999999999,
-      "sma100": 0.0013986399999999998,
-      "sma200": 0.00137239,
-      "rsi14": 24.615384615384812,
-      "macd_histogram": -2.5050432536011493e-06,
-      "macd_histogram_previous": -2.298160850971259e-06,
-      "atr14": 1.1546043050307865e-05,
-      "momentum10": -2.7999999999999813e-05,
-      "cci20": -163.66366366366228,
-      "stoch_k": 11.111111111111164,
-      "stoch_d": 6.119162640901794,
-      "di_plus": 16.063820503700786,
-      "di_minus": 27.395650074946094,
-      "adx14": 14.783446702505513,
-      "awesome_oscillator": -2.6667647058823372e-05,
-      "volume_last": 447593.85,
-      "volume_mean20": 582466.8105,
-      "volume_ratio_20": 0.7684452434564938,
+      "last_closed_at": "2026-11-05T13:15:00+00:00",
+      "candle_age_seconds": 156,
+      "close": 0.00135,
+      "ema20": 0.0013764839744200177,
+      "ema50": 0.0013892278560647512,
+      "sma10": 0.0013682,
+      "sma20": 0.0013790500000000002,
+      "sma50": 0.0013964199999999998,
+      "sma100": 0.00139865,
+      "sma200": 0.001372475,
+      "rsi14": 23.18840579710161,
+      "macd_histogram": -2.7430917431084315e-06,
+      "macd_histogram_previous": -2.5050432533929147e-06,
+      "atr14": 1.1292754261096151e-05,
+      "momentum10": -2.499999999999985e-05,
+      "cci20": -158.67227676484282,
+      "stoch_k": 2.500000000000325,
+      "stoch_d": 6.952495974235235,
+      "di_plus": 15.250969556726012,
+      "di_minus": 26.64191012416,
+      "adx14": 15.669674521369659,
+      "awesome_oscillator": -3.047352941176469e-05,
+      "volume_last": 263210.27,
+      "volume_mean20": 577983.793,
+      "volume_ratio_20": 0.4553938591146621,
       "trend": "BAISSIER",
       "flags": [
         "RSI_SURVENDU_NE_CONFIRME_PAS_UN_REBOND"
       ],
-      "change_30": -0.027279253409906556
+      "change_30": -0.03086862885857855
     },
     "1h": {
       "status": "OK",
@@ -67,7 +71,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T13:00:00+00:00",
-      "candle_age_seconds": 240,
+      "candle_age_seconds": 1056,
       "close": 0.001355,
       "ema20": 0.0013896502686145825,
       "ema50": 0.001384171627993221,
@@ -103,7 +107,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T12:00:00+00:00",
-      "candle_age_seconds": 3840,
+      "candle_age_seconds": 4656,
       "close": 0.001384,
       "ema20": 0.0013893033987975097,
       "ema50": 0.0014153719381330074,
@@ -137,7 +141,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-05T00:00:00+00:00",
-      "candle_age_seconds": 47040,
+      "candle_age_seconds": 47856,
       "close": 0.001434,
       "ema20": 0.0014955953654119,
       "ema50": 0.0016170274827392308,
@@ -173,7 +177,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 306240,
+      "candle_age_seconds": 307056,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -207,7 +211,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 392640,
+      "candle_age_seconds": 393456,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -268,35 +272,21 @@
   "interpretation": "Analyse multi-unités de temps. Les drapeaux sont des observations, pas des signaux d'achat. Un RSI survendu ne confirme pas un retournement. SURVEILLER ne signifie pas ENTRER.",
   "orders_sent": 0,
   "early_reversal": {
-    "signal_status": "INVALIDATION",
+    "signal_status": "ALERTE_PRÉCOCE",
     "direction": "HAUSSIER",
     "evidence": [
       {
         "category": "momentum",
-        "type": "macd_histogram_turn",
-        "amplitude": 8.10168e-07,
-        "timeframe": "15m",
-        "setup_index": 293
-      },
-      {
-        "category": "momentum",
         "type": "momentum_turn",
-        "amplitude": 1.5e-05,
+        "amplitude": 2e-06,
         "timeframe": "15m",
-        "setup_index": 293
-      },
-      {
-        "category": "momentum",
-        "type": "rsi_turn",
-        "amplitude": 15.909,
-        "timeframe": "15m",
-        "setup_index": 293
+        "setup_index": 299
       },
       {
         "category": "structure",
-        "type": "bullish_engulfing",
+        "type": "bullish_rsi_divergence",
         "timeframe": "15m",
-        "setup_index": 293
+        "setup_index": 299
       },
       {
         "category": "context",
@@ -315,7 +305,7 @@
       "1w",
       "1M"
     ],
-    "reason": "Ancre structurelle du setup rompue (0.001366, tolerance 0.000003)",
+    "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
     "confidence": 50,
     "confidence_note": "score de convergence des familles de preuves (0-100) ; ce n'est pas une probabilite et n'a pas ete calibre",
     "families": [
@@ -325,21 +315,21 @@
     ],
     "setup": {
       "direction": "HAUSSIER",
-      "anchor": 0.001366,
-      "age_bars": 6,
+      "anchor": 0.001349,
+      "age_bars": 0,
       "note": "age_bars : nombre de bougies entre la creation du setup et la barre courante. L'index du setup est relatif a la fenetre analysee et n'est donc pas publie."
     },
     "objectives": {
       "short_term": {
         "level": 0.00142,
-        "distance_pct": 4.797,
-        "distance_atr": 5.63,
+        "distance_pct": 5.185,
+        "distance_atr": 6.2,
         "kind": "opposing structural level (recent window)"
       },
       "swing": {
         "level": 0.001552,
-        "distance_pct": 14.539,
-        "distance_atr": 17.06,
+        "distance_pct": 14.963,
+        "distance_atr": 17.89,
         "kind": "opposing structural level (swing window)"
       },
       "note": "Niveaux structurels informatifs : une localisation, pas une prediction. Aucun objectif n'entre dans la decision du detecteur."
@@ -362,10 +352,10 @@
       "direction": "HAUSSIER",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 0.9795134355979374,
-        "measured_ex_fees_pct": 0.9795134355979374,
-        "spread_pct": 0.22148394241417235,
-        "slippage_pct": 0.7582744975448426,
+        "round_trip_pct": 0.9518415994583241,
+        "measured_ex_fees_pct": 0.9518415994583241,
+        "spread_pct": 0.22213994816734278,
+        "slippage_pct": 0.7299481083340664,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
         "method": "liquidity_cost",
@@ -374,15 +364,15 @@
         "depth_failure": null
       },
       "objective": {
-        "move_pct": 4.797,
+        "move_pct": 5.185,
         "level": 0.00142,
         "kind": "opposing structural level (recent window)",
         "source": "short_term"
       },
-      "coverage_ratio": 4.897329455283789,
-      "net_edge_pct": 3.8174865644020626,
+      "coverage_ratio": 5.4473349378202105,
+      "net_edge_pct": 4.233158400541676,
       "economic_validity": "COUVERT_MINORANT",
-      "reason": "le mouvement visé couvre le minorant de coût (4.90x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
+      "reason": "le mouvement visé couvre le minorant de coût (5.45x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
       "provenance": [
         "coût: liquidity_cost (scénario 300 USDT)",
         "profondeur: carnet public observé",
@@ -398,6 +388,6 @@
       ]
     }
   },
-  "collection_id": "a3bd5b05-ef48-464b-a7c4-c2a32ae1f027",
-  "snapshot_id": "5776135aad6bd9e94808448c4adec6ed16070a750740c1d9bd6d993214a535d1"
+  "collection_id": "63e4058a-c6cc-4229-a95a-9c035d2dc550",
+  "snapshot_id": "053e83a431f8d95015dc431f45adda72c60ea53785faf60c41f8def9ff236ddd"
 }

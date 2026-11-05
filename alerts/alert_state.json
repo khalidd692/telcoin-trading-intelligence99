@@ -1,41 +1,10 @@
 {
   "counters": {
-    "alerts": 42,
-    "evaluations": 1524,
+    "alerts": 43,
+    "evaluations": 1525,
     "resolutions": 20
   },
   "history": [
-    {
-      "action": "NOUVELLE_ALERTE",
-      "alert": {
-        "age_bars": 0,
-        "anchor": 0.00138,
-        "confidence": 30,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
-        "setup_id": "fd00cc15c6c4ea11",
-        "signal_status": "ALERTE_PRÉCOCE",
-        "symbol": "TELUSDT"
-      },
-      "at": "2026-10-24T13:40:53.661983+00:00",
-      "resolved": {
-        "age_bars": 12,
-        "anchor": 0.001473,
-        "confidence": 65,
-        "direction": "BAISSIER",
-        "exploitable": false,
-        "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
-        "first_seen": "2026-10-24T10:16:44.927943+00:00",
-        "last_seen": "2026-10-24T13:27:18.683318+00:00",
-        "reason": "Setup baissier confirme par intermediate_timeframe_turn, momentum_sustained",
-        "seen_count": 15,
-        "setup_id": "e97ef8d7b37af626",
-        "signal_status": "CONFIRMATION",
-        "symbol": "TELUSDT"
-      }
-    },
     {
       "action": "NOUVELLE_ALERTE",
       "alert": {
@@ -1129,23 +1098,54 @@
       },
       "at": "2026-11-05T11:41:54.612736+00:00",
       "resolved": null
+    },
+    {
+      "action": "NOUVELLE_ALERTE",
+      "alert": {
+        "age_bars": 0,
+        "anchor": 0.001349,
+        "confidence": 50,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
+        "setup_id": "f29e741c2a076c6a",
+        "signal_status": "ALERTE_PRÉCOCE",
+        "symbol": "TELUSDT"
+      },
+      "at": "2026-11-05T13:17:36.319363+00:00",
+      "resolved": {
+        "age_bars": 6,
+        "anchor": 0.001366,
+        "confidence": 50,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+        "first_seen": "2026-11-05T11:41:54.612736+00:00",
+        "last_seen": "2026-11-05T13:04:00.484567+00:00",
+        "reason": "Ancre structurelle du setup rompue (0.001366, tolerance 0.000003)",
+        "seen_count": 7,
+        "setup_id": "6325d0b94242c371",
+        "signal_status": "INVALIDATION",
+        "symbol": "TELUSDT"
+      }
     }
   ],
   "open_alert": {
-    "age_bars": 6,
-    "anchor": 0.001366,
+    "age_bars": 0,
+    "anchor": 0.001349,
     "confidence": 50,
     "direction": "HAUSSIER",
     "exploitable": false,
     "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-    "first_seen": "2026-11-05T11:41:54.612736+00:00",
-    "last_seen": "2026-11-05T13:04:00.484567+00:00",
-    "reason": "Ancre structurelle du setup rompue (0.001366, tolerance 0.000003)",
-    "seen_count": 7,
-    "setup_id": "6325d0b94242c371",
-    "signal_status": "INVALIDATION",
+    "first_seen": "2026-11-05T13:17:36.319363+00:00",
+    "last_seen": "2026-11-05T13:17:36.319363+00:00",
+    "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
+    "seen_count": 1,
+    "setup_id": "f29e741c2a076c6a",
+    "signal_status": "ALERTE_PRÉCOCE",
     "symbol": "TELUSDT"
   },
   "schema_version": 1,
-  "updated_at": "2026-11-05T13:04:00.484567+00:00"
+  "updated_at": "2026-11-05T13:17:36.319363+00:00"
 }
