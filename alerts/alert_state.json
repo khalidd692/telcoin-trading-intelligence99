@@ -1,41 +1,10 @@
 {
   "counters": {
     "alerts": 43,
-    "evaluations": 1537,
-    "resolutions": 20
+    "evaluations": 1538,
+    "resolutions": 21
   },
   "history": [
-    {
-      "action": "NOUVELLE_ALERTE",
-      "alert": {
-        "age_bars": 0,
-        "anchor": 0.001366,
-        "confidence": 30,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
-        "setup_id": "6325d0b94242c371",
-        "signal_status": "ALERTE_PRÉCOCE",
-        "symbol": "TELUSDT"
-      },
-      "at": "2026-10-24T15:43:34.281929+00:00",
-      "resolved": {
-        "age_bars": 7,
-        "anchor": 0.00138,
-        "confidence": 30,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "first_seen": "2026-10-24T13:40:53.661983+00:00",
-        "last_seen": "2026-10-24T15:29:57.473473+00:00",
-        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
-        "seen_count": 9,
-        "setup_id": "fd00cc15c6c4ea11",
-        "signal_status": "ALERTE_PRÉCOCE",
-        "symbol": "TELUSDT"
-      }
-    },
     {
       "action": "RESOLUTION",
       "alert": null,
@@ -1129,23 +1098,29 @@
         "signal_status": "INVALIDATION",
         "symbol": "TELUSDT"
       }
+    },
+    {
+      "action": "RESOLUTION",
+      "alert": null,
+      "at": "2026-11-05T18:28:56.314142+00:00",
+      "resolved": {
+        "age_bars": 11,
+        "anchor": 0.001349,
+        "confidence": 40,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+        "first_seen": "2026-11-05T13:17:36.319363+00:00",
+        "last_seen": "2026-11-05T16:01:50.003849+00:00",
+        "reason": "Ancre structurelle du setup rompue (0.001349, tolerance 0.000007)",
+        "seen_count": 13,
+        "setup_id": "f29e741c2a076c6a",
+        "signal_status": "INVALIDATION",
+        "symbol": "TELUSDT"
+      }
     }
   ],
-  "open_alert": {
-    "age_bars": 11,
-    "anchor": 0.001349,
-    "confidence": 40,
-    "direction": "HAUSSIER",
-    "exploitable": false,
-    "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-    "first_seen": "2026-11-05T13:17:36.319363+00:00",
-    "last_seen": "2026-11-05T16:01:50.003849+00:00",
-    "reason": "Ancre structurelle du setup rompue (0.001349, tolerance 0.000007)",
-    "seen_count": 13,
-    "setup_id": "f29e741c2a076c6a",
-    "signal_status": "INVALIDATION",
-    "symbol": "TELUSDT"
-  },
+  "open_alert": null,
   "schema_version": 1,
-  "updated_at": "2026-11-05T16:01:50.003849+00:00"
+  "updated_at": "2026-11-05T18:28:56.314142+00:00"
 }
