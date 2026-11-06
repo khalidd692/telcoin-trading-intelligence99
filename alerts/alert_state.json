@@ -1,27 +1,10 @@
 {
   "counters": {
     "alerts": 45,
-    "evaluations": 1640,
-    "resolutions": 22
+    "evaluations": 1641,
+    "resolutions": 23
   },
   "history": [
-    {
-      "action": "NOUVELLE_ALERTE",
-      "alert": {
-        "age_bars": 0,
-        "anchor": 0.001386,
-        "confidence": 30,
-        "direction": "HAUSSIER",
-        "exploitable": false,
-        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
-        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
-        "setup_id": "1710b05d4adaf1dd",
-        "signal_status": "ALERTE_PRÉCOCE",
-        "symbol": "TELUSDT"
-      },
-      "at": "2026-10-25T10:26:01.695566+00:00",
-      "resolved": null
-    },
     {
       "action": "RESOLUTION",
       "alert": null,
@@ -1115,23 +1098,29 @@
       },
       "at": "2026-11-06T14:49:27.773539+00:00",
       "resolved": null
+    },
+    {
+      "action": "RESOLUTION",
+      "alert": null,
+      "at": "2026-11-06T18:55:02.643968+00:00",
+      "resolved": {
+        "age_bars": 15,
+        "anchor": 0.001582,
+        "confidence": 50,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
+        "first_seen": "2026-11-06T14:49:27.773539+00:00",
+        "last_seen": "2026-11-06T18:41:25.238154+00:00",
+        "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained, structure_break",
+        "seen_count": 18,
+        "setup_id": "cf5e508070544973",
+        "signal_status": "CONFIRMATION",
+        "symbol": "TELUSDT"
+      }
     }
   ],
-  "open_alert": {
-    "age_bars": 15,
-    "anchor": 0.001582,
-    "confidence": 50,
-    "direction": "HAUSSIER",
-    "exploitable": false,
-    "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
-    "first_seen": "2026-11-06T14:49:27.773539+00:00",
-    "last_seen": "2026-11-06T18:41:25.238154+00:00",
-    "reason": "Setup haussier confirme par intermediate_timeframe_turn, momentum_sustained, structure_break",
-    "seen_count": 18,
-    "setup_id": "cf5e508070544973",
-    "signal_status": "CONFIRMATION",
-    "symbol": "TELUSDT"
-  },
+  "open_alert": null,
   "schema_version": 1,
-  "updated_at": "2026-11-06T18:41:25.238154+00:00"
+  "updated_at": "2026-11-06T18:55:02.643968+00:00"
 }
