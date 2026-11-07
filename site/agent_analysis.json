@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-07T14:26:21.352497+00:00",
-  "source_generated_at": "2026-11-07T14:26:21.191000+00:00",
+  "generated_at": "2026-11-07T14:40:00.097260+00:00",
+  "source_generated_at": "2026-11-07T14:39:59.917000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
@@ -11,7 +11,7 @@
   "cross_check": {
     "independent_confirmation": "OUI",
     "venue_data_diagnostic": {
-      "status": "NON_SIGNALÉ",
+      "status": "SUSPECT_IDENTIQUE",
       "left_symbol": "MEXC:TELUSDT",
       "right_symbol": "KUCOIN:TEL-USDT",
       "checked_fields": [
@@ -20,11 +20,13 @@
         "ask"
       ],
       "matching_fields": [
-        "bid"
+        "mid",
+        "bid",
+        "ask"
       ],
-      "note": "Aucune identité complète suspecte détectée sur les champs comparables."
+      "note": "Alerte diagnostique seulement : des valeurs identiques ne prouvent pas une corruption. Vérifier l'instrument, la source et le cache."
     },
-    "divergence_bps": 3.1230480949410766
+    "divergence_bps": 0.0
   },
   "timeframes": {
     "15m": {
@@ -32,36 +34,36 @@
       "reason": null,
       "candle_status": "OK",
       "candle_count": 300,
-      "last_closed_at": "2026-11-07T14:15:00+00:00",
-      "candle_age_seconds": 681,
-      "close": 0.001601,
-      "ema20": 0.001615331975619986,
-      "ema50": 0.001631481343375583,
-      "sma10": 0.0016014,
-      "sma20": 0.00161705,
-      "sma50": 0.00163852,
-      "sma100": 0.0016464599999999998,
-      "sma200": 0.00158477,
-      "rsi14": 32.653061224489775,
-      "macd_histogram": -1.2041661728455074e-07,
-      "macd_histogram_previous": -2.981734441007696e-07,
-      "atr14": 1.3500771682336349e-05,
-      "momentum10": -2.3999999999999933e-05,
-      "cci20": -70.80561714708053,
-      "stoch_k": 31.250000000000064,
-      "stoch_d": 29.687500000000085,
-      "di_plus": 14.072769250299173,
-      "di_minus": 35.6688562377291,
-      "adx14": 28.835166463058044,
-      "awesome_oscillator": -2.3967647058823578e-05,
-      "volume_last": 272847.55,
-      "volume_mean20": 948925.507,
-      "volume_ratio_20": 0.2875331603874781,
+      "last_closed_at": "2026-11-07T14:30:00+00:00",
+      "candle_age_seconds": 600,
+      "close": 0.001599,
+      "ema20": 0.0016137765493704631,
+      "ema50": 0.0016302075710536656,
+      "sma10": 0.0016022999999999999,
+      "sma20": 0.00161525,
+      "sma50": 0.0016370000000000002,
+      "sma100": 0.0016466,
+      "sma200": 0.001585965,
+      "rsi14": 30.6122448979591,
+      "macd_histogram": -2.7461702843708703e-08,
+      "macd_histogram_previous": -1.204166168438632e-07,
+      "atr14": 1.2822145134146614e-05,
+      "momentum10": 8.999999999999894e-06,
+      "cci20": -67.11409395973195,
+      "stoch_k": 28.12499999999999,
+      "stoch_d": 30.20833333333337,
+      "di_plus": 13.759187461798799,
+      "di_minus": 34.8740514922596,
+      "adx14": 29.87669231071477,
+      "awesome_oscillator": -2.4755882352941365e-05,
+      "volume_last": 211950.61,
+      "volume_mean20": 937460.9890000001,
+      "volume_ratio_20": 0.22609005866589715,
       "trend": "BAISSIER",
       "flags": [
         "HISTOGRAMME_MACD_EN_AMELIORATION"
       ],
-      "change_30": -0.029696969696969666
+      "change_30": -0.023213194868662246
     },
     "1h": {
       "status": "OK",
@@ -69,7 +71,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-07T14:00:00+00:00",
-      "candle_age_seconds": 1581,
+      "candle_age_seconds": 2400,
       "close": 0.001601,
       "ema20": 0.0016336500136531053,
       "ema50": 0.0015886698500075316,
@@ -103,7 +105,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-07T12:00:00+00:00",
-      "candle_age_seconds": 8781,
+      "candle_age_seconds": 9600,
       "close": 0.00159,
       "ema20": 0.0015426356784500896,
       "ema50": 0.0014842295828701637,
@@ -137,7 +139,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-07T00:00:00+00:00",
-      "candle_age_seconds": 51981,
+      "candle_age_seconds": 52800,
       "close": 0.001678,
       "ema20": 0.0015205848682850523,
       "ema50": 0.001618174287307423,
@@ -175,7 +177,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 483981,
+      "candle_age_seconds": 484800,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -209,7 +211,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 570381,
+      "candle_age_seconds": 571200,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -287,26 +289,26 @@
     "objectives": {
       "resistance": {
         "level": 0.001656,
-        "distance_pct": 3.435,
-        "distance_atr": 4.07,
+        "distance_pct": 3.565,
+        "distance_atr": 4.45,
         "kind": "resistance (recent window)"
       },
       "support": {
         "level": 0.001581,
-        "distance_pct": 1.249,
-        "distance_atr": 1.48,
+        "distance_pct": 1.126,
+        "distance_atr": 1.4,
         "kind": "support (recent window)"
       },
       "short_term": {
         "level": 0.001656,
-        "distance_pct": 3.435,
-        "distance_atr": 4.07,
+        "distance_pct": 3.565,
+        "distance_atr": 4.45,
         "kind": "resistance (recent window)"
       },
       "swing": {
         "level": 0.001581,
-        "distance_pct": 1.249,
-        "distance_atr": 1.48,
+        "distance_pct": 1.126,
+        "distance_atr": 1.4,
         "kind": "support (recent window)"
       },
       "note": "Niveaux structurels informatifs : une localisation, pas une prediction. Aucun objectif n'entre dans la decision du detecteur."
@@ -329,10 +331,10 @@
       "direction": "INDETERMINE",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 0.7621103874214252,
-        "measured_ex_fees_pct": 0.7621103874214252,
-        "spread_pct": 0.31220730565095306,
-        "slippage_pct": 0.4503896891670603,
+        "round_trip_pct": 0.7793675863849029,
+        "measured_ex_fees_pct": 0.7793675863849029,
+        "spread_pct": 0.3124023742580452,
+        "slippage_pct": 0.46745242730817094,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
         "method": "liquidity_cost",
@@ -341,7 +343,7 @@
         "depth_failure": null
       },
       "objective": {
-        "move_pct": 3.435,
+        "move_pct": 3.565,
         "level": 0.001656,
         "kind": "resistance (recent window)",
         "source": "short_term"
@@ -365,6 +367,6 @@
       ]
     }
   },
-  "collection_id": "2a614817-99f1-4d6c-adb0-2247006215aa",
-  "snapshot_id": "d988dfbc60175c069c776a3398e940a664f992549e90488b09968322d620eda2"
+  "collection_id": "25b7dfab-08c3-4358-8362-944f21a2a4d4",
+  "snapshot_id": "4008cf406e744e7c8979e165364e9cdd14c77169ab6789084b76fdaeb4b3e07a"
 }
