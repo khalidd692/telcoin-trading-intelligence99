@@ -1,30 +1,10 @@
 {
   "counters": {
-    "alerts": 47,
-    "evaluations": 1808,
+    "alerts": 48,
+    "evaluations": 1809,
     "resolutions": 25
   },
   "history": [
-    {
-      "action": "RESOLUTION",
-      "alert": null,
-      "at": "2026-10-25T23:22:38.460827+00:00",
-      "resolved": {
-        "age_bars": 15,
-        "anchor": 0.001502,
-        "confidence": 80,
-        "direction": "BAISSIER",
-        "exploitable": false,
-        "exploitable_reason": "Retournement confirme mais regime en tendance (variation 1j 30 j hors zone neutre) : contre-tendance non exploitable",
-        "first_seen": "2026-10-25T19:17:22.962544+00:00",
-        "last_seen": "2026-10-25T23:09:02.138521+00:00",
-        "reason": "Setup baissier confirme par momentum_sustained",
-        "seen_count": 18,
-        "setup_id": "f505d06b0f0f38f2",
-        "signal_status": "CONFIRMATION",
-        "symbol": "TELUSDT"
-      }
-    },
     {
       "action": "NOUVELLE_ALERTE",
       "alert": {
@@ -1093,9 +1073,40 @@
         "signal_status": "ALERTE_PRÉCOCE",
         "symbol": "TELUSDT"
       }
+    },
+    {
+      "action": "NOUVELLE_ALERTE",
+      "alert": {
+        "age_bars": 0,
+        "anchor": 0.001591,
+        "confidence": 50,
+        "direction": "HAUSSIER",
+        "exploitable": false,
+        "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+        "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
+        "setup_id": "9a37d3a785263957",
+        "signal_status": "ALERTE_PRÉCOCE",
+        "symbol": "TELUSDT"
+      },
+      "at": "2026-11-08T09:02:34.834928+00:00",
+      "resolved": null
     }
   ],
-  "open_alert": null,
+  "open_alert": {
+    "age_bars": 0,
+    "anchor": 0.001591,
+    "confidence": 50,
+    "direction": "HAUSSIER",
+    "exploitable": false,
+    "exploitable_reason": "Aucun signal de retournement confirme a ce stade",
+    "first_seen": "2026-11-08T09:02:34.834928+00:00",
+    "last_seen": "2026-11-08T09:02:34.834928+00:00",
+    "reason": "Setup de retournement haussier a l'extreme, 2 famille(s) independante(s), non confirme",
+    "seen_count": 1,
+    "setup_id": "9a37d3a785263957",
+    "signal_status": "ALERTE_PRÉCOCE",
+    "symbol": "TELUSDT"
+  },
   "schema_version": 1,
-  "updated_at": "2026-11-08T08:48:57.412747+00:00"
+  "updated_at": "2026-11-08T09:02:34.834928+00:00"
 }
