@@ -2,8 +2,8 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-08T11:45:49.558914+00:00",
-  "source_generated_at": "2026-11-08T11:45:49.412000+00:00",
+  "generated_at": "2026-11-08T11:59:25.361845+00:00",
+  "source_generated_at": "2026-11-08T11:59:25.214000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
@@ -19,10 +19,12 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [],
+      "matching_fields": [
+        "ask"
+      ],
       "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": 19.096117122852842
+    "divergence_bps": -9.49667616334409
   },
   "timeframes": {
     "15m": {
@@ -31,7 +33,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T11:45:00+00:00",
-      "candle_age_seconds": 50,
+      "candle_age_seconds": 865,
       "close": 0.00158,
       "ema20": 0.0015961205666043508,
       "ema50": 0.0016030190072428851,
@@ -65,7 +67,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T11:00:00+00:00",
-      "candle_age_seconds": 2750,
+      "candle_age_seconds": 3565,
       "close": 0.001581,
       "ema20": 0.0016094462438037802,
       "ema50": 0.0015982791048112508,
@@ -99,7 +101,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T08:00:00+00:00",
-      "candle_age_seconds": 13550,
+      "candle_age_seconds": 14365,
       "close": 0.001607,
       "ema20": 0.0015692237201711022,
       "ema50": 0.001506913448565549,
@@ -133,7 +135,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T00:00:00+00:00",
-      "candle_age_seconds": 42350,
+      "candle_age_seconds": 43165,
       "close": 0.001594,
       "ema20": 0.0015275767855912584,
       "ema50": 0.0016172261330701537,
@@ -169,7 +171,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 560750,
+      "candle_age_seconds": 561565,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -203,7 +205,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 647150,
+      "candle_age_seconds": 647965,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -329,10 +331,10 @@
       "direction": "HAUSSIER",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 1.2905041275576534,
-        "measured_ex_fees_pct": 1.2905041275576534,
-        "spread_pct": 0.635324015247778,
-        "slippage_pct": 0.6571919046317494,
+        "round_trip_pct": 1.0867084257052586,
+        "measured_ex_fees_pct": 1.0867084257052586,
+        "spread_pct": 0.506970849176171,
+        "slippage_pct": 0.5810194244410375,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
         "method": "liquidity_cost",
@@ -346,10 +348,10 @@
         "kind": "opposing structural level (recent window)",
         "source": "short_term"
       },
-      "coverage_ratio": 2.2068894931703853,
-      "net_edge_pct": 1.5574958724423464,
+      "coverage_ratio": 2.6207581837342317,
+      "net_edge_pct": 1.7612915742947413,
       "economic_validity": "COUVERT_MINORANT",
-      "reason": "le mouvement visé couvre le minorant de coût (2.21x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
+      "reason": "le mouvement visé couvre le minorant de coût (2.62x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
       "provenance": [
         "coût: liquidity_cost (scénario 300 USDT)",
         "profondeur: carnet public observé",
@@ -365,6 +367,6 @@
       ]
     }
   },
-  "collection_id": "bab55c60-668a-478a-958c-20e7d40a9909",
-  "snapshot_id": "2c80023c22a67ae020123bfd11ebee67ba8a8421a93d9939ffaf5ad8a2921232"
+  "collection_id": "5f59fde0-f8e6-42bd-8bf3-563954e30853",
+  "snapshot_id": "685aa8885bd72b5be4b585e9425fbf8ea192441a058be4e5f6c4f6feb401e352"
 }
