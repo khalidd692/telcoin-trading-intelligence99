@@ -19,7 +19,7 @@ Stratégie primaire TradingView : « TEL Kraken – repli 4h dans tendance » (s
 Règles de référence :
 - EMA20 > EMA50 et clôture 4h > EMA50.
 - Branche EMA20 : low <= EMA20 ; bougie haussière (close > open) ; close > EMA20.
-- Branche résistance/support : sommet confirmé 5/5 ; cassure par clôture au-dessus ; retest ultérieur où low atteint le niveau et close reste au-dessus ; bougie de confirmation haussière clôturant au-dessus EMA20.
+- Branche résistance/support : sommet confirmé 5/5 ; cassure par clôture au-dessus ; premier retest ultérieur où low atteint le niveau et close reste au-dessus ; bougie de confirmation haussière clôturant au-dessus EMA20.
 - Pivots 5/5 : un pivot devient disponible seulement après clôture des cinq bougies à droite. Aucun lookahead.
 - Signal à la clôture t ; entrée à l'ouverture de t+1.
 - ATR(14) Wilder ; stop sous le dernier pivot bas 5/5 confirmé moins 0,5 ATR.
@@ -32,23 +32,32 @@ Règles de référence :
 
 Réserves : la stratégie TradingView originale n'a pas été modifiée ; ses huit rule_checks étaient « unsettled ». La présente spécification est celle du test, pas une validation de rentabilité.
 
-## Étape 3 — EN COURS
-Tester séparément :
-1. branche EMA20 ;
-2. branche résistance devenue support ;
-3. combinaison des deux, avec déduplication des signaux.
+## Étape 3 — PREMIER REPLAY EFFECTUÉ, VALIDATION INCOMPLÈTE
+Données utilisées : 1 741 bougies clôturées, dernière bougie en formation exclue. Un gap de 8 h est présent ; aucune interpolation. Indicateurs recalculés sur 4h : EMA20/EMA50 et ATR(14) Wilder. Pivots 5/5 disponibles après les cinq bougies de droite. Split chronologique 70/30 ; début OOS : 2026-08-13 16:00 UTC.
 
-Conditions :
-- mêmes données, règles d'exécution et coûts pour les trois variantes ;
-- séparation chronologique IS/OOS, sans optimisation sur OOS ;
-- résultats bruts et nets, nombre de trades, expectancy en R, profit factor, drawdown, coûts, raisons de sortie, exclusions pour gaps ;
-- seuil de travail : au moins 100 trades OOS ; en dessous, verdict « DONNÉES INSUFFISANTES ».
-- Aucun verdict de rentabilité sans expectancy nette positive, PF > 1,2, borne basse de confiance positive et robustesse temporelle.
-- Les taux de frais/slippage restent des scénarios provisoires tant que les frais exacts ne sont pas vérifiés.
+Diagnostic des candidats :
+- Branche EMA20 : 336 bougies en tendance ; 43 contacts EMA20 avec confirmation haussière ; 43 candidats disposant d'un creux confirmé et d'une résistance cible ; 0/43 atteint le RR brut minimum 1,51. RR maximal observé : environ 0,80.
+- Branche résistance devenue support : 81 cassures de pivots hauts confirmés ; 69 premiers retests ; 55 retests avec confirmation haussière au-dessus EMA20 ; 30 candidats avec creux et cible identifiables ; 0/30 atteint le RR brut minimum 1,51. RR maximal observé : environ 0,295.
+- Combinaison dédupliquée : 0 setup admissible.
+
+Verdict provisoire : aucune entrée admissible dans ce premier replay. Aucun trade n'a donc été exécuté dans la simulation ; expectancy, profit factor, drawdown et statistiques OOS ne sont pas calculables (n=0). Ce résultat ne prouve ni rentabilité ni absence définitive d'opportunité : il montre que la règle actuelle de cible/RR filtre tous les candidats observés sur cette période.
+
+Deux scénarios de coûts prévus, non vérifiés sur le compte Kraken :
+- central : frais 0,25 % + slippage 0,10 % par côté ;
+- prudent : frais 0,40 % + slippage 0,30 % par côté.
+Comme aucun candidat n'a franchi le filtre RR, aucun P&L net n'est calculable. Ne pas présenter ces taux comme les frais réels.
+
+Limite technique à corriger avant de considérer l'étape 3 achevée : le moteur strict existant ne reproduit pas exactement la spécification (notamment ATR simple au lieu de Wilder et absence de la branche résistance/support). Le replay ci-dessus est un premier calcul indépendant des règles, pas encore un audit complet du moteur ni une validation statistique. La règle de résistance/support utilise le premier retest après cassure confirmée ; pivots hauts/bas utilisent une convention déterministe de gestion des égalités.
+
+Prochaine action à la reprise :
+1. Construire/auditer un moteur dédié aux deux branches, en vérifiant les signaux et les entrées/sorties sur cas unitaires.
+2. Réconcilier les calculs avec le CSV GitHub et conserver les fenêtres autour du gap exclues.
+3. Produire un journal trade-par-trade et les résultats IS/OOS sous les deux scénarios de coûts.
+4. Conclure « DONNÉES INSUFFISANTES » dès que l'OOS compte moins de 100 trades ; ne pas relâcher le seuil RR pour fabriquer des signaux.
 
 ## Règles de sécurité et de gouvernance
 - Paper trading exclusivement si une étape future le permet, mais aucun paper order sans autorisation explicite.
 - Aucun ordre réel, aucun accès au compte Kraken réel, aucun trading automatique.
-- Ne pas modifier le board, les stratégies, paramètres, scripts originaux, dépôt, déployer, commit/merge autre chose que le présent document de suivi et les données explicitement autorisées.
+- Ne pas modifier le board, les stratégies, paramètres, scripts originaux, ni déployer. Le présent document de suivi et le CSV historique sont les seuls ajouts explicitement autorisés.
 - Ne jamais confondre hypothèse, test incomplet et stratégie validée.
 - Reprendre directement à l'étape 3 à la prochaine session ; ne pas recommencer les étapes 1 et 2.
