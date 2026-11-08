@@ -2,14 +2,14 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-08T04:30:26.186183+00:00",
-  "source_generated_at": "2026-11-08T04:30:26.060000+00:00",
+  "generated_at": "2026-11-08T04:44:03.724529+00:00",
+  "source_generated_at": "2026-11-08T04:44:03.599000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
   "reason": null,
   "cross_check": {
-    "independent_confirmation": "OUI",
+    "independent_confirmation": "NON ÉTABLIE",
     "venue_data_diagnostic": {
       "status": "NON_SIGNALÉ",
       "left_symbol": "MEXC:TELUSDT",
@@ -22,7 +22,7 @@
       "matching_fields": [],
       "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": -27.565084226644597
+    "divergence_bps": -24.397682220188354
   },
   "timeframes": {
     "15m": {
@@ -31,7 +31,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T04:30:00+00:00",
-      "candle_age_seconds": 26,
+      "candle_age_seconds": 844,
       "close": 0.001627,
       "ema20": 0.0016168714027608405,
       "ema50": 0.0016106525607649806,
@@ -65,7 +65,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T04:00:00+00:00",
-      "candle_age_seconds": 1826,
+      "candle_age_seconds": 2644,
       "close": 0.001648,
       "ema20": 0.0016139991162764133,
       "ema50": 0.0015957515926037075,
@@ -103,7 +103,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T04:00:00+00:00",
-      "candle_age_seconds": 1826,
+      "candle_age_seconds": 2644,
       "close": 0.001648,
       "ema20": 0.0015652472696628043,
       "ema50": 0.0015028284209401919,
@@ -140,7 +140,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-08T00:00:00+00:00",
-      "candle_age_seconds": 16226,
+      "candle_age_seconds": 17044,
       "close": 0.001594,
       "ema20": 0.0015275767855912584,
       "ema50": 0.0016172261330701537,
@@ -176,7 +176,7 @@
       "candle_status": "OK",
       "candle_count": 102,
       "last_closed_at": "2026-11-02T00:00:00+00:00",
-      "candle_age_seconds": 534626,
+      "candle_age_seconds": 535444,
       "close": 0.001448,
       "ema20": 0.0018238087692862817,
       "ema50": 0.002596389339978435,
@@ -210,7 +210,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 621026,
+      "candle_age_seconds": 621844,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -374,13 +374,13 @@
       "direction": "HAUSSIER",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 1.0304551364918666,
-        "measured_ex_fees_pct": 1.0304551364918666,
-        "spread_pct": 0.6142506142506025,
-        "slippage_pct": 0.41808526508955124,
+        "round_trip_pct": 1.0206463262902237,
+        "measured_ex_fees_pct": 1.0206463262902237,
+        "spread_pct": 0.5502904310608311,
+        "slippage_pct": 0.471865838485352,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
-        "method": "liquidity_cost",
+        "method": "order_book",
         "is_lower_bound": true,
         "depth_complete": true,
         "depth_failure": null
@@ -391,12 +391,12 @@
         "kind": "opposing structural level (recent window)",
         "source": "short_term"
       },
-      "coverage_ratio": 1.5507710558271481,
-      "net_edge_pct": 0.5675448635081335,
+      "coverage_ratio": 1.565674571923756,
+      "net_edge_pct": 0.5773536737097764,
       "economic_validity": "COUVERT_MINORANT",
-      "reason": "le mouvement visé couvre le minorant de coût (1.55x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
+      "reason": "le mouvement visé couvre le minorant de coût (1.57x) ; le coût réel (frais non vérifiés ou profondeur non mesurée) peut réduire cette marge",
       "provenance": [
-        "coût: liquidity_cost (scénario 300 USDT)",
+        "coût: order_book (scénario 300 USDT)",
         "profondeur: carnet public observé",
         "frais: NOT_VERIFIED (exclus ; coût réel >= coût publié)",
         "objectif: objectives.short_term"
@@ -410,6 +410,6 @@
       ]
     }
   },
-  "collection_id": "3d019611-83d5-4c8a-bdbb-0b5359c670e6",
-  "snapshot_id": "d0a582f271259ec9c2b7d2ae7c07cf3da0336d1bccd4eb5f7ee5dc836ef8d327"
+  "collection_id": "7fa66ef2-0506-4434-9b02-58ae95bac16a",
+  "snapshot_id": "a4e4daf8f7453e5fef7b01919135b3bf6b5de861697796856a2497f11bd36e11"
 }
