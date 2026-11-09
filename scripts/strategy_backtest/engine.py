@@ -22,7 +22,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 BAR = dt.timedelta(hours=4)
@@ -146,6 +146,7 @@ class Segment:
     def __init__(self, bars: List[Bar], offset: int, p: Params):
         self.bars, self.offset, self.p = bars, offset, p
         self.n = len(bars)
+        self._run_states = {}
         closes = [b.c for b in bars]
         self.e_fast = ema(closes, p.ema_fast)
         self.e_slow = ema(closes, p.ema_slow)
@@ -280,10 +281,51 @@ def simulate_exit(seg: Segment, tl: int, stop: float, target: float, p: Params):
     raise AssertionError("inatteignable")
 
 
-def run(cands: List[Candidate], p: Params, cost: Costs, t_lo: int, t_hi: int):
-    equity, trades, log = p.capital, [], []
-    free_t, tid = -1, 0
-    realized: Dict[dt.date, float] = defaultdict(float)
+@dataclass
+class RunState:
+    """Portfolio shared by consecutive phase windows of one cost scenario.
+
+    Trades belong to their signal phase and are simulated through their exit,
+    even across a boundary; free_t keeps that position/cooldown reserved.
+    """
+    params: Params
+    cost: Costs
+    equity: float = field(init=False)
+    free_t: int = -1
+    tid: int = 0
+    realized: Dict[dt.date, float] = field(default_factory=lambda: defaultdict(float))
+    next_t: Optional[int] = None
+
+    def __post_init__(self):
+        self.equity = self.params.capital
+
+
+def run(cands: List[Candidate], p: Params, cost: Costs, t_lo: int, t_hi: int,
+        *, state: Optional[RunState] = None):
+    """Run [t_lo, t_hi), retaining portfolio state across adjacent phases.
+
+    Pass state explicitly when phases can have no candidates or use different
+    segments. For existing callers, adjacent calls on shared segments resume
+    automatically; a window starting at zero starts a fresh simulation.
+    """
+    segments = {c.segment for c in cands}
+    key = (p, cost)
+    if state is None:
+        previous = [seg._run_states.get(key) for seg in segments]
+        resumable = [s for s in previous if s is not None and s.next_t == t_lo]
+        if t_lo != 0 and resumable:
+            state = resumable[0]
+            if any(s is not state for s in resumable):
+                raise ValueError("Conflicting phase states; pass state explicitly")
+        else:
+            state = RunState(p, cost)
+    if state.params != p or state.cost != cost:
+        raise ValueError("Phase parameters and costs must match the portfolio state")
+    if t_hi < t_lo or (state.next_t is not None and state.next_t != t_lo):
+        raise ValueError("Portfolio phase windows must be adjacent and chronological")
+    equity, trades, log = state.equity, [], []
+    free_t, tid = state.free_t, state.tid
+    realized = state.realized
     for c in cands:
         if not (t_lo <= c.t < t_hi):
             continue
@@ -318,6 +360,10 @@ def run(cands: List[Candidate], p: Params, cost: Costs, t_lo: int, t_hi: int):
                             c.entry, c.stop, c.target, c.rr_gross, ref, why, k - tl, qty, risk_usd, fees, slip_usd,
                             pnl, pnl / risk_usd, equity))
         row["statut"] = "trade"; log.append(row)
+    state.equity, state.free_t, state.tid = equity, free_t, tid
+    state.next_t = t_hi
+    for seg in segments:
+        seg._run_states[key] = state
     return trades, log
 
 

@@ -28,9 +28,11 @@ res["candidates_with_rr"] = len(rrs)
 journal, clog = [], []
 for cname, cost in E.COSTS.items():
     res["results"][cname] = {}
+    state = E.RunState(p, cost)
     for ph, (a, b) in PH.items():
-        tr, log = E.run(cands, p, cost, a, b)
-        res["results"][cname][ph] = E.metrics(tr, p.capital)
+        phase_capital = state.equity
+        tr, log = E.run(cands, p, cost, a, b, state=state)
+        res["results"][cname][ph] = E.metrics(tr, phase_capital)
         for t in tr:
             journal.append({"scenario": cname, "phase": ph, **dataclasses.asdict(t)})
         if cname == "central":
