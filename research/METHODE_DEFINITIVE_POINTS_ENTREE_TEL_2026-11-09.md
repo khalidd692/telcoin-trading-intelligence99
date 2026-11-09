@@ -1143,3 +1143,9 @@ Ne pas créer de doublons ; vérifier ces demandes avant d'en soumettre de nouve
 
 ## Statut
 Audit opérationnel initial effectué en lecture seule. Données partielles et limites documentées. Aucun ordre réel ou paper supplémentaire ; aucun compte Kraken réel consulté ; aucune stratégie, règle, board, alerte, paramètre ou paper broker modifié.
+
+
+### Addendum vérifié — date de lancement du marché Kraken TEL/USD
+Kraken a annoncé officiellement que le trading TEL sur Kraken était en ligne le **22 janvier 2026**. Source officielle : https://blog.kraken.com/product/asset-listings/tel-is-available-for-trading
+
+Conséquence importante : il n'existe pas d'historique de transactions KRAKEN:TELUSD sur Kraken pour 2024 ni pour mai–décembre 2022, puisque le marché n'était pas encore ouvert. Les tests proposés sur ces périodes ne sont donc pas simplement absents du flux TradingView : ils sont impossibles sur cet instrument exact. Ne pas les remplacer par MEXC, KuCoin ou un autre exchange, car cela changerait le marché testé. La fenêtre historique de référence possible commence au lancement du marché, le 2026-01-22, sous réserve de la complétude des données réellement récupérables.
