@@ -638,3 +638,126 @@ Ces seuils sont des propositions de gouvernance, pas des seuils universellement 
 
 ### 10. Statut et garde-fous
 Cette synthèse Gemini est enregistrée comme arbitrage proposé, pas comme validation empirique. Elle ne remplace pas les audits indépendants initiaux. Les points chiffrés et seuils doivent être justifiés et testés avant adoption. Aucun script, stratégie, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
+
+
+## Synthèse contradictoire finale DeepSeek — 2026-11-09
+
+### Portée et réserves
+DeepSeek précise ne pas avoir accès aux trois autres audits (Gemini, Claude, Grok) et ne peut donc pas les comparer littéralement. Sa réponse est une analyse autonome des frictions méthodologiques probables et des contraintes décrites. Les chiffres publics, affirmations sur les frais, la liquidité, l'offre en circulation, les capacités API et les périodes historiques doivent être vérifiés avant utilisation. Aucun backtest privé n'a été exécuté dans cette réponse.
+
+### 1. Réduction du noyau d'indicateurs
+DeepSeek recommande quatre briques :
+1. Structure des prix : swings, supports/résistances, consolidations.
+2. Volume brut et volume relatif, par exemple rapport à la moyenne des 20 bougies.
+3. ATR, uniquement pour dimensionner invalidation et taille, pas comme signal d'entrée.
+4. RSI comme unique oscillateur de momentum.
+
+DeepSeek propose de supprimer MACD, Stochastique, CCI, AO, OBV et les multiples moyennes mobiles. Le principe de réduction des degrés de liberté est pertinent ; la sélection exacte des variables doit toutefois être évaluée par disponibilité, qualité et apport marginal sur KRAKEN:TELUSD. Le volume relatif doit être interprété avec prudence sur une paire peu liquide. L'utilisation de SMC doit être traduite en règles explicites et reproductibles.
+
+### 2. Séparation des livres accumulation et swing
+DeepSeek recommande une séparation stricte des règles, budgets et mesures :
+- **Accumulation** : horizon long, achats planifiés par paliers dans des zones hebdomadaires définies ex ante, plafond de déploiement et réserve préétablie ; pas de stop serré de swing. Les règles proposées (zones sous MM200 hebdomadaire ou value area) sont des exemples à tester, non des seuils adoptés.
+- **Swing** : risque maximal de 0,25 % du capital virtuel par trade, invalidation structurelle ou ATR, une confirmation supplémentaire au maximum, et exécution simulée tenant compte des coûts.
+
+DeepSeek suggère des ordres limites dans les zones. Une limite ne garantit pas l'exécution ; le risque de non-exécution et les mouvements pendant l'attente doivent être enregistrés. La séparation des livres et des métriques est retenue comme principe de recherche, sans modifier les stratégies actuelles.
+
+### 3. Filtre BTC comme interrupteur
+DeepSeek propose un filtre binaire pour le swing long :
+- régime favorable : BTC au-dessus de sa MM200 journalière et dominance BTC stable ou en baisse sur 20 jours ;
+- régime défavorable : BTC sous sa MM200 ou dominance BTC en hausse sur 20 jours ;
+- dans le régime défavorable, swing désactivé ; accumulation poursuivie selon ses règles propres.
+
+Ce filtre est qualifié de plausible, pas démontré sur TEL. Les seuils MM200 et 20 jours sont des hypothèses. Il faut tester filtre activé vs désactivé, avec règles figées et échantillon hors échantillon. Vérifier la disponibilité et la synchronisation des séries BTC.D avant de l'intégrer.
+
+### 4. Plafond d'ordre et liquidité
+DeepSeek rapporte des spreads observés de 0,33–0,44 % et des frais Kraken Pro variables selon les grilles, citant 0,40/0,80 % et ailleurs 0,25/0,40 %. Ces valeurs ne sont pas vérifiées dans cette réponse et sont potentiellement contradictoires selon le palier, le produit ou la date. Le barème individuel applicable doit être vérifié directement.
+
+DeepSeek propose un plafond d'ordre tel que l'impact estimé ne dépasse pas 0,15 %, et évoque des tailles de quelques centaines de dollars dans les périodes peu liquides. Ces valeurs sont des hypothèses et ne doivent pas être traitées comme des limites validées. Le plafond doit être dérivé de données exécutables, de la profondeur réellement observée et de la tolérance au coût. Un carnet instantané ne prouve pas la profondeur historique ; des trades historiques seuls ne permettent pas de reconstruire le carnet passé.
+
+### 5. Pistes à maintenir en expérimentation
+- Order flow (delta, absorption), sous réserve de données tick et d'une méthode de calcul vérifiable.
+- Force relative TEL/BTC, sans la rendre obligatoire avant comparaison expérimentale.
+- Volume Profile, POC et value area, si les données et la méthode de calcul sont fiables.
+- Seuils exacts du filtre BTC, à tester sur des plages raisonnables sans optimiser sur le test final.
+
+### 6. Données manquantes selon DeepSeek
+1. Trades tick historiques Kraken TELUSD pour examiner microstructure et coûts.
+2. Snapshots historiques du carnet pour estimer la profondeur au moment des exécutions ; DeepSeek estime que ces données sont généralement commerciales. Disponibilité réelle à vérifier.
+3. Journal des catalyseurs propres à TEL : annonces, partenariats, mises à jour réseau, gouvernance et distributions éventuelles.
+
+DeepSeek affirme que l'API Kraken permettrait de télécharger l'historique complet des trades depuis l'origine. Cette capacité et ses limites doivent être vérifiées dans la documentation officielle et par un test réel : ne pas supposer que les endpoints publics exposent l'intégralité de l'historique exploitable ni un carnet historique. Les OHLCV TradingView et les trades bruts ne remplacent pas les snapshots de carnet.
+
+DeepSeek rapporte aussi qu'environ 96 % de l'offre serait en circulation et qu'il n'y aurait pas de calendrier majeur d'unlock restant. Ces éléments ne sont pas vérifiés ici et ne doivent pas servir de prémisses sans source datée.
+
+### 7. Ordre des tests proposé
+**Test 1 — Coûts et microstructure :**
+- Estimer frais maker/taker réellement applicables, spread, slippage et impact pour plusieurs tailles d'ordre (100, 500, 1 000 et 5 000 USD sont les tailles exploratoires proposées par DeepSeek).
+- Séparer coût théorique, coût observable et coût non mesurable faute de données de carnet.
+- DeepSeek propose 1,5 % aller-retour comme seuil d'invalidation du swing. Ce seuil est arbitraire à ce stade : la viabilité dépend de l'espérance brute, de la fréquence, du payoff, de l'exposition et de la distribution des coûts ; comparer des scénarios plutôt qu'utiliser un couperet non justifié.
+
+**Test 2 — Évaluation chronologique :**
+DeepSeek propose des segments 2019–2021, 2021–2022, 2022–2023 et 2023–2025, avec réoptimisation walk-forward. Ne retenir ces fenêtres que si KRAKEN:TELUSD dispose de données valides et suffisamment complètes sur chacune ; éviter les segments qui se chevauchent ambiguëment ou qui ont déjà servi à sélectionner les règles. Définir un vrai train/validation/test chronologique et ne jamais réutiliser le test final pour ajuster la stratégie.
+
+**Test 3 — Accumulation seule :**
+Comparer accumulation par paliers à DCA et Buy & Hold, avec mêmes dates, mêmes flux de capitaux, mêmes conventions de frais et exécution.
+
+**Test 4 — Swing avec et sans filtre BTC :**
+Comparer performance nette, Sortino et drawdown hors échantillon, sans retenir le filtre si son apport n'est pas robuste.
+
+**Test 5 — Sensibilité des paramètres :**
+DeepSeek propose de tester MM200 150/180/200/220/250 et volume relatif 1,2x/1,5x/2x. Ce sont des plages exploratoires, pas des paramètres à optimiser jusqu'à trouver un optimum. Évaluer la stabilité et limiter le nombre total d'essais.
+
+### 8. Critères de classification proposés
+DeepSeek propose :
+- **Rejetée** : coût aller-retour >1,5 % pour la taille typique, ou performance hors échantillon négative après coûts, ou drawdown supérieur au Buy & Hold, ou accumulation ne battant pas le DCA.
+- **Prometteuse** : coûts jugés raisonnables, dégradation OOS inférieure à 50 % de l'in-sample, Sortino OOS positif, et surperformance nette d'un benchmark pertinent sur au moins un livre.
+- **Validée** : critères prometteurs, robustesse aux paramètres, paper trading prospectif au moins trois mois (ou nombre de trades suffisant et justifié), et Deflated/Probabilistic Sharpe Ratio significatif après correction des essais multiples.
+
+Réserves :
+- Le seuil de coût de 1,5 %, la dégradation maximale de 50 % et les durées sont des seuils proposés, pas des vérités universelles.
+- L'accumulation doit être comparée au DCA et Buy & Hold ; le swing doit être comparé à des benchmarks compatibles avec son exposition et son horizon.
+- Le drawdown doit être calculé avec des conventions cohérentes de cashflows et d'exposition.
+- Un Sortino positif ou un Profit Factor isolé ne suffit pas à établir un avantage.
+- Le nombre d'essais, les dépendances entre trades, les intervalles de confiance et la diversité des régimes doivent être pris en compte.
+
+### 9. Timing : règle des deux conditions maximum
+DeepSeek propose pour le swing :
+1. Prix dans une zone de valeur/support identifiée à l'avance.
+2. Une seule confirmation : volume relatif ≥1,5x sur la bougie de rejet OU divergence RSI sur l'unité supérieure, pas les deux.
+3. Invalidation si clôture sous la zone avec volume supérieur à la moyenne ; pas de moyennage à la baisse.
+
+Le seuil 1,5x et la règle d'invalidation sont des hypothèses à formaliser. Il faut définir précisément le niveau, le moment du signal, l'exécution à la bougie suivante et les cas de gap/slippage. Pour l'accumulation, DeepSeek recommande un plafond de déploiement par paliers plutôt qu'un stop serré ou un moyennage sans limite.
+
+### 10. Angles morts résiduels signalés
+- **Biais de survie de TEL** : étudier TEL ne renseigne pas sur le risque qu'un token individuel perde durablement sa liquidité ou soit délisté ; le paper trading ne modélise pas entièrement ce risque.
+- **Qualité des données TradingView** : vérifier trous, agrégation de volume, prix et cohérence avec les données Kraken brutes.
+- **Risque de contrepartie Kraken** : panne, restrictions, gel de retraits ou modification des conditions ; non capturé par un backtest.
+- **Coûts de financement et conversion** : conversion EUR/USD, dépôts/retraits et frais éventuels peuvent compter pour l'accumulation réelle. Ces frais ne sont pas automatiquement des coûts de trading de la stratégie paper et doivent être séparés selon le scénario étudié.
+
+### 11. Règle de timing proposée par DeepSeek
+La règle « deux conditions maximum » vise à éviter le sur-filtrage :
+- zone de valeur identifiée ex ante ;
+- une seule confirmation minimale, volume relatif ou divergence RSI ;
+- invalidation préétablie et pas de moyenne à la baisse.
+
+C'est une hypothèse de protocole à tester face à une entrée purement structurelle et à une entrée confirmée plus tard. Elle ne doit pas être ajoutée aux boards avant autorisation.
+
+### 12. Arbitrage provisoire et statut
+**Principes retenus comme cadre de recherche :**
+- simplifier et éviter le double comptage ;
+- séparer accumulation et swing, règles, budgets et métriques ;
+- mesurer les coûts avant de conclure sur le swing ;
+- définir un filtre de régime quantifiable et tester son utilité ;
+- utiliser des données KRAKEN:TELUSD, signaux clôturés et exécution réaliste ultérieure ;
+- comparer aux benchmarks simples et évaluer hors échantillon ;
+- rester en paper trading, spot, sans levier, risque maximal 0,25 % du capital virtuel par trade.
+
+**À ne pas adopter sans test :**
+- suppression définitive de chaque indicateur proposé ;
+- seuil 1,5 % de coût, impact 0,15 %, MM200/20 jours comme interrupteur ;
+- limite d'ordre en dollars ;
+- score ou seuils de volume ;
+- règle des deux conditions, règle 1,5x et scénarios d'allocation par paliers ;
+- toute affirmation non sourcée sur les frais, le spread, l'offre en circulation ou les données tick.
+
+Cette réponse est une proposition de protocole, pas une validation empirique. Aucun backtest n'est ajouté comme résultat. Aucun script, stratégie, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
