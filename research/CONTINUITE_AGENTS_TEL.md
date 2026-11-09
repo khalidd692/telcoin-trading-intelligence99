@@ -140,3 +140,8 @@ Fenêtre demandée par le service : 1,000 barres, du 2026-05-26 au 2026-11-09, h
 - Les meilleurs résultats initiaux all-in ou avec R/R 1R sont rejetés : sizing incompatible avec risque 0.25% et/ou R/R paper minimum 1.51. Aucun candidat ne doit être activé en paper.
 - Limitation majeure : historique TradingView consulté commence le 2026-01-22 en 4h/1D ; impossible de démontrer 100 trades OOS robustes avec cette profondeur seule. Le flux intraday 1h/15m comporte des trous et ne doit pas être interpolé.
 - Suite : obtenir davantage d'historique propre, auditer le moteur de backtest du dépôt et poursuivre les familles non-RSI (Keltner, Donchian, failed breakouts, ATR compression/expansion, swing structure, volume, multi-timeframe) avec règles pré-enregistrées, coûts et validation OOS.
+
+
+## Audit moteur historique — 2026-11-09
+
+Audit statique enregistré dans [`research/AUDIT_MOTEUR_HISTORIQUE_2026-11-09.md`](AUDIT_MOTEUR_HISTORIQUE_2026-11-09.md). Constats prioritaires : `run_oos.py` et `check_causality.py` utilisent KuCoin/TEL-USDT, pas KRAKEN:TELUSD ; `history_store.coverage()` détecte les trous mais le chemin `load_timeframe` → `Bundle` → `engine` ne segmente pas les séries ; `engine.py` mesure la qualité prédictive d'un détecteur et n'est pas un simulateur complet de trades. Les tests existants utilisent des fixtures continues et ne couvrent pas le passage d'un horizon ou d'indicateurs à travers une rupture réelle. Aucun test n'a été exécuté pendant cet audit statique. Les cinq demandes TradingView historiques (`rq_3fbd24d7858c4e9e`, `rq_304062157ba54962`, `rq_81fc211a3a43405b`, `rq_4f665100b71f4f6a`, `rq_919a53432a114077`) ont été relues et sont toujours queued ; ne pas les dupliquer. Aucun code, stratégie, board, paper setting ou main modifié.
