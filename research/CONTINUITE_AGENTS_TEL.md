@@ -128,3 +128,15 @@ Fenêtre demandée par le service : 1,000 barres, du 2026-05-26 au 2026-11-09, h
 2. Poursuivre l'exploration avec données OHLCV 4h clôturées et règles pré-enregistrées ; vérifier les coûts Kraken et slippage avant toute simulation nette.
 3. Reprendre l'audit du moteur historique existant uniquement après inspection de ses fichiers/tests ; aucun résultat de moteur ni test logiciel n'a été exécuté pendant cette session.
 4. Maintenir la séparation entre fréquences MCP, résultats exploratoires, simulation paper et validation OOS (100 trades minimum).
+
+
+## Sweep multi-combinaisons — 2026-11-09
+
+- Exécution d'un sweep local sur OHLCV TradingView via MCP, sans modifier stratégies, boards ou moteur du dépôt. Rapport complet : `research/EXPLORATION_MULTI_COMBINAISONS_2026-11-09.md`.
+- 4h : 1,743 barres (2026-01-22 → 2026-11-09), 1 trou de 8h ; anomalie initiale et dernière bougie en formation exclues.
+- 1h : 5,000 barres (2026-04-11 → 2026-11-09), 65 trous ; segmentation stricte : 19 segments >=80 barres, 3,550 barres retenues, 1,450 barres de segments courts écartées. 1D seulement 292 barres ; 1W 43 barres.
+- Sweep brut 4h : 1,200 variantes (RSI/mean reversion, Donchian breakout, momentum, pullback). Sweep risque-contraint 4h : 2,400 variantes RSI avec risque max 0.25% equity/trade, exposition max 1x, coûts 0.70% et stress 1.40%. Sensibilité locale : 144 variantes, 96 avec n>=15, 43 positives à 0.70%, seulement 21 positives à 1.40%. Sweep 1h : 2,704 variantes (RSI, Stoch, CCI, Bollinger, momentum) ; aucun candidat >=30 trades dans les segments propres conservés.
+- Aucun candidat robuste : RSI30 / SL1.5 ATR / TP3R / H12 (27 trades) PF 1.37 à 0.70%, 1.09 à 1.40%, mais holdout récent 6 trades PF 0.76, négatif. RSI30 / SL2.5 / TP3.5R / H16 (18 trades) PF 2.06 à 0.70%, 1.69 à 1.40%, mais holdout 5 trades PF 0.17, négatif. RSI40 cross / EMA20<EMA50 / SL1.5 / TP3R / H36 (36 trades) PF 1.33 à 0.70%, 1.08 à 1.40%, validation négative. Transfert RSI30 1h : 56 trades, PF 1.25 à 0.70% et 0.78 à 1.40%; holdout 18 trades PF 1.12 / 0.72.
+- Les meilleurs résultats initiaux all-in ou avec R/R 1R sont rejetés : sizing incompatible avec risque 0.25% et/ou R/R paper minimum 1.51. Aucun candidat ne doit être activé en paper.
+- Limitation majeure : historique TradingView consulté commence le 2026-01-22 en 4h/1D ; impossible de démontrer 100 trades OOS robustes avec cette profondeur seule. Le flux intraday 1h/15m comporte des trous et ne doit pas être interpolé.
+- Suite : obtenir davantage d'historique propre, auditer le moteur de backtest du dépôt et poursuivre les familles non-RSI (Keltner, Donchian, failed breakouts, ATR compression/expansion, swing structure, volume, multi-timeframe) avec règles pré-enregistrées, coûts et validation OOS.
