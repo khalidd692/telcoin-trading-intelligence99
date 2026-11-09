@@ -295,3 +295,116 @@ Points spécifiques à DeepSeek à investiguer :
 
 ### Statut
 Audit DeepSeek reçu et capturé comme avis indépendant, avec une limite de complétude de l'extrait. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié. Les recommandations restent des hypothèses de recherche ; les règles de sécurité existantes restent en vigueur.
+
+
+## Audit indépendant Claude — 2026-11-09
+
+### Portée et niveau de preuve
+Claude indique n'avoir effectué aucun backtest et ne disposer d'aucune donnée TEL pour cet audit. Il s'agit d'une critique méthodologique, pas d'un conseil financier ni d'une validation de stratégie. Les références académiques et les chiffres de frais rapportés ci-dessous doivent être distingués des données propres à notre compte et vérifiés avant usage.
+
+### Diagnostic
+La méthode produit potentiellement beaucoup de signaux sans définir assez précisément ce qu'est un bon point d'entrée. Elle peut compter plusieurs fois la même information, ne chiffre pas suffisamment les coûts d'exécution et comporte de nombreux degrés de liberté. Risque principal : rationaliser après coup des entrées qui semblent bonnes sur un échantillon court.
+
+### Dix angles morts
+1. **Absence de critère de succès et de baseline** : définir à l'avance un benchmark simple (DCA périodique) et mesurer prix moyen d'acquisition, MAE/MFE, rebonds manqués et performance nette.
+2. **Coûts sous-estimés** : Claude rapporte qu'à partir du 9 juillet 2026 le palier 1 Kraken Pro serait à 0,40 % maker / 0,80 % taker, soit jusqu'à 1,6 % aller-retour taker avant spread et slippage. Ce barème, sa date d'effet et son applicabilité au compte de l'utilisateur ne sont pas vérifiés ici ; les frais personnels doivent être vérifiés directement avant calcul.
+3. **Indicateurs corrélés** : RSI, Stochastique, CCI, AO et MACD mesurent des dimensions proches du momentum dérivé du prix.
+4. **Surapprentissage et tests multiples** : multiplication des setups, indicateurs, timeframes et paramètres ; références citées par Claude : Sullivan, Timmermann & White (1999), Bajgrowicz & Scaillet (2012). Les références doivent être consultées avant d'en tirer des affirmations précises.
+5. **Échantillon court et mono-régime** : l'historique disponible de TEL peut être insuffisant et dominé par un ou deux cycles ; tester la couverture réelle avant de conclure.
+6. **Risque idiosyncratique** : token unlocks, narratif, réglementation, listings et événements propres à TEL peuvent invalider une lecture technique.
+7. **Conflit des deux moteurs** : capital et signaux peuvent être mélangés ; un swing peut vendre ce que l'accumulation vient d'acheter. Examiner aussi les conséquences fiscales selon la résidence, sans présumer la situation fiscale de l'utilisateur.
+8. **Hiérarchie des timeframes** : cinq horizons sans règle de priorité laissent choisir après coup la lecture favorable ; réduire et fixer une hiérarchie par moteur.
+9. **Régimes insuffisamment définis** : formaliser le régime et le filtre BTC/ETH ; bêta et corrélation de TEL peuvent varier.
+10. **Coût de l'attente non mesuré** : chiffrer les rebonds manqués par l'attente des confirmations, ainsi que les faux départs évités.
+
+### Biais de données signalés
+- Bougies non clôturées et look-ahead.
+- Trous de cotation et faibles volumes sur TEL/USD.
+- OBV et VWAP potentiellement bruités sur une paire peu liquide.
+
+### Améliorations prioritaires
+- Définir les métriques et la baseline avant tout test.
+- Réduire à deux timeframes principaux par moteur ; 15m uniquement pour affiner l'exécution.
+- Mesurer spread et profondeur réels de TEL/USD ; n'envisager une opération que si l'avantage attendu dépasse les coûts de façon suffisamment robuste, multiple à estimer sur données et non à choisir arbitrairement.
+- Geler les règles avant évaluation.
+- Lancer un paper trading prospectif horodaté, sans retoucher les règles pendant la période de mesure. C'est un complément important aux tests historiques, qui restent exposés au biais de sélection.
+
+### Indicateurs — proposition de Claude, non adoptée
+- **Garder comme noyau candidat** : structure/niveaux, ATR pour la taille et les stops, volume relatif, une moyenne longue (SMA ou EMA 200), un seul oscillateur.
+- **Retirer du moteur principal selon Claude** : CCI, Stochastique, AO, moyennes intermédiaires redondantes, Bollinger, OBV et VWAP glissant sur cette paire.
+- **Ajouter comme variables candidates** : ratio TEL/BTC (force relative), distance au plus haut/drawdown, percentile de volatilité, VWAP ancré sur un creux majeur, calendrier des déblocages.
+- Les flux on-chain vers les exchanges sont qualifiés de plausibles mais peu démontrés pour les petites capitalisations.
+- Ne pas supprimer définitivement les variables avant d'avoir mesuré leur apport marginal, leur stabilité et la qualité de leurs données sur TEL.
+
+### Configurations manquantes proposées
+1. Capitulation avec volume extrême suivie d'absorption.
+2. Compression de volatilité en range avant expansion.
+3. Faux breakdown / Spring dans un range large.
+4. Divergence de force relative TEL/BTC.
+5. Configuration explicite « ne rien faire » lorsque le marché manque de structure.
+
+Ces configurations sont des hypothèses à formaliser et tester, pas des signaux validés.
+
+### Méthode améliorée proposée
+1. **Régime (1W/1D)** : tendance, volatilité et contexte BTC ; il détermine les conditions et le budget autorisés, pas le déclencheur précis.
+2. **Moteur A — accumulation** : entrées sur valeur (zones 1D/1W), pas uniquement sur retournement ; première tranche limitée, suivantes conditionnées à l'amélioration de la structure (creux relevé, reprise de niveau).
+3. **Moteur B — swing** : structure 4H/1H, sorties et invalidations définies avant l'entrée, taille adaptée à l'ATR.
+4. **Filtre de coûts** avant toute simulation d'exécution ou recommandation.
+5. **Réduction du risque de rebond manqué** : tester des entrées par tranches plutôt qu'une décision tout-ou-rien ; hypothèse plausible, pas encore démontrée.
+
+Claude décrit comme hypothèse d'accumulation durable : base longue, volume qui se tarit puis absorption, volatilité comprimée et force relative stable. Cela reste à vérifier empiriquement.
+
+### Tests indispensables proposés
+- Walk-forward chronologique avec purge/embargo lorsque les horizons de labels ou positions se chevauchent.
+- Deflated Sharpe Ratio et/ou Reality Check pour tenir compte des tests multiples, selon disponibilité des données et protocole statistique approprié.
+- Stabilité des paramètres : rechercher des plateaux robustes plutôt qu'un optimum isolé.
+- Scénario pessimiste avec coûts doublés.
+- Résultats séparés par sous-période et régime.
+- Comparaison systématique au DCA.
+- Paper trading prospectif horodaté après gel des règles.
+- Mesure des MAE/MFE et des occasions manquées pour arbitrer entre précocité et confirmation.
+
+### Risques non résolubles soulignés
+- Historique potentiellement trop court pour conclure sur le swing.
+- Liquidité future incertaine.
+- Risque émetteur et réglementaire.
+- Régime de marché futur inconnu.
+- Absence possible d'un historique fiable du carnet d'ordres.
+
+### Réserves et arbitrage
+- Le chiffre de frais Kraken cité par Claude est à vérifier dans les conditions en vigueur et le barème individuel ; ne pas le présenter comme confirmé.
+- Réduire les timeframes à deux par moteur est une proposition méthodologique ; la sélection finale doit être justifiée par l'usage et les données disponibles.
+- Le paper trading prospectif est précieux pour éviter de sélectionner rétrospectivement une règle gagnante, mais ne remplace pas les tests historiques et ne garantit pas de représentativité de tous les régimes.
+- La proposition de supprimer OBV/VWAP doit être évaluée sur les données de la paire, pas acceptée par autorité.
+- Claude déconseille d'optimiser 70/30 et 25/35/40 : ces répartitions restent des hypothèses de discussion, pas des décisions de l'utilisateur.
+- Le cadre de risque existant reste prioritaire : paper trading seulement, plafond 0,25 % du capital virtuel par trade, KRAKEN:TELUSD, spot, sans levier, aucune opération réelle ou automatique.
+
+### Convergences avec Gemini et DeepSeek
+- Simplifier le noyau d'indicateurs et éviter le double comptage.
+- Quantifier les coûts, spread, profondeur et slippage.
+- Formaliser le régime BTC/ETH.
+- Séparer rigoureusement accumulation et swing.
+- Prévenir look-ahead et surapprentissage ; utiliser walk-forward hors échantillon.
+- Tester les setups de compression et de faux breakdown.
+- Ne pas confondre hypothèses, résultats incomplets et avantage démontré.
+
+### Apports spécifiques de Claude à investiguer
+- Définir la baseline DCA et les métriques avant les tests.
+- Mesurer MAE/MFE et rebonds manqués pour quantifier le coût de l'attente.
+- Limiter les timeframes par moteur et fixer leur hiérarchie à l'avance.
+- Ajouter ratio TEL/BTC, distance au plus haut, percentile de volatilité et calendrier d'unlocks.
+- Utiliser Deflated Sharpe / Reality Check et analyse de stabilité des paramètres.
+- Geler les règles et compléter les backtests par du paper trading prospectif.
+
+### Actions de recherche
+1. Établir la couverture réelle des historiques KRAKEN:TELUSD et la disponibilité des bougies clôturées.
+2. Vérifier le barème Kraken actuel et les frais applicables au compte ; mesurer spread, profondeur et slippage par taille d'ordre.
+3. Définir à l'avance les métriques de succès et les benchmarks DCA/buy-and-hold.
+4. Fixer les timeframes et la hiérarchie de chaque moteur avant les tests.
+5. Ajouter MAE/MFE, rebonds manqués, coûts et turnover au protocole.
+6. Préparer un protocole walk-forward avec purge/embargo, correction des tests multiples et stress test des coûts.
+7. Geler une version candidate puis lancer un journal de paper trading prospectif.
+8. Attendre l'audit Grok avant arbitrage global ; ne pas décider par vote majoritaire.
+
+### Statut
+Audit Claude reçu et enregistré comme avis indépendant. Aucun backtest Claude n'a été effectué et aucune donnée TEL n'a été consultée par Claude selon son avertissement. Les recommandations restent des hypothèses à tester. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
