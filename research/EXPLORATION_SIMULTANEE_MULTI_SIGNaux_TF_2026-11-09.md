@@ -94,3 +94,20 @@ Aucune stratégie n'est validée. Les filtres EMA200 / EMA20>EMA50 semblent amé
 2. Auditer la stratégie swing-low avec pivot confirmé 10/10 et la comparer à des déclencheurs RSI/EMA sans modifier la stratégie existante.
 3. Vérifier frais Kraken, spread et slippage à partir de données publiques fiables avant de conclure au net.
 4. Garder les données 1h/15m segmentées et exclure les trous ; obtenir plus d'historique propre avant usage.
+
+
+## Addendum — frais Kraken et stress réaliste (2026-11-09)
+La grille publique Kraken Spot Crypto affiche au Tier 1 0,40% maker et 0,80% taker par exécution. La simulation précédente à 0,70% A/R était donc trop optimiste pour une entrée et une sortie taker. Nouveau recalcul sur les mêmes signaux avec frais appliqués séparément à l'entrée/sortie et slippage modélisé par côté :
+
+| Setup | Trades | Frais maker 0,40% + 0,05% slippage / côté | Frais taker 0,80% + 0,10% slippage / côté | Stress taker 0,80% + 0,25% slippage / côté |
+|---|---:|---:|---:|---:|
+| RSI croise sa moyenne sans filtre | 91 | +0,864%, PF 1,46 | -0,040%, PF 0,98 | -0,340%, PF 0,86 |
+| RSI croise sa moyenne + clôture > EMA200 | 14 | +3,885%, PF 3,27 | +2,954%, PF 2,51 | +2,646%, PF 2,30 |
+| RSI croise sa moyenne + EMA20>EMA50 | 18 | +2,969%, PF 2,70 | +2,046%, PF 2,01 | +1,741%, PF 1,82 |
+| RSI30 cross simple | 19 | +0,831%, PF 1,52 | -0,073%, PF 0,96 | -0,372%, PF 0,82 |
+| EMA20 pullback + clôture > EMA200 | 12 | +1,287%, PF 1,66 | +0,379%, PF 1,16 | +0,079%, PF 1,03 |
+
+Ces frais sont les valeurs de la grille Tier 1 publique, pas le tarif personnel confirmé de l'utilisateur. Le slippage reste une hypothèse. Les résultats conditionnels 4h filtrés EMA200 / EMA20>EMA50 résistent dans cette simulation, mais seulement 14/18 trades et 5–7 trades OOS : non validés, forte sélection parmi de nombreuses variantes. Le RSI cross non filtré et le RSI30 simple deviennent légèrement négatifs au coût taker de base. Source officielle des frais : https://www.kraken.com/features/fee-schedule ; détails maker/taker : https://support.kraken.com/fr/articles/201893638-how-trading-fees-work-on-kraken.
+
+## Source d'historique long Kraken découverte
+Kraken publie officiellement un ZIP CSV OHLCVT contenant l'historique complet de toutes les paires depuis le début de chaque marché, en 1m/5m/15m/30m/60m/240m/720m/1440m. Le fichier est lié depuis https://support.kraken.com/in/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data (lien Google Drive). Le téléchargement direct depuis cet environnement n'a pas abouti ; ne pas prétendre que le ZIP a été récupéré. C'est désormais la meilleure voie pour sortir de la limite historique TradingView. Le marché TEL/USD est confirmé dans la liste officielle des marchés Kraken et TEL trading live depuis le 22 janvier 2026.
