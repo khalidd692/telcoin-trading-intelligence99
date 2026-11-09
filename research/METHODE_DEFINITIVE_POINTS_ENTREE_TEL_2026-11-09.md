@@ -202,3 +202,96 @@ L'audit Gemini est une contribution indépendante utile, mais ne valide ni la m�
 
 ### Statut
 Audit reçu de Gemini et enregistré comme avis indépendant. Les recommandations restent des hypothèses à vérifier. Les règles de sécurité existantes et le cadre KRAKEN:TELUSD spot/paper-only restent inchangés.
+
+
+## Audit indépendant DeepSeek — 2026-11-09
+
+### Portée et niveau de preuve
+DeepSeek précise ne pas avoir exécuté de backtest pour le compte de l'utilisateur. Il classe ses recommandations en [Démontré], [Plausible] et [Hypothétique]. Les chiffres de carnet, spread, volume et corrélation qu'il cite sont des observations publiques rapportées par DeepSeek, non vérifiées indépendamment dans cet échange ; leur date précise et leur méthode d'observation ne sont pas fournies. Ils ne doivent donc pas être traités comme des conditions actuelles de marché.
+
+### Diagnostic central
+DeepSeek estime que la méthode doit être davantage ancrée dans la microstructure réelle de KRAKEN:TELUSD. Son argument principal est que la profondeur exécutable de la paire Kraken pourrait être faible au point de rendre les backtests au prix moyen irréalistes, surtout si les frais, le spread et l'impact de marché ne sont pas modélisés.
+Il identifie aussi trois faiblesses de gouvernance : indicateurs redondants, filtre BTC/ETH non formalisé et séparation insuffisante entre accumulation et swing.
+
+### Dix angles morts identifiés
+1. **Liquidité exécutable Kraken** : plafond de taille et type d'ordre à définir selon la profondeur réelle, le spread et l'impact. DeepSeek rapporte, sans vérification indépendante ici, un instantané de 6 710 USD de profondeur bid et 11 550 USD ask à ±2 %, spread 0,36 % et volume 24 h proche de 24 000 USD. Ces chiffres sont datés/non datés de façon précise et ne sont pas des données actuelles garanties.
+2. **Redondance des indicateurs** : RSI, Stochastique, CCI, MACD et AO sont des variables de momentum partiellement corrélées ; multiples EMA/SMA et Bollinger/ATR ajoutent aussi des degrés de liberté.
+3. **Filtre BTC/ETH non testable** : transformer le contexte en règles mesurables et versionnées plutôt qu'en jugement subjectif.
+4. **Conflit accumulation/swing** : règles, capitaux, horizons, entrées et mesure de performance séparés.
+5. **Absence de flux d'ordres** : envisager delta, absorption et déséquilibre des flux pour étudier les retournements précoces, sous réserve de données fiables.
+6. **Cassures inadaptées à la faible liquidité** : un pic de volume relatif sur une base faible peut être trompeur ; tester clôture, persistance, mèches de rejet et continuité des flux.
+7. **Invalidation et risque incomplets** : préciser invalidation, risque par trade, R:R minimal, taille et méthode de stop avant entrée ; empêcher le moyennage à la baisse non contrôlé.
+8. **Validation historique insuffisamment spécifiée** : walk-forward avec purge des observations chevauchantes, période et taille d'échantillon, métriques de risque, turnover et sensibilité aux paramètres.
+9. **Catalyseurs propres à TEL** : partenariats, annonces réseau, staking/validateurs/gouvernance, tokenomics/unlocks et listings peuvent modifier le contexte technique.
+10. **Mesure de performance trop pauvre** : suivre au minimum rendement net, Sharpe/Sortino, drawdown maximal, taux de réussite, gain/perte moyen, turnover, coûts et comparaison à DCA et buy-and-hold.
+
+### Améliorations prioritaires proposées
+**Priorité 1 — Microstructure et impact de marché**
+- Chercher des données tick-by-tick et carnets historiques Kraken ; DeepSeek cite CryptoHFTData et CryptoStruct comme pistes commerciales, non vérifiées ici.
+- Estimer le slippage selon taille d'ordre et profondeur ; fixer un plafond de taille par ordre. Le seuil illustratif de 0,2 % d'impact proposé par DeepSeek est un choix de risque à tester, pas une règle adoptée.
+- Préférer les ordres limites lorsque cela est cohérent avec le plan ; une limite ne garantit ni exécution ni sortie. L'urgence d'une invalidation peut nécessiter une autre décision, mais aucune exécution réelle n'est autorisée ici.
+- Distinguer frais maker/taker, spread, slippage et exécution partielle.
+
+**Priorité 2 — Réduction du noyau d'indicateurs**
+- Noyau candidat : structure des prix ; volume brut/relatif et éventuellement Volume Profile (POC/value area) ; ATR ; un seul oscillateur de momentum ; une paire de moyennes mobiles (par exemple 20/50) et une moyenne longue (200) pour le contexte.
+- DeepSeek propose de supprimer MACD, Stochastique, CCI, AO, OBV et la multiplication EMA/SMA ; Bollinger pourrait rester visuel mais pas signal de sizing.
+- Ces suppressions ne sont pas adoptées automatiquement : mesurer la corrélation et l'apport marginal hors échantillon avant arbitrage. L'OBV peut être bruité sur faible liquidité, mais cela doit être vérifié sur les données TEL.
+
+**Priorité 3 — Filtre de régime BTC mesurable**
+- Exemple de régime favorable proposé : BTC au-dessus de sa MM200 journalière, dominance BTC stable/en baisse sur 20 jours et volatilité réalisée hors zone de panique.
+- Exemple défavorable : BTC sous MM200 ou dominance BTC en forte hausse.
+- Ces seuils sont des hypothèses de recherche, pas des règles acceptées. Mesurer retards, faux filtres et occasions manquées ; l'accumulation doit rester régie séparément.
+
+**Priorité 4 — Séparation des livres**
+- Accumulation : horizon pluriannuel, DCA et/ou paliers de valorisation hebdomadaire, réserve de capital, pas de stop serré de swing.
+- Swing : horizon heures/semaines, risque défini, stop structurel ou ATR, R:R défini, entrées planifiées et performance isolée.
+- DeepSeek donne 1–2 % de risque par trade du livre swing comme exemple. Cette proposition est incompatible avec la règle de projet déjà fixée à 0,25 % maximum du capital virtuel par trade : elle est donc explicitement rejetée comme règle applicable, sauf décision ultérieure expresse de l'utilisateur. Le plafond existant de 0,25 % reste prioritaire.
+
+**Priorité 5 — Order flow**
+- Calculer le volume delta à partir des trades Kraken (achats taker moins ventes taker), détecter les ventes agressives absorbées sans baisse proportionnelle du prix et exploiter le Volume Profile.
+- Les données tick-by-tick historiques peuvent être payantes ; une approximation à partir des bougies est moins précise. Ne jamais prétendre disposer d'un CVD/footprint fiable si le flux n'est pas réellement exposé pour KRAKEN:TELUSD.
+
+### Autres règles et hypothèses de DeepSeek à évaluer
+- Cassure : tester clôture au-delà du niveau, volume en multiple de sa moyenne, persistance sur plusieurs bougies, mèches de rejet et continuité de l'order flow.
+- Stops : invalidation par structure ou ATR ; ne jamais renforcer seulement parce que le prix baisse.
+- Régime : comparer MM200 BTC, dominance et volatilité réalisée, en tenant compte du retard de ces filtres.
+- Catalyseurs TEL : intégrer un calendrier d'événements vérifiés ; ne pas spéculer sur des annonces non confirmées.
+- Benchmarks : comparer aux stratégies simples DCA et buy-and-hold.
+- Métriques : Sharpe, Sortino, drawdown, turnover, coût total, taux de réussite et ratio gain/perte.
+- Validation : walk-forward chronologique avec purge si les labels/horizons se chevauchent ; réserver un échantillon final non utilisé pour sélectionner les paramètres.
+
+### Réserves et points à ne pas reprendre tels quels
+- Les chiffres de profondeur, spread, volume 24 h et corrélation TEL/BTC (~0,6 en 2025) sont des chiffres rapportés par DeepSeek ; ils ne sont ni confirmés comme actuels ni vérifiés indépendamment dans cet audit.
+- Le coût aller-retour 1,2–1,6 % est une estimation illustrative de DeepSeek, dépendante du spread et du barème maker/taker ; recalculer avec le barème réel, la taille, le carnet et le mode d'exécution.
+- L'usage systématique des ordres limites n'assure pas une exécution : risque de non-exécution, exécution partielle et sélection adverse.
+- Les seuils BTC MM200, dominance 20 jours, impact 0,2 % et risque 1–2 % sont des propositions, pas des décisions.
+- L'affirmation que les données de carnet historiques sont disponibles commercialement auprès des fournisseurs cités doit être vérifiée avant achat ou intégration.
+- L'extrait fourni par l'utilisateur s'interrompt au milieu d'un tableau de classification des indicateurs, après le début de la ligne « Momentum ». La suite éventuelle de l'audit DeepSeek n'a pas été reçue ; cette capture ne prétend pas être complète.
+
+### Arbitrage provisoire
+Convergences Gemini + DeepSeek :
+- réduire le nombre d'indicateurs et mesurer leur redondance ;
+- formaliser le régime BTC/ETH ;
+- isoler accumulation et swing ;
+- intégrer liquidité, spread, frais et slippage dans les simulations ;
+- renforcer la validation hors échantillon et éviter le look-ahead ;
+- étudier CVD/order flow et les phases de faible volatilité, sans supposer leur disponibilité.
+
+Points spécifiques à DeepSeek à investiguer :
+- profondeur exécutable réelle sur Kraken et plafond de taille ;
+- données tick-by-tick, trades taker et carnet historique ;
+- Volume Profile ;
+- calendrier des catalyseurs TEL ;
+- métriques de performance ajustées au risque et benchmarks.
+
+### Actions de recherche
+1. Mesurer à nouveau le carnet et le spread KRAKEN:TELUSD au moment de chaque analyse, avec horodatage et taille d'ordre de référence.
+2. Vérifier ce que TradingView MCP et les connecteurs réellement disponibles exposent : OHLCV, trades, bid/ask, carnet, delta, Volume Profile, dominance BTC et données de dérivés.
+3. Vérifier la provenance, la période et la qualité des chiffres publics cités par DeepSeek avant de les utiliser.
+4. Comparer un noyau réduit d'indicateurs aux variantes actuelles, en mesurant l'apport marginal.
+5. Définir séparément le livre accumulation et le livre swing ; conserver le plafond de risque swing de 0,25 % du capital virtuel.
+6. Construire un protocole walk-forward avec purge, coûts réalistes, impact de marché, exécutions partielles et benchmarks.
+7. Comparer les audits de Claude et Grok avant de décider ; pas de vote majoritaire, les arguments doivent être vérifiés.
+
+### Statut
+Audit DeepSeek reçu et capturé comme avis indépendant, avec une limite de complétude de l'extrait. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié. Les recommandations restent des hypothèses de recherche ; les règles de sécurité existantes restent en vigueur.
