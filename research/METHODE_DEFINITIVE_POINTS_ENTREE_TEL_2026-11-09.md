@@ -1149,3 +1149,63 @@ Audit opérationnel initial effectué en lecture seule. Données partielles et l
 Kraken a annoncé officiellement que le trading TEL sur Kraken était en ligne le **22 janvier 2026**. Source officielle : https://blog.kraken.com/product/asset-listings/tel-is-available-for-trading
 
 Conséquence importante : il n'existe pas d'historique de transactions KRAKEN:TELUSD sur Kraken pour 2024 ni pour mai–décembre 2022, puisque le marché n'était pas encore ouvert. Les tests proposés sur ces périodes ne sont donc pas simplement absents du flux TradingView : ils sont impossibles sur cet instrument exact. Ne pas les remplacer par MEXC, KuCoin ou un autre exchange, car cela changerait le marché testé. La fenêtre historique de référence possible commence au lancement du marché, le 2026-01-22, sous réserve de la complétude des données réellement récupérables.
+
+
+# Résultats de recherche opérationnelle — backtests indépendants préliminaires — 2026-11-09
+
+## État du marché
+Données TradingView en lecture seule :
+- Cotation screener KRAKEN:TELUSD : 0,0014962 USD, variation -0,439 % ; volume screener non disponible.
+- Dernière clôture 1D complète : 0,001500 USD (2026-11-08 00:00 UTC).
+- Dernière clôture 4H complète : 0,001500 USD (2026-11-08 20:00 UTC).
+- RSI 1D 47,11 ; ADX 1D 16,30. RSI 4H 44,73 ; ADX 4H 35,12.
+- Prix sous SMA200 1D (~0,00200 USD), EMA20 1D (~0,001521), EMA50 1D (~0,001607), EMA200 1D (~0,002023).
+- En 4H, prix sous EMA20 (~0,001554) et EMA50 (~0,001512), malgré EMA20 > EMA50.
+- Recommandation agrégée TradingView : SELL en 1D et 4H.
+Décision de recherche : ATTENDRE, aucun setup long confirmé. Les boards sont stale ; quota de refresh épuisé jusqu'au 2026-11-13. Aucun refresh forcé ni ordre.
+
+## Backtest indépendant — cassure swing high 4H
+Règles du board conservées : pivot high confirmé 5/5, clôture croise au-dessus, close au-dessus EMA20/EMA50, entrée open suivant, stop 1,5 ATR, cible 3 ATR, expiration 20 barres. OHLCV : 1 742 bougies 4H clôturées du 2026-01-22 12:00 au 2026-11-08 20:00 UTC. Signaux dédupliqués, trades non chevauchants, stop prioritaire en collision. Découpage chronologique 70/30, date de coupure 2026-08-13 20:00 UTC. Coût principal : taker Tier 1 0,80 % par côté + hypothèse de slippage 0,10 % par côté.
+- Total : 23 trades, 8 positifs, 15 négatifs ; 13 stops, 8 targets, 2 expirations.
+- Expectancy nette : -0,237 R/trade ; PF 0,696.
+- Développement : 15 trades, 3 gagnants, expectancy -0,624 R, PF 0,331.
+- Holdout chronologique : 8 trades, 5 gagnants, expectancy +0,491 R, PF 2,00.
+- Sizing au risque 0,25 % d'equity par trade, frais inclus dans le stop et exposition plafonnée à 1x : 1 000 USD devient 985,51 USD (-1,20 %) sur la série ; développement -1,87 %, holdout +0,68 %.
+Sensibilité : maker 0,40 % par côté + 0,10 % slippage : expectancy -0,087 R, PF 0,876. Taker + 0,20 % slippage par côté : expectancy -0,274 R, PF 0,658.
+Conclusion : pas prometteuse à ce stade. Le holdout positif ne contient que 8 trades et contredit le développement négatif ; résultat global négatif même sous scénario maker.
+
+## Backtest indépendant — repli 4H
+Pour rendre le test calculable, proxy explicite : touche EMA20 dans les 5 bougies précédentes, bougie signal haussière et close au-dessus EMA20/EMA50, entrée open suivant ; stop sous dernier pivot low 5/5 moins 0,5 ATR ; cible dernier pivot high au-dessus de l'entrée uniquement si R:R brut >=1,51. Cette approximation n'encode pas complètement l'ancienne résistance devenue support.
+Sous taker 0,80 % par côté + 0,10 % slippage par côté :
+- 9 trades, 1 gagnant, 8 perdants ; 4 stops, 1 target, 4 expirations.
+- Expectancy -0,775 R/trade ; PF 0,162.
+- Développement : 7 trades, expectancy -0,768 R, PF 0,200.
+- Holdout : 2 trades, 0 gagnant, expectancy -0,800 R.
+- Sizing 0,25 % du capital au stop, frais inclus : rendement théorique -1,25 %.
+Conclusion : résultat défavorable mais échantillon trop petit et proxy incomplet ; aucune modification de règle.
+
+## Repli swing low 4H — pivot 10/10
+Implémentation stricte du protocole en file : pivot low 10/10 confirmé, clôture dans la zone swing low à swing low +0,3 ATR, close > EMA20, ADX14 >=20, stop 0,5 ATR sous le swing low, cible 1,5 ATR, entrée open suivant, expiration 20 barres. Seulement 2 trades sur la période ; aucun dans le holdout. Non concluant. La recherche TradingView rq_4f665100b71f4f6a et la comparaison A/B/C rq_81fc211a3a43405b restent en attente.
+
+## Sweep / réintégration — prototype 15m et 1H
+Définition de cette première passe : support = dernier pivot low confirmé 5/5 ; sweep = low sous le support, close au-dessus, close précédent >= support ; entrée open suivant ; stop = extrême du sweep moins 0,25 ATR ; cible = dernier pivot high 5/5 au-dessus de l'entrée ; signaux dédupliqués, trades non chevauchants, 20 barres max, stop prioritaire en collision. Coûts : taker 0,80 % par côté + 0,10 % slippage par côté. Le stop 0,25 ATR est une hypothèse de prototype, pas une règle adoptée.
+Données : 15m = 5 533 bougies clôturées du 2026-09-01 au 2026-11-09 02:30 UTC ; 1H = 5 999 bougies clôturées du 2026-02-25 au 2026-11-09 01:00 UTC.
+- 15m sans filtre volume : 67 trades, 8 positifs, expectancy -0,710 R, PF 0,076, rendement moyen net/trade -1,79 %.
+- 15m avec volume >1,5× moyenne 20 : 40 trades, 7 positifs, expectancy -0,571 R, PF 0,108.
+- 15m avec volume >1,5× et R:R initial >=1,51 : 33 trades, 7 positifs, expectancy -0,591 R, PF 0,130.
+- 1H sans filtre volume : 118 trades, 19 positifs, expectancy -0,620 R, PF 0,187, rendement moyen net/trade -1,92 %.
+- 1H avec volume >1,5× : 59 trades, 14 positifs, expectancy -0,524 R, PF 0,196.
+- 1H avec volume >1,5× et R:R initial >=1,51 : 36 trades, 6 positifs, expectancy -0,665 R, PF 0,187.
+Lecture : prototype fortement pénalisé par les coûts et le stop serré ; plusieurs targets touchés restent négatifs nets. Cela n'invalide pas toute stratégie de sweep, mais ce prototype n'est pas prometteur. Les variantes sont des diagnostics de sensibilité, pas une optimisation adoptée.
+
+## Coûts Kraken
+Barème officiel Tier 1 : maker 0,40 % / taker 0,80 % par exécution. Le palier réel du compte reste inconnu. Avec slippage supposé de 0,10 % par côté, mouvement de break-even mécanique approximatif : +1,82 % en taker, +1,01 % en maker, avant spread et impact additionnels. Ce n'est pas une mesure du spread.
+Source officielle : https://support.kraken.com/articles/cross-platform-fee-tier-changes
+
+## Limites statistiques
+OHLCV ne simule pas le carnet, le spread historique, la file d'attente, l'impact ou les non-fills. Les frais proviennent du barème Tier 1 ; slippage 0,10 % par côté = hypothèse. Stop/target simulés sur bougies, collisions stop d'abord. Les trades sont dépendants ; un bootstrap par blocs et des intervalles adaptés seront nécessaires. Le holdout 30 % a maintenant été consulté : il ne peut plus servir de période cachée pour de nouveaux réglages. Il faut réserver une nouvelle période prospective sans modifier les règles. Historique KRAKEN:TELUSD disponible seulement depuis le listing Kraken du 2026-01-22, donc pas de test multi-cycle sur cette paire.
+
+## État paper et décisions
+État vérifié : equity 997,50 USD, cash 997,50 USD, P&L réalisé -2,50 USD, aucune position, aucun ordre en attente. Risque maximal 0,25 %/trade, perte quotidienne 1 %, une position max, levier 1x, R:R min 1,51, stop et cible obligatoires. Dernier stop paper 2026-11-07 11:59 UTC ; cooldown 240 min écoulé.
+Demandes TradingView toujours queued : rq_4f665100b71f4f6a, rq_81fc211a3a43405b, rq_3fbd24d7858c4e9e, rq_304062157ba54962, rq_919a53432a114077. Ne pas créer de doublons.
+Aucun setup validé. Backtests cassure/repli défavorables ou insuffisants ; sweep prototype très négatif sous les coûts et le stop testés. Aucun changement de stratégie, board, règle, alerte, compte ou ordre.
