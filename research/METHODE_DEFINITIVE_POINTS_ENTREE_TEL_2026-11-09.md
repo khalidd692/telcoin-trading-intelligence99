@@ -540,3 +540,101 @@ Le score ≥3, la première tranche de 25 % et les autres règles chiffrées son
 
 ### Statut
 Audit Grok reçu et archivé comme avis indépendant. Grok n'a pas exécuté les backtests privés ni consulté les boards selon son avertissement. Aucun chiffre de performance n'est ajouté au dossier comme résultat vérifié. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
+
+
+## Synthèse contradictoire finale Gemini — 2026-11-09
+
+### Portée
+Gemini présente une synthèse contradictoire des quatre audits et un protocole minimal de recherche. Les propositions ci-dessous sont archivées comme recommandations à examiner, pas comme résultats empiriques. Aucune donnée de performance ou disponibilité de carnet n'est confirmée par cette synthèse seule.
+
+### 1. Arbitrage des indicateurs
+Gemini recommande de réduire fortement le noyau à :
+- structure des prix / niveaux ;
+- un indicateur de tendance (EMA) ;
+- un indicateur de momentum (RSI) ;
+- volume relatif.
+
+Gemini propose d'ignorer CCI, AO, Stochastique et Bollinger, et de ne pas additionner plusieurs oscillateurs corrélés. Il estime que RSI, MACD, Stochastique et CCI dérivent d'informations de prix proches. Cette intuition de redondance est pertinente, mais l'affirmation selon laquelle les additionner n'augmente jamais la probabilité de succès est trop absolue : l'apport marginal doit être mesuré sur données TEL, avec tests hors échantillon. Le recours à SMC doit aussi être défini par des règles objectives, sans étiquettes discrétionnaires.
+
+### 2. Régime et force relative
+Gemini considère que TEL/BTC peut être un filtre d'entrée trop tardif sur une small cap. Il recommande de privilégier ADX ou pente EMA50 pour distinguer tendance et range, sans imposer la force relative TEL/BTC comme condition d'entrée. Cela diverge des audits Claude et Grok qui proposent d'étudier la force relative. Arbitrage à faire par comparaison expérimentale : filtre obligatoire, variable informative non bloquante, ou absence de filtre. Ne pas l'écarter sans test.
+
+### 3. Timing et risque
+Gemini propose un modèle « 1/3 précoce, 2/3 confirmation » : première exposition au signal précoce, puis ajout si la structure 4H casse à la hausse. Il traduit cela en 0,08 % et 0,17 % du capital virtuel, pour rester sous le plafond total de risque de 0,25 % par trade.
+
+Réserve majeure : le plafond de 0,25 % est un budget de perte au stop, pas une fraction de capital à investir. La taille de chaque tranche doit être calculée à partir de la distance entre entrée et invalidation, des frais, du slippage et de l'exposition cumulée. Deux tranches ne peuvent être additionnées que si le risque total, après déplacement éventuel du stop et prise en compte des coûts, reste inférieur ou égal à 0,25 %. La règle « 1/3–2/3 » demeure une hypothèse non validée.
+
+### 4. Entrées progressives
+Gemini recommande de remplacer les tranches fixes 25/35/40 par un espacement lié à l'ATR. C'est une hypothèse à tester, pas une preuve. L'ATR seul ne garantit ni exécution ni liquidité ; l'espacement doit aussi respecter les niveaux structurels, la profondeur et le risque total.
+
+### 5. Angles morts additionnels signalés
+- **Tick size et granularité de cotation Kraken** : le tick size peut rendre certains mouvements de prix très petits relativement au prix unitaire ; son effet doit être calculé à partir des règles de cotation et données de marché réelles, pas d'un pourcentage supposé.
+- **Prix de clôture vs exécution réelle** : ne pas simuler une exécution au close qui n'était pas connaissable au moment du signal. Signal sur bougie clôturée, exécution simulée au premier prix réalistement disponible ensuite, avec spread, slippage et latence.
+- **Coût d'opportunité du capital immobilisé** : suivre durée d'immobilisation, rendement alternatif explicitement choisi et coût d'opportunité. Le taux sans risque pertinent dépend de la devise, de l'horizon et du véhicule réellement accessible ; ne pas en inventer un.
+
+### 6. Protocole minimal proposé
+**Benchmarks :**
+- Buy & Hold : achat unique au début de la période.
+- DCA : montant fixe chaque lundi à 00:00.
+Gemini propose la période du 1er janvier 2024 à la date d'évaluation. Il faut d'abord vérifier que les données historiques Kraken sont complètes sur toute la période. Les benchmarks doivent utiliser les mêmes conventions de cashflows, frais, prix d'exécution et devise de référence ; préciser si le DCA garde du cash non investi et comment les dividendes/intérêts éventuels sont traités (aucun rendement de trésorerie ne doit être supposé).
+
+**Extraction et paper trading :**
+- Récupérer via les outils existants l'historique des signaux TradingView disponibles, sans présumer que l'historique complet des alertes existe.
+- Conserver le journal horodaté des exécutions paper actuelles et futures.
+- Aucun changement aux boards ou règles existantes pour ce travail d'évaluation.
+
+**Stress test :**
+Gemini propose d'ajouter 0,40 % au coût de chaque achat et 0,40 % à chaque vente. Ce scénario peut être conservé comme scénario de stress simple, mais ne doit pas être présenté comme le coût réel universel ni comme une représentation complète de la liquidité. Il faut distinguer frais maker/taker applicables, spread payé, slippage, impact et éventuel coût de non-exécution. Vérifier le barème individuel Kraken et éviter le double comptage du spread si la décote l'inclut déjà.
+
+**Tests dans l'ordre proposés :**
+1. Baselines Buy & Hold et DCA, avec rendement net et drawdown.
+2. Performance brute des signaux actuels.
+3. Performance nette avec scénarios de coûts.
+4. Évaluation hors échantillon et par régime.
+
+Gemini suggère mai–décembre 2022 comme période baissière de robustesse. Réserve : cette période ne peut être qualifiée d'out-of-sample que si elle n'a pas servi à concevoir, sélectionner ou ajuster les règles. Une période antérieure à la fenêtre de développement peut être un test historique de régime, mais un split chronologique cohérent doit être défini avant les analyses et tenir compte de la disponibilité des données Kraken TELUSD.
+
+### 7. Critères de classification proposés par Gemini
+Gemini propose :
+- **Rejetée** : rendement net inférieur au Buy & Hold sur un an et drawdown supérieur au DCA.
+- **Prometteuse** : rendement net supérieur au DCA et Profit Factor >1,5 sur au moins 50 trades.
+- **Validée** : Profit Factor >1,5 après coût de 0,40 % par exécution, espérance positive et drawdown inférieur de moitié à Buy & Hold.
+
+Ces seuils sont des propositions de gouvernance, pas des seuils universellement démontrés. Points à corriger avant adoption :
+- Ne pas définir le rejet par une seule comparaison : accumulation et swing ont des objectifs et profils de risque différents. Comparer le swing à des benchmarks de même exposition/horizon et l'accumulation à DCA/Buy & Hold.
+- Un Profit Factor élevé sur 50 trades ne suffit pas à prouver un avantage robuste ; considérer intervalles de confiance, dépendance entre trades, taille effective de l'échantillon, coûts, stabilité par régime et résultats hors échantillon.
+- Drawdown « inférieur de moitié » à Buy & Hold est un objectif très exigeant et arbitraire tant que l'exposition et les flux de capitaux ne sont pas comparables.
+- Le win rate et le ratio gain/perte doivent être calculés nets de coûts ; l'exemple 40 % × 2:1 donne une espérance positive brute de 0,2R seulement si le gain moyen est bien deux fois la perte moyenne et si ces valeurs incluent tous les coûts et pertes d'exécution.
+- Pour une stratégie de swing peu fréquente, 50 trades peuvent nécessiter longtemps et rester insuffisants selon leur dépendance et la diversité des régimes.
+- Séparer performance absolue, rendement sur capital immobilisé, rendement ajusté au risque, drawdown, turnover et durée d'exposition.
+
+### 8. Décisions candidates et expérimentation
+**Candidats à figer pour le protocole de recherche, après vérification :**
+- KRAKEN:TELUSD exclusivement.
+- Accumulation (1W/1D) et swing (4H/1H) évalués dans des livres et métriques distincts.
+- 15m limité à l'affinage d'exécution si les données le justifient.
+- Signal basé sur bougie clôturée et exécution à un prix disponible ensuite.
+- Mesure explicite des coûts et de la liquidité.
+- Comparaison aux benchmarks simples.
+- Paper trading uniquement, spot, sans levier, risque maximal de 0,25 % du capital virtuel par trade.
+
+**À maintenir en expérimentation :**
+- 1/3 précoce et 2/3 confirmation.
+- Espacement ATR des tranches.
+- ADX vs pente EMA50 pour classifier les régimes.
+- Utilité marginale du ratio TEL/BTC.
+- Divergences RSI/CVD si données disponibles et fiables.
+- Signaux éventuels MEXC/KuCoin comme information externe uniquement ; ils ne remplacent jamais l'instrument d'exécution KRAKEN:TELUSD et doivent être synchronisés et testés.
+- Le scénario de coût fixe 0,40 % par côté.
+
+### 9. Données manquantes à vérifier
+- Couverture et qualité de l'historique OHLCV KRAKEN:TELUSD, notamment depuis janvier 2024 et mai–décembre 2022.
+- Historique des signaux/alertes Smart View réellement récupérable.
+- Tick size et tick precision applicables à la paire, historique éventuel des changements.
+- Spread, profondeur bid/ask et slippage par taille d'ordre ; carnet historique si disponible.
+- Frais maker/taker individuels et hypothèses d'exécution réalistes.
+- Séries BTC/ETH et éventuellement BTC.D synchronisées, si testées.
+- Disponibilité réelle de CVD et données on-chain ; ne pas les supposer disponibles.
+
+### 10. Statut et garde-fous
+Cette synthèse Gemini est enregistrée comme arbitrage proposé, pas comme validation empirique. Elle ne remplace pas les audits indépendants initiaux. Les points chiffrés et seuils doivent être justifiés et testés avant adoption. Aucun script, stratégie, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
