@@ -1,5 +1,6 @@
 # Méthode de recherche des points d'entrée TEL — décision de travail
 
+
 Date de capture : 2026-11-09
 
 ## Objectif de l'investisseur
@@ -139,3 +140,65 @@ L'utilisateur a évoqué la possibilité d'utiliser 30 € d'argent réel pour t
 ## Règle de continuité
 
 Reprendre ce document comme référence de travail. Ne pas relancer une architecture abandonnée ni demander à l'utilisateur d'exécuter des commandes PC lorsqu'il est sur mobile. Avant chaque conseil de marché, récupérer les données fraîches disponibles. Aucune modification de code, stratégie, board, compte ou ordre sans autorisation explicite.
+
+
+## Audit indépendant Gemini — 2026-11-09
+
+### Diagnostic
+Gemini juge la méthode sérieuse dans ses intentions, mais trop chargée en indicateurs et vulnérable à la redondance, au double comptage et au surapprentissage. Le risque est de croire disposer de plusieurs confirmations alors que RSI, MACD, Stochastique, CCI et AO reflètent en partie le même phénomène de momentum.
+
+### Angles morts à examiner
+1. Colinéarité des indicateurs de momentum : mesurer l'apport marginal de chaque variable, ne pas compter des indicateurs corrélés comme des confirmations indépendantes.
+2. Régime de marché insuffisamment formalisé : distinguer tendance, range, baisse et stress ; tester les règles par régime.
+3. Volume historique différent de la liquidité exécutable : le volume d'une bougie ne garantit pas la profondeur du carnet Kraken.
+4. Dérivés externes : l'Open Interest et le funding sur les marchés perpétuels peuvent influencer TEL même pour une approche spot ; disponibilité des données à vérifier.
+5. Dimensionnement fixe : étudier un espacement et une taille adaptés à la volatilité via ATR, sans présumer que cette méthode améliore les résultats.
+6. Risque macro : prévoir des conditions d'invalidation lorsque BTC/ETH ou la liquidité se dégradent.
+7. Confusion des horizons : une position swing invalidée ne doit jamais être requalifiée en investissement long terme pour éviter de prendre une perte.
+8. Contexte BTC subjectif : tester corrélation glissante et bêta de TEL par rapport à BTC, avec fenêtres et stabilité à évaluer.
+9. Retest trop strict : mesurer les départs impulsifs sans retest propre afin de ne pas manquer systématiquement les mouvements.
+10. Accumulation horizontale : rechercher les longues phases de stabilisation et de contraction de volatilité.
+
+### Nettoyage proposé par Gemini — non adopté à ce stade
+- Noyau candidat : structure des prix, EMA 20/50/200, RSI, ADX/DMI, ATR, OBV et volume relatif.
+- Réduire le rôle ou retirer du moteur principal SMA si EMA conservées, MACD, CCI, Stochastique, AO et Bollinger.
+- Tester VWAP ancré sur événements pertinents.
+- Variables expérimentales à vérifier : déséquilibre du carnet Kraken à ±2 %, CVD, corrélation/bêta BTC.
+- Ne pas implémenter ces suppressions/ajouts avant d'avoir vérifié disponibilité des données et mesuré leur apport hors échantillon.
+
+### Deux setups supplémentaires à tester
+1. Compression de volatilité : contraction de l'ATR/volatilité, stabilisation du prix et évolution de l'OBV ; comparer entrée anticipée avant cassure et entrée après cassure.
+2. Failed Breakdown / Spring : passage sous un support puis réintégration confirmée en clôture 4H ; tester l'entrée sur réintégration sans exiger systématiquement un retest ultérieur.
+
+Ces setups sont des hypothèses de recherche, pas des signaux validés.
+
+### Points méthodologiques quantitatifs
+- Prévenir le look-ahead bias : signal calculé à la clôture de la barre n, exécution simulée au plus tôt à l'ouverture de n+1.
+- Surapprentissage : utiliser une validation chronologique walk-forward, par exemple optimisation sur 6 mois puis test sur les 3 mois suivants, en répétant le cycle. Les fenêtres restent à justifier selon l'historique disponible.
+- Tester séparément plusieurs régimes et conserver un véritable échantillon final hors optimisation.
+- Modéliser les frais maker/taker, spread et slippage séparément ; faire des stress tests de coûts. Le chiffre de 0,40 % avancé par Gemini n'est pas adopté comme coût universel ni comme coût total garanti.
+- Mesurer l'exécution simulée en fonction de la profondeur réellement disponible, si le carnet Kraken historique ou temps réel est accessible.
+
+### Réserves critiques sur l'audit Gemini
+- ADX > 25 ou ADX 1D < 20 ne doivent pas devenir des interdictions automatiques : ce sont des seuils candidats à tester, pas des lois de marché.
+- Les notions SMC, Fair Value Gap et Order Block doivent être définies objectivement avant backtest, sinon elles introduisent de la subjectivité.
+- Le CVD et le carnet ne doivent être utilisés que si des données fiables et spécifiques à KRAKEN:TELUSD sont réellement accessibles.
+- La suppression définitive d'indicateurs doit être décidée à partir de leur apport marginal mesuré, pas sur affirmation seule.
+- ATR-based scaling est une piste, pas une garantie de meilleur dimensionnement.
+- Une corrélation ou un bêta BTC sur 14 jours peut être instable ; tester plusieurs fenêtres et régimes.
+- Le chiffre de stress de coûts doit être décomposé entre frais, spread et slippage et confronté au barème réel du compte.
+
+### Conclusion de travail
+L'audit Gemini est une contribution indépendante utile, mais ne valide ni la méthode ni une stratégie rentable. Il justifie une phase de simplification expérimentale et d'analyse des données. Aucun changement n'est autorisé à ce stade sur les stratégies, scripts, boards Smart View, alertes, paramètres, paper broker ou comptes.
+
+### Actions de recherche à mener
+1. Vérifier quelles données TradingView MCP expose réellement pour KRAKEN:TELUSD : OHLCV, historique, volume, indicateurs, carnet, CVD et données dérivées.
+2. Établir la fraîcheur, profondeur et complétude des historiques disponibles.
+3. Mesurer les corrélations entre indicateurs et leur apport marginal.
+4. Comparer les six setups (quatre initiaux + compression + failed breakdown) sur le même protocole.
+5. Ajouter régime de marché, ATR sizing et filtre macro comme variantes expérimentales, pas comme règles imposées.
+6. Construire un walk-forward sans fuite de futur avec frais, spread et slippage explicitement modélisés.
+7. Obtenir les audits indépendants de Claude, Grok et DeepSeek avant arbitrage final ; ne pas décider par vote majoritaire.
+
+### Statut
+Audit reçu de Gemini et enregistré comme avis indépendant. Les recommandations restent des hypothèses à vérifier. Les règles de sécurité existantes et le cadre KRAKEN:TELUSD spot/paper-only restent inchangés.
