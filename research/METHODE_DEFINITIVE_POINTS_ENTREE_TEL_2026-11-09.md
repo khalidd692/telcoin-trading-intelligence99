@@ -408,3 +408,135 @@ Claude décrit comme hypothèse d'accumulation durable : base longue, volume qui
 
 ### Statut
 Audit Claude reçu et enregistré comme avis indépendant. Aucun backtest Claude n'a été effectué et aucune donnée TEL n'a été consultée par Claude selon son avertissement. Les recommandations restent des hypothèses à tester. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
+
+
+## Audit indépendant Grok — 2026-11-09
+
+### Portée et réserves
+Grok précise ne pas avoir accès aux backtests privés, aux résultats exacts de paper trading ni au détail des boards TradingView/MCP. Il ne prétend pas avoir validé empiriquement la méthode. Ses observations sont méthodologiques. Les volumes TEL/USD et les frais cités doivent être revérifiés à la source et à la date de toute utilisation ; ils ne sont pas des mesures actuelles garanties.
+
+### Diagnostic général
+Grok juge la méthode conceptuellement cohérente pour un investisseur à deux horizons (accumulation pluriannuelle et swing), notamment grâce à la séparation des horizons, au contexte BTC/ETH, à la prise en compte des coûts et à la volonté de validation hors échantillon. Il relève toutefois :
+- trop d'indicateurs redondants ;
+- des confirmations techniques qui peuvent arriver après le mouvement ;
+- une formalisation insuffisante des régimes et du coût d'exécution Kraken ;
+- un risque simultané de sur-filtrage (rebonds manqués) et de sous-filtrage structurel (entrer dans une baisse prolongée ou un rebond seulement technique).
+
+### Dix angles morts classés par Grok
+1. **Coût d'exécution et liquidité** : Grok rapporte des frais Kraken Pro Tier 1 de 0,40 % maker / 0,80 % taker et estime qu'avec spread et impact le coût aller-retour pourrait atteindre 1,5–3 % ou davantage pour certaines tailles. Il cite aussi des volumes quotidiens souvent sous 100 kUSD sur Kraken. Ces chiffres et leur période de référence ne sont pas confirmés ici ; vérifier le barème individuel, les volumes et le carnet au moment des tests. Les entrées en plusieurs tranches peuvent multiplier les frais.
+2. **Régime non formalisé** : distinguer explicitement marché haussier, baissier, range et forte volatilité ; les setups ne sont pas nécessairement transférables entre régimes.
+3. **Redondance indicateurs** : RSI, Stochastique, CCI, MACD, AO et Momentum sont largement corrélés ; ADX/DMI et plusieurs moyennes peuvent aussi doubler l'information.
+4. **Retard des confirmations** : les confirmations multi-timeframes, volume et structure peuvent faire manquer une part importante du rebond initial. L'estimation Grok de 30–50 % n'est pas mesurée sur TEL et ne doit pas être traitée comme un fait.
+5. **Force relative insuffisamment quantifiée** : formaliser TEL/BTC, TEL/ETH et éventuellement BTC.D plutôt que laisser le filtre macro subjectif.
+6. **Accumulation vs rebond technique** : quantifier durée de stabilisation, volume cumulé et succession de higher lows sur plusieurs horizons.
+7. **Tranches progressives** : les répartitions 25/35/40 restent hypothétiques ; la taille devrait être étudiée en fonction de l'ATR, de la liquidité et de la distance au support.
+8. **Overfitting et look-ahead** : formaliser le protocole hors échantillon, walk-forward et purge des données/paramètres optimisés.
+9. **Catalyseurs fondamentaux et on-chain** : examiner upgrades réseau, migration v3, liquidité TELx, émissions et annonces Telcoin Association ; disponibilité et pertinence de ces données restent à établir.
+10. **Mesure de performance duale** : suivre séparément le coût moyen d'accumulation en TEL et la performance ajustée au risque du swing, ainsi que le drawdown du capital immobilisé.
+
+### Améliorations prioritaires proposées
+- Filtre de régime candidat : ADX, pente des EMA 50/200 sur 1D et BTC.D ; seuils et règles à définir/tester, non à adopter tels quels.
+- Réduire le noyau à 4–5 variables suffisamment orthogonales.
+- Construire une force relative TEL/BTC et TEL/ETH, avec contexte BTC.D.
+- Conditionner les tranches à l'ATR et au spread observé.
+- Écrire un protocole de validation strict avant de tester.
+- Inclure les frais, une estimation du demi-spread et l'impact d'exécution dans le filtre de coût.
+
+### Indicateurs — proposition de Grok, non adoptée
+**À conserver comme candidats :**
+- structure des prix, supports et résistances ;
+- EMA/SMA 50/200 et ATR ;
+- volume relatif et OBV ;
+- RSI(14) uniquement comme filtre d'extrême, pas comme signal primaire ;
+- ADX/DMI.
+
+**À supprimer ou reléguer selon Grok :**
+- Stochastique, CCI, AO, Momentum 10 ;
+- MACD histogramme comme signal d'entrée ;
+- Bollinger comme signal principal ;
+- VWAP glissant en daily/weekly sur cette paire ;
+- moyennes 10/20/100 redondantes avec 50/200.
+
+**À ajouter comme variables candidates :**
+- ratios TEL/BTC et TEL/ETH, avec moyenne mobile des ratios ;
+- BTC.D ;
+- spread et profondeur approximative ;
+- nombre de higher lows et contraction d'ATR sur 1D/4H ;
+- Volume Profile/POC si réellement disponible sur TradingView.
+
+Ces propositions divergent partiellement des audits précédents sur OBV, VWAP et le choix du noyau. Aucun indicateur ne doit être supprimé ou retenu par vote ; mesurer la disponibilité, la qualité et l'apport marginal sur KRAKEN:TELUSD.
+
+### Configurations supplémentaires proposées
+1. Failed breakdown / Spring : balayage du support puis clôture rapide au-dessus, avec volume.
+2. Séquence de higher lows et reprise de l'EMA 50 en 4H/1D, dans un contexte de force relative positive.
+3. Compression ATR suivie d'expansion avec volume, en zone de valeur.
+4. Divergence RSI/prix sur timeframe supérieur, pas sur 15m.
+5. Entrée post-catalyseur avec confirmation technique minimale.
+
+Toutes sont des hypothèses ; edge sur TEL non démontré.
+
+### Méthode améliorée proposée par Grok
+1. Filtre de régime 1D/1W : tendance BTC, BTC.D et ADX TEL.
+2. Score de setup 0–5 composé de structure, force relative, volume, stabilisation et coût acceptable.
+3. Entrée progressive uniquement si score ≥3 ; tranche initiale de 25 % sur signal précoce, tranches suivantes après confirmation et selon ATR.
+4. Budgets séparés : accumulation/DCA intelligent en zones de valeur et swing avec risque par trade limité.
+5. Invalidation définie avant entrée (sous le creux structurel ou multiple ATR).
+6. Paper trading exclusivement avec journal de la raison, du score, du coût estimé et du résultat.
+
+Le score ≥3, la première tranche de 25 % et les autres règles chiffrées sont des propositions non testées, pas des seuils validés. Ne pas remplacer le plafond de risque existant de 0,25 % du capital virtuel par trade.
+
+### Tests indispensables proposés
+- Backtest point-in-time KRAKEN:TELUSD uniquement ; frais réels applicables, demi-spread et impact estimé ; signal à la clôture et exécution au début de la bougie suivante pour éviter le look-ahead.
+- Walk-forward ou séparation stricte train/validation/test.
+- Sensibilité des paramètres (±20 % comme scénario de test proposé, pas une norme universelle).
+- Performances accumulation et swing séparées.
+- Analyse par régime.
+- Comptage des signaux et du taux de participation pour détecter le sur-filtrage.
+- Paper trading prospectif de 3–6 mois proposé par Grok, sans en faire une garantie de validation.
+
+### Risques non résolubles
+- Faible liquidité structurelle et slippage imparfaitement modélisable.
+- Événements fondamentaux et réglementaires imprévisibles.
+- Changement durable de régime crypto.
+- Biais comportementaux.
+- Historique Kraken potentiellement incomplet et absence possible de données tick-by-tick.
+
+### Arbitrage et réserves
+- Les volumes 24h 40–100 kUSD mentionnés par Grok, les frais Tier 1 et l'estimation de coût aller-retour 1,5–3 % ou plus ne sont pas vérifiés indépendamment ici. Les vérifier avec données horodatées avant toute conclusion.
+- Le chiffre 30–50 % de rebond manqué n'est pas démontré sur TEL.
+- Le score 0–5, le seuil ≥3, les tranches proposées et les seuils de régime doivent être testés ; ne pas les introduire dans les boards existants.
+- L'indicateur BTC.D et les ratios TEL/BTC/TEL/ETH ne sont candidats que si des séries fiables et synchronisées sont accessibles.
+- Le Volume Profile/POC, le carnet, les données on-chain et les catalyseurs doivent être vérifiés en disponibilité réelle ; ne jamais simuler leur présence.
+- Les audits divergent sur OBV, VWAP, MACD, RSI et la composition du noyau. Résoudre ces désaccords par tests d'apport marginal et qualité de données, pas par vote.
+- Cadre impératif inchangé : KRAKEN:TELUSD, spot, sans levier, paper trading uniquement, capital virtuel, risque maximal 0,25 % par trade, aucune connexion/commande sur compte réel, aucun ordre automatique, aucune modification des stratégies ou boards sans autorisation.
+
+### Convergences avec Gemini, DeepSeek et Claude
+- Simplifier les indicateurs et contrôler leur redondance.
+- Formaliser les régimes et la force relative BTC/ETH.
+- Séparer accumulation et swing, budgets et métriques.
+- Mesurer frais, spread, profondeur, slippage et impact.
+- Contrôler look-ahead, surapprentissage et sélection de paramètres.
+- Faire du walk-forward et comparer les résultats à des références simples.
+- Étudier les springs/faux breakdowns et les compressions de volatilité.
+- Distinguer strictement hypothèse, test incomplet et preuve empirique.
+
+### Apports spécifiques de Grok à investiguer
+- BTC.D et force relative TEL/BTC, TEL/ETH.
+- Mesure de stabilisation par higher lows et contraction ATR.
+- Mesure du taux de participation pour détecter le sur-filtrage.
+- Catalyseurs fondamentaux TEL et événements tokenomics.
+- Sensibilité des paramètres et paper trading prospectif de plusieurs mois.
+- Score de setup, uniquement comme hypothèse à comparer à une approche sans score.
+
+### Actions de recherche
+1. Vérifier les frais Kraken réellement applicables, puis relever spread/profondeur/volume horodatés sur la paire.
+2. Vérifier la disponibilité des séries BTC.D, TEL/BTC et TEL/ETH, ainsi que des données fondamentales/on-chain ; documenter les absences.
+3. Définir un filtre de régime mesurable et une hiérarchie de timeframes avant toute évaluation.
+4. Comparer un noyau réduit d'indicateurs par tests d'apport marginal, sans supprimer définitivement des variables sur avis externe.
+5. Mesurer taux de participation, rebonds manqués, coûts et performances par régime.
+6. Comparer les moteurs accumulation/swing séparément à leurs benchmarks.
+7. Rédiger puis geler le protocole hors échantillon avant tout test confirmatoire.
+8. Conserver les règles et boards actuels inchangés jusqu'à autorisation explicite.
+
+### Statut
+Audit Grok reçu et archivé comme avis indépendant. Grok n'a pas exécuté les backtests privés ni consulté les boards selon son avertissement. Aucun chiffre de performance n'est ajouté au dossier comme résultat vérifié. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
