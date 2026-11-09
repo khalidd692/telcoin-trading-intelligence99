@@ -44,6 +44,14 @@ L'archive Kraken est la source de données appropriée pour l'étude cross-paire
 4. Réutiliser les rapports et les résultats déjà obtenus ; ne pas répéter les 6 304 configurations déjà testées sur TEL.
 5. Avant de prétendre qu'une stratégie est rentable, auditer ou sélectionner un moteur de simulation P&L adapté aux règles spot Kraken. Le moteur de détection existant reste inchangé.
 
+## Constat 4 — les coûts Kraken utilisés précédemment ne sont pas assez ancrés
+Le barème public Kraken Pro consulté le 2026-11-09 affiche, au niveau Spot Tier 1, 0,40 % Maker et 0,80 % Taker par exécution. À titre de repère avant spread/slippage :
+- Maker à l'entrée + Maker à la sortie : environ 0,80 % aller-retour ;
+- Maker + Taker : environ 1,20 % ;
+- Taker + Taker : environ 1,60 %.
+Les niveaux réels dépendent du palier applicable au compte et du type d'exécution ; le palier personnel n'est pas connu ici. Les hypothèses 0,70 % et 1,40 % du sweep antérieur ne doivent donc pas être traitées comme des frais Kraken confirmés. Les candidats devront être retestés avec un scénario de frais correspondant au compte et avec spread/slippage séparés.
+Source : https://www.kraken.com/features/fee-schedule
+
 ## Garde-fous
 - Recherche et paper trading uniquement.
 - Aucun ordre réel, aucune connexion au compte Kraken réel.
