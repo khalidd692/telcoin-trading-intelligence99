@@ -26,7 +26,7 @@ Main branch: unchanged; do not merge or push to main without explicit permission
 
 ## Current durable work
 
-Branch research/tel-discovery-unrestricted was created from main HEAD 05184036e9c4fcadf56fb3d2028a3e52997fbf13. It is currently 3 commits ahead and 0 behind main (last verified 2026-11-09). It contains:
+Branch research/tel-discovery-unrestricted was created from main HEAD 05184036e9c4fcadf56fb3d2028a3e52997fbf13. It was last verified 2026-11-09 as 4 commits ahead and 1 commit behind main; the branch has diverged. Do not merge or rebase automatically. Inspect the one new main commit and reconcile only on this research branch after review, without modifying main. It contains:
 - research/RECHERCHE_ELARGIE_TEL_CADRE.md
 - research/RESULTATS_PRELIMINAIRES_4H.md
 
