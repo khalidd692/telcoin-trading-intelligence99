@@ -83,3 +83,48 @@ At the end of each substantial work session:
 - verify the GitHub write and branch diff;
 - keep the Notion project memory linked to this repository/branch.
 Future agents must read this file and the two research documents before doing any work.
+
+## Session de reprise — 2026-11-09 01:52–01:53 UTC
+
+### Contrôle du dépôt
+- Lecture des trois fichiers de référence effectuée depuis `research/tel-discovery-unrestricted`.
+- Comparaison GitHub vérifiée : branche divergée, 5 commits ahead et 2 behind `main` ; merge-base `05184036e9c4fcadf56fb3d2028a3e52997fbf13`, HEAD actuel de `main` `ce85a6fe9a47b3e69031b1d475cf6b41f40e5777`. Aucun merge/rebase et aucun changement de `main`.
+- Aucun fichier de stratégie, board, alerte ou code moteur modifié pendant cette session.
+
+### État TradingView/MCP observé
+- MCP TradingView officiel accessible ; cotation KRAKEN:TELUSD `0.0014912 USD`, `update_mode=streaming`, variation affichée `-0.7719%` au moment de l'appel (2026-11-09 vers 01:52 UTC).
+- OHLCV 4h : dernières barres retournées : 2026-11-08 20:00 UTC clôture 0.001500 ; barre 2026-11-09 00:00 UTC encore en formation, clôture provisoire 0.001477. Exclure cette dernière des calculs clôturés.
+- Snapshot technique 4h : RSI14 44.18, ADX 35.12, EMA20 0.00155392, EMA50 0.00151127, MACD 0.00001588 sous signal 0.00003728, recommandation TradingView SELL.
+- Snapshot technique 1h : RSI14 23.06, ADX 30.43, EMA20 0.00154456, EMA50 0.00156835, MACD -0.00002834 sous signal -0.00002154, recommandation SELL.
+- Nouvelle vérification des pages intraday récentes : 1h, 5,000 barres de 2026-04-11 20:00 à 2026-11-09 01:00 UTC, 65 ruptures sur cette page, historique plus ancien disponible ; 15m, 5,000 barres de 2026-09-08 12:45 à 2026-11-09 01:45 UTC, 664 ruptures sur cette page, historique plus ancien disponible. Ces nombres de ruptures ne couvrent que les pages récentes observées et ne remplacent pas les totaux paginés consignés plus haut.
+- Tentative de refresh des deux boards refusée : quota hebdomadaire à 100 %, zéro refresh restant, réinitialisation annoncée le 2026-11-13 vers 14:52 UTC. Les lectures de boards restent donc anciennes : radar 15m dernier refresh 2026-11-08 22:28:36 UTC ; repli 4h dernier refresh 2026-11-08 20:01:28 UTC. Ne pas présenter leurs signaux comme actuels.
+
+### Paper broker — état vérifié
+- Equity/cash : 997.50 USD sur 1,000 USD ; P&L réalisé -2.50 USD ; aucune position et aucun ordre en attente.
+- Derniers fills : achat paper 33,500 TEL à 0.001680 le 2026-11-06 23:32 UTC ; stop exécuté à 0.00160546 le 2026-11-07 11:59 UTC. Aucun nouvel ordre ni aucune modification effectués pendant cette session.
+- Politique lue : risque 0.25 % par trade, perte quotidienne 1 %, une position, levier max 1, cooldown 240 min, symbole autorisé KRAKEN:TELUSD, minimum R/R paper 1.51. Ce minimum reste une règle d'admission paper active ; il ne doit pas devenir un filtre universel de découverte.
+
+### Boards et qualité du suivi
+- Radar retournement 15m : 0 setup, 4 watch et 5 none sur la fenêtre de 14 jours ; 0 signal scoré. Les signaux récents sont non scorables et le volume par barre requis par la règle est indiqué indisponible dans la lecture du board.
+- Repli 4h : 0 setup, 10 watch ; 0 signal scoré. Dernier plan lu (ancien) : entrée 0.00151475, stop 0.00145996, cible 0.001578, R/R 1.15 ; déclencheur de reprise EMA20 non satisfait. Les règles du board sont marquées unsettled. Aucun plan n'est une instruction d'ordre.
+
+### Tests historiques automatiques MCP — fréquences, pas backtests de trading
+Fenêtre demandée par le service : 1,000 barres, du 2026-05-26 au 2026-11-09, horizon 20 barres sauf gaps (intra-barre). Ces réponses ne modélisent ni entrée/exécution réaliste, ni stop, ni sizing, ni frais/slippage : aucune n'est une preuve d'avantage net.
+- 4h `rsi_oversold` : 10/17 (58.8 %), baseline 38.9 %, IC95 36.0–78.4 %, médiane forward +1.20 %, faible échantillon.
+- 4h `rsi_ma_cross_up` : 36/82 (43.9 %), baseline 38.9 %, IC95 33.7–54.7 %, médiane -0.77 %, 1 observation en attente.
+- 4h `gap_up_fill` : 16/19 (84.2 %), IC95 62.4–94.5 %, médiane forward -0.08 %, baseline non fournie, faible échantillon ; définition = retour au close précédent pendant la même barre.
+- 4h `bb_lower_reentry` : 30/30 succès, mais baseline 100 % également ; définition = retour de clôture à l'intérieur des bandes sous 20 barres. Pas de pouvoir discriminant établi.
+- 4h `gap_down_fill` : 11/16 (68.8 %), IC95 44.4–85.8 %, médiane forward -0.78 %, baseline non fournie ; taux de seconde moitié 40 % (2/5), stabilité faible.
+- Rappel résultats 1h déjà obtenus le 2026-11-08 : `rsi_oversold` 9/19 (47.4 %) vs baseline 38.3 %, médiane -0.31 % ; `rsi_ma_cross_up` 30/78 (38.5 %) vs baseline 38.3 %, médiane -0.85 % ; `bb_lower_reentry` 35/35 mais baseline 100 %.
+
+### Conclusion de cette session
+- Aucune stratégie nouvelle validée. Le test 4h RSI sous 30 est une fréquence de signal (n=17), pas la validation de la stratégie RSI<30 sous EMA50 (16 trades du screen précédent) ; ne pas confondre ces définitions.
+- La réversion RSI 4h reste une piste de recherche à tester avec des règles d'entrée/sortie pré-enregistrées et des coûts réalistes ; l'IC est large et n=17.
+- RSI cross-up 4h n'apporte pas d'avantage évident sur la baseline ; les gaps et BB reentry n'établissent pas une stratégie rentable.
+- L'état des boards ne peut pas être actualisé avant le reset du quota. Le cours OHLCV/technique reste consultable directement via le MCP officiel, mais il ne remplace pas la lecture fraîche Smart View.
+
+### Prochaine action concrète
+1. Après reset du quota, rafraîchir les deux boards et relire leurs signaux/horodatages, sans modifier leurs règles.
+2. Poursuivre l'exploration avec données OHLCV 4h clôturées et règles pré-enregistrées ; vérifier les coûts Kraken et slippage avant toute simulation nette.
+3. Reprendre l'audit du moteur historique existant uniquement après inspection de ses fichiers/tests ; aucun résultat de moteur ni test logiciel n'a été exécuté pendant cette session.
+4. Maintenir la séparation entre fréquences MCP, résultats exploratoires, simulation paper et validation OOS (100 trades minimum).
