@@ -73,3 +73,13 @@ Buy-and-hold sur la même période (après 0,70 % de coût hypothétique) : envi
 - Poursuivre la famille réversion, mais tester sa robustesse sur segments de marché différents, frais stressés, stops alternatifs et règles d'invalidation fixées à l'avance.
 - Construire un holdout réellement scellé et augmenter l'échantillon via historique 1h paginé et propre, sans compter les sous-barres comme des observations indépendantes.
 - Ne pas transférer cette piste vers le board TradingView ou le paper broker avant validation distincte et autorisation.
+
+
+## Complément de contrôle — pagination et anomalie OHLCV
+
+Pagination terminée pour les fenêtres intraday disponibles :
+- 1h : 6 779 barres du 2026-01-22 14:00 UTC au 2026-11-09 01:00 UTC, réparties sur deux pages. 166 ruptures d'une heure ont été observées au total (101 dans la page ancienne, 65 dans la page récente).
+- 15m : 5 529 barres du 2026-09-01 00:00 UTC au 2026-11-09 01:15 UTC, sur deux pages. 791 ruptures de 15 minutes observées (127 anciennes, 664 récentes).
+- Le premier OHLCV 1h est anormal : 2026-01-22 14:00 UTC, open 0,004400, high 0,020000, low 0,003929, close 0,004049, volume 30 402 785 TEL. Ce high est très éloigné de toutes les autres valeurs du même historique (deuxième plus haut : 0,004875) et n'est pas reflété par l'agrégat 4h correspondant. Il doit être exclu ou mis en quarantaine, jamais utilisé pour les niveaux/ATR.
+- Les ruptures intraday et cette anomalie empêchent de traiter les historiques 1h/15m comme un flux continu. Les backtests multi-timeframes restent bloqués jusqu'à segmentation, exclusion de l'anomalie et contrôle des timestamps.
+
