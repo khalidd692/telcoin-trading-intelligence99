@@ -1021,3 +1021,125 @@ Divergences non résolues à arbitrer avec les données :
 
 ### Statut
 Synthèse finale personnelle Claude reçue et archivée. Claude ne prétend pas avoir accès aux audits des autres ni avoir consulté TradingView dans sa session. Aucun résultat de backtest n'est ajouté. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
+
+
+# Audit opérationnel initial TradingView / MCP — 2026-11-09
+
+## 1. Cadre et sécurité vérifiés
+Lecture seule uniquement. Aucun ordre, aucune modification de stratégie, de board, d'alerte, de paramètre, de paper broker ou de compte n'a été effectué.
+
+État du connecteur trader :
+- Instrument autorisé : KRAKEN:TELUSD uniquement.
+- Spot, levier brut maximal 1x.
+- Risque maximal : 0,25 % par trade.
+- Perte quotidienne maximale : 1 %.
+- Maximum une position ouverte ; maximum un pari corrélé.
+- Stop et cible obligatoires.
+- R:R minimum de la politique : 1,51.
+- Aucun trade réel ; le paper broker est le seul environnement de simulation.
+- Trading agent activé dans le connecteur, mais cela ne modifie pas l'interdiction utilisateur d'exécuter des ordres réels ou automatiques.
+
+Paper broker au contrôle :
+- Capital initial : 1 000 USD.
+- Cash et equity : 997,50 USD.
+- P&L réalisé cumulé : -2,50 USD (-0,25 %).
+- Position ouverte : aucune.
+- Ordres en attente : aucun.
+- Dernier trade historique : achat paper de 33 500 TEL à 0,001680 USD, puis stop paper à 0,00160546 USD le 2026-11-07 ; perte réalisée de 2,50 USD.
+
+## 2. Boards et stratégies primaires recensés
+Trois boards principaux ont une stratégie primaire sur KRAKEN:TELUSD :
+1. **TEL/USD — Radar de retournement précoce** (9f6534d9-4eb8-4ded-a6ca-b694fb98dfd3) : stratégie primaire « TEL retournement confirmé 15m », écrite par le board. Le déclencheur dépend d'un CHoCH, MACD et volume relatif supérieur à 1,5× ; le volume par barre est signalé NON DISPONIBLE dans la lecture du board. La lecture est périmée et aucun setup n'est signalé.
+2. **TEL/USDT — Aide à la décision** (06d9cdf8-29ff-4d79-8d1c-5b5b7d1ed0ad) : stratégie primaire « TEL Kraken – repli 4h dans tendance », écrite par le propriétaire. Toutes ses règles sont classées unsettled par le connecteur : aucun backtest de ses règles complètes n'est encore reconnu. Dernier signal enregistré : WATCH, pas SETUP ; ancien plan indicatif entry 0,00151475 / stop 0,00145996 / target 0,001578, R:R 1,15, inférieur au minimum de politique 1,51. Lecture périmée.
+3. **TEL/USD — Smart View propre (test)** (27b3b625-b1c9-4c18-9109-8b8c1181b85c) : stratégie primaire « TEL/USD 4h — cassure du swing high en tendance ». Règles d'entrée et niveaux partiellement classés history_approx ; aucun setup signalé, lecture périmée.
+
+Un quatrième board primaire recensé est basé sur MEXC:TELUSDT (911228ef-44d6-4de7-8841-a9f1b366ff93) : exclu de toute décision et de tout benchmark décisionnel, car l'instrument de référence autorisé est KRAKEN:TELUSD.
+
+### Incohérence importante de carte
+La carte trade_box du board « Aide à la décision » a rendu un plan SHORT (entry 0,00151475, stop 0,00160129, target1 0,0014247, target2 0,001383) alors que sa stratégie primaire est strictement LONG. Cette contradiction signifie que cette carte ne doit pas être utilisée comme plan d'ordre ni comme signal exploitable sans clarification. Aucun ordre n'a été placé.
+
+### Historique de signaux disponible
+Le connecteur indique que l'enregistrement des signaux ne commence que le 2026-11-03 :
+- Radar 15m : 28 runs, 0 setup, 4 watch, 5 none ; 0 trade scoré.
+- Repli 4h : 14 runs, 0 setup, 10 watch ; 0 trade scoré.
+- Smart View test 4h : 12 runs, 0 setup, 2 watch, 1 none ; 0 trade scoré.
+- Les données sont insuffisantes pour évaluer l'effet des filtres ; le connecteur retourne too_early.
+Ne pas interpréter l'absence de setup enregistré avant le 3 novembre comme preuve qu'aucun signal n'a existé avant cette date.
+
+### Quota de refresh
+Les trois boards ont refreshes_left=0 et l'allocation hebdomadaire est consommée jusqu'au 2026-11-13. Leurs lectures stratégiques restent donc périmées. Les cartes ont pu être relues sans lancer un refresh complet ; aucune tentative de refresh supplémentaire n'a été faite.
+
+## 3. Couverture OHLCV TradingView réellement observée
+Appels en lecture seule sur KRAKEN:TELUSD :
+- **1D** : 292 barres, première disponible le 2026-01-22, dernière barre 2026-11-09 en formation ; dernière clôture complète le 2026-11-08.
+- **1W** : 43 barres, première disponible semaine du 2026-01-19 ; insuffisant pour calculer une SMA200 hebdomadaire.
+- **4H** : 1 743 barres paginées, du 2026-01-22 au 2026-11-09 ; dernière clôture complète le 2026-11-08 à 20:00 UTC.
+- **1H** : 1 000 barres dans la première page, du 2026-09-28 au 2026-11-09 ; has_more=true, historique plus ancien à paginer.
+- Requêtes quotidiennes ciblées 2024-01-01 → 2024-12-31 et 2022-05-01 → 2022-12-31 : échec explicite « no bars », historique TradingView disponible commençant le 2026-01-22.
+
+Conséquence : le test suggéré par Gemini sur 2024 et le test de régime 2022 suggéré par DeepSeek ne peuvent pas être faits avec l'historique OHLCV TradingView actuellement exposé. La couverture observée ne représente qu'environ neuf mois de données quotidiennes/4H et un seul contexte de marché ; elle ne permet pas de démontrer la robustesse multi-cycle. La date du premier bar TradingView ne prouve pas à elle seule la date officielle de listing de la paire.
+
+### Derniers repères calculés sur bougies clôturées
+- Dernière clôture journalière complète (8 novembre) : 0,001500 USD.
+- Dernière clôture 4H complète (8 novembre 20:00 UTC) : 0,001500 USD.
+- Dernière clôture 1H complète (9 novembre 01:00 UTC) : 0,001477 USD.
+- Cotation screener TradingView lue séparément : 0,0014942 USD ; elle n'est pas horodatée dans le retour et n'est pas substituée aux clôtures OHLCV.
+- SMA journalières calculées sur l'historique disponible : SMA50 ≈ 0,00169248 ; SMA200 ≈ 0,00201188. EMA20 ≈ 0,00152729 ; EMA50 ≈ 0,00161634 ; EMA200 ≈ 0,00197640. Le dernier close complet est sous ces moyennes.
+- Snapshot technique TradingView : RSI 1D ≈47, ADX 1D ≈16,3 ; RSI 4H ≈44,7, ADX 4H ≈35,1 ; recommandations agrégées SELL sur 1D et 4H. Ces indicateurs sont un snapshot de contexte, pas un signal de trading validé.
+
+### Niveaux du snapshot des cartes (pas un plan d'ordre)
+Au prix de référence de carte 0,001503 :
+- Supports affichés : POC 0,001490 ; niveau 0,001486 ; Fib 78,6 % 0,0014247 ; swing low 0,001383 ; VAL 0,001310.
+- Résistances affichées : Fib 61,8 % 0,00151475 ; Fib 50 % 0,001578 ; swing high 0,001624 ; VAH 0,001670.
+Ces niveaux sont ceux des cartes à data_as_of=2026-11-09T02:56:xxZ, pas des niveaux garantis en temps réel.
+
+## 4. Benchmark exploratoire DCA vs Buy & Hold sur l'historique disponible
+Calcul exploratoire à partir des bougies journalières TradingView, du 2026-01-22 au 2026-11-08 :
+- DCA : 1 USD investi à l'ouverture de chaque lundi UTC disponible, 41 achats du 2026-01-26 au 2026-11-02 ; total investi 41 USD.
+- Buy & Hold : 41 USD investis à l'ouverture de la première bougie disponible (0,0044 USD).
+- Dernière clôture complète utilisée : 0,0015 USD.
+- **Sans frais** : DCA ≈19 862,45 TEL, coût moyen ≈0,0020642 USD/TEL, valeur finale ≈29,79 USD, rendement ≈-27,33 %. Buy & Hold ≈9 318,18 TEL, coût d'entrée 0,0044 USD, valeur finale ≈13,98 USD, rendement ≈-65,91 %.
+- **Scénario frais Tier 1 maker 0,40 % à chaque achat et à la liquidation** : DCA ≈-27,91 %, Buy & Hold ≈-66,18 %.
+- **Scénario frais Tier 1 taker 0,80 % à chaque achat et à la liquidation** : DCA ≈-28,49 %, Buy & Hold ≈-66,45 %.
+
+Limites majeures : calcul préliminaire sur bougies, prix d'ouverture du lundi utilisé comme proxy d'exécution DCA ; pas de spread, slippage, impact, file d'attente, non-exécution, frais de conversion ou retrait. Il ne s'agit ni d'un backtest de stratégie d'accumulation, ni d'une recommandation d'investissement, ni d'une preuve que le DCA battra Buy & Hold sur une autre période. Les frais de compte exacts ne sont pas connus.
+
+## 5. Résultats des tests automatiques de fréquence déjà disponibles
+Les tests automatiques du connecteur sur KRAKEN:TELUSD 4H, fenêtre d'environ 1 000 barres du 2026-05-26 au 2026-11-09, mesurent des fréquences d'événements, pas des trades complets nets de coûts :
+- RSI oversold : n=17, 10 succès (58,8 %), taux de base 38,9 %, rendement médian à 20 barres +1,20 % ; échantillon faible.
+- RSI croise sa moyenne : n=82, 36 succès (43,9 %) contre taux de base 38,9 %, rendement médian -0,77 %.
+- Bollinger lower reentry : n=30, 30/30 (100 %), mais taux de base également 100 % ; le taux de réussite ne démontre donc aucun avantage prédictif.
+- Gap up fill : n=19, 16 succès (84,2 %), rendement médian -0,08 %.
+- Gap down fill : n=16, 11 succès (68,8 %), rendement médian -0,78 %.
+
+Aucun de ces tests ne fournit une expectancy nette en R, profit factor, drawdown d'une stratégie exécutée, ou exécution réaliste. Ne pas classer ces résultats comme des stratégies rentables.
+
+## 6. Recherches déjà en file
+Demandes toujours en attente au dernier relevé :
+- rq_4f665100b71f4f6a : backtest complet de la règle repli swing low 4H.
+- rq_81fc211a3a43405b : comparaison A/B/C de variantes du repli 4H.
+- rq_919a53432a114077 : clarification de la règle et du sizing du repli 4H.
+- rq_3fbd24d7858c4e9e : sweep/réintégration 15m et 1H.
+- rq_304062157ba54962 : cassure/retest 4H.
+Ne pas créer de doublons ; vérifier ces demandes avant d'en soumettre de nouvelles.
+
+## 7. Capacité Kraken — documentation officielle vérifiée, exécution non disponible ici
+- La documentation Kraken indique que l'endpoint public Trades permet de récupérer l'historique Time & Sales depuis le premier trade, en paginant via le curseur last/since à précision nanoseconde et jusqu'à 1 000 trades par lot. Sources : https://support.kraken.com/articles/360029077772-python-code-to-retrieve-historical-time-and-sales-trading-history- et https://support.kraken.com/articles/advanced-api-faq
+- L'endpoint public Depth renvoie un snapshot courant du carnet ; le flux WebSocket Kraken fournit un snapshot initial puis des mises à jour en temps réel. Ces sources documentent une capture prospective du carnet, pas un historique public de snapshots passés. Sources : https://support.kraken.com/articles/360000919986-public-endpoint-examples-you-can-try-them-directly-in-a-web-browser- et https://support.kraken.com/articles/360027821131-websocket-api-v1-how-to-maintain-a-valid-order-book
+- L'endpoint AssetPairs permet de vérifier symboles, pair_decimals, lot_decimals, frais et minimum d'ordre : https://support.kraken.com/articles/360000920306-api-symbols-and-tickers
+- Barème Kraken mis à jour le 2026-10-30 : Tier 1 Spot 0,40 % maker / 0,80 % taker ; le palier réel dépend du volume Spot 30 jours ou des actifs détenus sur Kraken, selon le meilleur palier. Source : https://support.kraken.com/articles/cross-platform-fee-tier-changes
+- **Limite de l'environnement actuel** : aucun connecteur Kraken API direct n'est exposé parmi les outils disponibles dans cette session. Les appels directs aux URL API Kraken n'ont pas été accessibles via le lecteur Web. Nous avons donc vérifié la documentation, mais pas extrait les trades bruts, le carnet courant, le tick size exact ou le palier de frais individuel. Ne pas prétendre que ces données ont été mesurées.
+
+## 8. Décisions de recherche et prochaines actions
+1. Garder tous les boards et toutes les règles inchangés ; ne pas utiliser le plan SHORT incohérent comme signal.
+2. Attendre les recherches déjà en file sur les setups complets ; ne pas confondre tests automatiques de fréquence et backtests de stratégie.
+3. Définir le protocole sur la couverture disponible, et marquer 2024/2022 comme indisponibles dans TradingView MCP.
+4. Vérifier si un accès public Kraken peut être ajouté à l'environnement de recherche existant pour paginer Time & Sales et relever AssetPairs/Ticker/Depth ; sinon conserver un scénario de coûts pessimiste et commencer une collecte prospective de carnet seulement si une voie autorisée existe.
+5. Ne jamais supposer que le carnet historique peut être reconstruit à partir des seules transactions.
+6. Pré-enregistrer les règles et réserver une période cachée avant tout test confirmatoire.
+7. Mesurer séparément accumulation (TEL accumulés par dollar, coût moyen, exposition immobilisée) et swing (R net, expectancy, PF, DD, MAE/MFE, durée, fills).
+8. Comparer au DCA et Buy & Hold avec mêmes cashflows et coûts.
+9. Autoriser le verdict « non concluant » si l'historique ou le nombre de trades ne suffit pas.
+
+## Statut
+Audit opérationnel initial effectué en lecture seule. Données partielles et limites documentées. Aucun ordre réel ou paper supplémentaire ; aucun compte Kraken réel consulté ; aucune stratégie, règle, board, alerte, paramètre ou paper broker modifié.
