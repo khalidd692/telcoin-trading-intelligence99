@@ -890,3 +890,134 @@ Ces désaccords ne seront pas résolus par un vote ou par l'autorité d'un modè
 
 ### Statut
 Cette revue finale Grok est enregistrée comme avis complémentaire, avec sa limite importante : Grok n'avait pas accès aux trois autres textes dans sa session et n'a donc pas effectué de comparaison littérale. Ses seuils et propositions restent des hypothèses à tester. Aucun backtest n'est ajouté comme résultat, et aucun script, stratégie, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
+
+
+## Synthèse finale Claude — arbitrage personnel et protocole de travail — 2026-11-09
+
+### Portée et limites
+Claude indique n'avoir dans sa session que son propre audit et ne pas disposer des textes Gemini, DeepSeek et Grok ni d'un outil TradingView/Smart View. Sa réponse n'est donc pas une comparaison directe des quatre audits et ne contient aucune extraction ni aucun test TradingView. Les synthèses croisées précédentes ont été fournies séparément par Gemini, DeepSeek et Grok et sont archivées indépendamment.
+
+### Critique de son premier audit
+Claude corrige ses propres suggestions antérieures :
+- Force relative TEL/BTC, percentile de volatilité et VWAP ancré restent en expérimentation, pas dans le noyau.
+- Le « multiple de coût à estimer » peut être circulaire sur petit échantillon ; préférer simuler chaque trade net de coûts pessimistes sans seuil arbitraire.
+- Les frais cités (0,40 % maker / 0,80 % taker au palier 1) doivent être confirmés pour le compte et le type d'ordre.
+
+### Noyau et règles proposées
+Claude propose comme noyau de protocole :
+- prix et structure ;
+- SMA 200 journalière ;
+- volume relatif ;
+- ATR pour stop et sizing.
+Le reste est ignoré dans le protocole de recherche, sans toucher aux boards existants.
+
+Régime : une seule variable, TEL au-dessus ou en dessous de sa SMA 200 journalière. Filtre BTC/ETH expérimental.
+
+Timeframes :
+- Moteur A accumulation : 1W/1D.
+- Moteur B swing : 1D contexte, 4H signal, 1H affinage.
+- 15m exclu du protocole candidat pour limiter le bruit et les coûts ; cette exclusion reste une hypothèse plausible, non démontrée.
+
+Tranches : trois tranches égales comme référence de départ ; 25/35/40 et 70/30 restent des hypothèses. Aucune tranche ne doit être dimensionnée sans calcul de risque et d'exposition.
+
+### Preuves générales et hypothèses
+Claude classe comme principes méthodologiques généraux :
+- tests multiples et surapprentissage peuvent faire apparaître de fausses stratégies gagnantes ;
+- test hors échantillon avec purge lorsque nécessaire ;
+- les coûts érodent les stratégies à rotation élevée ;
+- le momentum observé sur le marché crypto large n'est pas une preuve de momentum exploitable sur TEL.
+
+Plausible, mais non démontré sur TEL :
+- filtre de tendance longue ;
+- sizing par ATR ;
+- entrées par tranches.
+
+Hypothèses non démontrées :
+- détection précoce de retournement ;
+- distinction quantitative accumulation durable / rebond technique ;
+- force relative et filtres BTC/ETH ;
+- allocations et répartitions de tranches.
+
+### Angles morts complémentaires identifiés
+1. **Risque et frais** : 0,25 % fixe détermine le budget de perte au stop, pas la rentabilité. Claude illustre l'effet d'un coût aller-retour hypothétique de 1,6 % sur des stops de 5 % ou 2 %. L'arithmétique doit être recalculée avec les frais réellement applicables, le spread, le slippage et la taille.
+2. **Budget accumulation** : le moteur A n'a pas nécessairement de stop de swing ; il lui faut donc un plafond d'exposition/déploiement distinct, défini à l'avance. Le plafond de risque swing de 0,25 % ne suffit pas à encadrer l'accumulation.
+3. **Objectif en TEL** : mesurer les TEL détenus à la fin, pas seulement le rendement en dollars ; prix moyen d'acquisition et quantité finale sont des métriques importantes.
+4. **Fills irréalistes** : les backtests sur bougies ne reconstituent pas le carnet. Une limite simplement touchée ne garantit pas l'exécution ; un stop peut être exécuté au-delà de son niveau. Les fills doivent être conservateurs.
+5. **Puissance statistique** : le paper trading peut prendre longtemps sur un actif peu actif ; autoriser explicitement un verdict « non concluant ».
+6. **Dépendance des trades** : les trades peuvent être regroupés par régime/événement et ne sont pas indépendants ; envisager un bootstrap par blocs plutôt qu'un bootstrap naïf.
+7. **Pré-enregistrement** : dater et geler les règles et hypothèses avant de consulter les résultats du test final.
+
+### Timing : trop précoce vs trop tardif
+Claude reconnaît qu'aucune règle ne supprime les deux risques.
+- Prématuré : première tranche plus petite, invalidation et budget de risque fixés ; mesurer MAE.
+- Tardif : une seule confirmation (par exemple clôture 4H), puis ajout sur retest ; mesurer l'écart entre le prix d'entrée et le creux local.
+- Comparer le coût net combiné des occasions manquées et des faux départs ; ne pas optimiser seulement le taux de réussite.
+
+Ces règles sont des propositions à tester, pas des règles opérationnelles adoptées.
+
+### Décisions recommandées par Claude
+1. Métrique primaire accumulation : TEL accumulés par dollar investi.
+2. Métrique primaire swing : R net après coûts.
+3. Capitaux virtuels distincts pour accumulation et swing, sans signaux partagés.
+4. Swing : tester en premier les deux configurations « repli en tendance » et « cassure/retest » ; balayage de support et accumulation après stabilisation restent expérimentaux.
+5. Coûts : hypothèse taker + spread pessimiste par défaut. Un fill maker ne serait reconnu que si le prix a traversé le niveau ; cette convention doit être spécifiée précisément et comparée à des scénarios de non-exécution.
+6. Aucun réglage de paramètres pendant les tests ; journaliser le nombre de variantes essayées.
+
+### Expérimentation uniquement
+- Force relative TEL/BTC.
+- Filtre BTC/ETH.
+- Régimes de volatilité.
+- Répartitions 70/30 et 25/35/40.
+- Détection d'accumulation durable.
+- Tout indicateur hors noyau.
+
+### Données manquantes
+- Barème de frais réellement applicable au compte.
+- Date de début, trous, volume et qualité de l'historique TradingView KRAKEN:TELUSD.
+- Spread et profondeur Kraken, idéalement via relevés prospectifs horodatés ; sans données historiques de carnet, conserver un scénario de coûts élevé.
+- Calendrier des déblocages/événements tokenomics, à vérifier avec sources datées.
+- Budget maximal d'exposition du moteur A, à définir par l'utilisateur avant tout test d'accumulation réel ; en paper, le plafond virtuel doit être explicitement fixé.
+
+### Ordre des tests proposé
+1. Pré-enregistrer et dater les règles.
+2. Contrôler la qualité des données et réserver une dernière période historique cachée, jamais consultée pour ajuster les règles.
+3. Calculer DCA et Buy & Hold sur les mêmes périodes et conventions.
+4. Backtest sur période de développement avec coûts pessimistes.
+5. Évaluer une seule fois sur la période cachée.
+6. Paper trading prospectif avec fills conservateurs (achat à l'ask, vente au bid, frais inclus) et journal complet.
+7. Décider selon des critères définis avant le test.
+
+### Critères de classification proposés par Claude
+Claude propose des intervalles de confiance à 95 % par convention :
+- **Rejetée** : résultat net inférieur ou égal à la baseline en développement ; ou borne haute de l'IC de surperformance négative sur test caché/prospectif ; ou perte au-delà du budget de 0,25 % hors slippage ; ou résultat qui disparaît avec les coûts pessimistes.
+- **Prometteuse** : surperformance nette positive en développement et sur test caché, stabilité autour des paramètres et absence de contradiction majeure entre sous-périodes.
+- **Validée / défendable** : nombre de trades prospectifs fixé par un calcul de puissance, borne basse de l'IC supérieure à zéro, drawdown acceptable et coûts observés cohérents avec le scénario.
+
+Réserves :
+- Les intervalles doivent être calculés avec une méthode adaptée à la dépendance temporelle et aux trades regroupés ; ne pas supposer des observations indépendantes.
+- La règle « perte au-delà de 0,25 % hors slippage » doit être clarifiée : le budget de 0,25 % s'applique au risque prévu au stop ; les dépassements dus au slippage doivent être rapportés et stressés, sans les confondre avec un risque initial mal dimensionné.
+- Pour accumulation et swing, les baselines et métriques sont distinctes.
+- « Validée » signifie uniquement défendable sur les données et la période testées, jamais garantie de rentabilité future.
+- Le verdict « non concluant » doit être disponible lorsque l'échantillon ou la puissance sont insuffisants.
+
+### Arbitrage provisoire consolidé
+Principes qui convergent avec les autres audits :
+- réduire les indicateurs redondants ;
+- séparer les livres accumulation et swing ;
+- définir l'exécution après clôture, éviter les fills au close rétrospectifs ;
+- intégrer frais, spread et slippage pessimistes ;
+- comparer à DCA et Buy & Hold ;
+- utiliser une période cachée, walk-forward adapté et pré-enregistrement ;
+- suivre MAE/MFE, durée d'immobilisation, taux de participation et occasions manquées ;
+- distinguer un résultat négatif d'un résultat non concluant.
+
+Divergences non résolues à arbitrer avec les données :
+- noyau exact : SMA200 seule vs EMA50/200, RSI et ADX ;
+- filtre BTC/BTC.D et force relative TEL/BTC ;
+- maintien ou exclusion du 15m ;
+- règles d'entrée précoce et nombre de confirmations ;
+- tranches égales vs ATR-conditionnées ;
+- seuils de coûts et critères de classification.
+
+### Statut
+Synthèse finale personnelle Claude reçue et archivée. Claude ne prétend pas avoir accès aux audits des autres ni avoir consulté TradingView dans sa session. Aucun résultat de backtest n'est ajouté. Aucune stratégie, script, board Smart View, alerte, paramètre, paper broker, compte ou ordre n'a été modifié.
