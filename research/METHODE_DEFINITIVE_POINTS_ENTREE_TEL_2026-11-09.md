@@ -1209,3 +1209,46 @@ OHLCV ne simule pas le carnet, le spread historique, la file d'attente, l'impact
 État vérifié : equity 997,50 USD, cash 997,50 USD, P&L réalisé -2,50 USD, aucune position, aucun ordre en attente. Risque maximal 0,25 %/trade, perte quotidienne 1 %, une position max, levier 1x, R:R min 1,51, stop et cible obligatoires. Dernier stop paper 2026-11-07 11:59 UTC ; cooldown 240 min écoulé.
 Demandes TradingView toujours queued : rq_4f665100b71f4f6a, rq_81fc211a3a43405b, rq_3fbd24d7858c4e9e, rq_304062157ba54962, rq_919a53432a114077. Ne pas créer de doublons.
 Aucun setup validé. Backtests cassure/repli défavorables ou insuffisants ; sweep prototype très négatif sous les coûts et le stop testés. Aucun changement de stratégie, board, règle, alerte, compte ou ordre.
+
+
+---
+
+# Complément de recherche — vérification des accès et tests automatiques du 2026-11-09
+
+## Vérification des données TradingView MCP
+
+Accès lecture seule testé sur `KRAKEN:TELUSD` :
+- 1D : 292 bougies disponibles depuis la cotation ; dernière clôture rapportée 0,001506 USD.
+- 4H : 1 743 bougies disponibles, sans page antérieure supplémentaire dans ce flux ; dernière clôture rapportée 0,001511 USD.
+- 1H : première page de 5 000 bougies disponible, pagination antérieure annoncée ; fenêtre de la page affichée à partir du 2026-04-11.
+- 15m : première page de 5 000 bougies disponible, pagination antérieure annoncée ; fenêtre de la page affichée à partir du 2026-09-08.
+- Les réponses indiquent que la dernière bougie peut être en formation. Ne pas traiter cette dernière bougie comme une clôture confirmée.
+- Les nombres de pages 1H/15m ne sont pas des historiques complets : poursuivre la pagination avant toute étude qui exige la couverture entière.
+
+Le compte TradingView MCP permet donc de continuer des tests historiques sur 4H, 1H et 15m, mais les historiques intraday restent bornés par le flux et la pagination. L'archive officielle publique Kraken constitue une source complémentaire importante : fichiers OHLCVT de 1, 5, 15, 60, 240, 720 et 1440 minutes, du premier échange de chaque paire au 30 septembre 2026 dans la version documentée du 2 novembre 2026. Les données sont sans authentification ; les intervalles sans transaction sont absents, et non remplis artificiellement. Les bougies 1m/5m et les champs de nombre de trades peuvent enrichir les tests, mais il faut contrôler les trous et les conventions de bougies.
+Source officielle : https://support.kraken.com/fr/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data
+
+Les données publiques de marché Kraken (ticker, carnet L2, trades et OHLCV) ne nécessitent pas de clé privée. Une clé privée n'est pas le préalable aux backtests. Elle n'est utile que pour des données personnelles du compte et nécessite une intégration compatible distincte. Décision : ne pas créer la clé privée à ce stade.
+
+## Tests historiques automatiques TradingView — 4H
+
+Tests de fréquence / comportement, et non backtests de trades nets de frais :
+- Bollinger lower re-entry : 30 succès / 30 cas évaluables, taux 100 %, IC95 88,6–100 %, taux de base 100 %, rendement médian prospectif rapporté +1,58 %, 1 cas encore en attente. Le taux de base étant déjà 100 %, aucun avantage prédictif n'est démontré.
+- RSI croise au-dessus de sa moyenne : 36/82, taux 43,9 %, IC95 33,7–54,7 %, taux de base 38,9 %, rendement médian prospectif -0,77 %. Écart au taux de base faible et rendement médian négatif.
+- RSI survendu (RSI < 30) : 10/17, taux 58,8 %, IC95 36,0–78,4 %, taux de base 38,9 %, rendement médian +1,20 %. Échantillon faible (n=17), non concluant.
+- Gap haussier comblé : 16/19, taux 84,2 %, IC95 62,4–94,5 %, rendement médian -0,08 %. Petit échantillon ; événement de comblement intrabar, pas une stratégie.
+- Gap baissier comblé : 11/16, taux 68,8 %, IC95 44,4–85,8 %, rendement médian -0,78 %. Petit échantillon ; pas d'avantage établi.
+
+Définitions et limites : la réintégration Bollinger mesure un retour à l'intérieur de la bande dans les 20 bougies après une clôture extérieure ; le taux de base de 100 % rend le taux de succès inutilisable comme preuve d'edge. Les tests RSI/gaps mesurent des fréquences et rendements prospectifs, sans entrée exécutable, stop, cible, frais, spread, slippage ou non-fill. Ne pas adopter ces signaux comme stratégies.
+
+## État du système relu
+
+- Politique de risque lue : 0,25 % de risque max par trade, perte journalière 1 %, une position ouverte max, un pari corrélé max, levier brut max 1x, stop et cible obligatoires, R:R minimal 1,51, symbole autorisé KRAKEN:TELUSD.
+- État Paper Trading : equity/cash 997,50 USD, P&L réalisé -2,50 USD, aucune position ouverte, aucun ordre en attente. Dernier trade : achat paper 33 500 TEL à 0,001680 USD le 2026-11-06, stop paper à 0,00160546 USD le 2026-11-07.
+- Quatre boards primaires restent identifiés, dont le board MEXC qui est exclu de la recherche décisionnelle. La stratégie de repli 4H reste avec règles « unsettled » ; le board cassure 4H contient des approximations de structure ; le radar 15m contient également des règles approximatives.
+- Demandes déjà en attente, ne pas dupliquer : rq_4f665100b71f4f6a (repli swing low 4H), rq_81fc211a3a43405b (variantes repli 4H), rq_3fbd24d7858c4e9e (sweep/reclaim 15m/1H), rq_304062157ba54962 (cassure/retest 4H), rq_919a53432a114077 (clarification règles et sizing).
+- Aucun refresh de board, changement de stratégie, modification de règle, alerte ou ordre n'a été effectué pendant cette vérification.
+
+## Conclusion de ce complément
+
+L'accès OHLCV TradingView est suffisant pour poursuivre l'analyse et certains backtests, mais ne suffit pas à lui seul pour toutes les validations microstructurelles. Priorité suivante : exploiter l'archive OHLCVT officielle Kraken pour KRAKEN:TELUSD, vérifier les trous et le nombre de trades, puis construire des simulations d'exécution prudentes avec frais, spread/slippage documentés et non-fills. Garder une nouvelle période prospective intacte ; le holdout déjà consulté n'est plus un holdout vierge. Aucune stratégie n'est validée.
