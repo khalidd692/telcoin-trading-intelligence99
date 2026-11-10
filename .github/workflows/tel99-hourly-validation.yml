@@ -1,0 +1,71 @@
+name: TEL99 hourly read-only validation
+
+# IMPORTANT: GitHub only executes scheduled workflows from the default branch.
+# This workflow is deliberately staged on an isolated branch for manual testing.
+# Its hourly schedule will NOT activate until separately authorized on main.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tel99-hourly-validation
+  cancel-in-progress: false
+
+jobs:
+  validation:
+    name: Read-only TEL99 regression checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Python regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Collector regression tests
+        run: python -m unittest discover -s collector -p 'test_*.py' -v
+
+      - name: Dashboard JavaScript tests
+        run: node tests/test_dashboard.js
+
+      - name: Realtime fail-closed JavaScript tests
+        run: node tests/test_realtime.js
+
+      - name: Operational invariants
+        run: |
+          python scripts/verify_states.py
+          python scripts/verify_project.py --quick
+
+      - name: Execution summary
+        if: always()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo '## TEL99 hourly validation'
+            echo ''
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Ref: \`${GITHUB_REF}\`"
+            echo "- Trigger: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Run: ${RUN_URL}"
+            echo ''
+            echo 'This workflow is read-only: it does not commit, push, trade, or deploy.'
+            echo 'Check individual steps above for actual test outcomes.'
+          } >> "${GITHUB_STEP_SUMMARY}"
