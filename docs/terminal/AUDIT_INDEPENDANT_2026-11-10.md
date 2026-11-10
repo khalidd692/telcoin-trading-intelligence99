@@ -21,7 +21,7 @@ Revue **statique** du code accessible sur la branche `codex/tel99-quant-terminal
 
 **P1 — Validation des résultats.** Vérifier indépendamment les résultats du backtest sur données sources et le calcul du coût d'exécution ; ne pas conclure à un edge à partir de 20 transactions exploratoires.
 
-**P2 — Cotation Kraken.** `refreshQuote()` prend la première entrée de `result` sans vérifier explicitement la clé de paire. Ajouter une validation du symbole de réponse et un test de charge utile incorrecte.
+**P2 — Cotation Kraken (corrigé, tests CI à confirmer).** La lecture de la première entrée de `result` a été remplacée par une validation explicite de la paire TEL/USD et du cours dans `parseTelTicker()` ; quatre assertions ajoutées.
 
 **P2 — Limites du risque.** L'admissibilité du simulateur exige RR **brut** >= 1,51 et récompense nette positive, mais n'exige pas RR net >= 1,51. C'est cohérent avec le libellé et la règle actuelle, mais il faut décider explicitement si le seuil devrait s'appliquer au net avant de changer la politique.
 
@@ -32,6 +32,7 @@ Revue **statique** du code accessible sur la branche `codex/tel99-quant-terminal
 ## Actions effectuées
 
 - Correctif du ticker périmé dans `site/terminal/core.js` et `site/terminal/app.js`, cinq nouvelles assertions JS dans `tests/test_terminal.js` ; commits sur la branche isolée.
+- Validation explicite de la paire du ticker Kraken dans `core.js`/`app.js` et quatre assertions JS supplémentaires. Le script affiche maintenant 25 assertions prévues ; leur succès CI après modification reste à confirmer.
 - Aucune fusion, aucun déploiement, aucun ordre, aucune modification des règles des stratégies.
 
 ## Verdict
