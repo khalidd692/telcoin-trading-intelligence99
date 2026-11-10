@@ -1,0 +1,683 @@
+test_critical_level_above_closes_does_not_flag_breakdown (test_agent_analysis.AgentAnalysisTests.test_critical_level_above_closes_does_not_flag_breakdown) ... ok
+test_critical_level_breach_is_reported_as_risk_not_buy_signal (test_agent_analysis.AgentAnalysisTests.test_critical_level_breach_is_reported_as_risk_not_buy_signal) ... ok
+test_duplicate_rows_are_rejected (test_agent_analysis.AgentAnalysisTests.test_duplicate_rows_are_rejected) ... ok
+test_missing_snapshot_fails_closed (test_agent_analysis.AgentAnalysisTests.test_missing_snapshot_fails_closed) ... ok
+test_missing_timeframe_fails_closed (test_agent_analysis.AgentAnalysisTests.test_missing_timeframe_fails_closed) ... ok
+test_oversold_flag_is_not_a_reversal_claim (test_agent_analysis.AgentAnalysisTests.test_oversold_flag_is_not_a_reversal_claim) ... ok
+test_stale_higher_timeframe_candle_fails_closed (test_agent_analysis.AgentAnalysisTests.test_stale_higher_timeframe_candle_fails_closed) ... ok
+test_stale_snapshot_fails_closed (test_agent_analysis.AgentAnalysisTests.test_stale_snapshot_fails_closed) ... ok
+test_valid_snapshot_reports_all_timeframes_without_entry_signal (test_agent_analysis.AgentAnalysisTests.test_valid_snapshot_reports_all_timeframes_without_entry_signal) ... ok
+test_bearish_divergence_detected (test_agent_analysis.DivergenceRobustnessTests.test_bearish_divergence_detected)
+Price higher high with a lower RSI high is a bearish divergence. ... ok
+test_bullish_divergence_still_detected (test_agent_analysis.DivergenceRobustnessTests.test_bullish_divergence_still_detected)
+The bullish counterpart keeps its nominal behaviour. ... ok
+test_empty_series_return_false (test_agent_analysis.DivergenceRobustnessTests.test_empty_series_return_false)
+Empty inputs are rejected without raising. ... ok
+test_exactly_enough_history_is_accepted (test_agent_analysis.DivergenceRobustnessTests.test_exactly_enough_history_is_accepted)
+2 x lookback bars is the minimum usable history. ... ok
+test_invalid_lookback_returns_false (test_agent_analysis.DivergenceRobustnessTests.test_invalid_lookback_returns_false)
+lookback <= 0 (or a non-integer) is rejected, never an exception. ... ok
+test_nan_values_return_false_without_raising (test_agent_analysis.DivergenceRobustnessTests.test_nan_values_return_false_without_raising)
+NaN in prices or in the RSI never yields a divergence. ... ok
+test_no_divergence_without_price_higher_high (test_agent_analysis.DivergenceRobustnessTests.test_no_divergence_without_price_higher_high)
+Same RSI pattern but no higher price high is not a divergence. ... ok
+test_non_numeric_values_are_ignored (test_agent_analysis.DivergenceRobustnessTests.test_non_numeric_values_are_ignored)
+None values are treated as missing data, not as a crash. ... ok
+test_series_of_different_lengths_are_aligned_on_common_tail (test_agent_analysis.DivergenceRobustnessTests.test_series_of_different_lengths_are_aligned_on_common_tail)
+The divergence is looked for on the common trailing bars. ... ok
+test_series_of_different_lengths_do_not_raise (test_agent_analysis.DivergenceRobustnessTests.test_series_of_different_lengths_do_not_raise)
+A shorter RSI series must not raise IndexError. ... ok
+test_truncated_history_returns_false_without_reading_the_future (test_agent_analysis.DivergenceRobustnessTests.test_truncated_history_returns_false_without_reading_the_future)
+History shorter than 2 x lookback must not leak the recent window. ... ok
+test_bearish_reversal_detection (test_agent_analysis.EarlyReversalTests.test_bearish_reversal_detection)
+Bearish reversal detection. ... ok
+test_bullish_reversal_before_ema_crossover (test_agent_analysis.EarlyReversalTests.test_bullish_reversal_before_ema_crossover)
+Bullish reversal before EMA crossover with multiple evidence categories. ... ok
+test_confirmed_bullish_reversal_multiple_categories (test_agent_analysis.EarlyReversalTests.test_confirmed_bullish_reversal_multiple_categories)
+Une hausse reguliere n'est pas un retournement. ... ok
+test_contradictory_signals_between_timeframes (test_agent_analysis.EarlyReversalTests.test_contradictory_signals_between_timeframes)
+Contradictory signals between timeframes. ... ok
+test_early_reversal_json_serialization (test_agent_analysis.EarlyReversalTests.test_early_reversal_json_serialization)
+Early reversal result should serialize to JSON. ... ok
+test_false_rebound_no_volume_no_sustained_improvement (test_agent_analysis.EarlyReversalTests.test_false_rebound_no_volume_no_sustained_improvement)
+False rebound without volume or sustained improvement. ... ok
+test_insufficient_data_missing_timeframe (test_agent_analysis.EarlyReversalTests.test_insufficient_data_missing_timeframe)
+Insufficient data when timeframe missing. ... ok
+test_invalidation_below_critical_level (test_agent_analysis.EarlyReversalTests.test_invalidation_below_critical_level)
+Le niveau fixe CRITICAL_LEVEL ne doit plus dicter la decision. ... ok
+test_no_future_data_leakage (test_agent_analysis.EarlyReversalTests.test_no_future_data_leakage)
+Ensure no future data leakage in detection. ... ok
+test_rsi_oversold_alone_no_alert (test_agent_analysis.EarlyReversalTests.test_rsi_oversold_alone_no_alert)
+RSI oversold alone should not trigger alert. ... ok
+test_atr_known_values (test_agent_analysis.IndicatorValidationTests.test_atr_known_values)
+ATR calculation against known reference values. ... ok
+test_atr_with_gap_up (test_agent_analysis.IndicatorValidationTests.test_atr_with_gap_up)
+ATR handles gap up correctly. ... ok
+test_awesome_oscillator_known_values (test_agent_analysis.IndicatorValidationTests.test_awesome_oscillator_known_values)
+AO calculation against known reference values. ... ok
+test_awesome_oscillator_uptrend (test_agent_analysis.IndicatorValidationTests.test_awesome_oscillator_uptrend)
+AO with uptrend (short SMA above long SMA). ... ok
+test_cci_extreme_value (test_agent_analysis.IndicatorValidationTests.test_cci_extreme_value)
+CCI with extreme price deviation. ... ok
+test_cci_known_values (test_agent_analysis.IndicatorValidationTests.test_cci_known_values)
+CCI calculation against known reference values. ... ok
+test_dmi_strong_uptrend (test_agent_analysis.IndicatorValidationTests.test_dmi_strong_uptrend)
+DMI with strong uptrend. ... ok
+test_sma_known_values (test_agent_analysis.IndicatorValidationTests.test_sma_known_values)
+SMA calculation against known reference values. ... ok
+test_stochastic_at_high (test_agent_analysis.IndicatorValidationTests.test_stochastic_at_high)
+Stochastic at top of range. ... ok
+test_stochastic_known_values (test_agent_analysis.IndicatorValidationTests.test_stochastic_known_values)
+Stochastic calculation against known reference values. ... ok
+test_atr_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_atr_series_constant_prices)
+ATR of constant prices should be zero. ... ok
+test_atr_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_atr_series_insufficient_history)
+ATR with insufficient history returns empty list. ... ok
+test_atr_series_with_volatility (test_agent_analysis.NewIndicatorTests.test_atr_series_with_volatility)
+ATR should be positive with volatility. ... ok
+test_awesome_oscillator_constant_prices (test_agent_analysis.NewIndicatorTests.test_awesome_oscillator_constant_prices)
+AO of constant prices should be zero. ... ok
+test_awesome_oscillator_insufficient_history (test_agent_analysis.NewIndicatorTests.test_awesome_oscillator_insufficient_history)
+AO with insufficient history returns empty list. ... ok
+test_cci_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_cci_series_constant_prices)
+CCI of constant prices should be zero. ... ok
+test_cci_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_cci_series_insufficient_history)
+CCI with insufficient history returns empty list. ... ok
+test_dmi_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_dmi_series_constant_prices)
+DMI of constant prices should have zero values. ... ok
+test_dmi_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_dmi_series_insufficient_history)
+DMI with insufficient history returns empty lists. ... ok
+test_fail_closed_mode_preserved_with_new_indicators (test_agent_analysis.NewIndicatorTests.test_fail_closed_mode_preserved_with_new_indicators)
+Verify fail-closed mode is preserved when new indicators cannot be calculated. ... ok
+test_momentum_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_momentum_series_constant_prices)
+Momentum of constant prices should be zero. ... ok
+test_momentum_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_momentum_series_insufficient_history)
+Momentum with insufficient history returns empty list. ... ok
+test_momentum_series_rising_prices (test_agent_analysis.NewIndicatorTests.test_momentum_series_rising_prices)
+Momentum of rising prices should be positive. ... ok
+test_new_indicators_fail_closed_with_insufficient_history (test_agent_analysis.NewIndicatorTests.test_new_indicators_fail_closed_with_insufficient_history)
+Verify indicators return None with insufficient history. ... ok
+test_new_indicators_in_analysis_output (test_agent_analysis.NewIndicatorTests.test_new_indicators_in_analysis_output)
+Verify new indicators are included in analysis output. ... ok
+test_sma200_unavailable_on_short_timeframes (test_agent_analysis.NewIndicatorTests.test_sma200_unavailable_on_short_timeframes)
+SMA200 should be None on timeframes with insufficient history. ... ok
+test_sma_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_sma_series_constant_prices)
+SMA of constant prices should equal the constant. ... ok
+test_sma_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_sma_series_insufficient_history)
+SMA with insufficient history returns empty list. ... ok
+test_sma_series_rising_prices (test_agent_analysis.NewIndicatorTests.test_sma_series_rising_prices)
+SMA of rising prices should be between min and max. ... ok
+test_stochastic_series_constant_prices (test_agent_analysis.NewIndicatorTests.test_stochastic_series_constant_prices)
+Stochastic of constant prices should be 50 (neutral). ... ok
+test_stochastic_series_insufficient_history (test_agent_analysis.NewIndicatorTests.test_stochastic_series_insufficient_history)
+Stochastic with insufficient history returns empty lists. ... ok
+test_closed_candles_only (test_agent_analysis.RobustnessTests.test_closed_candles_only)
+Verify only closed candles are used for indicators. ... ok
+test_json_serialization_with_none_values (test_agent_analysis.RobustnessTests.test_json_serialization_with_none_values)
+Verify report with None values serializes to valid JSON. ... ok
+test_no_nan_or_infinity_in_json_output (test_agent_analysis.RobustnessTests.test_no_nan_or_infinity_in_json_output)
+Verify no NaN or Infinity values appear in JSON output. ... ok
+test_partial_indicator_availability (test_agent_analysis.RobustnessTests.test_partial_indicator_availability)
+Verify that unavailable indicators don't block available ones. ... ok
+test_very_short_history_returns_attendre (test_agent_analysis.RobustnessTests.test_very_short_history_returns_attendre)
+Verify very short history returns ATTENDRE status. ... ok
+test_cli_never_fails_on_unreadable_report (test_alert_state.TestCommandLine.test_cli_never_fails_on_unreadable_report) ... ok
+test_cli_on_fallback_report_does_not_create_an_alert (test_alert_state.TestCommandLine.test_cli_on_fallback_report_does_not_create_an_alert) ... ok
+test_cli_writes_state_and_decision (test_alert_state.TestCommandLine.test_cli_writes_state_and_decision) ... ok
+test_escalation_is_an_evolution_not_a_new_alert (test_alert_state.TestDeduplication.test_escalation_is_an_evolution_not_a_new_alert) ... ok
+test_invalidation_is_an_evolution (test_alert_state.TestDeduplication.test_invalidation_is_an_evolution) ... ok
+test_new_alert_is_detected (test_alert_state.TestDeduplication.test_new_alert_is_detected) ... ok
+test_new_anchor_is_a_new_alert (test_alert_state.TestDeduplication.test_new_anchor_is_a_new_alert) ... ok
+test_no_alert_when_nothing_is_open (test_alert_state.TestDeduplication.test_no_alert_when_nothing_is_open) ... ok
+test_opposite_direction_is_a_new_alert (test_alert_state.TestDeduplication.test_opposite_direction_is_a_new_alert) ... ok
+test_same_alert_is_deduplicated (test_alert_state.TestDeduplication.test_same_alert_is_deduplicated) ... ok
+test_engine_output_is_deduplicated_across_runs (test_alert_state.TestEngineIntegration.test_engine_output_is_deduplicated_across_runs) ... ok
+test_engine_output_produces_an_alert_event (test_alert_state.TestEngineIntegration.test_engine_output_produces_an_alert_event) ... ok
+test_module_never_invents_values (test_alert_state.TestEngineIntegration.test_module_never_invents_values)
+Toutes les valeurs de l'evenement proviennent du rapport. ... ok
+test_anchor_rounding_absorbs_float_noise (test_alert_state.TestEventExtraction.test_anchor_rounding_absorbs_float_noise) ... ok
+test_event_carries_report_values_only (test_alert_state.TestEventExtraction.test_event_carries_report_values_only) ... ok
+test_every_required_timeframe_must_be_validated (test_alert_state.TestEventExtraction.test_every_required_timeframe_must_be_validated) ... ok
+test_global_attendre_report_is_not_usable (test_alert_state.TestEventExtraction.test_global_attendre_report_is_not_usable)
+Un rapport globalement ATTENDRE est degrade, meme avec un signal residuel. ... ok
+test_identity_changes_with_anchor_and_direction (test_alert_state.TestEventExtraction.test_identity_changes_with_anchor_and_direction) ... ok
+test_missing_or_invalid_source_timestamp_is_not_usable (test_alert_state.TestEventExtraction.test_missing_or_invalid_source_timestamp_is_not_usable) ... ok
+test_monthly_partial_is_accepted_but_missing_monthly_is_not (test_alert_state.TestEventExtraction.test_monthly_partial_is_accepted_but_missing_monthly_is_not) ... ok
+test_no_event_on_malformed_report (test_alert_state.TestEventExtraction.test_no_event_on_malformed_report) ... ok
+test_no_event_when_report_has_no_early_reversal (test_alert_state.TestEventExtraction.test_no_event_when_report_has_no_early_reversal) ... ok
+test_no_event_when_signal_is_neutral (test_alert_state.TestEventExtraction.test_no_event_when_signal_is_neutral) ... ok
+test_snapshot_age_at_the_limit_is_usable (test_alert_state.TestEventExtraction.test_snapshot_age_at_the_limit_is_usable) ... ok
+test_stale_or_unknown_snapshot_age_is_not_usable (test_alert_state.TestEventExtraction.test_stale_or_unknown_snapshot_age_is_not_usable) ... ok
+test_usable_report_rules (test_alert_state.TestEventExtraction.test_usable_report_rules) ... ok
+test_atomic_write_leaves_no_temporary_file (test_alert_state.TestPersistence.test_atomic_write_leaves_no_temporary_file) ... ok
+test_corrupt_state_file_is_recovered (test_alert_state.TestPersistence.test_corrupt_state_file_is_recovered) ... ok
+test_history_is_bounded (test_alert_state.TestPersistence.test_history_is_bounded) ... ok
+test_missing_state_file_is_not_an_error (test_alert_state.TestPersistence.test_missing_state_file_is_not_an_error) ... ok
+test_state_file_is_created_on_first_run (test_alert_state.TestPersistence.test_state_file_is_created_on_first_run) ... ok
+test_state_file_is_readable_json (test_alert_state.TestPersistence.test_state_file_is_readable_json) ... ok
+test_state_survives_a_restart (test_alert_state.TestPersistence.test_state_survives_a_restart) ... ok
+test_cli_labels_its_rows_as_live (test_alert_state.TestProspectiveLedger.test_cli_labels_its_rows_as_live) ... ok
+test_cli_writes_the_ledger (test_alert_state.TestProspectiveLedger.test_cli_writes_the_ledger) ... ok
+test_fees_are_declared_as_a_protocol_hypothesis (test_alert_state.TestProspectiveLedger.test_fees_are_declared_as_a_protocol_hypothesis) ... ok
+test_ledger_appends_one_line_per_run (test_alert_state.TestProspectiveLedger.test_ledger_appends_one_line_per_run) ... ok
+test_ledger_carries_the_economic_qualification (test_alert_state.TestProspectiveLedger.test_ledger_carries_the_economic_qualification)
+Le verdict économique est consigné tel quel, pour être mesuré ensuite. ... ok
+test_ledger_never_erases_previous_lines (test_alert_state.TestProspectiveLedger.test_ledger_never_erases_previous_lines) ... ok
+test_ledger_row_contains_only_report_values (test_alert_state.TestProspectiveLedger.test_ledger_row_contains_only_report_values) ... ok
+test_ledger_row_handles_a_fallback_report (test_alert_state.TestProspectiveLedger.test_ledger_row_handles_a_fallback_report) ... ok
+test_ledger_row_labels_the_nature_of_the_observation (test_alert_state.TestProspectiveLedger.test_ledger_row_labels_the_nature_of_the_observation) ... ok
+test_missing_data_never_resolves (test_alert_state.TestResolution.test_missing_data_never_resolves) ... ok
+test_resolution_is_recorded_in_history (test_alert_state.TestResolution.test_resolution_is_recorded_in_history) ... ok
+test_resolution_when_data_is_usable (test_alert_state.TestResolution.test_resolution_when_data_is_usable) ... ok
+test_stale_data_does_not_resolve (test_alert_state.TestResolution.test_stale_data_does_not_resolve) ... ok
+test_a_valid_report_still_resolves_an_open_alert (test_alert_state.TestUnusableDataIsFailClosed.test_a_valid_report_still_resolves_an_open_alert)
+Le durcissement ne doit pas empecher une resolution legitime. ... ok
+test_attendre_report_with_a_signal_opens_no_alert (test_alert_state.TestUnusableDataIsFailClosed.test_attendre_report_with_a_signal_opens_no_alert)
+Un rapport globalement ATTENDRE ne doit pas ouvrir d'alerte. ... ok
+test_degraded_report_does_not_change_the_open_alert_status (test_alert_state.TestUnusableDataIsFailClosed.test_degraded_report_does_not_change_the_open_alert_status) ... ok
+test_degraded_report_does_not_resolve_an_open_alert (test_alert_state.TestUnusableDataIsFailClosed.test_degraded_report_does_not_resolve_an_open_alert) ... ok
+test_degraded_report_with_a_residual_signal_opens_no_alert (test_alert_state.TestUnusableDataIsFailClosed.test_degraded_report_with_a_residual_signal_opens_no_alert) ... ok
+test_report_without_source_timestamp_does_not_resolve_an_alert (test_alert_state.TestUnusableDataIsFailClosed.test_report_without_source_timestamp_does_not_resolve_an_alert) ... ok
+test_stale_report_does_not_resolve_an_open_alert (test_alert_state.TestUnusableDataIsFailClosed.test_stale_report_does_not_resolve_an_open_alert) ... ok
+test_r10_fixture_presente_et_exploitable_sans_reseau (test_backtest_harness.TestArchive.test_r10_fixture_presente_et_exploitable_sans_reseau) ... ok
+test_r9_bougie_en_formation_exclue_du_cache (test_backtest_harness.TestArchive.test_r9_bougie_en_formation_exclue_du_cache)
+Le cache ne doit contenir que des bougies clôturées. ... ok
+test_r9_integrite_de_l_archive (test_backtest_harness.TestArchive.test_r9_integrite_de_l_archive) ... ok
+test_r2_dmi_alignement_index_bougie (test_backtest_harness.TestCausaliteDesIndicateurs.test_r2_dmi_alignement_index_bougie) ... ok
+test_r2_equivalence_prefixe_complet (test_backtest_harness.TestCausaliteDesIndicateurs.test_r2_equivalence_prefixe_complet) ... ok
+test_r2_macd_alignement_index_bougie (test_backtest_harness.TestCausaliteDesIndicateurs.test_r2_macd_alignement_index_bougie) ... ok
+test_r2_stochastic_alignement_index_bougie (test_backtest_harness.TestCausaliteDesIndicateurs.test_r2_stochastic_alignement_index_bougie) ... ok
+test_r11_detection_rapide_identique_a_la_production (test_backtest_harness.TestFideliteHarnais.test_r11_detection_rapide_identique_a_la_production) ... ok
+test_r11_etat_rapide_identique_a_analyze_timeframe (test_backtest_harness.TestFideliteHarnais.test_r11_etat_rapide_identique_a_analyze_timeframe) ... ok
+test_criteres_publies_ensemble (test_backtest_harness.TestMetriques.test_criteres_publies_ensemble)
+Le protocole doit garder les DEUX criteres (v1 sigma, v2 quantile). ... ok
+test_r4_deduplication_par_evenement (test_backtest_harness.TestMetriques.test_r4_deduplication_par_evenement) ... ok
+test_r4_les_invalidations_ne_sont_pas_des_episodes_dalerte (test_backtest_harness.TestMetriques.test_r4_les_invalidations_ne_sont_pas_des_episodes_dalerte) ... ok
+test_r6_base_rate_et_vigilance_de_discrimination (test_backtest_harness.TestMetriques.test_r6_base_rate_et_vigilance_de_discrimination) ... ok
+test_r6_fenetre_non_discriminante_signalee (test_backtest_harness.TestMetriques.test_r6_fenetre_non_discriminante_signalee) ... ok
+test_r7_statut_de_sortie_complet (test_backtest_harness.TestMetriques.test_r7_statut_de_sortie_complet) ... ok
+test_r8_cas_degenere_aucun_signal (test_backtest_harness.TestMetriques.test_r8_cas_degenere_aucun_signal) ... ok
+test_r1_detection_identique_apres_perturbation_du_futur (test_backtest_harness.TestNoFutureLeak.test_r1_detection_identique_apres_perturbation_du_futur) ... ok
+test_r1_etat_identique_apres_perturbation_du_futur (test_backtest_harness.TestNoFutureLeak.test_r1_etat_identique_apres_perturbation_du_futur) ... ok
+test_r1_seuil_quantile_insensible_a_la_perturbation_du_futur (test_backtest_harness.TestNoFutureLeak.test_r1_seuil_quantile_insensible_a_la_perturbation_du_futur) ... ok
+test_r3_alignement_multi_unites_de_temps (test_backtest_harness.TestNoFutureLeak.test_r3_alignement_multi_unites_de_temps) ... ok
+test_r3_une_bougie_en_formation_nest_jamais_utilisee (test_backtest_harness.TestNoFutureLeak.test_r3_une_bougie_en_formation_nest_jamais_utilisee) ... ok
+test_r5_determinisme_de_la_detection (test_backtest_harness.TestReproductibilite.test_r5_determinisme_de_la_detection) ... ok
+test_the_block_is_attached_to_the_early_reversal (test_economic_validation.TestAgentAnalysisIntegration.test_the_block_is_attached_to_the_early_reversal) ... ok
+test_the_detector_decision_is_unchanged_by_the_economic_layer (test_economic_validation.TestAgentAnalysisIntegration.test_the_detector_decision_is_unchanged_by_the_economic_layer) ... ok
+test_a_full_snapshot_payload_is_accepted (test_economic_validation.TestCostMeasurement.test_a_full_snapshot_payload_is_accepted) ... ok
+test_cost_is_measured_on_the_observed_book (test_economic_validation.TestCostMeasurement.test_cost_is_measured_on_the_observed_book) ... ok
+test_insufficient_depth_is_a_declared_lower_bound_not_a_measured_cost (test_economic_validation.TestCostMeasurement.test_insufficient_depth_is_a_declared_lower_bound_not_a_measured_cost) ... ok
+test_liquidity_cost_is_preferred_when_usable (test_economic_validation.TestCostMeasurement.test_liquidity_cost_is_preferred_when_usable) ... ok
+test_measured_cost_comes_from_the_round_trip_not_from_the_spread (test_economic_validation.TestCostMeasurement.test_measured_cost_comes_from_the_round_trip_not_from_the_spread)
+Le coût A/R inclut la traversée du carnet, pas seulement le spread. ... ok
+test_missing_book_falls_back_to_spread_as_a_declared_lower_bound (test_economic_validation.TestCostMeasurement.test_missing_book_falls_back_to_spread_as_a_declared_lower_bound) ... ok
+test_no_market_data_is_indeterminate_and_says_why (test_economic_validation.TestCostMeasurement.test_no_market_data_is_indeterminate_and_says_why) ... ok
+test_an_objective_behind_the_price_is_not_covered (test_economic_validation.TestCoverage.test_an_objective_behind_the_price_is_not_covered) ... ok
+test_covered_objective_with_unverified_fees_stays_provisional (test_economic_validation.TestCoverage.test_covered_objective_with_unverified_fees_stays_provisional) ... ok
+test_covered_objective_with_verified_fees_is_covered (test_economic_validation.TestCoverage.test_covered_objective_with_verified_fees_is_covered) ... ok
+test_indeterminate_direction_has_no_verdict (test_economic_validation.TestCoverage.test_indeterminate_direction_has_no_verdict) ... ok
+test_missing_objective_has_no_verdict (test_economic_validation.TestCoverage.test_missing_objective_has_no_verdict) ... ok
+test_objective_below_cost_is_not_covered (test_economic_validation.TestCoverage.test_objective_below_cost_is_not_covered) ... ok
+test_short_term_objective_is_preferred_over_swing (test_economic_validation.TestCoverage.test_short_term_objective_is_preferred_over_swing) ... ok
+test_swing_is_used_when_short_term_is_absent (test_economic_validation.TestCoverage.test_swing_is_used_when_short_term_is_absent) ... ok
+test_a_fake_verified_flag_is_rejected (test_economic_validation.TestFees.test_a_fake_verified_flag_is_rejected) ... ok
+test_a_normalized_fee_block_is_verified_not_trusted (test_economic_validation.TestFees.test_a_normalized_fee_block_is_verified_not_trusted)
+Un bloc déjà normalisé doit repasser la vérification HMAC. ... ok
+test_signed_fees_are_added_to_the_round_trip (test_economic_validation.TestFees.test_signed_fees_are_added_to_the_round_trip) ... ok
+test_unverified_fees_are_never_applied (test_economic_validation.TestFees.test_unverified_fees_are_never_applied) ... ok
+test_default_notional_is_the_collector_reference (test_economic_validation.TestHonesty.test_default_notional_is_the_collector_reference) ... ok
+test_limits_are_explicit (test_economic_validation.TestHonesty.test_limits_are_explicit) ... ok
+test_no_orders_are_ever_claimed (test_economic_validation.TestHonesty.test_no_orders_are_ever_claimed) ... ok
+test_no_probability_is_published (test_economic_validation.TestHonesty.test_no_probability_is_published) ... ok
+test_bootstrap_is_repeatable_and_detects_zero_effect (test_entry_study.TestEntryStudy.test_bootstrap_is_repeatable_and_detects_zero_effect) ... ok
+test_existing_oversold_component_is_detected_without_rr (test_entry_study.TestEntryStudy.test_existing_oversold_component_is_detected_without_rr) ... ok
+test_gap_inside_horizon_rejected (test_entry_study.TestEntryStudy.test_gap_inside_horizon_rejected) ... ok
+test_holm_accounts_for_all_comparisons_and_missing_evidence (test_entry_study.TestEntryStudy.test_holm_accounts_for_all_comparisons_and_missing_evidence) ... ok
+test_insufficient_independent_clusters_is_not_significant (test_entry_study.TestEntryStudy.test_insufficient_independent_clusters_is_not_significant) ... ok
+test_nonoverlap_and_phase_boundary (test_entry_study.TestEntryStudy.test_nonoverlap_and_phase_boundary) ... ok
+test_positive_effect_has_nonzero_power_and_finite_correction (test_entry_study.TestEntryStudy.test_positive_effect_has_nonzero_power_and_finite_correction) ... ok
+test_reference_next_open_and_exact_horizon (test_entry_study.TestEntryStudy.test_reference_next_open_and_exact_horizon) ... ok
+test_signals_do_not_change_with_future (test_entry_study.TestEntryStudy.test_signals_do_not_change_with_future) ... ok
+test_confidence_buckets_are_reported_not_turned_into_probabilities (test_evaluate_prospective.TestCalibration.test_confidence_buckets_are_reported_not_turned_into_probabilities) ... ok
+test_missing_economic_verdict_is_reported_as_unknown (test_evaluate_prospective.TestCalibration.test_missing_economic_verdict_is_reported_as_unknown) ... ok
+test_non_signal_rows_are_not_counted_as_signals (test_evaluate_prospective.TestCalibration.test_non_signal_rows_are_not_counted_as_signals) ... ok
+test_outcomes_are_broken_down_by_economic_validity (test_evaluate_prospective.TestCalibration.test_outcomes_are_broken_down_by_economic_validity)
+La couche économique doit être mesurable, pas décorative. ... ok
+test_status_and_direction_are_broken_out (test_evaluate_prospective.TestCalibration.test_status_and_direction_are_broken_out) ... ok
+test_bearish_signal_is_scored_as_a_short (test_evaluate_prospective.TestDirection.test_bearish_signal_is_scored_as_a_short)
+Un short gagnant ne doit pas etre compte comme une perte. ... ok
+test_bearish_signal_losing_is_a_loss (test_evaluate_prospective.TestDirection.test_bearish_signal_losing_is_a_loss) ... ok
+test_direction_sign_reads_the_published_vocabulary (test_evaluate_prospective.TestDirection.test_direction_sign_reads_the_published_vocabulary) ... ok
+test_indeterminate_direction_is_never_given_a_return (test_evaluate_prospective.TestDirection.test_indeterminate_direction_is_never_given_a_return) ... ok
+test_missing_entry_price_is_not_evaluable (test_evaluate_prospective.TestEvaluationRules.test_missing_entry_price_is_not_evaluable) ... ok
+test_no_return_before_the_deadline (test_evaluate_prospective.TestEvaluationRules.test_no_return_before_the_deadline)
+Regle centrale : rien n'est renseigne avant l'echeance de 24 h. ... ok
+test_no_series_means_not_evaluable (test_evaluate_prospective.TestEvaluationRules.test_no_series_means_not_evaluable) ... ok
+test_return_computed_once_the_deadline_is_reached (test_evaluate_prospective.TestEvaluationRules.test_return_computed_once_the_deadline_is_reached) ... ok
+test_the_journal_is_never_modified (test_evaluate_prospective.TestEvaluationRules.test_the_journal_is_never_modified) ... ok
+test_unreadable_timestamp_is_not_evaluable (test_evaluate_prospective.TestEvaluationRules.test_unreadable_timestamp_is_not_evaluable) ... ok
+test_a_price_before_the_entry_is_not_an_exit_price (test_evaluate_prospective.TestExitFreshness.test_a_price_before_the_entry_is_not_an_exit_price) ... ok
+test_quote_beyond_the_tolerance_is_rejected (test_evaluate_prospective.TestExitFreshness.test_quote_beyond_the_tolerance_is_rejected) ... ok
+test_quote_within_the_tolerance_is_accepted (test_evaluate_prospective.TestExitFreshness.test_quote_within_the_tolerance_is_accepted) ... ok
+test_stale_exit_price_is_rejected (test_evaluate_prospective.TestExitFreshness.test_stale_exit_price_is_rejected)
+Un prix vieux de plusieurs heures ne peut pas etre le prix a 24 h. ... ok
+test_a_horizon_without_a_fresh_price_stays_unknown (test_evaluate_prospective.TestHorizons.test_a_horizon_without_a_fresh_price_stays_unknown) ... ok
+test_each_horizon_is_measured_separately (test_evaluate_prospective.TestHorizons.test_each_horizon_is_measured_separately) ... ok
+test_cost_is_the_frozen_protocol_scenario (test_evaluate_prospective.TestJournalEvaluation.test_cost_is_the_frozen_protocol_scenario) ... ok
+test_no_observation_due_yields_no_result (test_evaluate_prospective.TestJournalEvaluation.test_no_observation_due_yields_no_result) ... ok
+test_summary_separates_evaluated_and_pending (test_evaluate_prospective.TestJournalEvaluation.test_summary_separates_evaluated_and_pending) ... ok
+test_invalid_prices_are_ignored (test_evaluate_prospective.TestSeriesLoading.test_invalid_prices_are_ignored) ... ok
+test_jsonl_series (test_evaluate_prospective.TestSeriesLoading.test_jsonl_series) ... ok
+test_merge_deduplicates_and_later_values_win (test_evaluate_prospective.TestSeriesStore.test_merge_deduplicates_and_later_values_win) ... ok
+test_store_accumulates_across_runs (test_evaluate_prospective.TestSeriesStore.test_store_accumulates_across_runs) ... ok
+test_store_keeps_no_duplicate_for_the_same_timestamp (test_evaluate_prospective.TestSeriesStore.test_store_keeps_no_duplicate_for_the_same_timestamp) ... ok
+test_collector_snapshot_shape_is_readable (test_evaluate_prospective.TestSnapshotSeriesLoading.test_collector_snapshot_shape_is_readable) ... ok
+test_empty_snapshot_yields_no_fabricated_points (test_evaluate_prospective.TestSnapshotSeriesLoading.test_empty_snapshot_yields_no_fabricated_points) ... ok
+test_mexc_is_preferred_over_other_venues (test_evaluate_prospective.TestSnapshotSeriesLoading.test_mexc_is_preferred_over_other_venues) ... ok
+test_iso_forms (test_evaluate_prospective.TestTimestampParsing.test_iso_forms) ... ok
+test_ema_constant_series (test_indicators.IndicatorTests.test_ema_constant_series) ... ok
+test_ema_rejects_short_series (test_indicators.IndicatorTests.test_ema_rejects_short_series) ... ok
+test_rsi_rising_series (test_indicators.IndicatorTests.test_rsi_rising_series) ... ok
+test_all_duplicate_copies_excluded_even_when_conflicting (test_kraken_history_quality.TestHistoryQuality.test_all_duplicate_copies_excluded_even_when_conflicting) ... ok
+test_dataset_provenance_hash_and_final_bar_exclusion (test_kraken_history_quality.TestHistoryQuality.test_dataset_provenance_hash_and_final_bar_exclusion) ... ok
+test_engine_uses_validated_four_hour_input_only (test_kraken_history_quality.TestHistoryQuality.test_engine_uses_validated_four_hour_input_only) ... ok
+test_exported_csv_is_accepted_by_existing_engine_and_hash_checked (test_kraken_history_quality.TestHistoryQuality.test_exported_csv_is_accepted_by_existing_engine_and_hash_checked) ... ok
+test_extreme_consecutive_close_jump_is_quarantined (test_kraken_history_quality.TestHistoryQuality.test_extreme_consecutive_close_jump_is_quarantined) ... ok
+test_indicators_signals_and_trade_horizon_never_cross_quarantine (test_kraken_history_quality.TestHistoryQuality.test_indicators_signals_and_trade_horizon_never_cross_quarantine) ... ok
+test_quarantine_wick_and_nonfinite_or_inconsistent_ohlc (test_kraken_history_quality.TestHistoryQuality.test_quarantine_wick_and_nonfinite_or_inconsistent_ohlc) ... ok
+test_real_snapshot_counts_are_reproducible (test_kraken_history_quality.TestHistoryQuality.test_real_snapshot_counts_are_reproducible) ... ok
+test_utc_alignment_order_and_closed_candles (test_kraken_history_quality.TestHistoryQuality.test_utc_alignment_order_and_closed_candles) ... ok
+test_api_unavailable_fails_closed (test_monitor.ReportTests.test_api_unavailable_fails_closed) ... ok
+test_cross_exchange_reports_last_and_mid_with_explicit_check_basis (test_monitor.ReportTests.test_cross_exchange_reports_last_and_mid_with_explicit_check_basis) ... ok
+test_fallback_report_exits_nonzero (test_monitor.ReportTests.test_fallback_report_exits_nonzero)
+Missing or incoherent market data must still fail the collection step. ... ok
+test_fallback_report_has_no_market_quote (test_monitor.ReportTests.test_fallback_report_has_no_market_quote) ... ok
+test_inconsistent_exchange_quotes_fail_closed (test_monitor.ReportTests.test_inconsistent_exchange_quotes_fail_closed) ... ok
+test_mexc_schema_error_is_rejected (test_monitor.ReportTests.test_mexc_schema_error_is_rejected) ... ok
+test_mid_divergence_is_diagnostic_and_does_not_change_last_price_gate (test_monitor.ReportTests.test_mid_divergence_is_diagnostic_and_does_not_change_last_price_gate) ... ok
+test_spread_threshold_is_unchanged_and_still_fails_closed (test_monitor.ReportTests.test_spread_threshold_is_unchanged_and_still_fails_closed) ... ok
+test_stale_candles_fail_closed (test_monitor.ReportTests.test_stale_candles_fail_closed) ... ok
+test_unexpected_error_writes_fallback_and_exits_nonzero (test_monitor.ReportTests.test_unexpected_error_writes_fallback_and_exits_nonzero) ... ok
+test_valid_attendre_report_exits_zero (test_monitor.ReportTests.test_valid_attendre_report_exits_zero)
+A valid ATTENDRE is a fail-closed decision, not a collection failure. ... ok
+test_valid_report_contains_real_source_fields_and_indicators (test_monitor.ReportTests.test_valid_report_contains_real_source_fields_and_indicators) ... ok
+test_cost_is_applied_once_and_identically (test_oos_evaluation.TestMasksAndCosts.test_cost_is_applied_once_and_identically)
+Le masque net est exactement le masque brut sur des mouvements reduits ... ok
+test_cost_reduces_the_number_of_significant_bars (test_oos_evaluation.TestMasksAndCosts.test_cost_reduces_the_number_of_significant_bars)
+Un cout plus eleve ne peut pas augmenter le nombre de barres significatives. ... ok
+test_false_positives_are_the_exact_complement (test_oos_evaluation.TestMasksAndCosts.test_false_positives_are_the_exact_complement) ... ok
+test_hit_rate_uses_the_same_mask (test_oos_evaluation.TestMasksAndCosts.test_hit_rate_uses_the_same_mask) ... ok
+test_invalidation_is_measured_in_the_opposite_direction (test_oos_evaluation.TestMasksAndCosts.test_invalidation_is_measured_in_the_opposite_direction) ... ok
+test_mask_is_unique_per_cost_scenario (test_oos_evaluation.TestMasksAndCosts.test_mask_is_unique_per_cost_scenario) ... ok
+test_reference_rate_and_null_median_are_consistent (test_oos_evaluation.TestMasksAndCosts.test_reference_rate_and_null_median_are_consistent)
+La reference et la distribution null utilisent le meme masque : ... ok
+test_cost_scenarios_are_ordered_and_non_negative (test_oos_evaluation.TestProtocolIntegrity.test_cost_scenarios_are_ordered_and_non_negative) ... ok
+test_protocol_declares_the_split (test_oos_evaluation.TestProtocolIntegrity.test_protocol_declares_the_split) ... ok
+test_reference_reversals_do_not_look_beyond_the_segment (test_oos_evaluation.TestSegmentation.test_reference_reversals_do_not_look_beyond_the_segment) ... ok
+test_split_is_chronological_and_strict (test_oos_evaluation.TestSegmentation.test_split_is_chronological_and_strict) ... ok
+test_agent_analysis_rejects_mismatched_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_mismatched_collection_id)
+Test that agent_analysis rejects snapshot with mismatched collection_id. ... ok
+test_agent_analysis_rejects_mismatched_snapshot_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_mismatched_snapshot_id)
+Test that a snapshot hash mismatch is rejected before analysis is accepted. ... ok
+test_agent_analysis_rejects_missing_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_rejects_missing_collection_id)
+Test that agent_analysis rejects snapshot with missing collection_id when expected. ... ok
+test_agent_analysis_verifies_collection_id_match (test_provenance.TestProvenanceDeterministic.test_agent_analysis_verifies_collection_id_match)
+Test that agent_analysis verifies collection_id matches snapshot. ... ok
+test_agent_analysis_without_expected_collection_id (test_provenance.TestProvenanceDeterministic.test_agent_analysis_without_expected_collection_id)
+Test that agent_analysis works without expected collection_id (backward compatibility). ... ok
+test_fallback_attendre_report_is_rejected_even_with_matching_ids (test_provenance.TestProvenanceDeterministic.test_fallback_attendre_report_is_rejected_even_with_matching_ids)
+A fallback ATTENDRE must be rejected even when identifiers match the valid artifacts. ... ok
+test_fallback_report_is_fail_closed_for_absent_or_invalid_artifact (test_provenance.TestProvenanceDeterministic.test_fallback_report_is_fail_closed_for_absent_or_invalid_artifact)
+Fail-closed fallback must remain schema-valid and never claim a valid signal. ... ok
+test_monitor_includes_collection_id (test_provenance.TestProvenanceDeterministic.test_monitor_includes_collection_id)
+Test that monitor includes collection_id in report. ... ok
+test_monitor_without_collection_id (test_provenance.TestProvenanceDeterministic.test_monitor_without_collection_id)
+Test that monitor works without collection_id (backward compatibility). ... ok
+test_snapshot_fingerprint_deterministic (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_deterministic)
+Test that snapshot fingerprint is deterministic for same valid source data. ... ok
+test_snapshot_fingerprint_rejects_malformed_best_prices (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_rejects_malformed_best_prices)
+Test that a malformed best quote cannot produce a valid snapshot hash. ... ok
+test_snapshot_fingerprint_rejects_missing_or_incomplete_sources (test_provenance.TestProvenanceDeterministic.test_snapshot_fingerprint_rejects_missing_or_incomplete_sources)
+Test that a missing or malformed source block is rejected rather than hashed. ... ok
+test_valid_attendre_report_is_accepted_when_provenance_is_valid (test_provenance.TestProvenanceDeterministic.test_valid_attendre_report_is_accepted_when_provenance_is_valid)
+A legitimate ATTENDRE report remains valid when its provenance and snapshot are valid. ... ok
+test_workflow_validation_fails_nonzero_for_missing_or_invalid_artifacts (test_provenance.TestProvenanceDeterministic.test_workflow_validation_fails_nonzero_for_missing_or_invalid_artifacts)
+The publication gate must fail closed for missing or inconsistent provenance artifacts. ... ok
+test_tel_collector_generates_collection_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_generates_collection_id)
+Test that tel_collector generates a collection_id when not provided. ... skipped 'requires live public-market access'
+test_tel_collector_generates_snapshot_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_generates_snapshot_id)
+Test that a valid live snapshot yields a SHA-256 fingerprint, otherwise the collector stays fail-closed. ... skipped 'requires live public-market access'
+test_tel_collector_uses_provided_collection_id (test_provenance.TestProvenanceLiveIntegration.test_tel_collector_uses_provided_collection_id)
+Test that tel_collector uses the provided collection_id. ... skipped 'requires live public-market access'
+test_age_read_from_the_artifact_of_the_checkout_commit (test_publication_cadence.TestAgeFromPublishedArtifact.test_age_read_from_the_artifact_of_the_checkout_commit) ... ok
+test_missing_artifact_gives_no_age (test_publication_cadence.TestAgeFromPublishedArtifact.test_missing_artifact_gives_no_age) ... ok
+test_decide_allows_a_publication_that_is_old_enough (test_publication_cadence.TestCadenceCli.test_decide_allows_a_publication_that_is_old_enough) ... ok
+test_decide_writes_the_publication_gate (test_publication_cadence.TestCadenceCli.test_decide_writes_the_publication_gate) ... ok
+test_the_chain_mode_never_fails_and_never_waits_in_dry_run (test_publication_cadence.TestCadenceCli.test_the_chain_mode_never_fails_and_never_waits_in_dry_run) ... ok
+test_a_live_chain_is_not_dead (test_publication_cadence.TestChainLiveness.test_a_live_chain_is_not_dead) ... ok
+test_a_silent_chain_is_dead (test_publication_cadence.TestChainLiveness.test_a_silent_chain_is_dead) ... ok
+test_an_unknown_age_does_not_prove_the_chain_is_dead (test_publication_cadence.TestChainLiveness.test_an_unknown_age_does_not_prove_the_chain_is_dead) ... ok
+test_age_read_from_a_checkout_ref_distinct_from_head (test_publication_cadence.TestCheckoutRef.test_age_read_from_a_checkout_ref_distinct_from_head)
+L'age au commit de checkout est different de l'age a HEAD. ... ok
+test_missing_artifact_at_the_checkout_ref_decides_the_relay (test_publication_cadence.TestCheckoutRef.test_missing_artifact_at_the_checkout_ref_decides_the_relay)
+Pas d'artefact au CHECKOUT_SHA : l'etat de la chaine au demarrage ... ok
+test_the_checkout_ref_decides_whether_the_chain_is_alive (test_publication_cadence.TestCheckoutRef.test_the_checkout_ref_decides_whether_the_chain_is_alive)
+Scenario de production : l'execution vient de publier (age frais a ... ok
+test_chain_does_not_double_publish_within_the_interval (test_publication_cadence.TestDispatchDecision.test_chain_does_not_double_publish_within_the_interval)
+Un passage 5 minutes apres la publication ne doit rien declencher. ... ok
+test_chain_produces_one_publication_per_interval (test_publication_cadence.TestDispatchDecision.test_chain_produces_one_publication_per_interval)
+Simulation de la chaine : une publication toutes les ~12 a 15 minutes. ... ok
+test_chain_survives_a_fresh_publication (test_publication_cadence.TestDispatchDecision.test_chain_survives_a_fresh_publication)
+Apres une publication, l'age repart de zero : aucune boucle immediate. ... ok
+test_default_interval_is_twelve_minutes (test_publication_cadence.TestDispatchDecision.test_default_interval_is_twelve_minutes) ... ok
+test_interval_is_configurable (test_publication_cadence.TestDispatchDecision.test_interval_is_configurable) ... ok
+test_old_publication_triggers (test_publication_cadence.TestDispatchDecision.test_old_publication_triggers) ... ok
+test_recent_publication_does_not_trigger (test_publication_cadence.TestDispatchDecision.test_recent_publication_does_not_trigger) ... ok
+test_unknown_age_does_not_trigger (test_publication_cadence.TestDispatchDecision.test_unknown_age_does_not_trigger)
+Sans age connu, on ne relance pas : risque de boucle de publications. ... ok
+test_a_chain_link_after_a_failure_uses_the_backoff (test_publication_cadence.TestDispatchPlan.test_a_chain_link_after_a_failure_uses_the_backoff) ... ok
+test_a_chain_link_always_relays_and_waits_for_the_slot (test_publication_cadence.TestDispatchPlan.test_a_chain_link_always_relays_and_waits_for_the_slot) ... ok
+test_a_chain_link_that_did_not_publish_keeps_the_slot (test_publication_cadence.TestDispatchPlan.test_a_chain_link_that_did_not_publish_keeps_the_slot) ... ok
+test_a_chain_link_waits_only_for_the_remaining_slot (test_publication_cadence.TestDispatchPlan.test_a_chain_link_waits_only_for_the_remaining_slot) ... ok
+test_a_one_off_run_does_not_relay_a_live_chain (test_publication_cadence.TestDispatchPlan.test_a_one_off_run_does_not_relay_a_live_chain) ... ok
+test_a_one_off_run_restarts_a_dead_chain (test_publication_cadence.TestDispatchPlan.test_a_one_off_run_restarts_a_dead_chain) ... ok
+test_a_one_off_run_uses_the_state_at_its_own_start (test_publication_cadence.TestDispatchPlan.test_a_one_off_run_uses_the_state_at_its_own_start)
+Regression production du 21/10 : une execution ponctuelle qui vient ... ok
+test_an_unknown_age_makes_a_chain_link_wait_a_full_slot (test_publication_cadence.TestDispatchPlan.test_an_unknown_age_makes_a_chain_link_wait_a_full_slot)
+Un maillon de chaine sans age connu attend un creneau complet : ... ok
+test_an_unknown_age_never_relays_a_one_off_run (test_publication_cadence.TestDispatchPlan.test_an_unknown_age_never_relays_a_one_off_run)
+Protection anti-boucle : sans age connu, une execution ponctuelle ... ok
+test_the_chain_never_accumulates (test_publication_cadence.TestDispatchPlan.test_the_chain_never_accumulates)
+Une chaine au plus : les executions ponctuelles ne creent pas de chaine. ... ok
+test_the_chain_produces_one_publication_per_pace (test_publication_cadence.TestDispatchPlan.test_the_chain_produces_one_publication_per_pace)
+Simulation de la chaine : une publication tous les ~13 min. ... ok
+test_reads_the_given_reference (test_publication_cadence.TestGitHistoryReading.test_reads_the_given_reference) ... ok
+test_unknown_reference_falls_back_to_head (test_publication_cadence.TestGitHistoryReading.test_unknown_reference_falls_back_to_head) ... ok
+test_a_recent_publication_must_be_waited_for (test_publication_cadence.TestNextSlot.test_a_recent_publication_must_be_waited_for) ... ok
+test_an_expired_slot_does_not_wait (test_publication_cadence.TestNextSlot.test_an_expired_slot_does_not_wait) ... ok
+test_an_unknown_age_waits_a_full_slot (test_publication_cadence.TestNextSlot.test_an_unknown_age_waits_a_full_slot)
+Sans age connu, on attend un creneau complet : pas de boucle. ... ok
+test_the_pace_is_shorter_than_the_objective (test_publication_cadence.TestNextSlot.test_the_pace_is_shorter_than_the_objective)
+13 min de creneau + latence de creation + duree du run ~ 15 min. ... ok
+test_age_of_the_last_publication (test_publication_cadence.TestPreviousPublicationAge.test_age_of_the_last_publication) ... ok
+test_current_publication_is_excluded (test_publication_cadence.TestPreviousPublicationAge.test_current_publication_is_excluded)
+Le commit que l'execution courante vient de faire ne compte pas. ... ok
+test_no_publication_known (test_publication_cadence.TestPreviousPublicationAge.test_no_publication_known) ... ok
+test_non_publication_commits_are_ignored (test_publication_cadence.TestPreviousPublicationAge.test_non_publication_commits_are_ignored) ... ok
+test_only_head_current_excludes_one_entry (test_publication_cadence.TestPreviousPublicationAge.test_only_head_current_excludes_one_entry) ... ok
+test_publication_subject_is_detected (test_publication_cadence.TestPublicationDetection.test_publication_subject_is_detected) ... ok
+test_timestamp_parsing_is_tolerant (test_publication_cadence.TestPublicationDetection.test_timestamp_parsing_is_tolerant) ... ok
+test_a_fresh_publication_blocks_the_next_one (test_publication_cadence.TestPublicationGate.test_a_fresh_publication_blocks_the_next_one) ... ok
+test_an_old_publication_is_allowed (test_publication_cadence.TestPublicationGate.test_an_old_publication_is_allowed) ... ok
+test_an_unknown_age_does_not_block_the_publication (test_publication_cadence.TestPublicationGate.test_an_unknown_age_does_not_block_the_publication)
+Le site ne doit jamais rester sans donnee pour un simple doute. ... ok
+test_a_failure_does_not_loop (test_publication_cadence.TestRunnerSimulation.test_a_failure_does_not_loop)
+Un echec impose le delai de repli : la chaine ne boucle pas. ... ok
+test_a_one_off_run_does_not_fork_the_chain (test_publication_cadence.TestRunnerSimulation.test_a_one_off_run_does_not_fork_the_chain)
+Un push ou un cron ne cree pas une chaine parallelle. ... ok
+test_the_chain_publishes_at_a_regular_cadence (test_publication_cadence.TestRunnerSimulation.test_the_chain_publishes_at_a_regular_cadence)
+Six heures de chaine : des intervalles reguliers, proches de 15 min. ... ok
+test_invalid_workflow_name_does_not_raise (test_publication_cadence.test_never_fails_the_publication.test_invalid_workflow_name_does_not_raise) ... ok
+test_main_never_raises (test_publication_cadence.test_never_fails_the_publication.test_main_never_raises) ... ok
+test_workflow_default_is_a_file_name (test_publication_cadence.test_never_fails_the_publication.test_workflow_default_is_a_file_name) ... ok
+test_collector_snapshot_carries_a_collection_status (test_publication_gate.TestCollectorCompatibility.test_collector_snapshot_carries_a_collection_status) ... ok
+test_collector_snapshot_is_publishable_when_data_is_complete (test_publication_gate.TestCollectorCompatibility.test_collector_snapshot_is_publishable_when_data_is_complete) ... ok
+test_incomplete_data_yields_a_fallback_snapshot_that_cannot_be_published (test_publication_gate.TestCollectorCompatibility.test_incomplete_data_yields_a_fallback_snapshot_that_cannot_be_published) ... ok
+test_collector_normalized_signed_fees_are_accepted (test_publication_gate.TestGateAccepts.test_collector_normalized_signed_fees_are_accepted) ... ok
+test_signed_verified_fees_are_accepted (test_publication_gate.TestGateAccepts.test_signed_verified_fees_are_accepted) ... ok
+test_valid_triple_is_accepted (test_publication_gate.TestGateAccepts.test_valid_triple_is_accepted) ... ok
+test_valid_triple_on_disk_is_accepted (test_publication_gate.TestGateAccepts.test_valid_triple_on_disk_is_accepted) ... ok
+test_collection_id_mismatch_with_workflow_is_rejected (test_publication_gate.TestGateRejects.test_collection_id_mismatch_with_workflow_is_rejected) ... ok
+test_different_collection_ids_are_rejected (test_publication_gate.TestGateRejects.test_different_collection_ids_are_rejected) ... ok
+test_empty_artifact_on_disk_is_rejected (test_publication_gate.TestGateRejects.test_empty_artifact_on_disk_is_rejected) ... ok
+test_fallback_status_is_rejected (test_publication_gate.TestGateRejects.test_fallback_status_is_rejected) ... ok
+test_fingerprint_mismatch_is_rejected (test_publication_gate.TestGateRejects.test_fingerprint_mismatch_is_rejected) ... ok
+test_missing_artifact_on_disk_is_rejected (test_publication_gate.TestGateRejects.test_missing_artifact_on_disk_is_rejected) ... ok
+test_missing_collection_id_is_rejected (test_publication_gate.TestGateRejects.test_missing_collection_id_is_rejected) ... ok
+test_missing_collection_status_is_rejected (test_publication_gate.TestGateRejects.test_missing_collection_status_is_rejected)
+Le defaut exact qui a bloque la production du 21/10. ... ok
+test_missing_expected_collection_id_is_rejected (test_publication_gate.TestGateRejects.test_missing_expected_collection_id_is_rejected) ... ok
+test_missing_snapshot_id_is_rejected (test_publication_gate.TestGateRejects.test_missing_snapshot_id_is_rejected) ... ok
+test_scenario_claiming_verified_fees_without_envelope_is_rejected (test_publication_gate.TestGateRejects.test_scenario_claiming_verified_fees_without_envelope_is_rejected) ... ok
+test_scenario_fee_object_without_envelope_is_rejected (test_publication_gate.TestGateRejects.test_scenario_fee_object_without_envelope_is_rejected) ... ok
+test_symbol_mismatch_is_rejected (test_publication_gate.TestGateRejects.test_symbol_mismatch_is_rejected) ... ok
+test_verified_fees_with_invalid_signature_are_rejected (test_publication_gate.TestGateRejects.test_verified_fees_with_invalid_signature_are_rejected) ... ok
+test_verified_fees_with_modified_metadata_are_rejected (test_publication_gate.TestGateRejects.test_verified_fees_with_modified_metadata_are_rejected) ... ok
+test_verified_fees_with_modified_pct_are_rejected (test_publication_gate.TestGateRejects.test_verified_fees_with_modified_pct_are_rejected) ... ok
+test_verified_fees_without_key_are_rejected (test_publication_gate.TestGateRejects.test_verified_fees_without_key_are_rejected) ... ok
+test_verified_legacy_fees_without_provenance_are_rejected (test_publication_gate.TestGateRejects.test_verified_legacy_fees_without_provenance_are_rejected) ... ok
+test_verified_liquidity_fees_without_provenance_are_rejected (test_publication_gate.TestGateRejects.test_verified_liquidity_fees_without_provenance_are_rejected) ... ok
+test_bullish_engulfing_is_reported (test_reversal_engine.TestCandleFigures.test_bullish_engulfing_is_reported) ... ok
+test_figures_are_absent_when_ohlc_is_unavailable (test_reversal_engine.TestCandleFigures.test_figures_are_absent_when_ohlc_is_unavailable)
+Sans OHLC, le moteur degrade proprement et le signale. ... ok
+test_hammer_pattern_is_detected_and_reported (test_reversal_engine.TestCandleFigures.test_hammer_pattern_is_detected_and_reported)
+Un marteau a l'extreme doit produire une preuve de structure. ... ok
+test_decision_only_uses_bars_up_to_the_current_one (test_reversal_engine.TestCausality.test_decision_only_uses_bars_up_to_the_current_one)
+Le setup reference ne peut pas etre posterieur a la barre courante. ... ok
+test_future_bars_do_not_change_the_decision (test_reversal_engine.TestCausality.test_future_bars_do_not_change_the_decision)
+Perturber les barres posterieures ne doit rien changer a la decision ... ok
+test_critical_level_is_not_read_by_the_detector (test_reversal_engine.TestCriticalLevelIndependence.test_critical_level_is_not_read_by_the_detector)
+Aucune reference a CRITICAL_LEVEL dans le corps du detecteur. ... ok
+test_decision_is_independent_from_critical_level (test_reversal_engine.TestCriticalLevelIndependence.test_decision_is_independent_from_critical_level) ... ok
+test_bearish_engulfing_curr_not_bearish (test_reversal_engine.TestEngulfingPatterns.test_bearish_engulfing_curr_not_bearish) ... ok
+test_bearish_engulfing_detected (test_reversal_engine.TestEngulfingPatterns.test_bearish_engulfing_detected) ... ok
+test_bearish_engulfing_equal_opens_is_engulfing (test_reversal_engine.TestEngulfingPatterns.test_bearish_engulfing_equal_opens_is_engulfing) ... ok
+test_bearish_engulfing_prev_not_bullish (test_reversal_engine.TestEngulfingPatterns.test_bearish_engulfing_prev_not_bullish) ... ok
+test_bullish_engulfing_not_bearish (test_reversal_engine.TestEngulfingPatterns.test_bullish_engulfing_not_bearish) ... ok
+test_non_engulfing_not_detected (test_reversal_engine.TestEngulfingPatterns.test_non_engulfing_not_detected) ... ok
+test_doji_at_level_is_rejection_if_wick (test_reversal_engine.TestLevelRejection.test_doji_at_level_is_rejection_if_wick) ... ok
+test_level_not_touched_is_not_rejection (test_reversal_engine.TestLevelRejection.test_level_not_touched_is_not_rejection) ... ok
+test_level_not_touched_support (test_reversal_engine.TestLevelRejection.test_level_not_touched_support) ... ok
+test_resistance_rejection_closes_above_not_rejection (test_reversal_engine.TestLevelRejection.test_resistance_rejection_closes_above_not_rejection) ... ok
+test_resistance_rejection_no_upper_wick (test_reversal_engine.TestLevelRejection.test_resistance_rejection_no_upper_wick) ... ok
+test_resistance_rejection_upper_wick (test_reversal_engine.TestLevelRejection.test_resistance_rejection_upper_wick) ... ok
+test_resistance_rejection_wick_less_than_half_body (test_reversal_engine.TestLevelRejection.test_resistance_rejection_wick_less_than_half_body) ... ok
+test_support_rejection_closes_below_not_rejection (test_reversal_engine.TestLevelRejection.test_support_rejection_closes_below_not_rejection) ... ok
+test_support_rejection_lower_wick (test_reversal_engine.TestLevelRejection.test_support_rejection_lower_wick) ... ok
+test_support_rejection_no_lower_wick (test_reversal_engine.TestLevelRejection.test_support_rejection_no_lower_wick) ... ok
+test_support_rejection_wick_less_than_half_body (test_reversal_engine.TestLevelRejection.test_support_rejection_wick_less_than_half_body) ... ok
+test_tiny_body_requires_wick (test_reversal_engine.TestLevelRejection.test_tiny_body_requires_wick) ... ok
+test_contradiction_with_opposite_higher_timeframe_trend (test_reversal_engine.TestMissingDataAndEdgeCases.test_contradiction_with_opposite_higher_timeframe_trend) ... ok
+test_empty_series_does_not_raise (test_reversal_engine.TestMissingDataAndEdgeCases.test_empty_series_does_not_raise) ... ok
+test_misaligned_series_are_reported (test_reversal_engine.TestMissingDataAndEdgeCases.test_misaligned_series_are_reported) ... ok
+test_missing_15m_gives_insufficient_data (test_reversal_engine.TestMissingDataAndEdgeCases.test_missing_15m_gives_insufficient_data) ... ok
+test_nan_values_are_tolerated (test_reversal_engine.TestMissingDataAndEdgeCases.test_nan_values_are_tolerated) ... ok
+test_short_history_gives_insufficient_data (test_reversal_engine.TestMissingDataAndEdgeCases.test_short_history_gives_insufficient_data) ... ok
+test_trend_alignment_is_an_observation_not_evidence (test_reversal_engine.TestMissingDataAndEdgeCases.test_trend_alignment_is_an_observation_not_evidence)
+Une tendance superieure alignee ne doit pas compter comme preuve. ... ok
+test_confidence_is_labelled_as_not_a_probability (test_reversal_engine.TestOutputs.test_confidence_is_labelled_as_not_a_probability) ... ok
+test_every_evidence_has_a_known_family (test_reversal_engine.TestOutputs.test_every_evidence_has_a_known_family) ... ok
+test_objectives_are_informative_only (test_reversal_engine.TestOutputs.test_objectives_are_informative_only) ... ok
+test_parameters_are_exposed_and_frozen (test_reversal_engine.TestOutputs.test_parameters_are_exposed_and_frozen) ... ok
+test_reproducibility (test_reversal_engine.TestOutputs.test_reproducibility) ... ok
+test_exploitable_exige_confirmation_et_regime_neutre (test_reversal_engine.TestRegimeAndExploitabilite.test_exploitable_exige_confirmation_et_regime_neutre) ... ok
+test_exploitable_faux_en_regime_de_tendance (test_reversal_engine.TestRegimeAndExploitabilite.test_exploitable_faux_en_regime_de_tendance)
+Meme avec une confirmation, un regime en tendance n'est pas exploitable. ... ok
+test_regime_indetermine_sans_historique_journalier (test_reversal_engine.TestRegimeAndExploitabilite.test_regime_indetermine_sans_historique_journalier) ... ok
+test_regime_neutre_quand_la_variation_1d_est_faible (test_reversal_engine.TestRegimeAndExploitabilite.test_regime_neutre_quand_la_variation_1d_est_faible) ... ok
+test_regime_tendance_detecte (test_reversal_engine.TestRegimeAndExploitabilite.test_regime_tendance_detecte) ... ok
+test_bullish_setup_at_structural_low (test_reversal_engine.TestSetupDetection.test_bullish_setup_at_structural_low) ... ok
+test_direction_comes_from_the_extreme_not_from_three_candles (test_reversal_engine.TestSetupDetection.test_direction_comes_from_the_extreme_not_from_three_candles)
+Trois bougies ascendantes ne suffisent pas a definir une direction ... ok
+test_setup_without_independent_family_is_attendre (test_reversal_engine.TestSetupDetection.test_setup_without_independent_family_is_attendre)
+Un setup seul (momentum) ne suffit pas : il faut une famille independante. ... ok
+test_steady_rise_is_not_a_reversal_setup (test_reversal_engine.TestSetupDetection.test_steady_rise_is_not_a_reversal_setup)
+Une hausse reguliere n'est pas un retournement : la direction vient ... ok
+test_alert_then_confirmation (test_reversal_engine.TestStatusTransitions.test_alert_then_confirmation)
+ALERTE_PRÉCOCE puis CONFIRMATION quand la structure se casse. ... ok
+test_invalidation_takes_precedence_over_confirmation (test_reversal_engine.TestStatusTransitions.test_invalidation_takes_precedence_over_confirmation) ... ok
+test_invalidation_when_the_anchor_is_broken (test_reversal_engine.TestStatusTransitions.test_invalidation_when_the_anchor_is_broken)
+INVALIDATION quand l'ancre structurelle du setup est cassee. ... ok
+test_setup_expires_and_status_returns_to_attendre (test_reversal_engine.TestStatusTransitions.test_setup_expires_and_status_returns_to_attendre)
+Un setup trop ancien ne reste plus pertinent. ... ok
+test_expiry_at_close_of_bar_entry_plus_expiry (test_strategy_engine.TestExits.test_expiry_at_close_of_bar_entry_plus_expiry) ... ok
+test_gap_down_fills_at_open_not_stop (test_strategy_engine.TestExits.test_gap_down_fills_at_open_not_stop) ... ok
+test_gap_up_never_better_than_target (test_strategy_engine.TestExits.test_gap_up_never_better_than_target) ... ok
+test_stop_hit_on_entry_bar (test_strategy_engine.TestExits.test_stop_hit_on_entry_bar) ... ok
+test_stop_priority_when_both_touched (test_strategy_engine.TestExits.test_stop_priority_when_both_touched) ... ok
+test_incomplete_window_excluded (test_strategy_engine.TestGapsAndSegments.test_incomplete_window_excluded) ... ok
+test_indicators_never_cross_gap (test_strategy_engine.TestGapsAndSegments.test_indicators_never_cross_gap) ... ok
+test_segments_split_on_missing_bar (test_strategy_engine.TestGapsAndSegments.test_segments_split_on_missing_bar) ... ok
+test_atr_wilder_manual (test_strategy_engine.TestIndicators.test_atr_wilder_manual) ... ok
+test_ema_sma_seed (test_strategy_engine.TestIndicators.test_ema_sma_seed) ... ok
+test_future_change_does_not_alter_past_signals (test_strategy_engine.TestLookahead.test_future_change_does_not_alter_past_signals) ... ok
+test_pivot_known_only_after_five_bars (test_strategy_engine.TestLookahead.test_pivot_known_only_after_five_bars) ... ok
+test_signals_unchanged_when_future_removed (test_strategy_engine.TestLookahead.test_signals_unchanged_when_future_removed) ... ok
+test_costs_lower_pnl (test_strategy_engine.TestRiskAndCosts.test_costs_lower_pnl) ... ok
+test_loss_at_stop_equals_quarter_percent (test_strategy_engine.TestRiskAndCosts.test_loss_at_stop_equals_quarter_percent) ... ok
+test_no_leverage_cap (test_strategy_engine.TestRiskAndCosts.test_no_leverage_cap) ... ok
+test_one_position_and_cooldown (test_strategy_engine.TestRiskAndCosts.test_one_position_and_cooldown) ... ok
+test_equity_is_not_reset_at_phase_boundary (test_strategy_phase_continuity.TestPhaseStateContinuity.test_equity_is_not_reset_at_phase_boundary)
+Le second trade doit être dimensionné avec l'equity du premier. ... ok
+test_stop_cooldown_survives_phase_boundary (test_strategy_phase_continuity.TestPhaseStateContinuity.test_stop_cooldown_survives_phase_boundary)
+Le cooldown d'un stop IS doit aussi s'appliquer aux signaux VAL. ... ok
+test_trade_crossing_phase_blocks_competing_entry (test_strategy_phase_continuity.TestPhaseStateContinuity.test_trade_crossing_phase_blocks_competing_entry)
+Un trade IS ouvert jusqu'en VAL empêche une entrée VAL concurrente. ... ok
+test_daily_loss_limit_survives_boundary (test_strategy_phase_risk.TestPhaseRisk.test_daily_loss_limit_survives_boundary) ... ok
+test_explicit_state_survives_empty_phase_and_segment_change (test_strategy_phase_risk.TestPhaseRisk.test_explicit_state_survives_empty_phase_and_segment_change) ... ok
+test_manifest_cutoff_is_stable (test_strategy_validation_reproducibility.ValidationReproducibilityTests.test_manifest_cutoff_is_stable) ... ok
+test_two_replays_produce_identical_json (test_strategy_validation_reproducibility.ValidationReproducibilityTests.test_two_replays_produce_identical_json) ... ok
+test_api_errors_and_wrong_pair_rejected (test_terminal_collect.PublicCollection.test_api_errors_and_wrong_pair_rejected) ... ok
+test_market_refresh_does_not_change_experiment_sample (test_terminal_collect.PublicCollection.test_market_refresh_does_not_change_experiment_sample) ... ok
+test_public_payload_conversion (test_terminal_collect.PublicCollection.test_public_payload_conversion) ... ok
+test_column_length_mismatch_rejected (test_terminal_model.Quality.test_column_length_mismatch_rejected) ... ok
+test_duplicate_copies_quarantined (test_terminal_model.Quality.test_duplicate_copies_quarantined) ... ok
+test_expired_data_fails_closed (test_terminal_model.Quality.test_expired_data_fails_closed) ... ok
+test_forming_bar_excluded (test_terminal_model.Quality.test_forming_bar_excluded) ... ok
+test_future_clock_rejected (test_terminal_model.Quality.test_future_clock_rejected) ... ok
+test_gap_restarts_indicators (test_terminal_model.Quality.test_gap_restarts_indicators) ... ok
+test_indicator_prefix_invariance (test_terminal_model.Quality.test_indicator_prefix_invariance) ... ok
+test_invalid_row_type_rejected_cleanly (test_terminal_model.Quality.test_invalid_row_type_rejected_cleanly) ... ok
+test_inversion_quarantines_both (test_terminal_model.Quality.test_inversion_quarantines_both) ... ok
+test_missing_secondary_timeframe_blocks_buy (test_terminal_model.Quality.test_missing_secondary_timeframe_blocks_buy) ... ok
+test_nested_inversions_cannot_leave_unsorted_output (test_terminal_model.Quality.test_nested_inversions_cannot_leave_unsorted_output) ... ok
+test_ohlc_and_nonfinite_quarantined (test_terminal_model.Quality.test_ohlc_and_nonfinite_quarantined) ... ok
+test_unknown_final_timestamp_blocks_freshness (test_terminal_model.Quality.test_unknown_final_timestamp_blocks_freshness) ... ok
+test_unknown_market_rejected (test_terminal_model.Quality.test_unknown_market_rejected) ... ok
+test_vwap_constant_and_rsi_flat (test_terminal_model.Quality.test_vwap_constant_and_rsi_flat) ... ok
+test_cash_limited_sizing (test_terminal_model.Risk.test_cash_limited_sizing) ... ok
+test_does_not_round_quantity_up (test_terminal_model.Risk.test_does_not_round_quantity_up) ... ok
+test_gross_rr_strictly_greater_than_1_5 (test_terminal_model.Risk.test_gross_rr_strictly_greater_than_1_5) ... ok
+test_invalid_input_rejected (test_terminal_model.Risk.test_invalid_input_rejected) ... ok
+test_risk_fee_and_cash_cap (test_terminal_model.Risk.test_risk_fee_and_cash_cap) ... ok
+test_unrepresentable_arithmetic_fails_closed (test_terminal_model.Risk.test_unrepresentable_arithmetic_fails_closed) ... ok
+test_legacy_requested_6h_on_4h_is_labeled_effective_4h (test_terminal_research.DisplayAdapter.test_legacy_requested_6h_on_4h_is_labeled_effective_4h) ... ok
+test_breakout_enters_next_open_and_preserves_fixed_target (test_terminal_research.Research.test_breakout_enters_next_open_and_preserves_fixed_target) ... ok
+test_deterministic_replay (test_terminal_research.Research.test_deterministic_replay) ... ok
+test_empty_trades_metrics_not_fabricated (test_terminal_research.Research.test_empty_trades_metrics_not_fabricated) ... ok
+test_fold_excludes_position_crossing_boundary (test_terminal_research.Research.test_fold_excludes_position_crossing_boundary) ... ok
+test_signals_ignore_future_bars (test_terminal_research.Research.test_signals_ignore_future_bars) ... ok
+test_different_payload_is_not_flagged (test_tradingview_quality.IdenticalVenuePayloadTests.test_different_payload_is_not_flagged) ... ok
+test_exactly_identical_technical_fields_are_flagged_diagnostically (test_tradingview_quality.IdenticalVenuePayloadTests.test_exactly_identical_technical_fields_are_flagged_diagnostically) ... ok
+test_same_symbol_is_not_cross_venue_alert (test_tradingview_quality.IdenticalVenuePayloadTests.test_same_symbol_is_not_cross_venue_alert) ... ok
+test_suspect_tradingview_never_changes_native_verdict (test_tradingview_quality.NativeVerdictSafetyTests.test_suspect_tradingview_never_changes_native_verdict) ... ok
+test_verified_tradingview_is_only_cross_check (test_tradingview_quality.NativeVerdictSafetyTests.test_verified_tradingview_is_only_cross_check) ... ok
+test_crossed_book_fails (test_tradingview_quality.OrderBookQualityTests.test_crossed_book_fails) ... ok
+test_empty_or_incomplete_book_fails (test_tradingview_quality.OrderBookQualityTests.test_empty_or_incomplete_book_fails) ... ok
+test_stale_or_future_age_fails (test_tradingview_quality.OrderBookQualityTests.test_stale_or_future_age_fails) ... ok
+test_valid_book_passes (test_tradingview_quality.OrderBookQualityTests.test_valid_book_passes) ... ok
+test_fresh_timestamp_passes (test_tradingview_quality.TimestampTests.test_fresh_timestamp_passes) ... ok
+test_future_timestamp_fails (test_tradingview_quality.TimestampTests.test_future_timestamp_fails) ... ok
+test_invalid_timestamp_fails (test_tradingview_quality.TimestampTests.test_invalid_timestamp_fails) ... ok
+test_stale_timestamp_fails (test_tradingview_quality.TimestampTests.test_stale_timestamp_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 455 tests in 9.534s
+
+OK (skipped=3)
+INDISPONIBLE | Rapport illisible (FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpmtl3gfwo/absent.json') : aucune decision n'est prise.
+INDISPONIBLE | Donnees indisponibles ou perimees : aucune resolution n'est emise.
+NOUVELLE_ALERTE | ALERTE_PRÉCOCE | HAUSSIER | ancrage=0.002 | confiance=40 | exploitable=False
+NOUVELLE_ALERTE | ALERTE_PRÉCOCE | HAUSSIER | ancrage=0.002 | confiance=40 | exploitable=False
+NOUVELLE_ALERTE | ALERTE_PRÉCOCE | HAUSSIER | ancrage=0.002 | confiance=40 | exploitable=False
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-14T15:45:00+00:00",
+  "symbol": "TELUSDT",
+  "mode": "READ_ONLY_ALERTS",
+  "status": "ATTENDRE",
+  "collection_status": "FALLBACK",
+  "sources": {
+    "mexc_ticker": {
+      "status": "UNAVAILABLE",
+      "reason": "offline"
+    },
+    "mexc_candles": {
+      "status": "UNAVAILABLE",
+      "reason": "offline"
+    },
+    "kucoin_level1": {
+      "status": "UNAVAILABLE",
+      "reason": "offline"
+    }
+  },
+  "checks": [
+    {
+      "name": "Collection pipeline",
+      "status": "FAIL",
+      "reason": "offline"
+    }
+  ],
+  "indicators": null,
+  "error": "offline",
+  "interpretation": "Rapport de secours. Fail-closed : ATTENDRE.",
+  "disclaimer": "Read-only monitoring. No orders. No profitability claims."
+}
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-14T15:45:00+00:00",
+  "symbol": "TELUSDT",
+  "mode": "READ_ONLY_ALERTS",
+  "status": "ATTENDRE",
+  "collection_status": "FALLBACK",
+  "sources": {
+    "mexc_ticker": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    },
+    "mexc_candles": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    },
+    "kucoin_level1": {
+      "status": "UNAVAILABLE",
+      "reason": "unexpected collector error: RuntimeError"
+    }
+  },
+  "checks": [
+    {
+      "name": "Collection pipeline",
+      "status": "FAIL",
+      "reason": "unexpected collector error: RuntimeError"
+    }
+  ],
+  "indicators": null,
+  "error": "unexpected collector error: RuntimeError",
+  "interpretation": "Rapport de secours. Fail-closed : ATTENDRE.",
+  "disclaimer": "Read-only monitoring. No orders. No profitability claims."
+}
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-14T15:45:00+00:00",
+  "symbol": "TELUSDT",
+  "mode": "READ_ONLY_ALERTS",
+  "status": "ATTENDRE",
+  "collection_status": "VALID",
+  "sources": {
+    "mexc_ticker": {
+      "status": "OK"
+    }
+  },
+  "checks": [],
+  "indicators": null
+}
+Porte de publication : derniere publication 40.0 min (source : artefact publie sur la branche) ; intervalle minimal 12 min -> PUBLICATION AUTORISEE
+Porte de publication : derniere publication 3.0 min (source : artefact publie sur la branche) ; intervalle minimal 12 min -> PUBLICATION DIFFEREE
+Auto-relance : derniere publication 0.0 min (source : artefact publie sur la branche) ; mode chain -> RELANCE ; maillon de chaine : publication suivante au plus tard dans 13.0 min
+  (mode simulation : aucune requete effectuee)
+Auto-relance : derniere publication 556.7 min (source : artefact publie sur la branche) ; mode auto -> RELANCE ; chaine arretee : relance du chainage
+  (mode simulation : aucune requete effectuee)
+Auto-relance : derniere publication 556.7 min (source : artefact publie sur la branche) ; mode auto -> RELANCE ; chaine arretee : relance du chainage
+  Auto-relance impossible : jeton ou depot absent
+Auto-relance : derniere publication age inconnu (aucune relance) (source : historique des commits de publication) ; mode auto -> inutile ; age inconnu : aucune relance (protection anti-boucle)

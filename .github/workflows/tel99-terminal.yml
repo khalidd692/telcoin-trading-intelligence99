@@ -1,0 +1,58 @@
+name: TEL99 Quant Terminal verification
+on:
+  push:
+    branches: [codex/tel99-quant-terminal]
+    paths:
+      - 'src/terminal/**'
+      - 'scripts/terminal/**'
+      - 'site/terminal/**'
+      - 'research/terminal/**'
+      - 'results/terminal/**'
+      - 'tests/test_terminal*'
+      - '.github/workflows/tel99-terminal.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tel99-terminal-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python and collector regression
+        run: |
+          python -m unittest discover -s tests -v
+          python -m unittest discover -s collector -p 'test_*.py' -v
+      - name: Browser logic and legacy dashboard regression
+        run: |
+          node --check site/terminal/app.js
+          node tests/test_terminal.js
+          node tests/test_dashboard.js
+          node tests/test_realtime.js
+      - name: Deterministic terminal build
+        run: |
+          python -m scripts.terminal.build --market-input research/terminal/raw/kraken_2026-11-10_refresh.json
+          git diff --exit-code -- site/terminal/data.json results/terminal/experiments.json
+      - name: Package portable static terminal
+        run: |
+          cd site/terminal
+          zip -qr ../../TEL99-terminal.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TEL99-terminal-${{ github.sha }}
+          path: TEL99-terminal.zip
+          retention-days: 14
+      - name: Summary
+        run: |
+          echo 'Terminal tested and packaged; no deployment, no account access, no orders.' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,35 @@
+[
+  {
+    "command": [
+      "node",
+      "--check",
+      "site/terminal/app.js"
+    ],
+    "exit_code": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "tests/test_terminal.js"
+    ],
+    "exit_code": 0,
+    "output": "Terminal JS: 16 assertions passed\n"
+  },
+  {
+    "command": [
+      "node",
+      "tests/test_dashboard.js"
+    ],
+    "exit_code": 0,
+    "output": "Dashboard freshness tests: OK\nDashboard provenance refresh tests: OK\nDashboard early-reversal panel tests: OK\n"
+  },
+  {
+    "command": [
+      "node",
+      "tests/test_realtime.js"
+    ],
+    "exit_code": 0,
+    "output": "Real-time stream protocol/fail-closed tests: OK\n"
+  }
+]

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0e13"><meta name="description" content="TEL99 — terminal de recherche Kraken TEL/USD. Données traçables, laboratoire et simulation du risque. Aucun ordre.">
+<title>TEL99 · Quant Intelligence</title>
+<link rel="stylesheet" href="terminal.css">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+ <a class="brand" href="#market" aria-label="TEL99 accueil"><span class="brandmark">T<span>99</span></span><div>TEL99<small>QUANT INTELLIGENCE</small></div></a>
+ <div class="workspace-label">ESPACE DE RECHERCHE</div>
+ <nav aria-label="Navigation principale">
+  <button class="nav active" data-view="market"><span>◈</span> Marché <i>01</i></button>
+  <button class="nav" data-view="lab"><span>⌁</span> Laboratoire <i>02</i></button>
+  <button class="nav" data-view="risk"><span>◇</span> Simulateur de risque <i>03</i></button>
+  <button class="nav" data-view="data"><span>▤</span> Données & preuves <i>04</i></button>
+ </nav>
+ <div class="sidebar-note"><span class="green-dot"></span> Lecture seule<p>Recherche & simulation.<br>Aucune connexion à un compte.</p></div>
+ <div class="sidebar-footer"><b>INCRÉMENT 01</b><span>Kraken · Spot · USD</span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99/tree/codex/tel99-quant-terminal" target="_blank" rel="noopener">Code & méthode ↗</a></div>
+</aside>
+<div class="content">
+<header class="topbar"><div class="breadcrumb">TERMINAL <span>/</span> <b id="view-title">Centre de marché</b></div><div class="top-actions"><span class="outline-badge">PAPER UNIQUEMENT</span><span id="clock">—</span></div></header>
+<main>
+ <div id="loading" class="notice">Chargement du snapshot vérifiable…</div>
+ <section class="view" id="view-market">
+ <div class="page-heading"><div><div class="eyebrow">KRAKEN:TELUSD</div><h1>Le marché, avec ses preuves.</h1><p>Une lecture multifactorielle. Des hypothèses à tester.</p></div><button id="refresh-quote" class="button primary">↻ Actualiser le cours</button></div>
+ <div class="ticker-grid" id="tickers"></div>
+ <div id="freshness-banner" class="notice"></div>
+ <div class="market-grid">
+  <section class="panel chart-panel">
+   <div class="panel-header"><div><h2>TEL / USD <span class="subtle">· Kraken</span></h2><span class="micro" id="chart-meta"></span></div><div class="segmented" id="timeframes" aria-label="Unité de temps"><button data-tf="15m">15m</button><button data-tf="1h">1h</button><button data-tf="4h" class="selected">4h</button><button data-tf="1D">1j</button></div></div>
+   <div class="chart-toolbar"><div class="overlays"><label><input type="checkbox" id="ema20" checked><span class="key amber"></span> EMA20</label><label><input type="checkbox" id="ema50" checked><span class="key blue"></span> EMA50</label><label><input type="checkbox" id="sma200"><span class="key violet"></span> SMA200</label></div><select id="chart-window" aria-label="Fenêtre graphique"><option value="120">120 bougies</option><option value="60">60 bougies</option><option value="240">240 bougies</option><option value="all">Tout</option></select></div>
+   <div class="ohlc" id="ohlc">—</div><div id="chart" aria-label="Graphique en chandeliers TEL USD"></div>
+   <div class="osc-head"><div class="segmented"><button id="rsi-mode" class="selected">RSI 14</button><button id="macd-mode">MACD</button></div><span id="osc-value">—</span></div><div id="osc-chart" aria-label="Indicateur de momentum"></div>
+   <div class="chart-footer"><span>Volumes en TEL · Bougies clôturées · UTC</span><a href="https://www.tradingview.com/" target="_blank" rel="noopener">Graphiques par TradingView ↗</a></div>
+  </section>
+  <aside class="decision-stack"><section class="panel decision-panel"><div class="panel-header"><h2>Centre de décision</h2><span class="micro">SWING · 4H</span></div><div id="decision"></div></section><section class="panel accumulation"><div class="eyebrow">ACCUMULATION LONG TERME</div><h3>Un horizon différent.</h3><p>Le signal swing ne décide pas de l’allocation long terme. Aucune méthode d’accumulation n’est validée dans ce terminal.</p><span class="chip">Analyse séparée</span></section></aside>
+ </div>
+ <section class="panel"><div class="panel-header"><h2>Carte des facteurs</h2><span class="micro">INDICATEURS CALCULÉS · PAS DES PROBABILITÉS</span></div><div id="factors" class="factor-grid"></div></section>
+ <section class="panel"><div class="panel-header"><h2>Convergence temporelle</h2><span class="micro">UNE LIGNE = UNE SOURCE DATÉE</span></div><div class="table-scroll"><table><thead><tr><th>Unité</th><th>Qualité</th><th>Tendance</th><th>RSI 14</th><th>ADX 14</th><th>Vol. relatif</th><th>Dernière clôture UTC</th></tr></thead><tbody id="timeframe-table"></tbody></table></div></section>
+ </section>
+ <section class="view hidden" id="view-lab">
+  <div class="page-heading"><div><div class="eyebrow">LABORATOIRE QUANTITATIF</div><h1>Les résultats, y compris négatifs.</h1><p>Protocoles explicites, historiques exposés, coûts séparés.</p></div><button class="button" id="export-lab">↓ Exporter les résultats</button></div>
+  <div class="notice">Aucune stratégie validée. Les découpages chronologiques ci-dessous utilisent des historiques déjà explorés.</div>
+  <div class="lab-summary" id="lab-summary"></div>
+  <section class="panel"><div class="panel-header"><div><h2>Stratégie primaire préservée</h2><span class="micro">REPLI 4H · EMA20 / RETEST · OBJECTIF SUR RÉSISTANCE</span></div><span class="chip amber-text">Données insuffisantes</span></div><div id="frozen-results"></div></section>
+  <section class="panel"><div class="panel-header"><div><h2>Deux familles expérimentales</h2><span class="micro">3 FENÊTRES CHRONOLOGIQUES · AUCUNE OPTIMISATION</span></div><select id="cost-scenario" aria-label="Scénario de coûts"><option value="central">Central : 0,25 % + 0,10 %</option><option value="prudent">Prudent : 0,40 % + 0,30 %</option><option value="brut">Brut : sans coûts</option></select></div><p class="panel-copy">Coûts hypothétiques par côté. Chaque fenêtre commence à 1 000 USD. Stop : creux de 10 bougies − 0,5 ATR ; cible fixée à 2R. Les règles de la stratégie primaire restent inchangées.</p><div class="table-scroll"><table><thead><tr><th>Famille / fenêtre</th><th>Trades</th><th>Équité finale</th><th>Espérance R</th><th>Profit factor</th><th>DD réalisé</th><th>Buy & hold*</th></tr></thead><tbody id="experiment-table"></tbody></table></div><p class="footnote">* Même fenêtre, investissement intégral, exposition au risque différente. Référence cash : 0 %. Drawdown sur capital réalisé uniquement, sans pertes latentes. Les gaps peuvent dépasser le risque prévu.</p><details><summary>Voir les transactions simulées</summary><div class="table-scroll"><table><thead><tr><th>Famille</th><th>Entrée UTC</th><th>Sortie UTC</th><th>Motif</th><th>R net</th><th>P&L USD</th></tr></thead><tbody id="trade-table"></tbody></table></div></details></section>
+  <section class="panel"><div class="panel-header"><div><h2>Études prédictives existantes</h2><span class="micro">MOUVEMENTS BRUTS APRÈS ÉVÉNEMENT · PAS DES P&L</span></div><div class="filters"><select id="event-tf" aria-label="Filtrer les études par unité"><option value="all">Toutes les unités</option><option>15m</option><option>1h</option><option selected>4h</option></select><select id="event-family" aria-label="Filtrer par hypothèse"><option value="all">Toutes les hypothèses</option><option value="divergence">Divergence RSI</option><option value="oversold">Survente RSI</option><option value="pullback">Repli EMA20</option></select></div></div><div class="table-scroll"><table><thead><tr><th>Hypothèse</th><th>Unité</th><th>Horizon</th><th>Épisodes</th><th>Moyenne brute</th><th>Excès / référence</th><th>p corrigée Holm</th></tr></thead><tbody id="events-table"></tbody></table></div><p class="footnote">27 comparaisons préexistantes, aucune significative après correction. L’ancien calcul arrondit les horizons au nombre inférieur de bougies : la demande 6h sur des barres 4h mesure en réalité 4h, signalé dans le tableau. Épisodes chevauchants exclus par hypothèse ; ne pas additionner les effectifs entre horizons.</p></section>
+ </section>
+ <section class="view hidden" id="view-risk">
+  <div class="page-heading"><div><div class="eyebrow">SIMULATION · AUCUN ORDRE</div><h1>Dimensionner avant de décider.</h1><p>Risque planifié de 0,25 %, frais et slippage inclus. Spot sans levier.</p></div><span class="outline-badge">EXÉCUTION DÉSACTIVÉE</span></div>
+  <div class="risk-grid"><form class="panel risk-form" id="risk-form"><h2>Votre scénario virtuel</h2><p class="muted">Tous les prix sont en USD. Les valeurs proposées sont indicatives.</p><div class="form-grid"><label>Capital virtuel USD<input id="capital" type="number" min="1" step="any" value="1000" required></label><label>Prix d’entrée<input id="entry" type="number" min="0" step="any" required></label><label>Stop<input id="stop" type="number" min="0" step="any" required></label><label>Objectif<input id="target" type="number" min="0" step="any" required></label><label>Frais / côté (%)<input id="fee" type="number" min="0" max="9.99" step="any" value="0.4" required></label><label>Slippage / côté (%)<input id="slip" type="number" min="0" max="9.99" step="any" value="0.3" required></label></div><p class="footnote">Frais hypothétiques à vérifier. RR brut minimum 1,51. Le risque réalisé peut dépasser le budget en cas de gap.</p></form><section class="panel risk-output" id="risk-output" aria-live="polite"></section></div>
+  <div class="notice">Ce calculateur n’ouvre aucune position. Le capital de 1 000 USD est une référence de simulation, pas le solde du compte paper TradingView.</div>
+ </section>
+ <section class="view hidden" id="view-data">
+  <div class="page-heading"><div><div class="eyebrow">PROVENANCE & CONTRÔLES</div><h1>Chaque nombre a une origine.</h1><p>Des observations conservées, des limites visibles.</p></div><button class="button" id="export-data">↓ Exporter le snapshot</button></div>
+  <section class="panel"><div class="panel-header"><h2>État des historiques</h2><span class="micro">SANS INTERPOLATION</span></div><div class="table-scroll"><table><thead><tr><th>Unité</th><th>Source</th><th>Valides</th><th>Exclues</th><th>Intervalles absents</th><th>Segments</th><th>Segment final</th></tr></thead><tbody id="quality-table"></tbody></table></div><p class="footnote">Une absence peut provenir d’une période sans transaction ou d’un historique incomplet. Elle n’est jamais remplacée par une bougie inventée. Les mèches extrêmes sont mises en quarantaine, pas déclarées fausses.</p></section>
+  <div class="data-grid"><section class="panel padded"><h2>Chaîne de preuve</h2><dl id="provenance"></dl></section><section class="panel padded"><h2>Limites de cet incrément</h2><ul class="limit-list" id="limits"></ul></section></div>
+  <section class="panel padded"><h2>Méthodes</h2><p class="muted">EMA20/50 amorcées par SMA ; SMA200 ; ATR14 Wilder ; RSI14 arithmétique glissant ; MACD 12/26/9 ; DMI/ADX14 ; CCI20 ; stochastique 14/3. Indicateurs redémarrés à chaque interruption. VWAP : journée UTC complète uniquement. Corrélations : rendements logarithmiques 4h alignés, 90 observations maximum, 30 minimum.</p><details><summary>Quarantaines et raisons par unité</summary><pre id="quarantine"></pre></details></section>
+ </section>
+ <footer class="footer"><span>TEL99 / RESEARCH TERMINAL</span><span>Données observées <i class="legend-real"></i> · Hypothèses <i class="legend-hyp"></i> · Simulations <i class="legend-sim"></i></span><span>Incrément 01</span></footer>
+</main>
+</div></div>
+<script src="vendor/lightweight-charts-5.0.8.js"></script><script src="core.js"></script><script src="app.js"></script>
+</body></html>

@@ -1,0 +1,21 @@
+{
+  "id": "terminal-fixed-families-v1",
+  "status": "exploratory; parameters written before first execution; historical data already exposed",
+  "market": "KRAKEN:TELUSD",
+  "timeframe": "4h",
+  "families": {
+    "breakout20": "close exceeds all preceding 20 highs, EMA20 > EMA50, current volume >= 1.5 * preceding 20 mean volume",
+    "recovery30": "rolling-arithmetic RSI14 crosses from <=30 to >30 and close exceeds preceding candle high"
+  },
+  "warmup_bars": 50,
+  "entry": "next bar open",
+  "stop": "minimum low of signal bar and preceding 9 bars minus 0.5 ATR14 Wilder",
+  "target": "entry + 2 * (entry - stop); predeclared experimental target, not observed resistance",
+  "expiry": "existing engine: exit at close of entry index +20; 21 bars inspected",
+  "risk_fraction": 0.0025,
+  "min_rr_gross": 1.51,
+  "folds": "3 successive equal windows after first 50% of sample; warmup from past; no parameter fitting; each fold starts USD1000; complete holding windows only; historical windows already exposed",
+  "costs": "existing brut / central / prudent hypotheses; account fees unknown",
+  "benchmarks": "cash; buy-hold full capital in each evaluation window under same costs, unequal risk exposure",
+  "statistics": "realized-equity drawdown only; no annualized Sharpe from sparse trade returns; no statistical validation"
+}
