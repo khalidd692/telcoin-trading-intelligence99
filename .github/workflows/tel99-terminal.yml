@@ -42,7 +42,9 @@ jobs:
           node tests/test_realtime.js
       - name: Deterministic terminal build
         run: |
-          python -m scripts.terminal.build --market-input research/terminal/raw/kraken_2026-11-10_refresh.json
+          python -m scripts.terminal.build --market-input research/terminal/raw/kraken_2026-11-10_refresh.json --output /tmp/tel99-determinism-1.json --no-study-write
+          python -m scripts.terminal.build --market-input research/terminal/raw/kraken_2026-11-10_refresh.json --output /tmp/tel99-determinism-2.json --no-study-write
+          cmp /tmp/tel99-determinism-1.json /tmp/tel99-determinism-2.json
           git diff --exit-code -- site/terminal/data.json results/terminal/experiments.json
       - name: Package portable static terminal
         run: |
