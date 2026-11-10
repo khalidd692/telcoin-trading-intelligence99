@@ -63,3 +63,9 @@ Référence `KRAKEN:TELUSD` spot, levier 1x, capital virtuel $1 000, risque max 
 - CI #15 sur `cc04b19` était **en cours** lors de la rédaction : vérifier son statut et ses logs avant d'affirmer la réussite.
 - **Bloquant restant** : `site/terminal/data.json` n'est PAS encore alimenté par le workflow Kraken en continu. `tel99-kraken-snapshot.yml` produit seulement un artifact manuel en /tmp, sans publication sur un serveur. Ne pas annoncer l'actualisation analytique complète. Aucun déploiement ou merge autorisé.
 - **Limite scientifique** : le rechargement des données et la complétude de l'analyse ne prouvent pas un avantage prédictif ni une rentabilité. Les stratégies restent non validées.
+
+## Tentative de validation réelle de la collecte (10/11/2026)
+
+- Une automatisation navigateur a tenté d'ouvrir et de déclencher `.github/workflows/tel99-kraken-snapshot.yml`. **Non déclenché** : navigateur non authentifié GitHub, workflow absent de la branche par défaut `main` (présent uniquement sur la branche de travail). Aucune exécution ni artifact confirmé.
+- Le navigateur a prétendu que le fichier contenait seulement un déclencheur `schedule` ; **c'est inexact** : lecture directe du dépôt prouve `workflow_dispatch` et pas de `schedule`. Ne pas reprendre cette erreur.
+- Ne pas annoncer une publication analytique ou un flux end-to-end validé. La tâche de reprise automatique programmée n'est pas une preuve de résultat.
