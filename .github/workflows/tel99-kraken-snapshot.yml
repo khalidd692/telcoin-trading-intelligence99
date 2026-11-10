@@ -40,6 +40,13 @@ jobs:
           assert latest['research_source_sha256']==original['research_source_sha256']
           assert latest['safety']['real_orders'] is False
           assert latest['safety']['paper_orders'] is False
+          assert latest['as_of'] > original['as_of'], 'Market snapshot not newer than frozen sample'
+          for tf in ('15m','1h','4h','1D'):
+              frame=latest['frames'][tf]
+              assert frame['symbol']=='KRAKEN:TELUSD'
+              assert frame['quality']['valid_bars'] > 0
+              assert frame['quality']['last_close'] <= latest['as_of']
+          assert all(k in latest['context'] for k in ('btc4h','eth4h'))
           print('Market-only snapshot verified; frozen research unchanged')
           PY
           git diff --exit-code -- results/terminal/experiments.json research/terminal/ site/terminal/data.json
