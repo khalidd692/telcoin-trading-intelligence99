@@ -14,6 +14,7 @@ function statusOf(frame){const last=frame.quality.last_close,age=Date.now()/1000
 function rowClass(n){return T.finite(n)?n>=0?'positive':'negative':'';}
 function view(name){if(!['market','lab','risk','data'].includes(name))name='market';document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!=='view-'+name));document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===name));$('view-title').textContent={market:'Centre de marché',lab:'Laboratoire quantitatif',risk:'Simulateur de risque',data:'Données & preuves'}[name];history.replaceState(null,'','#'+name);if(name==='market'&&chart)resizeCharts();}
 function renderTickers(){
+ if(liveQuote&&!T.freshQuote(liveQuote))liveQuote=null;
  const f=data.frames['4h'],last=f.bars.at(-1),earlier=last&&f.bars.find(x=>x.t===last.t-86400),change=earlier?100*(last.c/earlier.c-1):null;
  const btc=data.context.btc4h,eth=data.context.eth4h;
  $('tickers').innerHTML=`<article class="ticker"><div class="label"><span>TEL / USD</span><span class="amber-text">KRAKEN</span></div><div class="value">${price(liveQuote?.price??last?.c)} <span style="font-size:12px">$</span></div><small>${liveQuote?'Cours public reçu '+date(liveQuote.received)+' UTC':'Clôture 4h · '+date(f.quality.last_close)+' UTC'}</small></article><article class="ticker"><div class="label"><span>VARIATION 24H</span><span>CLÔTURES</span></div><div class="value ${rowClass(change)}">${pct(change)}</div><small>Deux clôtures 4h espacées de 24h</small></article><article class="ticker"><div class="label"><span>BITCOIN / USD</span><span>4H</span></div><div class="value">${fmt(btc?.latest.close,0)} <span style="font-size:11px">$</span></div><small>Clôture ${date(btc?.quality.last_close)} UTC</small></article><article class="ticker"><div class="label"><span>ETHEREUM / USD</span><span>4H</span></div><div class="value">${fmt(eth?.latest.close,2)} <span style="font-size:11px">$</span></div><small>Clôture ${date(eth?.quality.last_close)} UTC</small></article>`;
@@ -104,7 +105,7 @@ async function start(){try{
  tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,p=data.decision.plan;$('entry').value=l.close??'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
- setInterval(()=>{renderDecision();renderFrames();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
+ setInterval(()=>{renderTickers();renderDecision();renderFrames();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  $('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';
  }catch(e){$('loading').classList.add('load-error');$('loading').textContent='Terminal indisponible : '+e.message+'. Servez le dossier avec HTTP et vérifiez data.json.';}}
 start();
