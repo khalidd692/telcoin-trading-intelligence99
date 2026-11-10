@@ -69,3 +69,9 @@ Référence `KRAKEN:TELUSD` spot, levier 1x, capital virtuel $1 000, risque max 
 - Une automatisation navigateur a tenté d'ouvrir et de déclencher `.github/workflows/tel99-kraken-snapshot.yml`. **Non déclenché** : navigateur non authentifié GitHub, workflow absent de la branche par défaut `main` (présent uniquement sur la branche de travail). Aucune exécution ni artifact confirmé.
 - Le navigateur a prétendu que le fichier contenait seulement un déclencheur `schedule` ; **c'est inexact** : lecture directe du dépôt prouve `workflow_dispatch` et pas de `schedule`. Ne pas reprendre cette erreur.
 - Ne pas annoncer une publication analytique ou un flux end-to-end validé. La tâche de reprise automatique programmée n'est pas une preuve de résultat.
+
+## Intégration Kraken réelle ajoutée (10/11/2026)
+
+- Commit `567dbf82437f17cffbb6772e0a7860c6e0b70521` : `.github/workflows/tel99-terminal.yml` possède désormais un second job `live-kraken-integration` déclenché automatiquement lors d'un push sur la branche terminal. Il appelle réellement le collecteur Kraken public pour six flux, reconstruit le snapshot en /tmp avec `--no-study-write`, vérifie schéma, source, fraîcheur, séries TEL, BTC/ETH, laboratoire figé et absence de mutation, puis téléverse un artifact privé temporaire. Aucun compte, ordre ou déploiement.
+- **CI #16 pour le commit `567dbf8` : GitHub Actions indique « completed successfully »** (10 novembre 2026). C'est une preuve d'exécution réussie du workflow à deux jobs, plus forte qu'une simple disponibilité d'API. Pour un audit approfondi, récupérer le détail des jobs et artifact avant de publier un snapshot.
+- **Toujours non fait :** alimenter le site public avec un snapshot périodique et prouver que le navigateur reçoit effectivement les nouveaux fichiers. Le job actuel ne publie pas ; ne pas confondre intégration en CI et déploiement.
