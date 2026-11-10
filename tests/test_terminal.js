@@ -17,6 +17,10 @@ assert.equal(T.freshQuote({price:.0015,received:1000},1121),false);
 assert.equal(T.freshQuote({price:.0015,received:1000},999),false);
 assert.equal(T.freshQuote({price:NaN,received:1000},1001),false);
 assert.equal(T.freshQuote(null,1001),false);
+assert.equal(T.parseTelTicker({error:[],result:{TELUSD:{c:['0.0015']}}}),.0015);
+assert.equal(T.parseTelTicker({error:[],result:{ETHUSD:{c:['3000']}}}),null);
+assert.equal(T.parseTelTicker({error:[],result:{TELUSD:{c:['0.0015']},ETHUSD:{c:['3000']}}}),null);
+assert.equal(T.parseTelTicker({error:['error'],result:{TELUSD:{c:['0.0015']}}}),null);
 assert.equal(T.display(null,2),'—');
 assert.equal(T.display(Infinity,2),'—');
 assert.equal(T.escape('<img onerror="x">'),'&lt;img onerror=&quot;x&quot;&gt;');
@@ -24,4 +28,4 @@ const series=T.chartSeries([{t:0,ema20:1},{t:900,ema20:2},{t:2700,ema20:3}],900,
 assert.deepEqual(series,[{time:0,value:1},{time:900,value:2},{time:1800},{time:2700,value:3}]);
 assert.equal(T.riskPlan(1000,1e-320,5e-321,2e-320,0,0).admissible,false);
 assert.equal(T.riskPlan(1e308,1e308,9e307,1.7e308,.09,.09).admissible,false);
-console.log('Terminal JS: 21 assertions passed');
+console.log('Terminal JS: 25 assertions passed');
