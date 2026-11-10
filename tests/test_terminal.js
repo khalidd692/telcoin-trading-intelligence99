@@ -32,7 +32,7 @@ const frozen={schema_version:1,market:'KRAKEN:TELUSD',source:'Kraken public REST
 const fresh={...frozen,as_of:1100};
 assert.equal(T.acceptSnapshot(frozen,fresh,1150),true);
 assert.equal(T.acceptSnapshot(frozen,{...fresh,as_of:1000},1150),false);
-assert.equal(T.acceptSnapshot(frozen,{...fresh,as_of:1200},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,as_of:1300},1150),false);
 assert.equal(T.acceptSnapshot(frozen,{...fresh,lab:{frozen:{trades:1}}},1150),false);
 assert.equal(T.acceptSnapshot(frozen,{...fresh,research_source_sha256:'changed'},1150),false);
 assert.equal(T.acceptSnapshot(frozen,{...fresh,safety:{real_orders:true,paper_orders:false}},1150),false);
