@@ -12,6 +12,9 @@ function safeDecision(data,now=Date.now()/1000){
  }
  return reasons.length?{...data.decision,status:'DONNÉES INSUFFISANTES',staleReasons:reasons}:data.decision;
 }
+function freshQuote(quote,now=Date.now()/1000){
+ return !!quote&&finite(quote.price)&&quote.price>0&&finite(quote.received)&&finite(now)&&now>=quote.received&&now-quote.received<=120;
+}
 function riskPlan(capital,entry,stop,target,fee,slip){
  if(![capital,entry,stop,target,fee,slip].every(finite)||Math.min(capital,entry,stop,target)<=0||!(stop<entry&&entry<target)||fee<0||fee>=.1||slip<0||slip>=.1)return {admissible:false,error:'Vérifiez les prix, le capital et les coûts.'};
  const buy=entry*(1+slip),ss=stop*(1-slip),st=target*(1-slip),loss=buy-ss+fee*(buy+ss),reward=st-buy-fee*(buy+st),qty=Math.min(capital*.0025/loss,capital/(buy*(1+fee))),rr=(target-entry)/(entry-stop);
@@ -24,6 +27,6 @@ function chartSeries(rows,step,key){
  const out=[];let prev=null;
  for(const r of rows){if(prev!==null&&r.t-prev>step)out.push({time:prev+step});out.push(finite(r[key])?{time:r.t,value:r[key]}:{time:r.t});prev=r.t;}return out;
 }
-const api={finite,steps,safeDecision,riskPlan,display,escape,chartSeries};
+const api={finite,steps,safeDecision,freshQuote,riskPlan,display,escape,chartSeries};
 if(typeof module==='object')module.exports=api;else root.TEL99=api;
 })(typeof window==='object'?window:globalThis);
