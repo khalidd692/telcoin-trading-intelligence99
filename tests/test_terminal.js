@@ -28,4 +28,14 @@ const series=T.chartSeries([{t:0,ema20:1},{t:900,ema20:2},{t:2700,ema20:3}],900,
 assert.deepEqual(series,[{time:0,value:1},{time:900,value:2},{time:1800},{time:2700,value:3}]);
 assert.equal(T.riskPlan(1000,1e-320,5e-321,2e-320,0,0).admissible,false);
 assert.equal(T.riskPlan(1e308,1e308,9e307,1.7e308,.09,.09).admissible,false);
-console.log('Terminal JS: 25 assertions passed');
+const frozen={schema_version:1,market:'KRAKEN:TELUSD',source:'Kraken public REST / OHLC',as_of:1000,research_source_sha256:'abc',lab:{frozen:{trades:0}},safety:{real_orders:false,paper_orders:false},frames:Object.fromEntries(['15m','1h','4h','1D'].map(interval=>[interval,{symbol:'KRAKEN:TELUSD',interval,bars:[{t:1000,c:1}],quality:{last_close:1000}}]))};
+const fresh={...frozen,as_of:1100};
+assert.equal(T.acceptSnapshot(frozen,fresh,1150),true);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,as_of:1000},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,as_of:1200},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,lab:{frozen:{trades:1}}},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,research_source_sha256:'changed'},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,safety:{real_orders:true,paper_orders:false}},1150),false);
+assert.equal(T.acceptSnapshot(frozen,{...fresh,frames:{}},1150),false);
+assert.equal(T.acceptSnapshot(frozen,fresh,2500),false);
+console.log('Terminal JS: 33 assertions passed');
