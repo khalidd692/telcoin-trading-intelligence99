@@ -6,7 +6,7 @@ const date=t=>T.finite(t)?new Date(t*1000).toLocaleString('fr-FR',{timeZone:'UTC
 const money=x=>fmt(x,2)+' $';
 const labels={breakout20:'Cassure 20',recovery30:'Reprise RSI30',divergence:'Divergence RSI',oversold:'Survente RSI',pullback:'Repli EMA20'};
 let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuote=null;
-let rangeSync=false,quoteBusy=false;
+let rangeSync=false,quoteBusy=false,snapshotBusy=false;
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -87,6 +87,17 @@ function renderRisk(){const vals=['capital','entry','stop','target','fee','slip'
  if(r.error){$('risk-output').innerHTML=`<div class="eyebrow">SIMULATION BLOQUÉE</div><h3>${esc(r.error)}</h3>`;return;}
  $('risk-output').innerHTML=`<div class="eyebrow">${r.admissible?'SCÉNARIO TECHNIQUEMENT ADMISSIBLE':'SCÉNARIO NON ADMISSIBLE'}</div><div class="big">${fmt(r.qty,2)} <span style="font-size:14px">TEL</span></div><p class="muted">Quantité théorique · Aucun ordre créé</p><dl><dt>Risque planifié</dt><dd>${money(r.risk)} / ${money(r.budget)}</dd><dt>Capital nécessaire</dt><dd>${money(r.cash)}</dd><dt>Rendement / risque brut</dt><dd class="${r.rr>=1.51?'positive':'negative'}">${fmt(r.rr,2)} R</dd><dt>Rendement / risque net</dt><dd>${fmt(r.rrNet,2)} R</dd><dt>Gain net si cible atteinte</dt><dd>${money(r.reward)}</dd></dl><p class="footnote" style="padding:24px 0 0">${r.admissible?'L’admissibilité mathématique ne valide pas la stratégie.':'RR brut requis : au moins 1,51 et gain net positif.'} Frais et slippage inclus. Un gap sous le stop peut dépasser ce budget. Quantité affichée arrondie ; calcul conservé à pleine précision.</p>`;
 }
+async function refreshSnapshot(){
+ if(snapshotBusy||document.hidden)return;snapshotBusy=true;
+ try{
+  const r=await fetch('data.json',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  if(!r.ok)throw Error('Snapshot HTTP '+r.status);
+  const next=await r.json();
+  if(!T.acceptSnapshot(data,next))return;
+  data=next;renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
+ }catch(e){console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',e.message);
+ }finally{snapshotBusy=false;}
+}
 async function refreshQuote(){if(quoteBusy)return;quoteBusy=true;const b=$('refresh-quote');b.disabled=true;b.textContent='Connexion à Kraken…';
  try{const r=await fetch('https://api.kraken.com/0/public/Ticker?pair=TELUSD',{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join(', '));const p=T.parseTelTicker(j);if(p===null)throw Error('Paire Kraken ou cours invalide');liveQuote={price:p,received:Date.now()/1000};renderTickers();renderDecision();b.textContent='✓ Cours public reçu';
  }catch(e){liveQuote=null;renderTickers();renderDecision();b.textContent='↻ Réessayer le cours';$('freshness-banner').textContent='Cours public indisponible : '+e.message+'. Le snapshot historique reste affiché et conserve son horodatage.';}finally{quoteBusy=false;b.disabled=false;}}
@@ -109,6 +120,8 @@ async function start(){try{
  // Public quote only: never relabel a static analytical snapshot as live.
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);
+ // Only accept a newer same-origin analytical snapshot with unchanged frozen research.
+ setInterval(refreshSnapshot,60000);
  $('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';
  }catch(e){$('loading').classList.add('load-error');$('loading').textContent='Terminal indisponible : '+e.message+'. Servez le dossier avec HTTP et vérifiez data.json.';}}
 start();
