@@ -1,0 +1,61 @@
+name: TEL99 strategy research regression
+
+on:
+  push:
+    branches:
+      - codex/tel-phase-continuity-regression
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tel99-strategy-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python regression suite including replay reproducibility
+        run: python -m unittest discover -s tests -v
+      - name: Collector tests
+        run: python -m unittest discover -s collector -p 'test_*.py' -v
+      - name: Historical strategy replay
+        run: python -m scripts.strategy_backtest.run_validation > /tmp/tel99-replay.log
+      - name: Entry research
+        run: python -m scripts.strategy_backtest.entry_study > /tmp/tel99-entry.log
+      - name: Confirm replay report is reproducible
+        run: |
+          python - <<'PY'
+          import hashlib
+          import pathlib
+          import subprocess
+          import sys
+          report = pathlib.Path("results/strategy_validation/results.json")
+          before = hashlib.sha256(report.read_bytes()).hexdigest()
+          subprocess.run([sys.executable, "-m", "scripts.strategy_backtest.run_validation"],
+                         check=True, capture_output=True, text=True)
+          after = hashlib.sha256(report.read_bytes()).hexdigest()
+          assert before == after, "Strategy report changed without input changes"
+          print("Reproducible replay SHA256:", after)
+          PY
+      - name: Dashboard checks
+        run: |
+          node tests/test_dashboard.js
+          node tests/test_realtime.js
+      - name: Operational invariants
+        run: |
+          python scripts/verify_states.py
+          python scripts/verify_project.py --quick
