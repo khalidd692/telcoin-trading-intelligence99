@@ -21,7 +21,8 @@ res = {"data_sha256": hashlib.sha256(open(DATA, "rb").read()).hexdigest(), "n_ba
        "candidates_total": len(cands), "candidates_by_branch": dict(Counter(c.branch for c in cands)),
        "candidate_status": dict(Counter(c.status for c in cands)),
        "rr_gross_max": max((c.rr_gross for c in cands if c.rr_gross), default=None),
-       "validated_data": Q.load_history(DATA).report,
+       "validated_data": Q.load_history(
+           DATA, as_of=Q.utc_timestamp(Q.manifest()[DATA]["closed_before"])).report,
        "params": dataclasses.asdict(p),
        "costs_hypothetical_per_side": {k: dataclasses.asdict(v) for k,v in E.COSTS.items()},
        "phase_diagnostics": {},
