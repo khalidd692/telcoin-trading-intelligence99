@@ -88,3 +88,9 @@ Référence `KRAKEN:TELUSD` spot, levier 1x, capital virtuel $1 000, risque max 
 - Commit `fae17ad710104c27de63f67e8fd5ba71c864179d` : ajout d'un test HTTP dans le job live. Il sert `site/terminal/` sur 127.0.0.1:8765, récupère `index.html`, `data.json`, `app.js`, `core.js`, `terminal.css`, et vérifie que le JSON HTTP est identique au snapshot Kraken validé. Ce test vérifie la livraison des fichiers via HTTP **mais ne simule pas un vrai navigateur ni la mise à jour après 60 secondes**.
 - Run #18 https://github.com/khalidd692/telcoin-trading-intelligence99/actions/runs/42894853081 : le job `live-kraken-integration` est **success** lors de la dernière interrogation ; le job `verify` était encore en cours. Vérifier la conclusion finale avant toute affirmation globale.
 - Non validé : déploiement public, actualisation périodique de `site/terminal/data.json` et vérification en navigateur réel. Ne pas annoncer « end-to-end en production ».
+
+## Politique économique et précaution de déploiement (10/11/2026)
+
+- Nouvelle référence `docs/terminal/AGENTS_ECONOMIE_QUOTAS.md` (commit `edacf3831f54db8ace5f3f95951736afcb70badf`) : prioriser CI/scripts déterministes, modèles locaux/gratuits déjà disponibles et demandes groupées ; réserver Astra Max aux problèmes réellement difficiles.
+- Comparaison GitHub `main...codex/tel99-quant-terminal` : **50 commits d'avance et 190 de retard**. Ne pas fusionner directement ni déployer le contenu complet sur le site existant ; risque de conflit avec le moniteur actuel. Préparer une intégration minimale depuis `main` et tests de non-régression.
+- Les modifications récentes d'autres agents peuvent survenir entre deux lectures. Relire le SHA et le workflow avant de modifier quoi que ce soit.
