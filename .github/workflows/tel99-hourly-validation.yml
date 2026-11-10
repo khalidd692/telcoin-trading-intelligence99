@@ -4,6 +4,12 @@ name: TEL99 hourly read-only validation
 # Checkout by immutable commit SHA to keep verification in detached HEAD mode.
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - 'codex/**'
   schedule:
     - cron: '17 * * * *'
 
@@ -11,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: tel99-hourly-validation
-  cancel-in-progress: false
+  group: tel99-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validation:
