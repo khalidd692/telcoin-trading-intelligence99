@@ -103,6 +103,34 @@ jobs:
           cp /tmp/tel99-live-snapshot.json site/terminal/data.json
           cd site/terminal
           zip -qr /tmp/TEL99-live-preview.zip .
+      - name: HTTP smoke test of isolated preview bundle
+        run: |
+          python -m http.server 8765 --bind 127.0.0.1 --directory site/terminal >/tmp/tel99-preview-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import json, time, urllib.request
+          from pathlib import Path
+          base='http://127.0.0.1:8765/'
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(base+'index.html',timeout=2) as response:
+                      page=response.read().decode()
+                  break
+              except Exception:
+                  time.sleep(.2)
+          else:
+              raise AssertionError('Preview HTTP server did not start')
+          assert 'TEL99' in page and 'app.js' in page
+          with urllib.request.urlopen(base+'data.json',timeout=5) as response:
+              live=json.load(response)
+          expected=json.loads(Path('/tmp/tel99-live-snapshot.json').read_text())
+          assert live==expected, 'Preview HTTP snapshot differs from validated capture'
+          for asset in ('app.js','core.js','terminal.css'):
+              with urllib.request.urlopen(base+asset,timeout=5) as response:
+                  assert response.status==200 and len(response.read())>100
+          print('Preview HTTP smoke test passed with exact validated Kraken snapshot')
+          PY
       - name: Upload private ready-to-preview terminal
         uses: actions/upload-artifact@v4
         with:
