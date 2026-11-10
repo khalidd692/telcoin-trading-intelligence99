@@ -54,3 +54,12 @@ Référence `KRAKEN:TELUSD` spot, levier 1x, capital virtuel $1 000, risque max 
 - Audit indépendant : `docs/terminal/AUDIT_INDEPENDANT_2026-11-10.md`
 
 **Instruction au prochain agent : reprendre les tâches non validées, ne pas recommencer les composants existants. Vérifier chaque affirmation dans le dépôt et les runs GitHub.**
+
+## Complément de passation — rafraîchissement analytique navigateur (10/11/2026)
+
+- `be6e88cab8453f91ba4772f70ed12b733be38172` : `site/terminal/core.js` ajoute `acceptSnapshot(current,next,now)`. Refuse une capture non récente, future hors tolérance, un autre marché/source, des séries absentes, toute modification de `lab`, de la provenance historique ou des garde-fous.
+- `65c41a4593179602b312a2dc10180597a39885ea` : `site/terminal/app.js` interroge `data.json` toutes les 60 secondes si page visible ; remplace les graphiques, indicateurs, décision et preuves **uniquement si** le nouveau snapshot passe les contrôles. Les valeurs saisies dans le simulateur de risque ne sont pas réinitialisées.
+- `f74fe2ed08bd1e81d1e07422a0f411994c205850` puis `cc04b197545620055c78ee6dfba8355cbb11e23d` : huit assertions de sécurité supplémentaires dans `tests/test_terminal.js` (33 annoncées), avec correction de l'horodatage de test futur.
+- CI #15 sur `cc04b19` était **en cours** lors de la rédaction : vérifier son statut et ses logs avant d'affirmer la réussite.
+- **Bloquant restant** : `site/terminal/data.json` n'est PAS encore alimenté par le workflow Kraken en continu. `tel99-kraken-snapshot.yml` produit seulement un artifact manuel en /tmp, sans publication sur un serveur. Ne pas annoncer l'actualisation analytique complète. Aucun déploiement ou merge autorisé.
+- **Limite scientifique** : le rechargement des données et la complétude de l'analyse ne prouvent pas un avantage prédictif ni une rentabilité. Les stratégies restent non validées.
