@@ -58,3 +58,49 @@ jobs:
       - name: Summary
         run: |
           echo 'Terminal tested and packaged; no deployment, no account access, no orders.' >> "$GITHUB_STEP_SUMMARY"
+
+  live-kraken-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read six public Kraken feeds into temporary capture
+        run: python -m scripts.terminal.collect --output /tmp/tel99-live-kraken.json
+      - name: Build fresh snapshot without rewriting frozen experiments
+        run: python -m scripts.terminal.build --market-input /tmp/tel99-live-kraken.json --output /tmp/tel99-live-snapshot.json --no-study-write
+      - name: Verify fresh data, invariants and absence of repository mutations
+        run: |
+          python - <<'PY'
+          import json, time
+          from pathlib import Path
+          old=json.loads(Path('site/terminal/data.json').read_text())
+          new=json.loads(Path('/tmp/tel99-live-snapshot.json').read_text())
+          assert new['schema_version']==1 and new['market']=='KRAKEN:TELUSD'
+          assert new['source']=='Kraken public REST / OHLC'
+          assert set(new['frames'])=={'15m','1h','4h','1D'}
+          assert set(new['context'])=={'btc4h','eth4h'}
+          assert new['lab']==old['lab'], 'Frozen research changed'
+          assert new['safety']==old['safety']
+          assert new['research_source_sha256']==old['research_source_sha256']
+          assert new['safety']['real_orders'] is False and new['safety']['paper_orders'] is False
+          assert abs(time.time()-new['as_of'])<900, 'Capture is stale or future-dated'
+          for tf,frame in new['frames'].items():
+              assert frame['symbol']=='KRAKEN:TELUSD' and frame['interval']==tf
+              assert frame['quality']['valid_bars']>0
+              assert frame['quality']['last_close']<=new['as_of']
+          print('Live Kraken read-only collection and market build verified')
+          PY
+          git diff --exit-code -- research/terminal/ results/terminal/ site/terminal/data.json
+      - name: Preserve validated snapshot as private Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEL99-live-kraken-${{ github.sha }}
+          path: /tmp/tel99-live-snapshot.json
+          retention-days: 3
