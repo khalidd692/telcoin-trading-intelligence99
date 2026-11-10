@@ -1,0 +1,22 @@
+{
+  "status": "definitions frozen before this run; all historical holdouts already exposed",
+  "market": "KRAKEN:TELUSD",
+  "hypotheses": {
+    "divergence": "Existing agent_analysis.has_rsi_divergence, two trailing windows of 5 closes; RSI14 rolling arithmetic implementation unchanged; evidence component, not full reversal detector",
+    "oversold": "Existing documented lead: RSI14 < 30 and close < EMA50; raw state, no RR gate",
+    "pullback": "Existing EMA branch: EMA20 > EMA50, close > EMA50, low <= EMA20, close > open and close > EMA20"
+  },
+  "source_document_ref": "399982eebe753a557978af18ab2d826b7faca14a",
+  "source_documents": ["research/RECHERCHE_ELARGIE_TEL_CADRE.md", "research/RESULTATS_PRELIMINAIRES_4H.md"],
+  "timeframes": ["15m", "1h", "4h"],
+  "warmup_bars": 50,
+  "horizons_hours": [6, 24, 72],
+  "phase_fractions": [0.6, 0.8],
+  "primary_horizon_hours": 24,
+  "inference": "27 overall comparisons: Holm across all hypotheses/timeframes/horizons; phase breakdown descriptive only",
+  "baseline": "all eligible next-open observations in same segment, phase and EMA20>EMA50 regime; includes event observations; descriptive association, not causal treatment effect",
+  "deduplication": "greedy nonoverlapping forward windows per hypothesis/timeframe/horizon; exclude incomplete horizons and windows crossing phase labels",
+  "bootstrap": "resample calendar-week clusters shared across segments and phase boundaries; centered null, one-sided excess-mean test; 999 resamples, seed 99; at least 10 clusters and 30 events to flag a statistical lead; approximate dependence control, not a new OOS",
+  "execution": "reference next open to close of H-th subsequent bar; MFE/MAE over that same window; no orders, stops, targets, sizing or portfolio simulation",
+  "economic_status": "gross predictive event study only; no economic validation or paper admission"
+}

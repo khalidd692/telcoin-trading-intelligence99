@@ -1,21 +1,205 @@
 {
   "data_sha256": "96b50ad431ff3c78cefc2a18b37d6cc3224ec82e9a67d7812a0e172535674aa4",
-  "n_bars": 1741,
-  "segments": [[0, 2], [2, 1739]],
+  "n_bars": 1740,
+  "segments": [
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      1739
+    ]
+  ],
   "phases": {
-    "IS": ["2026-01-22T12:00:00+00:00", "2026-07-15T16:00:00+00:00"],
-    "VAL": ["2026-07-15T16:00:00+00:00", "2026-09-11T16:00:00+00:00"],
-    "OOS": ["2026-09-11T16:00:00+00:00", "2026-11-08T20:00:00+00:00"]
+    "IS": [
+      "2026-01-22T16:00:00+00:00",
+      "2026-07-15T20:00:00+00:00"
+    ],
+    "VAL": [
+      "2026-07-15T20:00:00+00:00",
+      "2026-09-11T20:00:00+00:00"
+    ],
+    "OOS": [
+      "2026-09-11T20:00:00+00:00",
+      "2026-11-08T20:00:00+00:00"
+    ]
   },
   "candidates_total": 53,
-  "candidates_by_branch": {"B": 10, "A": 42, "A+B": 1},
-  "candidate_status": {"rejet:rr_inferieur_au_minimum": 53},
-  "rr_gross_max": 0.8010878083775014,
-  "results": {
-    "brut": {"IS": {"n": 0}, "VAL": {"n": 0}, "OOS": {"n": 0}, "N_total": 0},
-    "central": {"IS": {"n": 0}, "VAL": {"n": 0}, "OOS": {"n": 0}, "N_total": 0},
-    "prudent": {"IS": {"n": 0}, "VAL": {"n": 0}, "OOS": {"n": 0}, "N_total": 0}
+  "candidates_by_branch": {
+    "B": 10,
+    "A": 42,
+    "A+B": 1
   },
-  "rr_gross_top10": [0.801, 0.789, 0.735, 0.723, 0.638, 0.622, 0.549, 0.498, 0.453, 0.449],
+  "candidate_status": {
+    "rejet:rr_inferieur_au_minimum": 53
+  },
+  "rr_gross_max": 0.8010878083775014,
+  "validated_data": {
+    "timeframe": "4h",
+    "sha256": "96b50ad431ff3c78cefc2a18b37d6cc3224ec82e9a67d7812a0e172535674aa4",
+    "provenance": {
+      "market": "KRAKEN:TELUSD",
+      "provider": "TradingView MCP export of Kraken",
+      "timeframe": "4h",
+      "source_commit": "bd3d43f1333d8978ff4551e8f5cb6f6c08203b46",
+      "source_path": "data/KRAKEN_TELUSD_4h_2026-01-22_2026-11-08.csv",
+      "sha256": "96b50ad431ff3c78cefc2a18b37d6cc3224ec82e9a67d7812a0e172535674aa4",
+      "closed_before": "2026-11-08T20:00:00Z",
+      "closure_policy": "Closed bars documented in research/TRACABILITE_VALIDATION_TEL.md"
+    },
+    "as_of_utc": "2026-11-10T00:23:07.348359+00:00",
+    "closed_before_utc": "2026-11-08T20:00:00+00:00",
+    "price_ratio_quarantine_threshold": 3.0,
+    "source_rows": 1741,
+    "valid_bars": 1740,
+    "quarantined_rows": 1,
+    "reasons": {
+      "price_wick": 1
+    },
+    "source_gap_count": 1,
+    "source_missing_bars": 1,
+    "gap_count": 1,
+    "missing_bars": 1,
+    "gaps": [
+      {
+        "start_utc": "2026-01-22T20:00:00+00:00",
+        "end_exclusive_utc": "2026-01-23T00:00:00+00:00",
+        "missing_bars": 1
+      }
+    ],
+    "usable_periods": [
+      {
+        "start_utc": "2026-01-22T16:00:00+00:00",
+        "end_exclusive_utc": "2026-01-22T20:00:00+00:00",
+        "bars": 1
+      },
+      {
+        "start_utc": "2026-01-23T00:00:00+00:00",
+        "end_exclusive_utc": "2026-11-08T20:00:00+00:00",
+        "bars": 1739
+      }
+    ]
+  },
+  "params": {
+    "ema_fast": 20,
+    "ema_slow": 50,
+    "atr_n": 14,
+    "pivot": 5,
+    "atr_stop_mult": 0.5,
+    "rr_min": 1.51,
+    "expiry_bars": 20,
+    "capital": 1000.0,
+    "risk_frac": 0.0025,
+    "daily_loss_frac": 0.01,
+    "cooldown_after_stop_bars": 1
+  },
+  "costs_hypothetical_per_side": {
+    "brut": {
+      "name": "brut",
+      "fee": 0.0,
+      "slip": 0.0
+    },
+    "central": {
+      "name": "central",
+      "fee": 0.0025,
+      "slip": 0.001
+    },
+    "prudent": {
+      "name": "prudent",
+      "fee": 0.004,
+      "slip": 0.003
+    }
+  },
+  "phase_diagnostics": {
+    "IS": {
+      "candidates": 39,
+      "branches": {
+        "B": 7,
+        "A": 31,
+        "A+B": 1
+      },
+      "statuses": {
+        "rejet:rr_inferieur_au_minimum": 39
+      },
+      "starting_equity": 1000.0,
+      "ending_equity": 1000.0
+    },
+    "VAL": {
+      "candidates": 7,
+      "branches": {
+        "B": 1,
+        "A": 6
+      },
+      "statuses": {
+        "rejet:rr_inferieur_au_minimum": 7
+      },
+      "starting_equity": 1000.0,
+      "ending_equity": 1000.0
+    },
+    "OOS": {
+      "candidates": 7,
+      "branches": {
+        "A": 5,
+        "B": 2
+      },
+      "statuses": {
+        "rejet:rr_inferieur_au_minimum": 7
+      },
+      "starting_equity": 1000.0,
+      "ending_equity": 1000.0
+    }
+  },
+  "holdout_status": "already exposed; not an untouched final test",
+  "results": {
+    "brut": {
+      "IS": {
+        "n": 0
+      },
+      "VAL": {
+        "n": 0
+      },
+      "OOS": {
+        "n": 0
+      },
+      "N_total": 0
+    },
+    "central": {
+      "IS": {
+        "n": 0
+      },
+      "VAL": {
+        "n": 0
+      },
+      "OOS": {
+        "n": 0
+      },
+      "N_total": 0
+    },
+    "prudent": {
+      "IS": {
+        "n": 0
+      },
+      "VAL": {
+        "n": 0
+      },
+      "OOS": {
+        "n": 0
+      },
+      "N_total": 0
+    }
+  },
+  "rr_gross_top10": [
+    0.801,
+    0.789,
+    0.735,
+    0.723,
+    0.638,
+    0.622,
+    0.549,
+    0.498,
+    0.453,
+    0.449
+  ],
   "candidates_with_rr": 53
 }
