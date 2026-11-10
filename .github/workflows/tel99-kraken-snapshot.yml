@@ -1,0 +1,56 @@
+name: TEL99 Kraken market snapshot (isolated, read-only)
+# A schedule on a feature branch does not run on GitHub Actions.
+# Manual verification only; activation on main requires separate authorization.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tel99-kraken-snapshot-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect six public Kraken OHLC feeds
+        run: |
+          python -m scripts.terminal.collect --output /tmp/tel99-kraken-market.json
+      - name: Build market snapshot with pinned research
+        run: |
+          python -m scripts.terminal.build --market-input /tmp/tel99-kraken-market.json --output /tmp/tel99-market-data.json
+      - name: Check provenance, markets and frozen research invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          original=json.loads(Path('site/terminal/data.json').read_text())
+          latest=json.loads(Path('/tmp/tel99-market-data.json').read_text())
+          assert latest['schema_version']==1 and latest['market']=='KRAKEN:TELUSD'
+          assert latest['source']=='Kraken public REST / OHLC'
+          assert set(latest['frames'])=={'15m','1h','4h','1D'}
+          assert latest['safety']==original['safety']
+          assert latest['lab']==original['lab'], 'Frozen laboratory changed'
+          assert latest['research_source_sha256']==original['research_source_sha256']
+          assert latest['safety']['real_orders'] is False
+          assert latest['safety']['paper_orders'] is False
+          print('Market-only snapshot verified; frozen research unchanged')
+          PY
+          git diff --exit-code -- results/terminal/experiments.json research/terminal/ site/terminal/data.json
+      - name: Publish private workflow artifact (no deployment)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tel99-kraken-snapshot-${{ github.sha }}
+          path: /tmp/tel99-market-data.json
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Read-only Kraken market refresh. No commit, push, deploy, real or paper orders.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Historical research is pinned and compared to the existing snapshot.' >> "$GITHUB_STEP_SUMMARY"
