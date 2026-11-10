@@ -59,11 +59,13 @@ def main():
     p.add_argument('--input',type=Path,default=ROOT/'research/terminal/raw/tradingview_2026-11-10.json')
     p.add_argument('--market-input',type=Path,help='Optional new market capture; research sample stays fixed')
     p.add_argument('--output',type=Path,default=ROOT/'site/terminal/data.json')
+    p.add_argument('--no-study-write',action='store_true',help='Build a market snapshot without writing any laboratory result files')
     args=p.parse_args();data=build(args.input.resolve(),args.market_input.resolve() if args.market_input else None)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(data,ensure_ascii=False,separators=(',',':'),allow_nan=False)+'\n')
-    study_path=ROOT/'results/terminal/experiments.json';study_path.parent.mkdir(parents=True,exist_ok=True)
-    study_path.write_text(json.dumps(data['lab']['experiments'],ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+    if not args.no_study_write:
+        study_path=ROOT/'results/terminal/experiments.json';study_path.parent.mkdir(parents=True,exist_ok=True)
+        study_path.write_text(json.dumps(data['lab']['experiments'],ensure_ascii=False,indent=2,allow_nan=False)+'\n')
     print(json.dumps({'output':str(args.output),'sha256':digest(args.output),'decision':data['decision']['status'],
         'frames':{k:{x:v['quality'][x] for x in ['valid_bars','missing_bars','last_segment_bars','fresh']} for k,v in data['frames'].items()},
         'experiments':{k:[r['costs']['central']['n'] for r in v] for k,v in data['lab']['experiments']['families'].items()}},indent=2))
