@@ -73,16 +73,18 @@ COSTS = {
 
 
 def load_csv(path: str) -> List[Bar]:
-    out = []
-    with open(path, newline="") as f:
-        for r in csv.DictReader(f):
-            ts = dt.datetime.strptime(r["timestamp_utc"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
-            out.append(Bar(ts, float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]),
-                           float(r.get("volume", 0) or 0)))
-    return out
+    """Load hash-pinned Kraken history after quarantine; strategy stays 4h."""
+    from scripts.strategy_backtest.history_quality import load_history
+    history = load_history(path)
+    if history.report['timeframe'] != '4h':
+        raise ValueError('The existing Kraken strategy requires 4h bars')
+    return [Bar(r['timestamp_utc'], r['open'], r['high'], r['low'], r['close'], r['volume'])
+            for r in history.rows]
 
 
 def split_segments(bars: List[Bar]) -> List[Tuple[int, int]]:
+    if not bars:
+        return []
     segs, s = [], 0
     for i in range(1, len(bars)):
         if bars[i].ts - bars[i - 1].ts != BAR:
@@ -144,6 +146,10 @@ class Segment:
     """Indicateurs d'un segment continu ; indices LOCAUX, offset = indice global du début."""
 
     def __init__(self, bars: List[Bar], offset: int, p: Params):
+        if any(b.ts.tzinfo is None or b.ts.utcoffset() != dt.timedelta(0) for b in bars):
+            raise ValueError('Segment timestamps must be UTC')
+        if any(b.ts - a.ts != BAR for a, b in zip(bars, bars[1:])):
+            raise ValueError('Segment must contain consecutive 4h bars; use build_segments')
         self.bars, self.offset, self.p = bars, offset, p
         self.n = len(bars)
         self._run_states = {}
@@ -268,6 +274,8 @@ def build_order(c: Candidate, p: Params) -> Candidate:
 
 def simulate_exit(seg: Segment, tl: int, stop: float, target: float, p: Params):
     i = tl + 1
+    if tl < 0 or i + p.expiry_bars >= seg.n:
+        raise ValueError('Trade horizon crosses segment boundary')
     for k in range(i, i + p.expiry_bars + 1):
         b = seg.bars[k]
         if b.o <= stop:
@@ -334,6 +342,10 @@ def run(cands: List[Candidate], p: Params, cost: Costs, t_lo: int, t_hi: int,
         if c.status != "ok":
             log.append(row); continue
         seg, tl = c.segment, c.t - c.segment.offset
+        if tl < 0 or tl + 1 + p.expiry_bars >= seg.n:
+            row['statut'] = 'exclu:fenetre_incomplete_(fin_de_donnees_ou_trou)'
+            log.append(row)
+            continue
         if c.t < free_t:
             row["statut"] = "rejet:position_ouverte_ou_cooldown"; log.append(row); continue
         entry_day = seg.bars[tl + 1].ts.date()
