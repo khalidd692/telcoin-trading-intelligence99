@@ -2,14 +2,14 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-10T22:15:24.554463+00:00",
-  "source_generated_at": "2026-11-10T22:15:24.388000+00:00",
+  "generated_at": "2026-11-10T22:29:02.323188+00:00",
+  "source_generated_at": "2026-11-10T22:29:02.136000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
   "reason": null,
   "cross_check": {
-    "independent_confirmation": "NON ÉTABLIE",
+    "independent_confirmation": "OUI",
     "venue_data_diagnostic": {
       "status": "NON_SIGNALÉ",
       "left_symbol": "MEXC:TELUSDT",
@@ -22,7 +22,7 @@
       "matching_fields": [],
       "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": -64.10256410256335
+    "divergence_bps": -67.49555950266402
   },
   "timeframes": {
     "15m": {
@@ -31,7 +31,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-10T22:15:00+00:00",
-      "candle_age_seconds": 25,
+      "candle_age_seconds": 842,
       "close": 0.001395,
       "ema20": 0.0014126697570275534,
       "ema50": 0.0014212023379840662,
@@ -65,7 +65,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-10T22:00:00+00:00",
-      "candle_age_seconds": 925,
+      "candle_age_seconds": 1742,
       "close": 0.001393,
       "ema20": 0.0014289819127998311,
       "ema50": 0.0014662989832276122,
@@ -99,7 +99,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-10T20:00:00+00:00",
-      "candle_age_seconds": 8125,
+      "candle_age_seconds": 8942,
       "close": 0.00141,
       "ema20": 0.001489623440744697,
       "ema50": 0.001493670662106741,
@@ -136,7 +136,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-10T00:00:00+00:00",
-      "candle_age_seconds": 80125,
+      "candle_age_seconds": 80942,
       "close": 0.001498,
       "ema20": 0.0015223837179103312,
       "ema50": 0.0016081331333385545,
@@ -170,7 +170,7 @@
       "candle_status": "OK",
       "candle_count": 103,
       "last_closed_at": "2026-11-09T00:00:00+00:00",
-      "candle_age_seconds": 166525,
+      "candle_age_seconds": 167342,
       "close": 0.0015,
       "ema20": 0.0017929698388780644,
       "ema50": 0.0025533936795871237,
@@ -208,7 +208,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 857725,
+      "candle_age_seconds": 858542,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -367,13 +367,13 @@
       "direction": "BAISSIER",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 1.1447020971019697,
-        "measured_ex_fees_pct": 1.1447020971019697,
-        "spread_pct": 0.573476702508959,
-        "slippage_pct": 0.5728650706545089,
+        "round_trip_pct": 1.3480682177242898,
+        "measured_ex_fees_pct": 1.3480682177242898,
+        "spread_pct": 0.572246065808296,
+        "slippage_pct": 0.7774548083091701,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
-        "method": "order_book",
+        "method": "liquidity_cost",
         "is_lower_bound": true,
         "depth_complete": true,
         "depth_failure": null
@@ -384,12 +384,12 @@
         "kind": "opposing structural level (recent window)",
         "source": "short_term"
       },
-      "coverage_ratio": 0.5634653781389409,
-      "net_edge_pct": -0.49970209710196967,
+      "coverage_ratio": 0.4784624335175277,
+      "net_edge_pct": -0.7030682177242897,
       "economic_validity": "NON_COUVERT",
-      "reason": "le mouvement visé (0.645 %) ne couvre pas le coût A/R (1.145 %) : couverture 0.56x",
+      "reason": "le mouvement visé (0.645 %) ne couvre pas le coût A/R (1.348 %) : couverture 0.48x",
       "provenance": [
-        "coût: order_book (scénario 300 USDT)",
+        "coût: liquidity_cost (scénario 300 USDT)",
         "profondeur: carnet public observé",
         "frais: NOT_VERIFIED (exclus ; coût réel >= coût publié)",
         "objectif: objectives.short_term"
@@ -403,6 +403,6 @@
       ]
     }
   },
-  "collection_id": "6dab020f-6f69-4838-aa83-b153dfcf46a1",
-  "snapshot_id": "a20375a1d1d7a34799bb5f59f4bac241a4d610159eeaa29d61d350eb6bc17b5b"
+  "collection_id": "66cf2d0b-671d-4d25-b86a-9b69d067f8d2",
+  "snapshot_id": "10b8916ba658d12fcc75ad79ef15ea1a1636679b43cd8fadde76636fdee8334a"
 }
