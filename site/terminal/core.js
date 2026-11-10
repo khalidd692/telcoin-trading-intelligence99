@@ -12,6 +12,18 @@ function safeDecision(data,now=Date.now()/1000){
  }
  return reasons.length?{...data.decision,status:'DONNÉES INSUFFISANTES',staleReasons:reasons}:data.decision;
 }
+function acceptSnapshot(current,next,now=Date.now()/1000){
+ if(!current||!next||next.schema_version!==1||next.market!=='KRAKEN:TELUSD'||next.source!=='Kraken public REST / OHLC')return false;
+ if(!finite(next.as_of)||!finite(current.as_of)||next.as_of<=current.as_of||next.as_of>now+60||now-next.as_of>900)return false;
+ if(next.research_source_sha256!==current.research_source_sha256||!next.research_source_sha256)return false;
+ if(JSON.stringify(next.lab)!==JSON.stringify(current.lab)||JSON.stringify(next.safety)!==JSON.stringify(current.safety))return false;
+ if(next.safety?.real_orders!==false||next.safety?.paper_orders!==false)return false;
+ for(const tf of ['15m','1h','4h','1D']){
+  const f=next.frames?.[tf];
+  if(!f||f.interval!==tf||f.symbol!=='KRAKEN:TELUSD'||!Array.isArray(f.bars)||!f.bars.length||!finite(f.quality?.last_close))return false;
+ }
+ return true;
+}
 function freshQuote(quote,now=Date.now()/1000){
  return !!quote&&finite(quote.price)&&quote.price>0&&finite(quote.received)&&finite(now)&&now>=quote.received&&now-quote.received<=120;
 }
@@ -34,6 +46,6 @@ function chartSeries(rows,step,key){
  const out=[];let prev=null;
  for(const r of rows){if(prev!==null&&r.t-prev>step)out.push({time:prev+step});out.push(finite(r[key])?{time:r.t,value:r[key]}:{time:r.t});prev=r.t;}return out;
 }
-const api={finite,steps,safeDecision,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
+const api={finite,steps,safeDecision,acceptSnapshot,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
 if(typeof module==='object')module.exports=api;else root.TEL99=api;
 })(typeof window==='object'?window:globalThis);
