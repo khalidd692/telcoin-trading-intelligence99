@@ -98,6 +98,17 @@ jobs:
           print('Live Kraken read-only collection and market build verified')
           PY
           git diff --exit-code -- research/terminal/ results/terminal/ site/terminal/data.json
+      - name: Package isolated terminal preview with the verified live snapshot
+        run: |
+          cp /tmp/tel99-live-snapshot.json site/terminal/data.json
+          cd site/terminal
+          zip -qr /tmp/TEL99-live-preview.zip .
+      - name: Upload private ready-to-preview terminal
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEL99-live-preview-${{ github.sha }}
+          path: /tmp/TEL99-live-preview.zip
+          retention-days: 3
       - name: Preserve validated snapshot as private Actions artifact
         uses: actions/upload-artifact@v4
         with:
