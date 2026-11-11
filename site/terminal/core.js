@@ -7,12 +7,13 @@ function safeDecision(data,now=Date.now()/1000){
  const reasons=[];
  if(!finite(now)||!finite(data.as_of)||now<data.as_of-60)reasons.push('Horloge incohérente');
  if(finite(now)&&finite(data.as_of)&&now-data.as_of>900)reasons.push('Snapshot analytique périmé (plus de 15 minutes)');
- for(const tf of ['1h','4h']){
+ for(const tf of ['1h','4h','1D']){
   const f=data.frames?.[tf],t=f?.quality?.last_close;
   if(!f?.ready||!finite(t)||now<t||now-t>steps[tf]+300)reasons.push(tf+' : données périmées ou insuffisantes');
  }
  if(reasons.length)return {...data.decision,status:'DONNÉES INSUFFISANTES',staleReasons:reasons};
  const d=data.decision; if(['ACHAT PRÉCOCE','ACHAT CONFIRMÉ'].includes(d?.status)&&(!finite(d?.plan?.rr_net)||d.plan.rr_net<1.5))return {...d,status:'ATTENDRE',contradictions:[...(d.contradictions||[]),'Rendement/risque net inférieur à 1,5 ou non disponible.']};
+ if(['ACHAT PRÉCOCE','ACHAT CONFIRMÉ'].includes(d?.status))return {...d,status:'ATTENDRE',contradictions:[...(d.contradictions||[]),'Frais Kraken personnels et slippage réels non vérifiés : aucun signal d’achat exploitable.']};
  return d;
 }
 function acceptSnapshot(current,next,now=Date.now()/1000){

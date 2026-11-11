@@ -1,8 +1,9 @@
 'use strict';
 const assert=require('node:assert/strict');
 const T=require('../site/terminal/core.js');
-const base={as_of:100000,frames:{'4h':{ready:true,quality:{last_close:100000}},'1h':{ready:true,quality:{last_close:100000}}},decision:{status:'ACHAT PRÉCOCE',plan:{rr_net:1.5}}};
-assert.equal(T.safeDecision(base,100100).status,'ACHAT PRÉCOCE');
+const base={as_of:100000,frames:{'4h':{ready:true,quality:{last_close:100000}},'1h':{ready:true,quality:{last_close:100000}},'1D':{ready:true,quality:{last_close:100000}}},decision:{status:'ACHAT PRÉCOCE',plan:{rr_net:1.5}}};
+assert.equal(T.safeDecision(base,100100).status,'ATTENDRE');
+assert.equal(T.safeDecision({...base,frames:{'1h':base.frames['1h'],'4h':base.frames['4h']}},100100).status,'DONNÉES INSUFFISANTES');
 assert.equal(T.safeDecision({...base,as_of:98000},100100).status,'DONNÉES INSUFFISANTES');
 assert.equal(T.safeDecision(base,120000).status,'DONNÉES INSUFFISANTES');
 assert.equal(T.safeDecision(base,90000).status,'DONNÉES INSUFFISANTES');
