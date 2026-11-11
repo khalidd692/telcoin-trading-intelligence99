@@ -150,7 +150,7 @@ def risk_plan(capital,entry,stop,target,fee=.004,slip=.003):
     reward=selltgt-buy-fee*(buy+selltgt)
     if not all(finite(x) for x in (qty,reward,qty*buy*(1+fee),qty*loss,qty*reward,reward/loss)) or qty<=0:
         return {'admissible':False,'reason':'Valeurs hors précision numérique'}
-    return {'admissible':gross>=1.51 and reward>0,'reason':'Simulation uniquement ; seuil RR brut 1,51',
+    return {'admissible':gross>=1.51 and reward/loss>=1.5,'reason':'Simulation uniquement ; RR brut ≥ 1,51 et net ≥ 1,5',
             'quantity':qty,'cash_required':qty*buy*(1+fee),'planned_risk_usd':qty*loss,
             'risk_budget_usd':capital*.0025,'rr_gross':gross,'rr_net':reward/loss,
             'potential_net_usd':qty*reward,'fee_per_side':fee,'slippage_per_side':slip,
@@ -189,7 +189,7 @@ def decision(frames, as_of):
         if confirm:result['status']='ACHAT CONFIRMÉ'
         elif recovery and b['trend']!='BAISSIER':result['status']='ACHAT PRÉCOCE'
     if not result['plan'] or not result['plan']['admissible']:
-        result['contradictions'].append('Plan indicatif non admissible : niveaux ou RR brut ≥ 1,51 manquants.')
+        result['contradictions'].append('Plan indicatif non admissible : niveaux ou RR brut ≥ 1,51 ou net ≥ 1,5 manquants.')
     return result
 
 def correlation(a,b,step=14400,window=90):

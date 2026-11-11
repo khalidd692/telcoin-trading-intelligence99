@@ -97,7 +97,7 @@ class Quality(unittest.TestCase):
 
 class Risk(unittest.TestCase):
     def test_risk_fee_and_cash_cap(self):
-        r=M.risk_plan(1000,100,98,105,.004,.003)
+        r=M.risk_plan(1000,100,98,110,.004,.003)
         self.assertTrue(r['admissible'])
         self.assertLessEqual(r['planned_risk_usd'],2.5+1e-9)
         self.assertLessEqual(r['cash_required'],1000)
@@ -105,6 +105,7 @@ class Risk(unittest.TestCase):
 
     def test_gross_rr_strictly_greater_than_1_5(self):
         self.assertFalse(M.risk_plan(1000,100,98,103,0,0)['admissible'])
+        self.assertFalse(M.risk_plan(1000,100,90,116,.02,0)['admissible'])
 
     def test_invalid_input_rejected(self):
         for x in [0,-1,float('nan'),float('inf')]:
