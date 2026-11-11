@@ -26,7 +26,17 @@ function renderDecision(){
  const missing=Object.values(data.frames).filter(f=>statusOf(f)!=='Disponible').map(f=>f.interval==='1D'?'1j':f.interval);
  $('freshness-banner').textContent=`Snapshot analytique : ${date(data.as_of)} UTC. ${missing.length?'Attention : '+missing.join(', ')+' indisponible ou périmé.':'Unités analysables à la clôture.'} ${liveQuote?'Le cours public reçu ne rafraîchit ni les indicateurs ni les signaux.':'Le bouton de cours interroge l’API publique Kraken, indépendamment de l’analyse.'}`;
 }
+function renderWidgets(){
+ const f=data.frames[tf], l=f.latest, availability=statusOf(f);
+ if(availability!=='Disponible') $('technical-widget').innerHTML=`<p class="amber-text">${esc(tf)} · ${esc(availability)} : indicateurs masqués jusqu’à réception d’un snapshot valide.</p>`;
+ else $('technical-widget').innerHTML=`<p>${esc(tf)} · ${esc(availability)} · clôture ${date(f.quality.last_close)} UTC</p><dl><dt>Structure EMA20 / EMA50</dt><dd>${esc(l.trend)}</dd><dt>RSI 14</dt><dd>${fmt(l.rsi14,1)}</dd><dt>Histogramme MACD</dt><dd>${fmt(l.macd_hist,7)}</dd><dt>ADX 14</dt><dd>${fmt(l.adx14,1)}</dd><dt>Volume relatif</dt><dd>${fmt(l.volume_ratio,2)} ×</dd></dl><p class="footnote">Indicateurs descriptifs : aucune note ne représente une probabilité de réussite.</p>`;
+ const d=T.safeDecision(data),p=d.plan;
+ if(d.status==='DONNÉES INSUFFISANTES') $('tradeplan-widget').innerHTML='<p class="amber-text">Données insuffisantes ou périmées : plan masqué. Aucun ordre.</p>';
+ else if(!p||![p.entry,p.stop,p.target,p.rr_net].every(T.finite)) $('tradeplan-widget').innerHTML='<p class="amber-text">Aucun plan chiffré disponible pour ce snapshot. Aucun ordre.</p>';
+ else $('tradeplan-widget').innerHTML=`<p>Lecture : ${esc(d.status)} · snapshot ${date(data.as_of)} UTC</p><dl><dt>Entrée indicative</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif théorique</dt><dd>${price(p.target)} $</dd><dt>Rendement / risque net estimé</dt><dd>${fmt(p.rr_net,2)} R</dd><dt>Perte planifiée</dt><dd>${money(p.planned_risk_usd)}</dd><dt>Quantité indicative</dt><dd>${fmt(p.quantity,2)} TEL</dd><dt>Frais / slippage hypothétiques par côté</dt><dd>${fmt(100*p.fee_per_side,2)} % / ${fmt(100*p.slippage_per_side,2)} %</dd></dl><p class="footnote">Calcul indicatif pour 1 000 $. RR net minimum : 1,5. Les frais réels et le slippage peuvent différer ; un gap peut dépasser la perte prévue. Aucune stratégie validée, aucun ordre.</p>`;
+}
 function renderFrames(){
+ renderWidgets();
  $('timeframe-table').innerHTML=Object.values(data.frames).sort((a,b)=>T.steps[a.interval]-T.steps[b.interval]).map(f=>{const l=f.latest,q=f.quality;return `<tr><td>${esc(f.interval)}</td><td class="${statusOf(f)==='Disponible'?'positive':'amber-text'}">${statusOf(f)}</td><td>${esc(l.trend)}</td><td>${fmt(l.rsi14,1)}</td><td>${fmt(l.adx14,1)}</td><td>${fmt(l.volume_ratio,2)} ×</td><td>${date(q.last_close)}</td></tr>`;}).join('');
 }
 function renderFactors(){const f=data.frames[tf],l=f.latest,btc=data.context.btc4h?.correlation;
@@ -50,7 +60,7 @@ function setupCharts(){
 }
 function resizeCharts(){if(!chart||!$('chart').clientWidth)return;chart.resize($('chart').clientWidth,$('chart').clientHeight);osc.resize($('osc-chart').clientWidth,$('osc-chart').clientHeight);}
 function showOHLC(r){if(!r){$('ohlc').textContent='Aucune bougie disponible pour cette unité.';return;}$('ohlc').innerHTML=`O <b>${price(r.o??r.open)}</b> &nbsp; H <b>${price(r.h??r.high)}</b> &nbsp; L <b>${price(r.l??r.low)}</b> &nbsp; C <b>${price(r.c??r.close)}</b>`;}
-function renderChart(){const f=data.frames[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
+function renderChart(){renderWidgets();const f=data.frames[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
  document.querySelectorAll('[data-tf]').forEach(b=>b.classList.toggle('selected',b.dataset.tf===tf));
  if(!chart)return;
  // Whitespace creates visible time gaps; no artificial OHLC points.
@@ -116,7 +126,7 @@ function bind(){
 async function start(){try{
  const r=await fetch('data.json',{cache:'no-store'});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
  tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
- const l=data.frames['4h'].latest,p=data.decision.plan;$('entry').value=l.close??'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();
+ const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
  setInterval(()=>{renderTickers();renderDecision();renderFrames();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
