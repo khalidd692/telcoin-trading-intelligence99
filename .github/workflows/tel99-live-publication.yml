@@ -4,7 +4,7 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
   workflow_run:
-    workflows: ["TEL market monitor and website"]
+    workflows: ["TEL market monitor and website", "TEL99 hourly read-only validation"]
     types: [completed]
     branches: [main]
   push:
@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    # Existing read-only monitor chain is a fallback when GitHub cron is delayed.
+    # Monitor completion and hourly validation provide independent fallback triggers when GitHub cron is delayed.
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
