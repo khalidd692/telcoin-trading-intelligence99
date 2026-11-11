@@ -190,6 +190,10 @@ def decision(frames, as_of):
         elif recovery and b['trend']!='BAISSIER':result['status']='ACHAT PRÉCOCE'
     if not result['plan'] or not result['plan']['admissible']:
         result['contradictions'].append('Plan indicatif non admissible : niveaux ou RR brut ≥ 1,51 ou net ≥ 1,5 manquants.')
+    if result['status'] in ('ACHAT PRÉCOCE','ACHAT CONFIRMÉ'):
+        result['technical_signal']=result['status']
+        result['status']='ATTENDRE'
+        result['contradictions'].append('Frais Kraken personnels et slippage réels non vérifiés : signal non exploitable.')
     return result
 
 def correlation(a,b,step=14400,window=90):

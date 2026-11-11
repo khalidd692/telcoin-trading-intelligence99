@@ -95,6 +95,14 @@ class Quality(unittest.TestCase):
         a=M.analyze(dataset(),BASE+90*STEP)
         self.assertEqual(M.decision({'4h':a,'1h':a},BASE)['status'],'DONNÉES INSUFFISANTES')
 
+    def test_buy_signal_blocked_without_actual_costs(self):
+        n=100000
+        a={'trend':'HAUSSIER','close':100,'support20':90,'resistance20':150,'atr14':2,'macd_improving':True,'rsi_delta':2,'volume_ratio':2,'rsi_divergence':False}
+        f={'ready':True,'quality':{'last_close':n},'latest':a}
+        r=M.decision({'4h':f,'1h':f},n)
+        self.assertEqual(r['technical_signal'],'ACHAT CONFIRMÉ')
+        self.assertEqual(r['status'],'ATTENDRE')
+
 class Risk(unittest.TestCase):
     def test_risk_fee_and_cash_cap(self):
         r=M.risk_plan(1000,100,98,110,.004,.003)
