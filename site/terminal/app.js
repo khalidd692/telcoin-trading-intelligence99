@@ -105,11 +105,11 @@ async function refreshEurUsd(){
 }
 function renderEuroBudget(){
  const node=$('budget-eur-result');if(!node)return;
- const eur=Number($('budget-eur').value),p=T.freshQuote(liveQuote)?liveQuote.price:(T.safeDecision(data).status!=='DONNÉES INSUFFISANTES'?data.frames['4h'].latest.close:null);
+ const eur=Number($('budget-eur').value),p=T.freshQuote(liveQuote)?liveQuote.price:null;
  if(!T.finite(eur)||eur<=0){node.textContent='Saisissez un montant positif en euros.';return;}
  if(!T.finite(eurUsd)||Date.now()-eurUsdFetched>86400000){node.textContent='Conversion EUR/USD indisponible ou périmée : estimation bloquée.';return;}
  const usd=eur*eurUsd;
- if(!T.finite(p)||p<=0){node.textContent='≈ '+fmt(usd,2)+' USD. Prix TEL/USD frais indisponible : quantité bloquée.';return;}
+ if(!T.finite(p)||p<=0){node.textContent='≈ '+fmt(usd,2)+' USD. Cours Kraken récent indisponible : quantité bloquée. Le dernier snapshot analytique ne remplace pas une cotation actuelle.';return;}
  const fee=Number($('fee').value)/100,slip=Number($('slip').value)/100;
  if(!T.finite(fee)||!T.finite(slip)||fee<0||slip<0||fee>=.1||slip>=.1){node.textContent='Coûts hypothétiques invalides : quantité bloquée.';return;}
  const gross=usd/p,net=usd/(p*(1+slip)*(1+fee));
