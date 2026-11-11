@@ -27,6 +27,9 @@ function generate(data,o={}){
   {id:'breakout',name:'Cassure puis retest',entry:oldResistance,stop:oldResistance-atr,target:day.resistance20,confirmed:near(oldResistance)&&l.volume_ratio>=1,condition:'Clôture 4h au-dessus de la résistance des 20 bougies précédant la cassure, puis retest tenu ; volume relatif ≥ 1.'}
  ];
  return defs.map(d=>{
+  // Kraken TELUSD AssetPairs observed 2026-11-11: tick_size 0.000001.
+  // Keep displayed and calculated proposal prices identical; recheck rules before execution.
+  for(const key of ['entry','stop','target'])if(T.finite(d[key]))d[key]=Number((Math.floor(d[key]*1e6+1e-9)/1e6).toFixed(6));
   const r=T.riskPlan(o.capital,d.entry,d.stop,d.target,o.fee,o.slip),reasons=[...bad,...common];
   const invalidated=T.finite(d.entry)&&T.finite(l.close)&&(d.id==='support'?l.close<d.entry:d.confirmed&&l.close<d.stop);
   if(invalidated)reasons.push('Support ou seuil d’invalidation cassé sur clôture 4h');
@@ -38,8 +41,8 @@ function generate(data,o={}){
   const ratio=budgetOk&&T.finite(r.cash)?Math.min(1,o.budgetUsd/r.cash):0;
   const qty=!bad.length&&quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
   const scale=qty!==null&&r.qty>0?qty/r.qty:0;
-  const status=bad.length||invalidated||!r.admissible?'REJETÉ':!d.confirmed?'SURVEILLANCE':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
-  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+o.slip)*o.fee,invalidation:'Clôture 4h sous '+d.stop+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
+  const status=bad.length||invalidated||!r.admissible?'REJETÉ':!d.confirmed?'CONDITIONNEL':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
+  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+o.slip)*o.fee,invalidation:'Clôture 4h sous '+(T.finite(d.stop)?d.stop.toFixed(6):'niveau indisponible')+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
  });
 }
 function allocate(plans,capital,budgetUsd){

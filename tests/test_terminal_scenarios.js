@@ -35,3 +35,7 @@ test('verified fresh confirmation can be copied but never sends an order',()=>{
  const p=S().generate(fixture(),{...options,feesVerified:true,feesVerifiedAt:now,liquidityVerified:true,tv:{observedAt:now,contradictory:false}})[1];
  assert.equal(p.status,'PRÊT À ÉVALUER');assert.match(S().copyText(p,now),/AUCUN ORDRE/);
 });
+test('displayed Kraken tick prices are the prices used for RR',()=>{
+ const d=fixture();d.frames['4h'].latest.ema20=98.123456789;
+ const p=S().generate(d,options)[1];assert.equal(p.entry,98.123456);
+});
