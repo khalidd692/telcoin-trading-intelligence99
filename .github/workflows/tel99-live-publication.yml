@@ -3,8 +3,9 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+  workflow_call:
   workflow_run:
-    workflows: ["TEL market monitor and website", "TEL99 hourly read-only validation"]
+    workflows: ["TEL99 hourly read-only validation"]
     types: [completed]
     branches: [main]
   push:
@@ -109,5 +110,5 @@ jobs:
                   lines += ['### Freins à l’achat']+['- '+str(x) for x in decision['contradictions']]
               lines += ['**Attention :** les niveaux sont des observations, pas des ordres prêts à placer.']
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
-              out.write('\\n'.join(lines)+'\\n')
+              out.write('\n'.join(lines)+'\n')
           PY
