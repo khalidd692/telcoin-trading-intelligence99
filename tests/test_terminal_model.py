@@ -134,3 +134,37 @@ class Risk(unittest.TestCase):
     def test_does_not_round_quantity_up(self):
         r=M.risk_plan(1000,.0015,.0014,.0018,.004,.003)
         self.assertLessEqual(r['planned_risk_usd'],2.5+1e-9)
+
+
+class DecimalRisk(unittest.TestCase):
+    def test_decimal_avoids_float_representation_error(self):
+        # 0.1 - 0.09 est inexact en float (0.009999999999999998) mais exact en Decimal.
+        r=M.risk_plan(1000,0.1,0.09,0.12,0,0)
+        self.assertTrue(r['admissible'])
+        self.assertEqual(r['planned_risk_usd'],2.5)
+        self.assertEqual(r['risk_budget_usd'],2.5)
+        self.assertEqual(r['rr_gross'],2.0)
+        self.assertEqual(r['rr_net'],2.0)
+
+    def test_plan_output_is_json_serializable(self):
+        import json
+        r=M.risk_plan(1000,100,98,110,.004,.003)
+        json.dumps(r)  # ne doit pas lever : pas de Decimal en sortie
+
+    def test_risk_budget_exactly_zero_point_two_five_percent(self):
+        r=M.risk_plan(1000,100,98,110,.004,.003)
+        self.assertEqual(r['risk_budget_usd'],1000*0.0025)
+        self.assertEqual(r['planned_risk_usd'],2.5)
+
+    def test_non_numeric_input_rejected(self):
+        self.assertFalse(M.risk_plan('1000',100,98,110,0,0)['admissible'])
+        self.assertFalse(M.risk_plan(1000,None,98,110,0,0)['admissible'])
+
+    def test_rr_gross_threshold_1_51_inclusive(self):
+        self.assertTrue(M.risk_plan(1000,100,98,103.02,0,0)['admissible'])
+        self.assertFalse(M.risk_plan(1000,100,98,103.01,0,0)['admissible'])
+
+    def test_quantity_never_exceeds_cash_cap(self):
+        r=M.risk_plan(1000,100,99.999,101,0,0)
+        self.assertEqual(r['quantity'],10)
+        self.assertLessEqual(r['cash_required'],1000)
