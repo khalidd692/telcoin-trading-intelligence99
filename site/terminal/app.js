@@ -85,12 +85,13 @@ function renderQuality(){
 }
 function renderRisk(){const vals=['capital','entry','stop','target','fee','slip'].map(id=>$(id).value===''?NaN:Number($(id).value));vals[4]/=100;vals[5]/=100;const r=T.riskPlan(...vals);
  if(r.error){$('risk-output').innerHTML=`<div class="eyebrow">SIMULATION BLOQUÉE</div><h3>${esc(r.error)}</h3>`;return;}
- $('risk-output').innerHTML=`<div class="eyebrow">${r.admissible?'SCÉNARIO TECHNIQUEMENT ADMISSIBLE':'SCÉNARIO NON ADMISSIBLE'}</div><div class="big">${fmt(r.qty,2)} <span style="font-size:14px">TEL</span></div><p class="muted">Quantité théorique · Aucun ordre créé</p><dl><dt>Risque planifié</dt><dd>${money(r.risk)} / ${money(r.budget)}</dd><dt>Capital nécessaire</dt><dd>${money(r.cash)}</dd><dt>Rendement / risque brut</dt><dd class="${r.rr>=1.51?'positive':'negative'}">${fmt(r.rr,2)} R</dd><dt>Rendement / risque net</dt><dd>${fmt(r.rrNet,2)} R</dd><dt>Gain net si cible atteinte</dt><dd>${money(r.reward)}</dd></dl><p class="footnote" style="padding:24px 0 0">${r.admissible?'L’admissibilité mathématique ne valide pas la stratégie.':'RR brut requis : au moins 1,51 et gain net positif.'} Frais et slippage inclus. Un gap sous le stop peut dépasser ce budget. Quantité affichée arrondie ; calcul conservé à pleine précision.</p>`;
+ $('risk-output').innerHTML=`<div class="eyebrow">${r.admissible?'SCÉNARIO TECHNIQUEMENT ADMISSIBLE':'SCÉNARIO NON ADMISSIBLE'}</div><div class="big">${fmt(r.qty,2)} <span style="font-size:14px">TEL</span></div><p class="muted">Quantité théorique · Aucun ordre créé</p><dl><dt>Risque planifié</dt><dd>${money(r.risk)} / ${money(r.budget)}</dd><dt>Capital nécessaire</dt><dd>${money(r.cash)}</dd><dt>Rendement / risque brut</dt><dd class="${r.rr>=1.51?'positive':'negative'}">${fmt(r.rr,2)} R</dd><dt>Rendement / risque net</dt><dd>${fmt(r.rrNet,2)} R</dd><dt>Gain net si cible atteinte</dt><dd>${money(r.reward)}</dd></dl><p class="footnote" style="padding:24px 0 0">${r.admissible?'L’admissibilité mathématique ne valide pas la stratégie.':'RR net requis : au moins 1,5 après frais et slippage.'} Frais et slippage inclus. Un gap sous le stop peut dépasser ce budget. Quantité affichée arrondie ; calcul conservé à pleine précision.</p>`;
 }
 async function refreshSnapshot(){
  if(snapshotBusy||document.hidden)return;snapshotBusy=true;
  try{
-  const r=await fetch('data.json',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  const feed='https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json';
+  const r=await fetch(feed+'?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});
   if(!r.ok)throw Error('Snapshot HTTP '+r.status);
   const next=await r.json();
   if(!T.acceptSnapshot(data,next))return;
@@ -102,6 +103,7 @@ async function refreshQuote(){if(quoteBusy)return;quoteBusy=true;const b=$('refr
  try{const r=await fetch('https://api.kraken.com/0/public/Ticker?pair=TELUSD',{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join(', '));const p=T.parseTelTicker(j);if(p===null)throw Error('Paire Kraken ou cours invalide');liveQuote={price:p,received:Date.now()/1000};renderTickers();renderDecision();b.textContent='✓ Cours public reçu';
  }catch(e){liveQuote=null;renderTickers();renderDecision();b.textContent='↻ Réessayer le cours';$('freshness-banner').textContent='Cours public indisponible : '+e.message+'. Le snapshot historique reste affiché et conserve son horodatage.';}finally{quoteBusy=false;b.disabled=false;}}
 function bind(){
+ document.querySelectorAll('[data-widget]').forEach(input=>{const key=input.dataset.widget,panel=document.querySelector('[data-widget-panel="'+key+'"]');input.checked=pref('widget:'+key,'true')==='true';const apply=()=>{panel.classList.toggle('hidden',!input.checked);save('widget:'+key,String(input.checked));if(key==='chart'&&input.checked)resizeCharts();};apply();input.addEventListener('change',apply);});
  document.querySelectorAll('[data-view]').forEach(e=>e.addEventListener('click',()=>view(e.dataset.view)));
  document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;save('tf',tf);renderChart();}));
  for(const key of ['ema20','ema50','sma200']){$(key).checked=pref(key,key==='sma200'?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
@@ -121,6 +123,7 @@ async function start(){try{
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);
  // Only accept a newer same-origin analytical snapshot with unchanged frozen research.
+ refreshSnapshot();
  setInterval(refreshSnapshot,60000);
  $('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';
  }catch(e){$('loading').classList.add('load-error');$('loading').textContent='Terminal indisponible : '+e.message+'. Servez le dossier avec HTTP et vérifiez data.json.';}}
