@@ -56,9 +56,27 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch origin tel99-live-data
-          git switch -C tel99-live-data origin/tel99-live-data
-          cp /tmp/tel99-snapshot.json site/terminal/data.json
-          git add site/terminal/data.json
-          git commit -m "data: refresh TEL99 public snapshot"
-          git push origin HEAD:tel99-live-data
+          # Re-read the latest publication branch on each attempt. Never force-push.
+          # A delayed older capture must never overwrite a newer capture.
+          for attempt in 1 2 3; do
+            git fetch origin tel99-live-data
+            git switch -C tel99-live-data origin/tel99-live-data
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          new=json.loads(Path('/tmp/tel99-snapshot.json').read_text())
+          current=json.loads(Path('site/terminal/data.json').read_text())
+          if current.get('as_of',0)>=new['as_of']:
+              print('Current published snapshot is at least as fresh; nothing to overwrite.')
+              Path('/tmp/tel99-skip-publish').touch()
+          PY
+            if [ -f /tmp/tel99-skip-publish ]; then exit 0; fi
+            cp /tmp/tel99-snapshot.json site/terminal/data.json
+            git add site/terminal/data.json
+            git commit -m "data: refresh TEL99 public snapshot"
+            if git push origin HEAD:tel99-live-data; then exit 0; fi
+            echo "Concurrent publisher advanced branch; retrying from latest head."
+            sleep 2
+          done
+          echo "::error::Could not publish after 3 safe attempts."
+          exit 1
