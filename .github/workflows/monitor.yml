@@ -334,3 +334,11 @@ jobs:
         run: |
           echo "At least one market collection failed; fail-closed reports were published."
           exit 1
+
+  tel99-publication:
+    # Direct reusable job: do not depend on workflow_run propagation from bot dispatches.
+    # No dependency on the legacy monitor's 13-minute pacing wait or collection success.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/tel99-live-publication.yml
