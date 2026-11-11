@@ -6,7 +6,7 @@ const date=t=>T.finite(t)?new Date(t*1000).toLocaleString('fr-FR',{timeZone:'UTC
 const money=x=>fmt(x,2)+' $';
 const labels={breakout20:'Cassure 20',recovery30:'Reprise RSI30',divergence:'Divergence RSI',oversold:'Survente RSI',pullback:'Repli EMA20'};
 let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuote=null;
-let rangeSync=false,quoteBusy=false,snapshotBusy=false;
+let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0;
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -93,7 +93,29 @@ function renderQuality(){
  $('limits').innerHTML=[...data.limits,'Pas de macro, de carnet live intégré, de portefeuille persistant ni d’alertes automatiques dans cet incrément.'].map(x=>`<li>${esc(x)}</li>`).join('');
  $('quarantine').textContent=JSON.stringify(Object.fromEntries(Object.entries(data.frames).map(([tf,f])=>[tf,{reasons:f.quality.reasons,rows:f.excluded}])),null,2);
 }
-function renderRisk(){const vals=['capital','entry','stop','target','fee','slip'].map(id=>$(id).value===''?NaN:Number($(id).value));vals[4]/=100;vals[5]/=100;const r=T.riskPlan(...vals);
+async function refreshEurUsd(){
+ try{
+  const response=await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  if(!response.ok)throw Error('FX HTTP '+response.status);
+  const payload=await response.json(),rate=Number(payload.rates?.USD),dateStr=payload.date;
+  if(!T.finite(rate)||rate<=0||!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)||Date.now()-Date.parse(dateStr+'T00:00:00Z')>5*86400000)throw Error('Taux FX périmé');
+  eurUsd=rate;eurUsdFetched=Date.now();$('eur-usd').value=fmt(rate,5)+' USD (référence '+dateStr+')';
+ }catch(e){eurUsd=null;$('eur-usd').value='Indisponible';}
+ renderRisk();
+}
+function renderEuroBudget(){
+ const node=$('budget-eur-result');if(!node)return;
+ const eur=Number($('budget-eur').value),p=T.freshQuote(liveQuote)?liveQuote.price:(T.safeDecision(data).status!=='DONNÉES INSUFFISANTES'?data.frames['4h'].latest.close:null);
+ if(!T.finite(eur)||eur<=0){node.textContent='Saisissez un montant positif en euros.';return;}
+ if(!T.finite(eurUsd)||Date.now()-eurUsdFetched>86400000){node.textContent='Conversion EUR/USD indisponible ou périmée : estimation bloquée.';return;}
+ const usd=eur*eurUsd;
+ if(!T.finite(p)||p<=0){node.textContent='≈ '+fmt(usd,2)+' USD. Prix TEL/USD frais indisponible : quantité bloquée.';return;}
+ const fee=Number($('fee').value)/100,slip=Number($('slip').value)/100;
+ if(!T.finite(fee)||!T.finite(slip)||fee<0||slip<0||fee>=.1||slip>=.1){node.textContent='Coûts hypothétiques invalides : quantité bloquée.';return;}
+ const gross=usd/p,net=usd/(p*(1+slip)*(1+fee));
+ node.textContent=fmt(eur,2)+' € ≈ '+fmt(usd,2)+' USD · '+fmt(gross,0)+' TEL bruts · environ '+fmt(net,0)+' TEL après frais/slippage HYPOTHÉTIQUES ('+fmt(fee*100,2)+' % + '+fmt(slip*100,2)+' % par côté). Spread réel et frais Kraken personnels non vérifiés : estimation NON EXPLOITABLE, aucun ordre.';
+}
+function renderRisk(){renderEuroBudget();const vals=['capital','entry','stop','target','fee','slip'].map(id=>$(id).value===''?NaN:Number($(id).value));vals[4]/=100;vals[5]/=100;const r=T.riskPlan(...vals);
  if(r.error){$('risk-output').innerHTML=`<div class="eyebrow">SIMULATION BLOQUÉE</div><h3>${esc(r.error)}</h3>`;return;}
  $('risk-output').innerHTML=`<div class="eyebrow">${r.admissible?'SCÉNARIO TECHNIQUEMENT ADMISSIBLE':'SCÉNARIO NON ADMISSIBLE'}</div><div class="big">${fmt(r.qty,2)} <span style="font-size:14px">TEL</span></div><p class="muted">Quantité théorique · Aucun ordre créé</p><dl><dt>Risque planifié</dt><dd>${money(r.risk)} / ${money(r.budget)}</dd><dt>Capital nécessaire</dt><dd>${money(r.cash)}</dd><dt>Rendement / risque brut</dt><dd class="${r.rr>=1.51?'positive':'negative'}">${fmt(r.rr,2)} R</dd><dt>Rendement / risque net</dt><dd>${fmt(r.rrNet,2)} R</dd><dt>Gain net si cible atteinte</dt><dd>${money(r.reward)}</dd></dl><p class="footnote" style="padding:24px 0 0">${r.admissible?'L’admissibilité mathématique ne valide pas la stratégie.':'RR net requis : au moins 1,5 après frais et slippage.'} Frais et slippage inclus. Un gap sous le stop peut dépasser ce budget. Quantité affichée arrondie ; calcul conservé à pleine précision.</p>`;
 }
@@ -126,7 +148,7 @@ function bind(){
 async function start(){try{
  const r=await fetch('data.json',{cache:'no-store'});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
  tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
- const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();
+ const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
  setInterval(()=>{renderTickers();renderDecision();renderFrames();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
@@ -135,6 +157,7 @@ async function start(){try{
  // Only accept a newer same-origin analytical snapshot with unchanged frozen research.
  refreshSnapshot();
  setInterval(refreshSnapshot,60000);
+  setInterval(()=>{if(!document.hidden)refreshEurUsd();},3600000);
  $('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';
  }catch(e){$('loading').classList.add('load-error');$('loading').textContent='Terminal indisponible : '+e.message+'. Servez le dossier avec HTTP et vérifiez data.json.';}}
 start();
