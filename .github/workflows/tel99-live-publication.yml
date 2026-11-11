@@ -80,3 +80,34 @@ jobs:
           done
           echo "::error::Could not publish after 3 safe attempts."
           exit 1
+      - name: Publish decision and market-data evidence in Actions summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,os,datetime
+          from pathlib import Path
+          p=Path('/tmp/tel99-snapshot.json')
+          lines=['## TEL99 — état de la publication et de l’analyse']
+          if not p.is_file():
+              lines+=['**DONNÉES INSUFFISANTES** : aucune capture Kraken validée. Aucun ordre.']
+          else:
+              d=json.loads(p.read_text())
+              decision=d.get('decision',{})
+              lines += [
+                  f"- Capture UTC : {datetime.datetime.fromtimestamp(d['as_of'],datetime.timezone.utc).isoformat()}",
+                  f"- Décision expérimentale : **{decision.get('status','DONNÉES INSUFFISANTES')}**",
+                  '- Stratégie statistiquement validée : **NON**',
+                  '- Frais personnels et spread vérifiés : **NON**',
+                  '- Ordres réels et paper : **DÉSACTIVÉS**',
+              ]
+              for tf in ('15m','1h','4h','1D'):
+                  frame=d.get('frames',{}).get(tf,{})
+                  q=frame.get('quality',{})
+                  last=frame.get('latest',{})
+                  lines.append(f"- {tf} : {q.get('valid_bars','?')} bougies valides ; clôture {last.get('close','?')} USD ; tendance {last.get('trend','?')}")
+              if decision.get('contradictions'):
+                  lines += ['### Freins à l’achat']+['- '+str(x) for x in decision['contradictions']]
+              lines += ['**Attention :** les niveaux sont des observations, pas des ordres prêts à placer.']
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+              out.write('\\n'.join(lines)+'\\n')
+          PY
