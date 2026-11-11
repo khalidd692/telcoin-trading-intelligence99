@@ -1,0 +1,54 @@
+name: TEL99 live market snapshots
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tel99-live-data
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/tel99-quant-terminal
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect public Kraken data
+        run: python -m scripts.terminal.collect --output /tmp/tel99-capture.json
+      - name: Compute and validate snapshot
+        run: |
+          python -m scripts.terminal.build --market-input /tmp/tel99-capture.json --output /tmp/tel99-snapshot.json --no-study-write
+          python - <<'PY'
+          import datetime,json,time
+          from pathlib import Path
+          p=Path('/tmp/tel99-snapshot.json')
+          d=json.loads(p.read_text())
+          baseline=json.loads(Path('site/terminal/data.json').read_text())
+          assert d['schema_version']==1 and d['market']=='KRAKEN:TELUSD'
+          assert d['source']=='Kraken public REST / OHLC'
+          assert d['lab']==baseline['lab'] and d['research_source_sha256']==baseline['research_source_sha256']
+          assert d['safety']==baseline['safety'] and not d['safety']['real_orders'] and not d['safety']['paper_orders']
+          assert 0<=time.time()-d['as_of']<600
+          assert set(d['frames'])=={'15m','1h','4h','1D'} and set(d['context'])=={'btc4h','eth4h'}
+          for f in d['frames'].values():
+              assert f['quality']['last_close']<=d['as_of']
+          d['published_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          p.write_text(json.dumps(d,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
+          PY
+      - name: Publish complete snapshot atomically
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin tel99-live-data
+          git switch -C tel99-live-data origin/tel99-live-data
+          cp /tmp/tel99-snapshot.json site/terminal/data.json
+          git add site/terminal/data.json
+          git commit -m "data: refresh TEL99 public snapshot"
+          git push origin HEAD:tel99-live-data
