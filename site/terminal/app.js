@@ -131,11 +131,17 @@ function renderRisk(){renderEuroBudget();if(data)renderScenarios();const vals=['
 async function refreshSnapshot(){
  if(snapshotBusy||document.hidden)return;snapshotBusy=true;
  try{
-  const feed=hosted?'/data.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json';
-  const r=await fetch(feed+'?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});
-  if(!r.ok)throw Error('Snapshot HTTP '+r.status);
-  const next=await r.json();
-  if(!T.acceptSnapshot(data,next))return;
+  const feeds=hosted?['/data.json']:['data.json?t='+Date.now(),'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json?t='+Date.now()];
+  let next=null,lastErr=null;
+  for(const feed of feeds){
+   try{
+    const r=await fetch(feed,{cache:'no-store',signal:AbortSignal.timeout(12000)});
+    if(!r.ok)throw Error('Snapshot HTTP '+r.status);
+    const candidate=await r.json();
+    if(T.acceptSnapshot(data,candidate)){next=candidate;break;}
+   }catch(e){lastErr=e;}
+  }
+  if(!next){if(lastErr)console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',lastErr.message);return;}
   data=next;renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
  }catch(e){console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',e.message);
  }finally{snapshotBusy=false;}
@@ -172,7 +178,7 @@ function bind(){
  $('refresh-quote').addEventListener('click',refreshQuote);$('export-data').addEventListener('click',()=>download('TEL99_snapshot.json',data));$('export-lab').addEventListener('click',()=>download('TEL99_laboratoire.json',data.lab));
 }
 async function start(){try{
- const r=await fetch('data.json',{cache:'no-store'});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
+ const r=await fetch('data.json?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
  tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
