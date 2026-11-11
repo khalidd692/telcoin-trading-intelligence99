@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+  workflow_run:
+    workflows: ["TEL market monitor and website"]
+    types: [completed]
+    branches: [main]
   push:
     branches: [main]
     paths: ['.github/workflows/tel99-live-publication.yml']
@@ -13,6 +17,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    # Existing read-only monitor chain is a fallback when GitHub cron is delayed.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,7 +35,7 @@ jobs:
         run: |
           python -m scripts.terminal.build --market-input /tmp/tel99-capture.json --output /tmp/tel99-snapshot.json --no-study-write
           python - <<'PY'
-          import datetime,json,time
+          import datetime,json,time,os
           from pathlib import Path
           p=Path('/tmp/tel99-snapshot.json')
           d=json.loads(p.read_text())
@@ -42,6 +48,7 @@ jobs:
           assert set(d['frames'])=={'15m','1h','4h','1D'} and set(d['context'])=={'btc4h','eth4h'}
           for f in d['frames'].values():
               assert f['quality']['last_close']<=d['as_of']
+          d['publication']={'event':os.environ['GITHUB_EVENT_NAME'],'run_id':os.environ['GITHUB_RUN_ID'],'run_url':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],'cadence':'5-minute cron best effort; existing monitor completion fallback (~13 minutes)'}
           d['published_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
           p.write_text(json.dumps(d,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
           PY
