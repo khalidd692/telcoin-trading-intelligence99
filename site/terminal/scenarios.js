@@ -36,7 +36,7 @@ function generate(data,o={}){
   const budgetOk=T.finite(o.budgetUsd)&&o.budgetUsd>0;
   if(!budgetOk)reasons.push('Budget EUR/USD indisponible');
   const ratio=budgetOk&&T.finite(r.cash)?Math.min(1,o.budgetUsd/r.cash):0;
-  const qty=quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
+  const qty=!bad.length&&quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
   const scale=qty!==null&&r.qty>0?qty/r.qty:0;
   const status=bad.length||invalidated||!r.admissible?'REJETÉ':!d.confirmed?'SURVEILLANCE':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
   return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+o.slip)*o.fee,invalidation:'Clôture 4h sous '+d.stop+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};

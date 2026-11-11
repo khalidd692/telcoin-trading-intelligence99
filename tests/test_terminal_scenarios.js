@@ -28,3 +28,10 @@ test('copy refuses hypothetical or expired scenarios',()=>{
  const p=S().generate(fixture(),options)[0];assert.throws(()=>S().copyText(p,now));
  assert.throws(()=>S().copyText({...p,status:'PRÊT À ÉVALUER',expiresAt:now-1},now));
 });
+test('stale analytics hide all indicative quantities even with a fresh quote',()=>{
+ const d=fixture();d.as_of=now-901;assert.ok(S().generate(d,options).every(p=>p.qty===null));
+});
+test('verified fresh confirmation can be copied but never sends an order',()=>{
+ const p=S().generate(fixture(),{...options,feesVerified:true,feesVerifiedAt:now,liquidityVerified:true,tv:{observedAt:now,contradictory:false}})[1];
+ assert.equal(p.status,'PRÊT À ÉVALUER');assert.match(S().copyText(p,now),/AUCUN ORDRE/);
+});
