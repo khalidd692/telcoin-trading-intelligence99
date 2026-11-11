@@ -3,8 +3,10 @@
 const T=window.TEL99, $=id=>document.getElementById(id), esc=T.escape, fmt=T.display;
 const price=x=>fmt(x,6), pct=x=>T.finite(x)?`${x>=0?'+':''}${fmt(x,2)} %`:'—';
 const date=t=>T.finite(t)?new Date(t*1000).toLocaleString('fr-FR',{timeZone:'UTC',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+const hosted=location.hostname.endsWith('.chatgpt.site');
 const money=x=>fmt(x,2)+' $';
 const labels={breakout20:'Cassure 20',recovery30:'Reprise RSI30',divergence:'Divergence RSI',oversold:'Survente RSI',pullback:'Repli EMA20'};
+let scenarioPlans=[];
 let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuote=null;
 let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0;
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
@@ -29,6 +31,7 @@ function renderDecision(){
   const watch=[['Repli sur support',four.support20,'Attendre une défense du support et un rebond confirmé en 15 min / 1h'],['Reprise 4h',four.ema20,'Attendre une clôture 4h au-dessus, puis un retest tenu'],['Reprise journalière',day.ema20,'Attendre une clôture 1D au-dessus et une confirmation']];
   $('decision').innerHTML+='<div class="list-heading">ZONES À SURVEILLER · PAS D’ORDRES ACTIFS</div><dl>'+watch.map(([name,level,condition])=>'<dt>'+esc(name)+'</dt><dd>'+price(level)+' $ · '+esc(condition)+'</dd>').join('')+'</dl><p class="footnote">Niveaux recalculés depuis le snapshot analytique. Avant tout ordre limite : nouvelle cotation, confirmation, spread, frais personnels, stop et risque net vérifiés. Aucun ordre créé.</p>';
  }
+ renderScenarios();
  const missing=Object.values(data.frames).filter(f=>statusOf(f)!=='Disponible').map(f=>f.interval==='1D'?'1j':f.interval);
  $('freshness-banner').textContent=`Snapshot analytique : ${date(data.as_of)} UTC. ${missing.length?'Attention : '+missing.join(', ')+' indisponible ou périmé.':'Unités analysables à la clôture.'} ${liveQuote?'Le cours public reçu ne rafraîchit ni les indicateurs ni les signaux.':'Le bouton de cours interroge l’API publique Kraken, indépendamment de l’analyse.'}`;
 }
@@ -101,10 +104,10 @@ function renderQuality(){
 }
 async function refreshEurUsd(){
  try{
-  const response=await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  const response=await fetch(hosted?'/api/fx':'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD',{cache:'no-store',signal:AbortSignal.timeout(12000)});
   if(!response.ok)throw Error('FX HTTP '+response.status);
-  const payload=await response.json(),rate=Number(payload.rates?.USD),dateStr=payload.date;
-  if(!T.finite(rate)||rate<=0||!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)||Date.now()-Date.parse(dateStr+'T00:00:00Z')>5*86400000)throw Error('Taux FX périmé');
+  const fx=T.parseFx(await response.json());if(!fx)throw Error('Taux FX périmé');
+  const {rate,date:dateStr}=fx;
   eurUsd=rate;eurUsdFetched=Date.now();$('eur-usd').value=fmt(rate,5)+' USD (référence '+dateStr+')';
  }catch(e){eurUsd=null;$('eur-usd').value='Indisponible';}
  renderRisk();
@@ -121,14 +124,14 @@ function renderEuroBudget(){
  const gross=usd/p,net=usd/(p*(1+slip)*(1+fee));
  node.textContent=fmt(eur,2)+' € ≈ '+fmt(usd,2)+' USD · '+fmt(gross,0)+' TEL bruts · environ '+fmt(net,0)+' TEL après frais/slippage HYPOTHÉTIQUES ('+fmt(fee*100,2)+' % + '+fmt(slip*100,2)+' % par côté). Spread réel et frais Kraken personnels non vérifiés : estimation NON EXPLOITABLE, aucun ordre.';
 }
-function renderRisk(){renderEuroBudget();const vals=['capital','entry','stop','target','fee','slip'].map(id=>$(id).value===''?NaN:Number($(id).value));vals[4]/=100;vals[5]/=100;const r=T.riskPlan(...vals);
+function renderRisk(){renderEuroBudget();if(data)renderScenarios();const vals=['capital','entry','stop','target','fee','slip'].map(id=>$(id).value===''?NaN:Number($(id).value));vals[4]/=100;vals[5]/=100;const r=T.riskPlan(...vals);
  if(r.error){$('risk-output').innerHTML=`<div class="eyebrow">SIMULATION BLOQUÉE</div><h3>${esc(r.error)}</h3>`;return;}
  $('risk-output').innerHTML=`<div class="eyebrow">${r.admissible?'SCÉNARIO TECHNIQUEMENT ADMISSIBLE':'SCÉNARIO NON ADMISSIBLE'}</div><div class="big">${fmt(r.qty,2)} <span style="font-size:14px">TEL</span></div><p class="muted">Quantité théorique · Aucun ordre créé</p><dl><dt>Risque planifié</dt><dd>${money(r.risk)} / ${money(r.budget)}</dd><dt>Capital nécessaire</dt><dd>${money(r.cash)}</dd><dt>Rendement / risque brut</dt><dd class="${r.rr>=1.51?'positive':'negative'}">${fmt(r.rr,2)} R</dd><dt>Rendement / risque net</dt><dd>${fmt(r.rrNet,2)} R</dd><dt>Gain net si cible atteinte</dt><dd>${money(r.reward)}</dd></dl><p class="footnote" style="padding:24px 0 0">${r.admissible?'L’admissibilité mathématique ne valide pas la stratégie.':'RR net requis : au moins 1,5 après frais et slippage.'} Frais et slippage inclus. Un gap sous le stop peut dépasser ce budget. Quantité affichée arrondie ; calcul conservé à pleine précision.</p>`;
 }
 async function refreshSnapshot(){
  if(snapshotBusy||document.hidden)return;snapshotBusy=true;
  try{
-  const feed='https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json';
+  const feed=hosted?'/data.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json';
   const r=await fetch(feed+'?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});
   if(!r.ok)throw Error('Snapshot HTTP '+r.status);
   const next=await r.json();
@@ -138,9 +141,26 @@ async function refreshSnapshot(){
  }finally{snapshotBusy=false;}
 }
 async function refreshQuote(){if(quoteBusy)return;quoteBusy=true;const b=$('refresh-quote');b.disabled=true;b.textContent='Connexion à Kraken…';
- try{const r=await fetch('https://api.kraken.com/0/public/Ticker?pair=TELUSD',{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join(', '));const p=T.parseTelTicker(j);if(p===null)throw Error('Paire Kraken ou cours invalide');liveQuote={price:p,received:Date.now()/1000};renderTickers();renderDecision();b.textContent='✓ Cours public reçu';
- }catch(e){liveQuote=null;renderTickers();renderDecision();b.textContent='↻ Réessayer le cours';$('freshness-banner').textContent='Cours public indisponible : '+e.message+'. Le snapshot historique reste affiché et conserve son horodatage.';}finally{quoteBusy=false;b.disabled=false;}}
+ try{const r=await fetch(hosted?'/api/quote':'https://api.kraken.com/0/public/Ticker?pair=TELUSD',{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join(', '));const p=T.parseTelTicker(j);if(p===null)throw Error('Paire Kraken ou cours invalide');liveQuote={price:p,bid:Number(Object.values(j.result)[0].b?.[0]),ask:Number(Object.values(j.result)[0].a?.[0]),received:Date.now()/1000};renderTickers();renderDecision();renderRisk();b.textContent='✓ Cours public reçu';
+ }catch(e){liveQuote=null;renderTickers();renderDecision();renderRisk();b.textContent='↻ Réessayer le cours';$('freshness-banner').textContent='Cours public indisponible : '+e.message+'. Le snapshot historique reste affiché et conserve son horodatage.';}finally{quoteBusy=false;b.disabled=false;}}
+function renderScenarios(){
+ const node=$('conditional-scenarios');if(!node||!data)return;
+ const fxOk=T.finite(eurUsd)&&Date.now()-eurUsdFetched<86400000;
+ const budget=Number($('budget-eur').value),capital=Number($('capital').value),fee=Number($('fee').value)/100,slip=Number($('slip').value)/100;
+ const options={quote:liveQuote,capital,budgetUsd:fxOk?budget*eurUsd:NaN,fee,slip,tv:data.independent_verification};
+ scenarioPlans=window.TEL99Scenarios.generate(data,options);
+ const a=window.TEL99Scenarios.allocate(scenarioPlans,capital,options.budgetUsd);
+ const ready=scenarioPlans.filter(p=>p.status==='PRÊT À ÉVALUER');
+ $('decision-quick').innerHTML='<b>'+esc((T.safeDecision(data).status==='DONNÉES INSUFFISANTES'||Object.values(data.frames).some(f=>statusOf(f)!=='Disponible'))?'DONNÉES INSUFFISANTES':ready.length?'ACHAT POSSIBLE':'ATTENDRE')+'</b><span>'+Object.entries(data.frames).map(([tf,f])=>esc(tf)+': '+esc(statusOf(f))+' · '+esc(f.latest.trend)).join('<br>')+'</span>';
+ node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':'Aucun scénario prêt à évaluer.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<article class="scenario-card"><h3>${esc(p.name)} <span class="chip">${esc(p.status)}</span></h3><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></article>`).join('')+
+ '<p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage '+fmt(slip*100,2)+' %. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
+ '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives ne sont pas des ordres.</p>'+
+ '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p>';
+}
 function bind(){
+ document.querySelectorAll('[data-eur-budget]').forEach(b=>b.addEventListener('click',()=>{$('budget-eur').value=b.dataset.eurBudget;renderRisk();}));
+ $('conditional-scenarios').addEventListener('click',async e=>{const b=e.target.closest('[data-copy-scenario]');if(!b)return;try{const index=Number(b.dataset.copyScenario);renderScenarios();const text=window.TEL99Scenarios.copyText(scenarioPlans[index]);await navigator.clipboard.writeText(text);$('copy-result').textContent='Paramètres copiés. Aucun ordre envoyé.';}catch(err){$('copy-result').textContent=err.message;}});
+
  document.querySelectorAll('[data-widget]').forEach(input=>{const key=input.dataset.widget,panel=document.querySelector('[data-widget-panel="'+key+'"]');input.checked=pref('widget:'+key,'true')==='true';const apply=()=>{panel.classList.toggle('hidden',!input.checked);save('widget:'+key,String(input.checked));if(key==='chart'&&input.checked)resizeCharts();};apply();input.addEventListener('change',apply);});
  document.querySelectorAll('[data-view]').forEach(e=>e.addEventListener('click',()=>view(e.dataset.view)));
  document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;save('tf',tf);renderChart();}));

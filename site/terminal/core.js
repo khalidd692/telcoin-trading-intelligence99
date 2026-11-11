@@ -38,6 +38,12 @@ function parseTelTicker(payload){
  const p=Number(payload.result[keys[0]]?.c?.[0]);
  return finite(p)&&p>0?p:null;
 }
+function parseFx(payload,now=Date.now()){
+ const rate=Number(payload?.rates?.USD),date=payload?.date;
+ if(payload?.base!=='EUR'||!finite(rate)||rate<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date))return null;
+ const at=Date.parse(date+'T00:00:00Z');
+ return finite(at)&&now>=at&&now-at<=5*86400000?{rate,date}:null;
+}
 function riskPlan(capital,entry,stop,target,fee,slip){
  if(![capital,entry,stop,target,fee,slip].every(finite)||Math.min(capital,entry,stop,target)<=0||!(stop<entry&&entry<target)||fee<0||fee>=.1||slip<0||slip>=.1)return {admissible:false,error:'Vérifiez les prix, le capital et les coûts.'};
  const buy=entry*(1+slip),ss=stop*(1-slip),st=target*(1-slip),loss=buy-ss+fee*(buy+ss),reward=st-buy-fee*(buy+st),qty=Math.min(capital*.0025/loss,capital/(buy*(1+fee))),rr=(target-entry)/(entry-stop);
@@ -50,6 +56,6 @@ function chartSeries(rows,step,key){
  const out=[];let prev=null;
  for(const r of rows){if(prev!==null&&r.t-prev>step)out.push({time:prev+step});out.push(finite(r[key])?{time:r.t,value:r[key]}:{time:r.t});prev=r.t;}return out;
 }
-const api={finite,steps,safeDecision,acceptSnapshot,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
+const api={parseFx,finite,steps,safeDecision,acceptSnapshot,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
 if(typeof module==='object')module.exports=api;else root.TEL99=api;
 })(typeof window==='object'?window:globalThis);

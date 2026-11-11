@@ -21,13 +21,15 @@
  <div class="sidebar-footer"><b>INCRÉMENT 01</b><span>Kraken · Spot · USD</span><a href="https://github.com/khalidd692/telcoin-trading-intelligence99/tree/codex/tel99-quant-terminal" target="_blank" rel="noopener">Code & méthode ↗</a></div>
 </aside>
 <div class="content">
-<header class="topbar"><div class="breadcrumb">TERMINAL <span>/</span> <b id="view-title">Centre de marché</b></div><div class="top-actions"><span class="outline-badge">PAPER UNIQUEMENT</span><span id="clock">—</span></div></header>
+<header class="topbar"><div class="breadcrumb">TERMINAL <span>/</span> <b id="view-title">Centre de marché</b></div><div class="top-actions"><span class="outline-badge">AUCUN ORDRE</span><span id="clock">—</span></div></header>
 <main>
  <div id="loading" class="notice">Chargement du snapshot vérifiable…</div>
  <section class="view" id="view-market">
  <div class="page-heading"><div><div class="eyebrow">KRAKEN:TELUSD</div><h1>Le marché, avec ses preuves.</h1><p>Une lecture multifactorielle. Des hypothèses à tester.</p></div><button id="refresh-quote" class="button primary">↻ Actualiser le cours</button></div>
  <div class="ticker-grid" id="tickers"></div>
+ <div id="decision-quick" class="notice decision-quick" aria-live="polite"></div>
  <div id="freshness-banner" class="notice"></div>
+ <section class="panel padded"><h2>Scénarios conditionnels · spot long</h2><p>Budget EUR : <button class="button" data-eur-budget="300">300 €</button> <button class="button" data-eur-budget="400">400 €</button> <button class="button" data-eur-budget="500">500 €</button> <button class="button" data-view="risk">Budget libre et coûts</button></p><p>Capital de référence initial : 1 000 USD, modifiable dans le simulateur. Plafond de risque total : 0,25 %.</p><div id="conditional-scenarios"></div><p id="copy-result" role="status"></p></section>
  <details class="panel widget-catalog"><summary>Personnaliser les panneaux</summary><p>Choisissez les éléments visibles sur cet appareil. La décision reste affichée.</p><div class="widget-options"><label><input type="checkbox" data-widget="chart" checked> Graphique</label><label><input type="checkbox" data-widget="technical" checked> Note technique</label><label><input type="checkbox" data-widget="tradeplan" checked> Plan de trade</label><label><input type="checkbox" data-widget="factors" checked> Facteurs</label><label><input type="checkbox" data-widget="frames" checked> Unités de temps</label><label><input type="checkbox" data-widget="accumulation" checked> Contexte long terme</label></div></details>
  <div class="market-grid">
   <section class="panel chart-panel" data-widget-panel="chart">
@@ -63,8 +65,8 @@
   <div class="data-grid"><section class="panel padded"><h2>Chaîne de preuve</h2><dl id="provenance"></dl></section><section class="panel padded"><h2>Limites de cet incrément</h2><ul class="limit-list" id="limits"></ul></section></div>
   <section class="panel padded"><h2>Méthodes</h2><p class="muted">EMA20/50 amorcées par SMA ; SMA200 ; ATR14 Wilder ; RSI14 arithmétique glissant ; MACD 12/26/9 ; DMI/ADX14 ; CCI20 ; stochastique 14/3. Indicateurs redémarrés à chaque interruption. VWAP : journée UTC complète uniquement. Corrélations : rendements logarithmiques 4h alignés, 90 observations maximum, 30 minimum.</p><details><summary>Quarantaines et raisons par unité</summary><pre id="quarantine"></pre></details></section>
  </section>
- <footer class="footer"><span>TEL99 / RESEARCH TERMINAL</span><span>Données observées <i class="legend-real"></i> · Hypothèses <i class="legend-hyp"></i> · Simulations <i class="legend-sim"></i></span><span>Incrément 01</span></footer>
+ <footer class="footer"><span>TEL99 / RESEARCH TERMINAL</span><span>Données observées <i class="legend-real"></i> · Hypothèses <i class="legend-hyp"></i> · Simulations <i class="legend-sim"></i></span><span>Livraison conditionnelle 2026-11-11</span></footer>
 </main>
 </div></div>
-<script src="vendor/lightweight-charts-5.0.8.js"></script><script src="core.js"></script><script src="app.js"></script>
+<script src="vendor/lightweight-charts-5.0.8.js"></script><script src="core.js"></script><script src="scenarios.js"></script><script src="app.js"></script>
 </body></html>
