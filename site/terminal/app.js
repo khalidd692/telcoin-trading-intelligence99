@@ -10,7 +10,7 @@ let rangeSync=false,quoteBusy=false,snapshotBusy=false;
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function statusOf(frame){const last=frame.quality.last_close,age=Date.now()/1000-last;return frame.ready&&age>=0&&age<=T.steps[frame.interval]+300?'Disponible':frame.quality.last_segment_bars<50?'Série trop courte':'Périmé';}
+function statusOf(frame){const last=frame.quality.last_close,age=Date.now()/1000-last;return frame.ready&&T.finite(data.as_of)&&Date.now()/1000-data.as_of<=900&&age>=0&&age<=T.steps[frame.interval]+300?'Disponible':frame.quality.last_segment_bars<50?'Série trop courte':'Périmé';}
 function rowClass(n){return T.finite(n)?n>=0?'positive':'negative':'';}
 function view(name){if(!['market','lab','risk','data'].includes(name))name='market';document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!=='view-'+name));document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===name));$('view-title').textContent={market:'Centre de marché',lab:'Laboratoire quantitatif',risk:'Simulateur de risque',data:'Données & preuves'}[name];history.replaceState(null,'','#'+name);if(name==='market'&&chart)resizeCharts();}
 function renderTickers(){

@@ -6,6 +6,7 @@ const steps={'15m':900,'1h':3600,'4h':14400,'1D':86400};
 function safeDecision(data,now=Date.now()/1000){
  const reasons=[];
  if(!finite(now)||!finite(data.as_of)||now<data.as_of-60)reasons.push('Horloge incohérente');
+ if(finite(now)&&finite(data.as_of)&&now-data.as_of>900)reasons.push('Snapshot analytique périmé (plus de 15 minutes)');
  for(const tf of ['1h','4h']){
   const f=data.frames?.[tf],t=f?.quality?.last_close;
   if(!f?.ready||!finite(t)||now<t||now-t>steps[tf]+300)reasons.push(tf+' : données périmées ou insuffisantes');
