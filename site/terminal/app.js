@@ -12,7 +12,8 @@ let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched
 const S=window.TEL99SmartView;
 const technicalCache=new WeakMap();
 let renderedSmartFrame,renderedSmartAvailability;
-let chartPriceLines=[];
+let chartPriceLines=[], structureMarkers;
+let technicalDetail=null;
 let previousChartAvailability;
 function withWeekly(snapshot){
  snapshot.frames['1W']=S.weekly(snapshot.frames['1D'],snapshot.as_of);
@@ -23,11 +24,15 @@ function scoreGauge(name,votes){
  const score=total?(votes.buy-votes.sell)/total:0;
  const verdict=!total?'Indisponible':score>=.5?'Achat fort':score>.1?'Acheter':score<=-.5?'Vente forte':score<-.1?'Vendre':'Neutre';
  const theta=Math.PI*(1-score)/2;
- return `<article class="smart-gauge"><b>${name}</b><svg viewBox="0 0 100 58" aria-hidden="true"><path d="M10 50 A40 40 0 0 1 25 19" fill="none" stroke="#e96883" stroke-width="5"/><path d="M29 16 A40 40 0 0 1 71 16" fill="none" stroke="#9aa8bc" stroke-width="5"/><path d="M75 19 A40 40 0 0 1 90 50" fill="none" stroke="#72a8fa" stroke-width="5"/>${total?`<line x1="50" y1="50" x2="${50+31*Math.cos(theta)}" y2="${50-31*Math.sin(theta)}" stroke="#e8effa" stroke-width="3" stroke-linecap="round"/>`:''}</svg><strong>${verdict}</strong><small>Acheter ${votes.buy} · Neutre ${votes.neutral} · Vendre ${votes.sell}</small></article>`;
+ const colors=['#ff5f78','#ad354d','#a2adbe','#3874e5','#73a8ff'];
+ const point=deg=>[50+40*Math.cos(deg*Math.PI/180),49-40*Math.sin(deg*Math.PI/180)].join(' ');
+ const arcs=colors.map((color,i)=>`<path d="M ${point(180-i*36-3)} A40 40 0 0 1 ${point(180-(i+1)*36+3)}" stroke="${color}"/>`).join('');
+ return `<article class="smart-gauge"><b>${name}</b><svg viewBox="0 0 100 53" aria-hidden="true"><g fill="none" stroke-width="5" stroke-linecap="round">${arcs}</g>${total?`<line x1="50" y1="49" x2="${50+31*Math.cos(theta)}" y2="${49-31*Math.sin(theta)}" stroke="#e8effa" stroke-width="3" stroke-linecap="round"/>`:''}</svg><strong>${verdict}</strong><dl class="smart-votes"><div><dt>Acheter</dt><dd>${votes.buy}</dd></div><div><dt>Neutre</dt><dd>${votes.neutral}</dd></div><div><dt>Vendre</dt><dd>${votes.sell}</dd></div></dl></article>`;
+
 }
 function technicalTable(rows){
  const action={1:'Acheter',0:'Neutre','-1':'Vendre'};
- return '<div class="table-scroll"><table><thead><tr><th>Indicateur</th><th>Période</th><th>Valeur</th><th>Signal</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${r.name}</td><td>${r.period}</td><td>${fmt(r.value,8)}${T.finite(r.extra)?' / '+fmt(r.extra,8):''}</td><td class="${r.vote===1?'positive':r.vote===-1?'negative':''}">${action[r.vote]??'Indisponible'}</td></tr>`).join('')+'</tbody></table></div>';
+ return '<div class="table-scroll smart-table"><table><thead><tr><th>Indicateur</th><th>Valeur</th><th>Signal</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${r.name}<small>${r.period}</small></td><td>${fmt(r.value,8)}${T.finite(r.extra)?' / '+fmt(r.extra,8):''}</td><td class="${r.vote===1?'positive':r.vote===-1?'negative':''}">${action[r.vote]??'Indisponible'}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderSmart(frame,availability){
  const node=$('technical-widget');
@@ -42,12 +47,12 @@ function renderSmart(frame,availability){
  }
  if(!technicalCache.has(frame))technicalCache.set(frame,{technical:S.technical(frame,tf),levels:S.marketLevels(frame,tf)});
  const {technical:r,levels:m}=technicalCache.get(frame);
- const open=Object.fromEntries([...node.querySelectorAll('details[data-detail]')].map(x=>[x.dataset.detail,x.open]));
- const details=(id,name,body)=>`<details data-detail="${id}" ${open[id]?'open':''}><summary>${name}</summary>${body}</details>`;
- node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Résumé',r.total)}${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
+ const details=(id,name,body)=>`<section data-technical-panel="${id}" ${technicalDetail===id?'':'hidden'}><h3>${name}</h3>${body}</section>`;
+ node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Résumé',r.total)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
+  '<div class="technical-menu" aria-label="Tableaux techniques">'+[['osc','Oscillateurs'],['ma','Moyennes'],['piv','Pivots'],['method','Méthode']].map(([key,label])=>`<button type="button" data-technical="${key}" aria-pressed="${technicalDetail===key}">${label}</button>`).join('')+'</div>'+
   details('osc','Oscillateurs · valeurs et votes',technicalTable(r.oscillators))+
   details('ma','Moyennes mobiles · valeurs et votes',technicalTable(r.averages))+
-  details('piv','Pivots · classique, Fibonacci, Camarilla et Woodie',r.pivots.length?'<div class="table-scroll"><table><thead><tr><th>Niveau</th><th>Classique</th><th>Fibonacci</th><th>Camarilla</th><th>Woodie</th></tr></thead><tbody>'+r.pivots.map(row=>'<tr><td>'+row[0]+'</td>'+row.slice(1).map(v=>'<td>'+price(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p>Données insuffisantes.</p>')+
+  details('piv','Pivots · classique, Fibonacci, Camarilla et Woodie',r.pivots.length?'<div class="table-scroll smart-pivot-table"><table><thead><tr><th>Niveau</th><th>Classique</th><th>Fibonacci</th><th>Camarilla</th><th>Woodie</th></tr></thead><tbody>'+r.pivots.map(row=>'<tr><td>'+row[0]+'</td>'+row.slice(1).map(v=>'<td>'+price(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p>Données insuffisantes.</p>')+
   details('method','Méthode des votes',`<p>Une voix par indicateur disponible. Le score est (achats − ventes) ÷ votes. Verdict neutre entre −0,10 et +0,10, fort à partir de ±0,50. Les moyennes votent selon la position de la clôture. MACD et stochastiques votent selon la comparaison à leur signal. Momentum, AO et Bull Bear Power votent selon leur signe. ADX ≥ 25 utilise la direction DMI. RSI et Ultimate votent aux seuils 30 / 70, CCI −100 / +100 et Williams −80 / −20. Les indicateurs repartent après chaque interruption. Les pivots utilisent la période précédente et, pour Woodie, l’ouverture de la période analysée. Les jauges sont descriptives.</p>`);
  levels.innerHTML=`<p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>Support pivot</dt><dd>${price(m.support)} $</dd><dt>Résistance pivot</dt><dd>${price(m.resistance)} $</dd><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. Order blocks, liquidité réelle et classification BOS / CHoCH indisponibles.</p>`;
  const p=m.profile;
@@ -107,6 +112,7 @@ function setupCharts(){
  const common={layout:{background:{color:'#10151d'},textColor:'#7e8da3',fontFamily:'ui-monospace,monospace',fontSize:10,attributionLogo:true},grid:{vertLines:{color:'#1a2330'},horzLines:{color:'#1a2330'}},rightPriceScale:{borderColor:'#283343',minimumWidth:78},timeScale:{borderColor:'#283343',timeVisible:true,secondsVisible:false},crosshair:{mode:L.CrosshairMode.Normal,vertLine:{color:'#677b91',labelBackgroundColor:'#344458'},horzLine:{color:'#677b91',labelBackgroundColor:'#344458'}},handleScroll:{vertTouchDrag:false},localization:{locale:'fr-FR'}};
  chart=L.createChart($('chart'),{...common,width:$('chart').clientWidth,height:$('chart').clientHeight});
  candles=chart.addSeries(L.CandlestickSeries,{upColor:'#65cdb0',downColor:'#da7985',borderVisible:false,wickUpColor:'#65cdb0',wickDownColor:'#da7985',priceFormat:{type:'price',precision:6,minMove:.000001}});
+ structureMarkers=L.createSeriesMarkers(candles,[]);
  chart.priceScale('right').applyOptions({scaleMargins:{top:.12,bottom:.23}});
  vol=chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});vol.priceScale().applyOptions({scaleMargins:{top:.86,bottom:0}});
  for(const [key,color] of [['ema20','#e8ad62'],['ema50','#74a3ed'],['sma200','#b8a0eb'],['vwap_session','#54c4ba']])lines[key]=chart.addSeries(L.LineSeries,{color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
@@ -128,13 +134,18 @@ function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvai
  candles.setData(cs);vol.setData(vs);
  for(const line of chartPriceLines)candles.removePriceLine(line);
  chartPriceLines=[];
+ const marketStructure=statusOf(f)==='Disponible'?technicalCache.get(f).levels:null;
+ structureMarkers?.setMarkers($('smart-pivots').checked?(marketStructure?.pivots??[]).map(p=>({
+  time:p.time,position:p.side==='high'?'aboveBar':'belowBar',shape:'circle',size:.45,text:p.label,color:p.side==='high'?'#f28b9a':'#54c4ba'
+ })):[]);
  if($('smart-levels').checked&&statusOf(f)==='Disponible'){
-  const m=technicalCache.get(f).levels;
+  const m=marketStructure;
   const levels=[[m.support,'Support','#54c4ba'],[m.resistance,'Résistance','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),...(m.fvgs??[]).flatMap(z=>[[z.low,'FVG','#8a6bb0'],[z.high,'','#8a6bb0']])];
   chartPriceLines=levels.filter(([p])=>T.finite(p)).map(([price,title,color])=>candles.createPriceLine({price,title,color,lineWidth:1,lineStyle:2,axisLabelVisible:!!title}));
  }
 
- for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(f.series,S.steps[tf],key));lines[key].applyOptions({visible:$(key).checked});}
+ $('vwap_session').disabled=S.steps[tf]>=86400;
+ for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(f.series,S.steps[tf],key));lines[key].applyOptions({visible:$(key).checked&&!$(key).disabled});}
  oscLine.setData(T.chartSeries(f.series,S.steps[tf],oscMode));
  oscLine.applyOptions({color:oscMode==='rsi14'?'#b8a0eb':'#74a3ed',priceFormat:{type:'price',precision:oscMode==='rsi14'?2:7,minMove:oscMode==='rsi14'?.01:.0000001}});
  $('osc-value').textContent=fmt(f.latest[oscMode],oscMode==='rsi14'?2:7);
@@ -225,19 +236,28 @@ function renderScenarios(){
  const f=data.frames['4h'];
  const note=quote?'Kraken · reçu '+date(quote.received)+' UTC':'Dernière clôture 4 h · '+date(f.quality.last_close)+' UTC';
  $('decision-quick').innerHTML=`<div class="decision-main"><b>${esc(status)}</b><strong>TEL/USD · ${price(quote?.price??f.latest.close)} $</strong></div><div class="decision-meta">${esc(note)} · Analyse ${date(data.as_of)} UTC</div><div class="decision-prices"><span>Entrée ${price(stale?null:watch?.entry)} $</span><span>Invalidation ${price(stale?null:watch?.stop)} $</span><span>Objectif ${price(stale?null:watch?.target)} $</span></div><span>${stale?'Confiance indéterminée':'Confiance limitée · avantage statistique non démontré'}. ${esc(reason)}</span>`;
- node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':'Aucun scénario prêt à évaluer.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<article class="scenario-card"><h3>${esc(p.name)} <span class="chip">${esc(p.status)}</span></h3><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></article>`).join('')+
- '<p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage hors spread '+fmt(slip*100,2)+' %. Demi-spread ajouté à chaque côté dans le RR. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
+ const expanded=new Set([...node.querySelectorAll('details[data-scenario][open]')].map(x=>x.dataset.scenario));
+ node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':'Aucun scénario prêt à évaluer.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<details class="scenario-card" data-scenario="${p.id}" ${expanded.has(p.id)?'open':''}><summary><b>${esc(p.name)}</b><span class="chip">${esc(p.status)}</span></summary><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></details>`).join('')+
+ '<details class="plan-method" '+(node.querySelector('.plan-method')?.open?'open':'')+'><summary>Budget, frais et dimensionnement</summary><p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage hors spread '+fmt(slip*100,2)+' %. Demi-spread ajouté à chaque côté dans le RR. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
  '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(options.capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives sont calculées sans accès aux positions ouvertes. Vérifier la perte latente cumulée sur le capital de travail avant toute utilisation.</p>'+
- '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p>';
+ '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p></details>';
 }
 function bind(){
  document.querySelectorAll('[data-eur-budget]').forEach(b=>b.addEventListener('click',()=>{$('budget-eur').value=b.dataset.eurBudget;renderRisk();}));
+ $('show-decision').addEventListener('click',()=>{$('decision-quick').focus({preventScroll:true});$('decision-quick').scrollIntoView({block:'start'});});
+ $('technical-widget').addEventListener('click',event=>{
+  const button=event.target.closest('[data-technical]');
+  if(!button)return;
+  technicalDetail=technicalDetail===button.dataset.technical?null:button.dataset.technical;
+  $('technical-widget').querySelectorAll('[data-technical]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.technical===technicalDetail)));
+  $('technical-widget').querySelectorAll('[data-technical-panel]').forEach(x=>{x.hidden=x.dataset.technicalPanel!==technicalDetail;});
+ });
  $('conditional-scenarios').addEventListener('click',async e=>{const b=e.target.closest('[data-copy-scenario]');if(!b)return;try{const index=Number(b.dataset.copyScenario);renderScenarios();const text=window.TEL99Scenarios.copyText(scenarioPlans[index]);await navigator.clipboard.writeText(text);$('copy-result').textContent='Paramètres copiés. Aucun ordre envoyé.';}catch(err){$('copy-result').textContent=err.message;}});
 
  document.querySelectorAll('[data-widget]').forEach(input=>{const key=input.dataset.widget,panel=document.querySelector('[data-widget-panel="'+key+'"]');input.checked=pref('widget:'+key,'true')==='true';const apply=()=>{panel.classList.toggle('hidden',!input.checked);save('widget:'+key,String(input.checked));if(key==='chart'&&input.checked)resizeCharts();};apply();input.addEventListener('change',apply);});
  document.querySelectorAll('[data-view]').forEach(e=>e.addEventListener('click',()=>view(e.dataset.view)));
  document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;save('tf',tf);renderChart();}));
- $('smart-levels').addEventListener('change',renderChart);
+ for(const id of ['smart-levels','smart-pivots'])$(id).addEventListener('change',renderChart);
  document.querySelectorAll('[data-market]').forEach(b=>b.addEventListener('click',()=>selectMarket(b.dataset.market)));
  selectMarket(['chart','technical','levels','plans','context'].includes(pref('market-widget','chart'))?pref('market-widget','chart'):'chart');
  for(const key of ['ema20','ema50','sma200','vwap_session']){$(key).checked=pref(key,['sma200','vwap_session'].includes(key)?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}

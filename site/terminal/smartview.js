@@ -132,11 +132,11 @@ function pivots(prev,current){
 function marketLevels(frame,tf){
  const b=tail(contiguous(frame,tf),120),current=last(b);
  if(!current||b.length<5)return {profile:null};
- const highs=[],lows=[];
+ const highs=[],lows=[],pivots=[];
  for(let i=2;i<b.length-2;i++){
   const neighbors=[b[i-2],b[i-1],b[i+1],b[i+2]];
-  if(neighbors.every(x=>b[i].h>x.h))highs.push(b[i].h);
-  if(neighbors.every(x=>b[i].l<x.l))lows.push(b[i].l);
+  if(neighbors.every(x=>b[i].h>x.h)){const price=b[i].h, prior=last(highs);pivots.push({time:b[i].t,side:"high",label:!finite(prior)?"H":price>prior?"HH":price<prior?"LH":"EQH"});highs.push(price);}
+  if(neighbors.every(x=>b[i].l<x.l)){const price=b[i].l, prior=last(lows);pivots.push({time:b[i].t,side:"low",label:!finite(prior)?"L":price>prior?"HL":price<prior?"LL":"EQL"});lows.push(price);}
  }
  const resistance=last(highs),support=last(lows);
  const trend=highs.length>1&&lows.length>1?highs.at(-1)>highs.at(-2)&&lows.at(-1)>lows.at(-2)?'haussière':highs.at(-1)<highs.at(-2)&&lows.at(-1)<lows.at(-2)?'baissière':'mixte':'indéterminée';
@@ -162,7 +162,7 @@ function marketLevels(frame,tf){
   }
   profile={poc:min+(peak+.5)*step,val:min+lo*step,vah:min+(hi+1)*step,bins,min,step,peak,lo,hi,n:b.length};
  }
- return {profile,support,resistance,trend,breaks,fvgs:tail(fvgs,3),fib};
+ return {profile,support,resistance,trend,breaks,pivots:tail(pivots,10),fvgs:tail(fvgs,3),fib};
 }
 const api={technical,weekly,marketLevels,steps};
 if(typeof module!=='undefined')module.exports=api;else root.TEL99SmartView=api;

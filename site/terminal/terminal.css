@@ -69,3 +69,38 @@
  #freshness-banner{font-size:11px;padding:6px 9px}
  .smart-gauges{gap:4px}.smart-gauge{font-size:11px}
 }
+
+.widget-jump{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;overflow:visible}
+.widget-jump button{min-width:0;white-space:normal;line-height:1.15;font-size:12px}
+.widget-jump button:focus-visible,.technical-menu button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+#decision-quick{scroll-margin-top:10px}
+.smart-gauge svg{margin-top:5px}
+.smart-gauge:nth-child(2){border-color:#53667e;background:#182230}
+.smart-gauge>b{display:flex;min-height:2.3em;align-items:center;justify-content:center;line-height:1.15}
+.smart-votes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:#0d141d;border-radius:5px;margin:6px 0 0;padding:5px 0;gap:1px}
+.smart-votes dt{font-size:clamp(8px,2.5vw,11px);color:var(--muted)}
+.smart-votes dd{margin:0;font-variant-numeric:tabular-nums;font-weight:700}
+.technical-menu{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-bottom:8px}
+.technical-menu button{min-width:0;min-height:44px;border:1px solid var(--line);border-radius:5px;background:#192330;color:inherit;padding:4px;font:inherit;font-size:11px}
+.technical-menu button[aria-pressed=true]{border-color:var(--amber);color:var(--amber)}
+[data-technical-panel][hidden]{display:none}
+.smart-table table,.smart-pivot-table table{min-width:0;width:100%;font-variant-numeric:tabular-nums}
+.smart-table th,.smart-table td,.smart-pivot-table th,.smart-pivot-table td{padding:7px 4px;white-space:normal}
+.smart-table td small{display:block;color:var(--muted)}
+.smart-table :is(th,td):nth-child(2),.smart-pivot-table :is(th,td):not(:first-child){text-align:right}
+.smart-pivot-table table{font-size:clamp(10px,2.85vw,13px)}
+.smart-level-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:8px;margin-top:10px}
+.smart-mini{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0}
+.smart-mini .footnote{padding:0}
+.scenario-card{padding:0}
+.scenario-card summary,.plan-method summary{min-height:44px;padding:9px 0;cursor:pointer}
+.scenario-card summary .chip{margin-left:6px}
+@media(max-width:700px){
+ .widget-jump{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 8px;padding:4px 0}
+ .smart-timeframes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;overflow:visible;margin-inline:8px}
+ .smart-timeframes button{min-width:0;white-space:normal;font-size:11px;padding:3px}
+ #technical-widget{padding:8px}
+ .smart-gauge{padding-inline:2px}
+ .smart-votes{font-size:11px}
+ #freshness-banner{margin-bottom:4px}
+}

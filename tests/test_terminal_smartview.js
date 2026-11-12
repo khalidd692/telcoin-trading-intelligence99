@@ -22,3 +22,8 @@ test('profile ignores zero volume and bounds acceptance around POC',()=>{
  assert(r.profile.val<=r.profile.poc && r.profile.poc<=r.profile.vah);
  assert.equal(marketLevels({bars:bars.map(b=>({...b,v:0}))},'1D').profile,null);
 });
+test('structure markers only use confirmed swings and label relative highs',()=>{
+ const swing=[10,11,15,11,10,11,16,12,10,11,17].map((price,i)=>({t:monday+i*day,h:price+1,l:price-1,c:price,o:price,v:10}));
+ const markers=marketLevels({bars:swing},'1D').pivots;
+ assert.deepEqual(markers.filter(p=>p.side==='high').map(p=>[p.time,p.label]),[[monday+2*day,'H'],[monday+6*day,'HH']]);
+});
