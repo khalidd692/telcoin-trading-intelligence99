@@ -139,12 +139,14 @@ def analyze(dataset, as_of):
             'excluded':v['excluded'],'ready':quality['last_segment_bars']>=50 and quality['fresh']}
 
 def _to_decimal(value):
-    if value is None:
+    # Inputs must be numeric scalars. Numeric strings and bool are rejected.
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         return None
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
+    return result if result.is_finite() else None
 
 
 def _finite_decimal(value):
@@ -152,28 +154,48 @@ def _finite_decimal(value):
 
 
 def _to_float(value):
-    return float(value) if value is not None else None
+    # The public output is JSON-compatible: reject infinities and underflow,
+    # even if the intermediate Decimal arithmetic was finite.
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError, TypeError):
+        return None
+    return result if math.isfinite(result) and (result != 0 or value == 0) else None
 
 
 def risk_plan(capital,entry,stop,target,fee=.004,slip=.003):
-    capital,entry,stop,target,fee,slip=_to_decimal(capital),_to_decimal(entry),_to_decimal(stop),_to_decimal(target),_to_decimal(fee),_to_decimal(slip)
+    capital,entry,stop,target,fee,slip=(_to_decimal(v) for v in (capital,entry,stop,target,fee,slip))
+    invalid={'admissible':False,'reason':'Prix, capital ou coûts invalides'}
+    unrepresentable={'admissible':False,'reason':'Valeurs hors précision numérique'}
     if any(v is None for v in (capital,entry,stop,target,fee,slip)):
-        return {'admissible':False,'reason':'Prix, capital ou coûts invalides'}
+        return invalid
     if min(capital,entry,stop,target)<=0 or not 0<=fee<Decimal('0.1') or not 0<=slip<Decimal('0.1') or not stop<entry<target:
-        return {'admissible':False,'reason':'Prix, capital ou coûts invalides'}
-    gross=(target-entry)/(entry-stop)
-    buy=entry*(1+slip);sellstop=stop*(1-slip);selltgt=target*(1-slip)
-    loss=buy-sellstop+fee*(buy+sellstop)
-    if not all(_finite_decimal(x) for x in (gross,buy,sellstop,selltgt,loss)) or loss<=0:
-        return {'admissible':False,'reason':'Valeurs hors précision numérique'}
-    qty=min(Decimal('0.0025')*capital/loss,capital/(buy*(1+fee)))
-    reward=selltgt-buy-fee*(buy+selltgt)
-    if not all(_finite_decimal(x) for x in (qty,reward,qty*buy*(1+fee),qty*loss,qty*reward,reward/loss)) or qty<=0:
-        return {'admissible':False,'reason':'Valeurs hors précision numérique'}
-    return {'admissible':bool(gross>=Decimal('1.51') and reward/loss>=Decimal('1.5')),'reason':'Simulation uniquement ; RR brut ≥ 1,51 et net ≥ 1,5',
-            'quantity':_to_float(qty),'cash_required':_to_float(qty*buy*(1+fee)),'planned_risk_usd':_to_float(qty*loss),
-            'risk_budget_usd':_to_float(capital*Decimal('0.0025')),'rr_gross':_to_float(gross),'rr_net':_to_float(reward/loss),
-            'potential_net_usd':_to_float(qty*reward),'fee_per_side':_to_float(fee),'slippage_per_side':_to_float(slip),
+        return invalid
+    try:
+        gross=(target-entry)/(entry-stop)
+        buy=entry*(1+slip);sellstop=stop*(1-slip);selltgt=target*(1-slip)
+        loss=buy-sellstop+fee*(buy+sellstop)
+        if not all(_finite_decimal(x) for x in (gross,buy,sellstop,selltgt,loss)) or loss<=0:
+            return unrepresentable
+        qty=min(Decimal('0.0025')*capital/loss,capital/(buy*(1+fee)))
+        reward=selltgt-buy-fee*(buy+selltgt)
+        if not all(_finite_decimal(x) for x in (qty,reward,qty*buy*(1+fee),qty*loss,qty*reward,reward/loss)) or qty<=0:
+            return unrepresentable
+        amounts={'quantity':_to_float(qty),'cash_required':_to_float(qty*buy*(1+fee)),
+                 'planned_risk_usd':_to_float(qty*loss),
+                 'risk_budget_usd':_to_float(capital*Decimal('0.0025')),
+                 'rr_gross':_to_float(gross),'rr_net':_to_float(reward/loss),
+                 'potential_net_usd':_to_float(qty*reward),
+                 'fee_per_side':_to_float(fee),'slippage_per_side':_to_float(slip)}
+        if any(v is None for v in amounts.values()):
+            return unrepresentable
+    except (ArithmeticError, OverflowError):
+        return unrepresentable
+    return {'admissible':bool(gross>=Decimal('1.51') and reward/loss>=Decimal('1.5')),
+            'reason':'Simulation uniquement ; RR brut ≥ 1,51 et net ≥ 1,5',
+            **amounts,
             'gap_risk':'Un gap sous le stop peut dépasser le risque planifié.'}
 
 def decision(frames, as_of):
