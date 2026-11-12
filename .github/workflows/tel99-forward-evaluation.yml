@@ -1,0 +1,54 @@
+name: TEL99 read-only forward evaluation
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tel99-evaluation-journal
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Retrieve previous observations
+        run: |
+          git fetch origin tel99-evaluation-data
+          mkdir -p /tmp/tel99-evaluation
+          git show origin/tel99-evaluation-data:evaluation/observations.csv > /tmp/tel99-evaluation/observations.csv || true
+      - name: Observe and score matured horizons (no trades)
+        run: |
+          python scripts/terminal/evaluate_observations.py --journal /tmp/tel99-evaluation/observations.csv --report /tmp/tel99-evaluation/summary.json
+      - name: Publish journal on separate evidence branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C tel99-evaluation-data origin/tel99-evaluation-data
+          mkdir -p evaluation
+          cp /tmp/tel99-evaluation/observations.csv evaluation/observations.csv
+          cp /tmp/tel99-evaluation/summary.json evaluation/summary.json
+          git add evaluation/observations.csv evaluation/summary.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'data: record read-only TEL99 forward observation'
+            git push origin HEAD:tel99-evaluation-data
+          fi
+      - name: Explain limits
+        if: always()
+        run: |
+          echo '### TEL99 forward observation (read-only)' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No orders, no paper trades, no claimed trading profitability.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Outcomes are close-to-close price returns at 1h, 4h, 24h and 7d; missing horizons are explicitly marked.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/tel99-evaluation/summary.json ]; then
+            echo '\`\`\`json' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/tel99-evaluation/summary.json >> "$GITHUB_STEP_SUMMARY"
+            echo '\`\`\`' >> "$GITHUB_STEP_SUMMARY"
+          fi
