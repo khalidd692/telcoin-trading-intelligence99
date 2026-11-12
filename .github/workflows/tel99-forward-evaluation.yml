@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Retrieve previous observations
+      - name: Regression tests\n        run: python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'\n      - name: Retrieve previous observations
         run: |
           git fetch origin tel99-evaluation-data
           mkdir -p /tmp/tel99-evaluation
