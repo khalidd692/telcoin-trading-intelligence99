@@ -48,7 +48,7 @@ def update(rows,now):
             for later in rows:
                 try:
                     t=float(later["observed_at"]);p=float(later["price"])
-                    if later.get("data_valid")=="true" and start+seconds<=t<=start+seconds+7200 and p>0:
+                    if later.get("data_valid")=="true" and start+seconds<=t<=min(now,start+seconds+7200) and p>0:
                         eligible.append((t,p))
                 except (ValueError,TypeError,KeyError): pass
             if eligible:
