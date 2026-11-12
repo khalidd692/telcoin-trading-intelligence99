@@ -7,3 +7,35 @@
 .widget-catalog{padding:16px;margin:12px 0}.widget-catalog summary{cursor:pointer;font-weight:700}.widget-catalog p{color:var(--muted);margin:10px 0}.widget-options{display:flex;flex-wrap:wrap;gap:12px 20px}.widget-options label{display:flex;align-items:center;gap:6px;min-height:36px}
 
 .decision-quick{display:flex;flex-wrap:wrap;gap:16px;align-items:center}.decision-quick b{font-size:22px;color:var(--amber)}.decision-quick span{font-size:12px}.scenario-card{border-top:1px solid var(--line);padding:16px 0}.scenario-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px}.scenario-card dd{margin:0;overflow-wrap:anywhere}.scenario-card .chip{font-size:10px;display:inline-block}.scenario-card button:disabled{cursor:not-allowed}.scenario-card p{overflow-wrap:anywhere}@media(max-width:700px){.decision-stack{order:-1}.ticker-grid .ticker:not(:first-child){display:none}.page-heading h1{font-size:20px}.scenario-card dl{font-size:12px}.scenario-card h3{display:flex;flex-direction:column;align-items:flex-start;gap:8px}}
+
+/* Smart View mobile-first widget navigation — keeps the existing data engine intact. */
+.widget-jump{display:flex;gap:8px;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;padding:8px 0 13px;margin:0 0 12px;position:sticky;top:0;z-index:12;background:var(--bg)}
+.widget-jump a{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 13px;white-space:nowrap;border:1px solid #344255;background:#192330;border-radius:7px;color:#dbe6f4;font-size:12px;font-weight:600}
+.widget-jump a:focus-visible,.widget-jump a:hover{border-color:var(--amber);color:var(--amber)}
+#decision-quick,#tel99-chart,#technical-widget,#tradeplan-widget,#factors,#timeframe-table{scroll-margin-top:78px}
+@media(max-width:700px){
+ .widget-jump{margin:0 -14px 12px;padding:7px 14px 12px;top:0}
+ .widget-jump a{font-size:11px;min-height:42px}
+ #view-market{display:flex;flex-direction:column}
+ #view-market>.page-heading{order:0}
+ #view-market>.ticker-grid{order:1}
+ #view-market>#decision-quick{order:2}
+ #view-market>#freshness-banner{order:3}
+ #view-market>.widget-jump{order:4}
+ #view-market>.market-grid{order:5}
+ #view-market>[data-widget-panel="technical"]{order:6}
+ #view-market>[data-widget-panel="tradeplan"]{order:7}
+ #view-market>#tel99-scenarios{order:8}
+ #view-market>[data-widget-panel="factors"]{order:9}
+ #view-market>[data-widget-panel="frames"]{order:10}
+ #view-market>.widget-catalog{order:11}
+ .market-grid{display:flex;flex-direction:column;gap:12px}
+ .market-grid>.decision-stack{order:0}
+ .market-grid>.chart-panel{order:1}
+ .market-grid .decision-panel{margin-bottom:0}
+ .market-grid .accumulation{margin-top:12px}
+ .panel{margin-bottom:12px}
+ .panel-header{min-height:46px}
+ #decision-quick{margin-bottom:10px}
+ .widget-catalog{margin-top:8px}
+}
