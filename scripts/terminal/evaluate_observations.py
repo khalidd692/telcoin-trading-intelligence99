@@ -5,7 +5,6 @@ import datetime as dt
 import io
 import json
 import math
-import os
 from pathlib import Path
 import urllib.request
 
@@ -25,11 +24,11 @@ def observe(d,now):
     frames=d.get("frames") or {}
     latest=(frames.get("15m") or {}).get("latest") or {}
     price=latest.get("close")
-    valid=finite(stamp) and 0<=now-stamp<=900 and finite(price) and price>0
+    valid=(d.get("schema_version")==1 and d.get("market")=="KRAKEN:TELUSD"\n           and d.get("source")=="Kraken public REST / OHLC"\n           and (d.get("safety") or {}).get("real_orders") is False\n           and (d.get("safety") or {}).get("paper_orders") is False\n           and finite(stamp) and 0<=now-stamp<=900 and finite(price) and price>0)
     for tf,step in [("15m",900),("1h",3600),("4h",14400),("1D",86400)]:
         f=frames.get(tf) or {}
         close=(f.get("quality") or {}).get("last_close")
-        if not f.get("ready") or not finite(close) or close>now or now-close>step+300:
+        if (f.get("symbol")!="KRAKEN:TELUSD" or f.get("interval")!=tf\n            or not f.get("ready") or not finite(close) or close>now or now-close>step+300):
             valid=False
     dec=d.get("decision") or {}
     plan=dec.get("plan") or {}
