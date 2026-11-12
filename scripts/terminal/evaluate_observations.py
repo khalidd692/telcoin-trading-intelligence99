@@ -24,11 +24,16 @@ def observe(d,now):
     frames=d.get("frames") or {}
     latest=(frames.get("15m") or {}).get("latest") or {}
     price=latest.get("close")
-    valid=(d.get("schema_version")==1 and d.get("market")=="KRAKEN:TELUSD"\n           and d.get("source")=="Kraken public REST / OHLC"\n           and (d.get("safety") or {}).get("real_orders") is False\n           and (d.get("safety") or {}).get("paper_orders") is False\n           and finite(stamp) and 0<=now-stamp<=900 and finite(price) and price>0)
+    valid=(d.get("schema_version")==1 and d.get("market")=="KRAKEN:TELUSD"
+           and d.get("source")=="Kraken public REST / OHLC"
+           and (d.get("safety") or {}).get("real_orders") is False
+           and (d.get("safety") or {}).get("paper_orders") is False
+           and finite(stamp) and 0<=now-stamp<=900 and finite(price) and price>0)
     for tf,step in [("15m",900),("1h",3600),("4h",14400),("1D",86400)]:
         f=frames.get(tf) or {}
         close=(f.get("quality") or {}).get("last_close")
-        if (f.get("symbol")!="KRAKEN:TELUSD" or f.get("interval")!=tf\n            or not f.get("ready") or not finite(close) or close>now or now-close>step+300):
+        if (f.get("symbol")!="KRAKEN:TELUSD" or f.get("interval")!=tf
+            or not f.get("ready") or not finite(close) or close>now or now-close>step+300):
             valid=False
     dec=d.get("decision") or {}
     plan=dec.get("plan") or {}
@@ -84,6 +89,7 @@ def main():
     for h in HORIZONS:
         nums=[float(r["r_"+h]) for r in valid if r.get("r_"+h)]
         report["horizons"][h]={"count":len(nums),"mean_pct":round(sum(nums)/len(nums),5) if nums else None,"positive_fraction":round(sum(x>0 for x in nums)/len(nums),4) if nums else None}
-    rp=Path(args.report);rp.parent.mkdir(parents=True,exist_ok=True);rp.write_text(json.dumps(report,indent=2)+"\n")
+    rp=Path(args.report);rp.parent.mkdir(parents=True,exist_ok=True);rp.write_text(json.dumps(report,indent=2)+"
+")
     print(json.dumps(report))
 if __name__=="__main__":main()
