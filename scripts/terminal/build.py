@@ -34,7 +34,7 @@ def build(source, market_source=None):
     frozen=json.loads((ROOT/'results/strategy_validation/results.json').read_text())
     # Ship only chart fields per bar; latest retains the complete indicator set.
     for frame in frames.values():
-        frame['series']=[{k:r[k] for k in ('t','ema20','ema50','sma200','rsi14','macd_hist')}
+        frame['series']=[{k:r[k] for k in ('t','ema20','ema50','sma200','rsi14','macd_hist','vwap_session')}
                          for r in frame['series']]
     return {'schema_version':1,'market':'KRAKEN:TELUSD','captured_at':raw['captured_at'],
             'source':raw['source'],'source_path':source_for_market.relative_to(ROOT).as_posix() if source_for_market.is_relative_to(ROOT) else source_for_market.name,
