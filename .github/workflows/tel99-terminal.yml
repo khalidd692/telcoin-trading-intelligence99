@@ -1,5 +1,15 @@
 name: TEL99 Quant Terminal verification
 on:
+  pull_request:
+    branches: [codex/tel99-quant-terminal]
+    paths:
+      - 'src/terminal/**'
+      - 'scripts/terminal/**'
+      - 'site/terminal/**'
+      - 'research/terminal/**'
+      - 'results/terminal/**'
+      - 'tests/test_terminal*'
+      - '.github/workflows/tel99-terminal.yml'
   push:
     branches: [codex/tel99-quant-terminal]
     paths:
