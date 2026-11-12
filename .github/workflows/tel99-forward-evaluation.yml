@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Regression tests\n        run: python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'\n      - name: Retrieve previous observations
+      - name: Regression tests
+        run: python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'
+      - name: Retrieve previous observations
         run: |
           git fetch origin tel99-evaluation-data
           mkdir -p /tmp/tel99-evaluation
@@ -51,7 +53,7 @@ jobs:
           echo 'No orders, no paper trades, no claimed trading profitability.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Outcomes are close-to-close price returns at 1h, 4h, 24h and 7d; missing horizons are explicitly marked.' >> "$GITHUB_STEP_SUMMARY"
           if [ -f /tmp/tel99-evaluation/summary.json ]; then
-            echo '\`\`\`json' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
             cat /tmp/tel99-evaluation/summary.json >> "$GITHUB_STEP_SUMMARY"
-            echo '\`\`\`' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
