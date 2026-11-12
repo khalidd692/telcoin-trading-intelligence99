@@ -3,6 +3,16 @@
 'use strict';
 const finite=x=>typeof x==='number' && Number.isFinite(x);
 const steps={'15m':900,'1h':3600,'4h':14400,'1D':86400};
+function frameStatus(frame,capture,now=Date.now()/1000,step=steps[frame?.interval]){
+ if(!finite(capture)||!finite(now)||now<capture-60)return 'Horloge incohérente';
+ if(now-capture>900)return 'Capture périmée';
+ const q=frame?.quality;
+ if(!q||!finite(q.last_close)||!finite(step)||q.last_close>now)return 'Clôture indisponible';
+ if(q.invalid_tail)return 'Dernière bougie invalide';
+ if(now-q.last_close>step+300)return 'Clôture périmée';
+ if(q.last_segment_bars<(frame.interval==='1W'?1:50))return 'Historique continu insuffisant';
+ return frame.ready?'Disponible':'Données insuffisantes';
+}
 function safeDecision(data,now=Date.now()/1000){
  const reasons=[];
  if(!finite(now)||!finite(data.as_of)||now<data.as_of-60)reasons.push('Horloge incohérente');
@@ -56,6 +66,6 @@ function chartSeries(rows,step,key){
  const out=[];let prev=null;
  for(const r of rows){if(prev!==null&&r.t-prev>step)out.push({time:prev+step});out.push(finite(r[key])?{time:r.t,value:r[key]}:{time:r.t});prev=r.t;}return out;
 }
-const api={parseFx,finite,steps,safeDecision,acceptSnapshot,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
+const api={parseFx,finite,steps,frameStatus,safeDecision,acceptSnapshot,freshQuote,parseTelTicker,riskPlan,display,escape,chartSeries};
 if(typeof module==='object')module.exports=api;else root.TEL99=api;
 })(typeof window==='object'?window:globalThis);

@@ -9,7 +9,7 @@ function generate(data,o={}){
  for(const [tf,step] of Object.entries(T.steps)){const v=data.frames?.[tf],t=v?.quality?.last_close;if(!v?.ready||!T.finite(t)||now<t||now-t>step+300)bad.push(tf+' indisponible ou périmé');}
  const quoteOk=T.freshQuote(o.quote,now);if(!quoteOk)bad.push('Cotation Kraken indisponible ou périmée');
  const spread=quoteOk&&T.finite(o.quote.bid)&&T.finite(o.quote.ask)&&o.quote.bid>0&&o.quote.ask>=o.quote.bid?(o.quote.ask-o.quote.bid)/o.quote.ask:null;
- if(spread===null||spread>.01)bad.push('Spread absent ou supérieur à 1 %');
+ if(spread===null)bad.push('Spread Kraken indisponible');
  const feesOk=o.feesVerified===true&&T.finite(o.feesVerifiedAt)&&now>=o.feesVerifiedAt&&now-o.feesVerifiedAt<86400;
  const common=[];if(!feesOk)common.push('Frais personnels non vérifiés : hypothèse uniquement');
  if(!o.liquidityVerified)common.push('Profondeur du carnet non vérifiée pour cette taille');
@@ -34,18 +34,31 @@ function generate(data,o={}){
   const executionSlip=o.slip+(spread??0)/2;
   const r=T.riskPlan(o.capital,d.entry,d.stop,d.target,o.fee,executionSlip),reasons=[...bad,...common];
   const invalidated=T.finite(d.entry)&&T.finite(l.close)&&(d.id==='support'?l.close<d.entry:d.confirmed&&l.close<d.stop);
-  if(invalidated)reasons.push('Support ou seuil d’invalidation cassé sur clôture 4h');
-  if(!r.admissible)reasons.push(r.error||'RR net inférieur à 1,5');
+  const rejectionReasons=[...bad];
+  if(spread!==null&&spread>.01)rejectionReasons.push('Spread supérieur à 1 %');
+  if(invalidated)rejectionReasons.push('Support ou seuil d’invalidation cassé sur clôture 4h');
+  if(!r.admissible)rejectionReasons.push(r.error||'RR net inférieur à 1,5');
+  reasons.push(...rejectionReasons.filter(reason=>!bad.includes(reason)));
   if(quoteOk&&d.entry>o.quote.ask)reasons.push('Entrée au-dessus du marché : attendre la confirmation, limite immédiatement négociable aujourd’hui');
   if(!d.confirmed)reasons.push('Confirmation non observée');
   const budgetOk=T.finite(o.budgetUsd)&&o.budgetUsd>0;
   if(!budgetOk)reasons.push('Budget EUR/USD indisponible');
   const ratio=budgetOk&&T.finite(r.cash)?Math.min(1,o.budgetUsd/r.cash):0;
-  const qty=!bad.length&&quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
+  const qty=!bad.length&&spread<=.01&&quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
   const scale=qty!==null&&r.qty>0?qty/r.qty:0;
-  const status=bad.length||invalidated||!r.admissible?'REJETÉ':!d.confirmed?'CONDITIONNEL':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
-  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,executionSlip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+executionSlip)*o.fee,invalidation:'Clôture 4h sous '+(T.finite(d.stop)?d.stop.toFixed(6):'niveau indisponible')+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
+  const status=rejectionReasons.length?'REJETÉ':!d.confirmed?'CONDITIONNEL':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
+  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,rejectionReasons,dataIssues:bad,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,executionSlip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+executionSlip)*o.fee,invalidation:'Clôture 4h sous '+(T.finite(d.stop)?d.stop.toFixed(6):'niveau indisponible')+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
  });
+}
+function summarize(plans,dataIssues=[]){
+ const issues=dataIssues.length?dataIssues:plans[0]?.dataIssues??[];
+ if(issues.length)return {status:'DONNÉES INSUFFISANTES',plan:null,reason:issues.join(' · ')};
+ const ready=plans.find(p=>p.status==='PRÊT À ÉVALUER');
+ if(ready)return {status:'ACHETER MAINTENANT · PLAN À VÉRIFIER',plan:ready,reason:ready.condition};
+ const viable=plans.filter(p=>p.status==='CONDITIONNEL'&&p.admissible);
+ const plan=viable.find(p=>p.id==='reversal')??viable[0];
+ if(plan)return {status:plan.id==='support'?'ATTENDRE UN REPLI':'ATTENDRE UNE CONFIRMATION',plan,reason:plan.reasons?.join(' · ')||plan.condition};
+ return {status:'Aucun plan admissible',plan:null,reason:[...new Set(plans.flatMap(p=>p.rejectionReasons??[]))].join(' · ')||'Niveaux ou données du scénario indisponibles.'};
 }
 function allocate(plans,capital,budgetUsd){
  if(![capital,budgetUsd].every(T.finite)||capital<=0||budgetUsd<=0)return {valid:false,items:[],risk:null,cash:null};
@@ -59,5 +72,5 @@ function copyText(p,now=Date.now()/1000){
  if(p.status!=='PRÊT À ÉVALUER'||p.hypothetical||now>p.expiresAt||now<p.calculatedAt||!p.admissible||!T.finite(p.qty)||p.qty<=0)throw Error('Scénario non vérifié ou périmé : copie bloquée.');
  return `TEL99 — PROPOSITION À VÉRIFIER HUMAINEMENT — AUCUN ORDRE\nKRAKEN:TELUSD spot long, sans levier\n${p.name}\nEntrée limite ${p.entry} USD; stop ${p.stop}; objectif ${p.target}\n${p.condition}\nQuantité indicative ${p.qty} TEL; RR net ${p.rrNet}; risque planifié ${p.risk} USD\nCalcul ${new Date(p.calculatedAt*1000).toISOString()}\n${p.invalidation}\nUn ordre limite passif ne protège pas d’une chute. Réserve de 2 000 000 TEL exclue. Ne pas cumuler ces tailles individuelles.`;
 }
-const api={generate,allocate,copyText};if(typeof module==='object')module.exports=api;else root.TEL99Scenarios=api;
+const api={generate,summarize,allocate,copyText};if(typeof module==='object')module.exports=api;else root.TEL99Scenarios=api;
 })(typeof window==='object'?window:globalThis);

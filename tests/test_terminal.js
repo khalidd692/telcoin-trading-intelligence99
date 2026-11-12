@@ -43,3 +43,9 @@ assert.equal(T.acceptSnapshot(frozen,{...fresh,safety:{real_orders:true,paper_or
 assert.equal(T.acceptSnapshot(frozen,{...fresh,frames:{}},1150),false);
 assert.equal(T.acceptSnapshot(frozen,fresh,2500),false);
 console.log('Terminal JS assertions passed');
+
+const frameAt={interval:'15m',ready:true,quality:{last_close:3600,last_segment_bars:720}};
+assert.equal(T.frameStatus(frameAt,4134,4800,900),'Disponible');
+assert.equal(T.frameStatus(frameAt,4134,4801,900),'Clôture périmée');
+assert.equal(T.frameStatus(frameAt,4134,5035,900),'Capture périmée');
+assert.equal(T.frameStatus({...frameAt,ready:false,quality:{...frameAt.quality,last_segment_bars:12}},4134,4800,900),'Historique continu insuffisant');

@@ -39,3 +39,19 @@ test('displayed Kraken tick prices are the prices used for RR',()=>{
  const d=fixture();d.frames['4h'].latest.ema20=98.123456789;
  const p=S().generate(d,options)[1];assert.equal(p.entry,98.123456);
 });
+test('decision presentation distinguishes data blocks from rejected plans',()=>{
+ const {summarize}=S();
+ assert.equal(summarize([{status:'REJETÉ'}],['15m · clôture périmée']).status,'DONNÉES INSUFFISANTES');
+ const r=summarize([{status:'REJETÉ',rrNet:1.2,rejectionReasons:['RR net inférieur à 1,5']}]);
+ assert.equal(r.status,'Aucun plan admissible');assert.equal(r.plan,null);assert.match(r.reason,/RR net/);
+ const p={status:'CONDITIONNEL',id:'support',admissible:true,reasons:['Confirmation non observée']};
+ assert.equal(summarize([p]).status,'ATTENDRE UN REPLI');
+});
+
+test('missing quote blocks assessment, while an observed excessive spread rejects the scenario',()=>{
+ const {generate,summarize}=S();
+ assert.equal(summarize(generate(fixture(),{...options,quote:null})).status,'DONNÉES INSUFFISANTES');
+ const spread=generate(fixture(),{...options,quote:{...options.quote,bid:99}});
+ assert.equal(summarize(spread).status,'Aucun plan admissible');
+ assert.match(summarize(spread).reason,/Spread supérieur/);
+});
