@@ -27,3 +27,20 @@ test('structure markers only use confirmed swings and label relative highs',()=>
  const markers=marketLevels({bars:swing},'1D').pivots;
  assert.deepEqual(markers.filter(p=>p.side==='high').map(p=>[p.time,p.label]),[[monday+2*day,'H'],[monday+6*day,'HH']]);
 });
+test('eight-day profile requires 192 contiguous hourly bars and uses 60 bins',()=>{
+ const hourly=bars.map((r,i)=>({...r,t:monday+i*3600}));
+ const {volumeProfile}=require('../site/terminal/smartview.js');
+ assert.equal(volumeProfile({bars:hourly.slice(0,191)}),null);
+ const p=volumeProfile({bars:hourly});
+ assert.equal(p.n,192);assert.equal(p.bins.length,60);
+ assert.equal(p.bins.reduce((a,b)=>a+b,0),1920);
+ assert.equal(volumeProfile({bars:hourly.filter((_,i)=>i!==60)}),null);
+});
+test('structure uses closed confirmed pivots, then classifies continuation or reversal',()=>{
+ const {structureEvents}=require('../site/terminal/smartview.js');
+ const prices=[10,11,15,11,10,11,17,12,10,11,18,12,9,11,8,10,7];
+ const bars=prices.map((c,i)=>({t:monday+i*day,c,o:c+.1,h:c+.3,l:c-.3,v:1}));
+ const out=structureEvents({bars},'1D');
+ assert.deepEqual(out.slice(0,3).map(e=>[e.time,e.label]),[[monday+6*day,'Cassure'],[monday+10*day,'BOS'],[monday+12*day,'CHoCH']]);
+ assert.equal(structureEvents({bars:bars.slice(0,6)},'1D').length,0);
+});

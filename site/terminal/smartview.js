@@ -148,22 +148,49 @@ function marketLevels(frame,tf){
   if(b[i].h<b[i-2].l&&b.slice(i+1).every(r=>r.h<b[i-2].l))fvgs.push({low:b[i].h,high:b[i-2].l,side:'baisse'});
  }
  const min=Math.min(...b.map(r=>r.l)),max=Math.max(...b.map(r=>r.h));
- const fib=max>min?[.382,.5,.618,.786].map(x=>[x,max-x*(max-min)]):[];
- let profile=null;
- const step=(max-min)/24,total=b.reduce((a,r)=>a+r.v,0);
- if(total>0&&step>0){
-  const bins=Array(24).fill(0);
-  for(const r of b)bins[Math.min(23,Math.floor(((r.h+r.l+r.c)/3-min)/step))]+=r.v;
-  const peak=bins.indexOf(Math.max(...bins));
-  let lo=peak,hi=peak,weight=bins[peak];
-  while(weight<total*.7&&(lo>0||hi<23)){
-   if((bins[hi+1]??-1)>(bins[lo-1]??-1))weight+=bins[++hi];
-   else weight+=bins[--lo];
-  }
-  profile={poc:min+(peak+.5)*step,val:min+lo*step,vah:min+(hi+1)*step,bins,min,step,peak,lo,hi,n:b.length};
- }
+ const fib=max>min?[.236,.382,.5,.618,.786].map(x=>[x,max-x*(max-min)]):[];
+ const profile=profileOf(b,24);
  return {profile,support,resistance,trend,breaks,pivots:tail(pivots,10),fvgs:tail(fvgs,3),fib};
 }
-const api={technical,weekly,marketLevels,steps};
+function profileOf(b,count){
+ const min=Math.min(...b.map(r=>r.l)),max=Math.max(...b.map(r=>r.h));
+ const step=(max-min)/count,total=b.reduce((a,r)=>a+r.v,0);
+ if(!(total>0&&step>0))return null;
+ const bins=Array(count).fill(0);
+ for(const r of b)bins[Math.min(count-1,Math.floor(((r.h+r.l+r.c)/3-min)/step))]+=r.v;
+ const peak=bins.indexOf(Math.max(...bins));
+ let lo=peak,hi=peak,weight=bins[peak];
+ while(weight<total*.7&&(lo>0||hi<count-1)){
+  if((bins[hi+1]??-1)>(bins[lo-1]??-1))weight+=bins[++hi];
+  else weight+=bins[--lo];
+ }
+ return {poc:min+(peak+.5)*step,val:min+lo*step,vah:min+(hi+1)*step,bins,min,step,peak,lo,hi,n:b.length};
+}
+function volumeProfile(frame){
+ const rows=contiguous(frame,'1h');
+ return rows.length>=192?profileOf(tail(rows,192),60):null;
+}
+function structureEvents(frame,tf){
+ const rows=tail(contiguous(frame,tf),120);
+ const swings={},events=[];
+ let direction=null;
+ for(let i=4;i<rows.length;i++){
+  const j=i-2, pivot=rows[j],neighbors=[rows[j-2],rows[j-1],rows[j+1],rows[j+2]];
+  for(const [side,key,sign] of [['up','h',1],['down','l',-1]]){
+   if(neighbors.every(r=>sign*(pivot[key]-r[key])>0))swings[side]={price:pivot[key],index:j};
+   const level=swings[side];
+   if(!level||sign*(rows[i].c-level.price)<=0||sign*(rows[i-1].c-level.price)>0)continue;
+   const label=direction===null?'Cassure':direction===side?'BOS':'CHoCH';
+   direction=side;
+   delete swings[side];
+   const origin=rows.slice(Math.max(level.index,i-8),i).findLast(r=>sign*(r.c-r.o)<0);
+   const valid=origin&&rows.slice(i+1).every(r=>side==='up'?r.c>=origin.l:r.c<=origin.h);
+   events.push({time:rows[i].t,price:level.price,side,label,zone:valid?{low:origin.l,high:origin.h}:null});
+  }
+ }
+ return tail(events,6);
+}
+
+const api={technical,weekly,marketLevels,volumeProfile,structureEvents,steps};
 if(typeof module!=='undefined')module.exports=api;else root.TEL99SmartView=api;
 })(typeof window==='undefined'?globalThis:window);

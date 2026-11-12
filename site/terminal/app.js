@@ -15,6 +15,83 @@ let renderedSmartFrame,renderedSmartAvailability;
 let chartPriceLines=[], structureMarkers;
 let technicalDetail=null;
 let previousChartAvailability;
+let priceDays=5;
+const chartTitles={'15m':'Structure · 15 min','1h':'Structure · 1 h','4h':'Confirmation · 4 h','1D':'Contexte · 1 jour','1W':'Contexte · 1 semaine'};
+function drawRadarCanvas(canvas,bars,{series=[],levels=[],asLine=false}={}){
+ const width=canvas.clientWidth,height=canvas.clientHeight;
+ if(!width||!height)return;
+ const ratio=window.devicePixelRatio||1;
+ canvas.width=Math.round(width*ratio);canvas.height=Math.round(height*ratio);
+ const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);
+ if(!bars.length)return;
+ const plot=width-67;
+ const ticks=asLine?bars.map(r=>r.c):bars.flatMap(r=>[r.h,r.l]);
+ const lo=Math.min(...ticks),hi=Math.max(...ticks),pad=(hi-lo||hi*.02)*.08;
+ const step=(plot-8)/bars.length;
+ const x=i=>4+(i+.5)*step,y=v=>8+(hi+pad-v)/(hi-lo+2*pad)*(height-16);
+ const line=(a,b,c,d,color)=>{ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(a,b);ctx.lineTo(c,d);ctx.stroke();};
+ ctx.font='10px system-ui';ctx.fillStyle='#acb9ca';
+ for(const v of [hi,(hi+lo)/2,lo]){
+  line(0,y(v),plot,y(v),'#273242');ctx.fillText(price(v),plot+5,y(v)+3);
+ }
+ if(asLine){
+  bars.slice(1).forEach((r,i)=>line(x(i),y(bars[i].c),x(i+1),y(r.c),'#74a3ed'));
+  return;
+ }
+ bars.forEach((r,i)=>{
+  const color=r.c>=r.o?'#54c4ba':'#ee8990',body=Math.max(1,step*.63);
+  line(x(i),y(r.h),x(i),y(r.l),color);
+  ctx.fillStyle=color;ctx.fillRect(x(i)-body/2,Math.min(y(r.o),y(r.c)),body,Math.max(1,Math.abs(y(r.o)-y(r.c))));
+ });
+ for(const [value,color] of levels){
+  if(!T.finite(value)||value<lo-pad||value>hi+pad)continue;
+  ctx.setLineDash([4,3]);line(0,y(value),plot,y(value),color);ctx.setLineDash([]);
+ }
+ const indicators=new Map(series.map(r=>[r.t,r]));
+ for(const [key,color] of [['ema20','#e8ad62'],['ema50','#74a3ed']]){
+  bars.slice(1).forEach((r,i)=>{
+   const before=indicators.get(bars[i].t)?.[key],after=indicators.get(r.t)?.[key];
+   if(T.finite(before)&&T.finite(after)&&before>=lo-pad&&before<=hi+pad&&after>=lo-pad&&after<=hi+pad)line(x(i),y(before),x(i+1),y(after),color);
+  });
+ }
+}
+function renderRadarCanvas(canvas){
+ if(!data)return;
+ if(canvas.id==='radar-price-chart'){
+  const unit=priceDays===1?'1h':'1D',frame=data.frames[unit];
+  const count=priceDays===1?25:priceDays+1;
+  const bars=frame.bars.slice(-count);
+  const complete=bars.length===count&&bars.at(-1).t-bars[0].t===priceDays*86400;
+  drawRadarCanvas(canvas,complete?bars:[],{asLine:true});
+  $('radar-price-note').textContent=complete?`${pct(100*(bars.at(-1).c/bars[0].c-1))} sur ${priceDays} j · clôture ${date(frame.quality.last_close)} UTC · ${statusOf(frame)}`:'Historique Kraken insuffisant pour cette période.';
+  return;
+ }
+ const unit=canvas.dataset.preview,frame=data.frames[unit],availability=statusOf(frame);
+ const slice=frame.bars.slice(-55),cut=slice.findLastIndex((r,i)=>i>0&&r.t-slice[i-1].t!==S.steps[unit]);
+ const bars=slice.slice(Math.max(0,cut));
+ const m=availability==='Disponible'?S.marketLevels(frame,unit):{};
+ drawRadarCanvas(canvas,bars,{series:frame.series,levels:[[m.support,'#54c4ba'],[m.resistance,'#ee8990']]});
+ document.querySelector('[data-preview-caption="'+unit+'"]').textContent=`Kraken · ${date(frame.quality.last_close)} UTC · ${availability}`;
+}
+function renderRadar(){
+ if(!data)return;
+ const frame=data.frames['1h'];
+ const m=statusOf(frame)==='Disponible'?S.marketLevels(frame,'1h'):null;
+ const profile=m?S.volumeProfile(frame):null;
+ $('smart-profile').innerHTML=profile?`<p class="radar-values"><span>VAH <b>${price(profile.vah)}</b></span><span>POC <b>${price(profile.poc)}</b></span><span>VAL <b>${price(profile.val)}</b></span><span>Écart <b>${pct(100*(frame.latest.close/profile.poc-1))}</b></span></p><div class="smart-profile" aria-hidden="true">${profile.bins.map((v,i)=>`<i class="${i===profile.peak?'poc':i>=profile.lo&&i<=profile.hi?'accepted':''}" style="width:${100*v/Math.max(...profile.bins)}%"></i>`).reverse().join('')}</div><p class="radar-caption">8 jours · 60 classes · estimation HLC3 sur bougies 1h clôturées.</p>`:'<p>Profil indisponible. Il faut 192 bougies horaires clôturées et consécutives.</p>';
+ const structure=m?S.structureEvents(frame,'1h'):[];
+ const zones=m?[...(m.fvgs??[]).map(z=>({...z,label:'FVG'})),...structure.filter(e=>e.zone).slice(-2).map(e=>({...e.zone,label:'OB estimé',side:e.side==='up'?'hausse':'baisse'}))]:[];
+ $('radar-zones').innerHTML=m?(zones.length?`<ul class="radar-zones">${zones.map(z=>{
+  const c=frame.latest.close,edge=c<z.low?z.low:c>z.high?z.high:null;
+  return `<li><b>${z.label} · ${z.side}</b><span>${price(z.low)}–${price(z.high)} $</span><span>${edge===null?'Dans la zone':pct(100*(edge/c-1))}</span></li>`;
+ }).join('')}</ul>`:'<p>Aucune zone détectée sur la fenêtre.</p>')+'<p class="radar-caption">BOS dans le sens de la cassure précédente, CHoCH en sens inverse. OB estimé sur la dernière bougie opposée avant cassure.</p>':'<p>Données horaires insuffisantes ou périmées.</p>';
+ const quote=liveQuote&&T.freshQuote(liveQuote)?liveQuote:null;
+ $('radar-price-value').textContent=price(quote?.price??data.frames['1h'].latest.close)+' $ · '+(quote?'cotation '+date(quote.received):'clôture 1h '+date(frame.quality.last_close))+' UTC';
+ const context=['btc4h','eth4h'].map(k=>data.context[k]);
+ const row=(label,fn)=>`<tr><th scope="row">${label}</th>${context.map(c=>`<td>${fn(c)}</td>`).join('')}</tr>`;
+ $('radar-macro').innerHTML='<table class="radar-macro"><thead><tr><th>Kraken</th><th>BTC/USD</th><th>ETH/USD</th></tr></thead><tbody>'+row('Clôture 4h',c=>c?money(c.latest.close):'—')+row('Date UTC',c=>date(c?.quality.last_close))+row('Volume 4h',c=>fmt(c?.latest.volume,2))+row('Corrélation TEL',c=>fmt(c?.correlation?.pearson,2))+'</tbody></table><p class="radar-caption">Contexte à la clôture. Variations multi-périodes et capitalisation indisponibles dans ce flux.</p>';
+ document.querySelectorAll('[data-preview],#radar-price-chart').forEach(renderRadarCanvas);
+}
 function withWeekly(snapshot){
  snapshot.frames['1W']=S.weekly(snapshot.frames['1D'],snapshot.as_of);
  return snapshot;
@@ -36,41 +113,40 @@ function technicalTable(rows){
 }
 function renderSmart(frame,availability){
  const node=$('technical-widget');
- const levels=$('smart-structure'), profile=$('smart-profile');
+ const levels=$('smart-structure');
+ const monthly=$('technical-month').getAttribute('aria-pressed')==='true';
  if(renderedSmartFrame===frame&&renderedSmartAvailability===availability)return;
  renderedSmartFrame=frame;renderedSmartAvailability=availability;
  if(availability!=='Disponible'){
-  node.innerHTML='<p class="amber-text">DONNÉES INSUFFISANTES · '+esc(availability)+'</p><div class="smart-gauges">'+['Résumé','Oscillateurs','Moyennes mobiles'].map(name=>scoreGauge(name,{buy:0,sell:0,neutral:0})).join('')+'</div>';
+  if(!monthly)node.innerHTML='<p class="amber-text">DONNÉES INSUFFISANTES · '+esc(availability)+'</p><div class="smart-gauges">'+['Résumé','Oscillateurs','Moyennes mobiles'].map(name=>scoreGauge(name,{buy:0,sell:0,neutral:0})).join('')+'</div>';
   levels.textContent='Données insuffisantes pour des niveaux actuels.';
-  profile.textContent='Profil indisponible pour cette unité.';
   return null;
  }
  if(!technicalCache.has(frame))technicalCache.set(frame,{technical:S.technical(frame,tf),levels:S.marketLevels(frame,tf)});
  const {technical:r,levels:m}=technicalCache.get(frame);
  const details=(id,name,body)=>`<section data-technical-panel="${id}" ${technicalDetail===id?'':'hidden'}><h3>${name}</h3>${body}</section>`;
- node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Résumé',r.total)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
+ if(!monthly)node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Résumé',r.total)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
   '<div class="technical-menu" aria-label="Tableaux techniques">'+[['osc','Oscillateurs'],['ma','Moyennes'],['piv','Pivots'],['method','Méthode']].map(([key,label])=>`<button type="button" data-technical="${key}" aria-pressed="${technicalDetail===key}">${label}</button>`).join('')+'</div>'+
   details('osc','Oscillateurs · valeurs et votes',technicalTable(r.oscillators))+
   details('ma','Moyennes mobiles · valeurs et votes',technicalTable(r.averages))+
   details('piv','Pivots · classique, Fibonacci, Camarilla et Woodie',r.pivots.length?'<div class="table-scroll smart-pivot-table"><table><thead><tr><th>Niveau</th><th>Classique</th><th>Fibonacci</th><th>Camarilla</th><th>Woodie</th></tr></thead><tbody>'+r.pivots.map(row=>'<tr><td>'+row[0]+'</td>'+row.slice(1).map(v=>'<td>'+price(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p>Données insuffisantes.</p>')+
   details('method','Méthode des votes',`<p>Une voix par indicateur disponible. Le score est (achats − ventes) ÷ votes. Verdict neutre entre −0,10 et +0,10, fort à partir de ±0,50. Les moyennes votent selon la position de la clôture. MACD et stochastiques votent selon la comparaison à leur signal. Momentum, AO et Bull Bear Power votent selon leur signe. ADX ≥ 25 utilise la direction DMI. RSI et Ultimate votent aux seuils 30 / 70, CCI −100 / +100 et Williams −80 / −20. Les indicateurs repartent après chaque interruption. Les pivots utilisent la période précédente et, pour Woodie, l’ouverture de la période analysée. Les jauges sont descriptives.</p>`);
- levels.innerHTML=`<p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>Support pivot</dt><dd>${price(m.support)} $</dd><dt>Résistance pivot</dt><dd>${price(m.resistance)} $</dd><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. Order blocks, liquidité réelle et classification BOS / CHoCH indisponibles.</p>`;
- const p=m.profile;
- profile.innerHTML=p?`<p>POC <b>${price(p.poc)} $</b> · VAH ${price(p.vah)} $ · VAL ${price(p.val)} $</p><div class="smart-profile" aria-hidden="true">${p.bins.map((v,i)=>`<i class="${i===p.peak?'poc':i>=p.lo&&i<=p.hi?'accepted':''}" style="width:${100*v/Math.max(...p.bins)}%"></i>`).reverse().join('')}</div><p class="footnote">Estimation sur ${p.n} bougies, 24 classes, 70 % du volume. Chaque volume est placé au prix typique HLC3 de sa bougie. La répartition des transactions par prix reste inconnue.</p>`:'<p>Volume insuffisant.</p>';
+ levels.innerHTML=`<p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>Support pivot</dt><dd>${price(m.support)} $</dd><dt>Résistance pivot</dt><dd>${price(m.resistance)} $</dd><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. La carte Zones précise les heuristiques SMC.</p>`;
  return m;
 }
 function selectMarket(key){
- document.querySelectorAll('[data-market-panel]').forEach(panel=>{panel.hidden=panel.dataset.marketPanel!==key;});
+ document.querySelectorAll('[data-market-panel]').forEach(panel=>{panel.hidden=key==='radar'?!panel.hasAttribute('data-radar-card'):panel.dataset.marketPanel!==key;});
  document.querySelectorAll('[data-market]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.market===key)));
  save('market-widget',key);
- if(key==='chart')resizeCharts();
+ if(key==='chart'||key==='radar')resizeCharts();
+ if(data)renderRadar();
 }
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function statusOf(frame){const now=Date.now()/1000,last=frame.quality.last_close,age=now-last,min=frame.interval==='1W'?1:50;return frame.ready&&T.finite(data.as_of)&&now>=data.as_of-60&&now-data.as_of<=900&&T.finite(last)&&age>=0&&age<=S.steps[frame.interval]+300?'Disponible':frame.quality.last_segment_bars<min?'Série trop courte':'Périmé';}
 function rowClass(n){return T.finite(n)?n>=0?'positive':'negative':'';}
-function view(name){if(!['market','lab','risk','data'].includes(name))name='market';document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!=='view-'+name));document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===name));$('view-title').textContent={market:'Centre de marché',lab:'Laboratoire quantitatif',risk:'Simulateur de risque',data:'Données & preuves'}[name];history.replaceState(null,'','#'+name);if(name==='market'&&chart)resizeCharts();}
+function view(name){if(!['market','lab','risk','data'].includes(name))name='market';document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!=='view-'+name));document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===name));$('view-title').textContent={market:'Centre de marché',lab:'Laboratoire quantitatif',risk:'Simulateur de risque',data:'Données & preuves'}[name];history.replaceState(null,'','#'+name);if(name==='market'&&chart)resizeCharts();$('sidebar-toggle').setAttribute('aria-expanded','false');$('app-sidebar').classList.remove('sidebar-open');}
 function renderTickers(){
  if(liveQuote&&!T.freshQuote(liveQuote))liveQuote=null;
  const f=data.frames['4h'],last=f.bars.at(-1),earlier=last&&f.bars.find(x=>x.t===last.t-86400),change=earlier?100*(last.c/earlier.c-1):null;
@@ -125,7 +201,7 @@ function setupCharts(){
 }
 function resizeCharts(){if(!chart||!$('chart').clientWidth)return;chart.resize($('chart').clientWidth,$('chart').clientHeight);osc.resize($('osc-chart').clientWidth,$('osc-chart').clientHeight);}
 function showOHLC(r){if(!r){$('ohlc').textContent='Aucune bougie disponible pour cette unité.';return;}$('ohlc').innerHTML=`O <b>${price(r.o??r.open)}</b> &nbsp; H <b>${price(r.h??r.high)}</b> &nbsp; L <b>${price(r.l??r.low)}</b> &nbsp; C <b>${price(r.c??r.close)}</b>`;}
-function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvailability=statusOf(f);$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
+function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvailability=statusOf(f);$('radar-chart-title').textContent=chartTitles[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
  document.querySelectorAll('[data-tf]').forEach(b=>{b.classList.toggle('selected',b.dataset.tf===tf);b.setAttribute('aria-pressed',String(b.dataset.tf===tf));});
  if(!chart)return;
  // Whitespace creates visible time gaps; no artificial OHLC points.
@@ -134,13 +210,17 @@ function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvai
  candles.setData(cs);vol.setData(vs);
  for(const line of chartPriceLines)candles.removePriceLine(line);
  chartPriceLines=[];
- const marketStructure=statusOf(f)==='Disponible'?technicalCache.get(f).levels:null;
- structureMarkers?.setMarkers($('smart-pivots').checked?(marketStructure?.pivots??[]).map(p=>({
+ const marketStructure=statusOf(f)==='Disponible'?technicalCache.get(f)?.levels??S.marketLevels(f,tf):null;
+ const events=marketStructure?S.structureEvents(f,tf):[];
+ const swings=$('smart-pivots').checked?(marketStructure?.pivots??[]).map(p=>({
   time:p.time,position:p.side==='high'?'aboveBar':'belowBar',shape:'circle',size:.45,text:p.label,color:p.side==='high'?'#f28b9a':'#54c4ba'
- })):[]);
- if($('smart-levels').checked&&statusOf(f)==='Disponible'){
+ })):[];
+ const marks=$('smart-pivots').checked?events.map(e=>({time:e.time,position:e.side==='up'?'aboveBar':'belowBar',shape:e.side==='up'?'arrowUp':'arrowDown',size:.6,text:e.label,color:'#b8a0eb'})):[];
+ structureMarkers?.setMarkers([...swings,...marks].sort((a,b)=>a.time-b.time));
+ if(($('smart-levels').checked||$('smart-zones').checked)&&statusOf(f)==='Disponible'){
   const m=marketStructure;
-  const levels=[[m.support,'Support','#54c4ba'],[m.resistance,'Résistance','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),...(m.fvgs??[]).flatMap(z=>[[z.low,'FVG','#8a6bb0'],[z.high,'','#8a6bb0']])];
+  const levels=$('smart-levels').checked?[[m.support,'Support','#54c4ba'],[m.resistance,'Résistance','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),]:[];
+  if($('smart-zones').checked)for(const [label,zones] of [['FVG',m.fvgs??[]],['OB estimé',events.filter(e=>e.zone).slice(-2).map(e=>e.zone)]])for(const z of zones)levels.push([z.low,label,'#8a6bb0'],[z.high,'','#8a6bb0']);
   chartPriceLines=levels.filter(([p])=>T.finite(p)).map(([price,title,color])=>candles.createPriceLine({price,title,color,lineWidth:1,lineStyle:2,axisLabelVisible:!!title}));
  }
 
@@ -211,7 +291,7 @@ async function refreshSnapshot(){
    }catch(e){lastErr=e;}
   }
   if(!next){if(lastErr)console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',lastErr.message);return;}
-  data=withWeekly(next);renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
+  data=withWeekly(next);renderTickers();renderDecision();renderRadar();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
  }catch(e){console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',e.message);
  }finally{snapshotBusy=false;}
 }
@@ -230,19 +310,33 @@ function renderScenarios(){
  const stale=d.status==='DONNÉES INSUFFISANTES'||['15m','1h','4h','1D'].some(key=>statusOf(data.frames[key])!=='Disponible');
  const plans=scenarioPlans.filter(p=>[p.entry,p.stop,p.target].every(T.finite));
  const watch=ready[0]??plans.find(p=>p.id==='reversal')??plans[0];
- const status=stale?'DONNÉES INSUFFISANTES':ready.length?'ACHETER · PLAN À VÉRIFIER':watch&&/repli|pullback|support/i.test(watch.id)?'ATTENDRE REPLI':watch?'ATTENDRE CONFIRMATION':'NE PAS ACHETER';
+ const status=stale?'DONNÉES INSUFFISANTES':ready.length?'ACHETER MAINTENANT · PLAN À VÉRIFIER':watch&&/repli|pullback|support/i.test(watch.id)?'ATTENDRE UN REPLI':watch?'ATTENDRE UNE CONFIRMATION':'NE PAS ACHETER';
  const reason=stale?'La capture analytique ou une unité requise est indisponible.':watch?.reasons?.[0]??watch?.condition??'Aucun scénario chiffré admissible.';
  const quote=liveQuote&&T.freshQuote(liveQuote)?liveQuote:null;
  const f=data.frames['4h'];
  const note=quote?'Kraken · reçu '+date(quote.received)+' UTC':'Dernière clôture 4 h · '+date(f.quality.last_close)+' UTC';
- $('decision-quick').innerHTML=`<div class="decision-main"><b>${esc(status)}</b><strong>TEL/USD · ${price(quote?.price??f.latest.close)} $</strong></div><div class="decision-meta">${esc(note)} · Analyse ${date(data.as_of)} UTC</div><div class="decision-prices"><span>Entrée ${price(stale?null:watch?.entry)} $</span><span>Invalidation ${price(stale?null:watch?.stop)} $</span><span>Objectif ${price(stale?null:watch?.target)} $</span></div><span>${stale?'Confiance indéterminée':'Confiance limitée · avantage statistique non démontré'}. ${esc(reason)}</span>`;
+ $('decision-quick').innerHTML=`<div class="decision-main"><b>${esc(status)}</b><strong>TEL/USD · ${price(quote?.price??f.latest.close)} $</strong></div><div class="decision-meta">${esc(note)} · Analyse ${date(data.as_of)} UTC</div><div class="decision-prices"><span>Entrée ${price(stale?null:watch?.entry)} $</span><span>Invalidation ${price(stale?null:watch?.stop)} $</span><span>Objectif ${price(stale?null:watch?.target)} $</span><span>RR net ${fmt(stale?null:watch?.rrNet,2)}</span><span>Frais estimés ${fmt(stale?null:watch?.feeEstimate,2)} $</span></div><span>${stale?'Confiance indéterminée':'Confiance limitée · avantage statistique non démontré'}. ${esc(reason)}</span>`;
  const expanded=new Set([...node.querySelectorAll('details[data-scenario][open]')].map(x=>x.dataset.scenario));
  node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':'Aucun scénario prêt à évaluer.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<details class="scenario-card" data-scenario="${p.id}" ${expanded.has(p.id)?'open':''}><summary><b>${esc(p.name)}</b><span class="chip">${esc(p.status)}</span></summary><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></details>`).join('')+
  '<details class="plan-method" '+(node.querySelector('.plan-method')?.open?'open':'')+'><summary>Budget, frais et dimensionnement</summary><p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage hors spread '+fmt(slip*100,2)+' %. Demi-spread ajouté à chaque côté dans le RR. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
  '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(options.capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives sont calculées sans accès aux positions ouvertes. Vérifier la perte latente cumulée sur le capital de travail avant toute utilisation.</p>'+
  '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p></details>';
 }
+function renderPricePeriod(){document.querySelectorAll('[data-price-days]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.priceDays)===priceDays)));renderRadarCanvas($('radar-price-chart'));}
 function bind(){
+ $('sidebar-toggle').addEventListener('click',()=>{$('sidebar-toggle').setAttribute('aria-expanded',String($('app-sidebar').classList.toggle('sidebar-open')));});
+ $('technical-month').addEventListener('click',()=>{
+  $('technical-widget').innerHTML='<p>Note mensuelle indisponible. Historique Kraken trop court pour les indicateurs requis.</p>';
+  renderedSmartFrame=undefined;
+  document.querySelectorAll('[data-market-panel="technical"] [data-tf]').forEach(b=>{b.classList.remove('selected');b.setAttribute('aria-pressed','false');});
+  $('technical-month').setAttribute('aria-pressed','true');
+ });
+ document.querySelectorAll('[data-open-chart]').forEach(b=>b.addEventListener('click',()=>{tf=b.dataset.openChart;selectMarket('chart');renderChart();$('tel99-chart').scrollIntoView({block:'start'});}));
+ document.querySelectorAll('[data-price-days]').forEach(b=>b.addEventListener('click',()=>{priceDays=Number(b.dataset.priceDays);renderPricePeriod();}));
+ const resize=new ResizeObserver(entries=>entries.forEach(e=>renderRadarCanvas(e.target)));
+ document.querySelectorAll('[data-preview],#radar-price-chart').forEach(c=>resize.observe(c));
+ renderPricePeriod();
+
  document.querySelectorAll('[data-eur-budget]').forEach(b=>b.addEventListener('click',()=>{$('budget-eur').value=b.dataset.eurBudget;renderRisk();}));
  $('show-decision').addEventListener('click',()=>{$('decision-quick').focus({preventScroll:true});$('decision-quick').scrollIntoView({block:'start'});});
  $('technical-widget').addEventListener('click',event=>{
@@ -256,11 +350,11 @@ function bind(){
 
  document.querySelectorAll('[data-widget]').forEach(input=>{const key=input.dataset.widget,panel=document.querySelector('[data-widget-panel="'+key+'"]');input.checked=pref('widget:'+key,'true')==='true';const apply=()=>{panel.classList.toggle('hidden',!input.checked);save('widget:'+key,String(input.checked));if(key==='chart'&&input.checked)resizeCharts();};apply();input.addEventListener('change',apply);});
  document.querySelectorAll('[data-view]').forEach(e=>e.addEventListener('click',()=>view(e.dataset.view)));
- document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;save('tf',tf);renderChart();}));
- for(const id of ['smart-levels','smart-pivots'])$(id).addEventListener('change',renderChart);
+ document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;$('technical-month').setAttribute('aria-pressed','false');save('tf',tf);renderChart();}));
+ for(const id of ['smart-levels','smart-pivots','smart-zones'])$(id).addEventListener('change',renderChart);
  document.querySelectorAll('[data-market]').forEach(b=>b.addEventListener('click',()=>selectMarket(b.dataset.market)));
- selectMarket(['chart','technical','levels','plans','context'].includes(pref('market-widget','chart'))?pref('market-widget','chart'):'chart');
- for(const key of ['ema20','ema50','sma200','vwap_session']){$(key).checked=pref(key,['sma200','vwap_session'].includes(key)?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
+ selectMarket('radar');
+ for(const key of ['ema20','ema50','sma200','vwap_session']){$(key).checked=pref(key,key==='sma200'?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
  $('chart-window').addEventListener('change',renderChart);
  for(const [id,key] of [['rsi-mode','rsi14'],['macd-mode','macd_hist']])$(id).addEventListener('click',()=>{oscMode=key;$('rsi-mode').classList.toggle('selected',key==='rsi14');$('macd-mode').classList.toggle('selected',key==='macd_hist');renderChart();});
  $('cost-scenario').addEventListener('change',renderExperiments);$('event-tf').addEventListener('change',renderEvents);$('event-family').addEventListener('change',renderEvents);
@@ -270,10 +364,10 @@ function bind(){
 async function start(){try{
  const r=await fetch('data.json?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
  data=withWeekly(data);
- tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
+ tf='15m';bind();setupCharts();renderTickers();renderDecision();renderRadar();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
- setInterval(()=>{renderTickers();renderDecision();renderFrames();if(previousChartAvailability!==statusOf(data.frames[tf]))renderChart();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
+ setInterval(()=>{renderTickers();renderDecision();renderRadar();renderFrames();if(previousChartAvailability!==statusOf(data.frames[tf]))renderChart();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);
