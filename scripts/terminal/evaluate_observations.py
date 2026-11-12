@@ -89,6 +89,6 @@ def main():
     for h in HORIZONS:
         nums=[float(r["r_"+h]) for r in valid if r.get("r_"+h)]
         report["horizons"][h]={"count":len(nums),"mean_pct":round(sum(nums)/len(nums),5) if nums else None,"positive_fraction":round(sum(x>0 for x in nums)/len(nums),4) if nums else None}
-    rp=Path(args.report);rp.parent.mkdir(parents=True,exist_ok=True);rp.write_text(json.dumps(report,indent=2)+String.fromCharCode(92)+"n")
+    rp=Path(args.report);rp.parent.mkdir(parents=True,exist_ok=True);rp.write_text(json.dumps(report,indent=2)+"\n")
     print(json.dumps(report))
 if __name__=="__main__":main()
