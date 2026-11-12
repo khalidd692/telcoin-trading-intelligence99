@@ -25,6 +25,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read the product radar
+        run: |
+          git fetch origin codex/tel99-quant-terminal
+          git worktree add --detach /tmp/tel99-radar FETCH_HEAD
+          node --test /tmp/tel99-radar/tests/test_terminal_radar.js
       - name: Regression tests
         run: python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'
       - name: Retrieve previous observations
@@ -34,7 +42,7 @@ jobs:
           git show origin/tel99-evaluation-data:evaluation/observations.csv > /tmp/tel99-evaluation/observations.csv || true
       - name: Observe and score matured horizons (no trades)
         run: |
-          python scripts/terminal/evaluate_observations.py --journal /tmp/tel99-evaluation/observations.csv --report /tmp/tel99-evaluation/summary.json
+          python scripts/terminal/evaluate_observations.py --journal /tmp/tel99-evaluation/observations.csv --report /tmp/tel99-evaluation/summary.json --radar /tmp/tel99-radar/site/terminal/radar.js
       - name: Publish journal on separate evidence branch
         run: |
           git config user.name 'github-actions[bot]'

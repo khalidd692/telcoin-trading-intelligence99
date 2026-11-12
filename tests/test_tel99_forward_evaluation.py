@@ -34,3 +34,29 @@ class EvaluationTests(unittest.TestCase):
         self.assertNotIn("r_1h",first)
 
 if __name__=="__main__":unittest.main()
+
+class RadarJournalTests(unittest.TestCase):
+    def test_transitions_include_validity_and_factor_changes_without_duplicate_events(self):
+        from scripts.terminal.evaluate_observations import decision_history
+        rows = [
+            dict(observed_at="100", decision="ATTENDRE", data_valid="true", factors="[]"),
+            dict(observed_at="200", decision="ALERTE PRÉCOCE", data_valid="true",
+                 factors='["volume"]', event='{"id":"early-1","type":"EARLY_ALERT"}'),
+            dict(observed_at="201", decision="ALERTE PRÉCOCE", data_valid="true",
+                 factors='["volume"]', event='{"id":"early-1","type":"EARLY_ALERT"}'),
+            dict(observed_at="300", decision="ATTENDRE", data_valid="false", factors="[]"),
+        ]
+        changes = decision_history(rows)
+        self.assertEqual(len(changes), 3)
+        self.assertEqual(changes[1]["previous_decision"], "ATTENDRE")
+        self.assertEqual(changes[1]["changed_factors"], ["+ volume"])
+        self.assertEqual(changes[1]["event"]["type"], "EARLY_ALERT")
+        self.assertEqual(changes[2]["decision"], "DONNÉES INSUFFISANTES")
+        self.assertIsNone(changes[2]["event"])
+
+    def test_dated_radar_event_is_ignored_when_observation_expires(self):
+        d = fixture()
+        d["radar"] = {"status":"ALERTE PRÉCOCE", "asOf":d["as_of"], "closedAt":1999880,
+                      "event":{"id":"abc","type":"EARLY_ALERT","data_valid":True}}
+        self.assertEqual(observe(d,2001000)["decision"],"DONNÉES INSUFFISANTES")
+        self.assertEqual(observe(d,2001000)["event"],"")

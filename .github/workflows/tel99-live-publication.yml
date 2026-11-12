@@ -60,6 +60,11 @@ jobs:
               assert f['quality']['last_close']<=d['as_of']
           d['publication']={'event':os.environ['GITHUB_EVENT_NAME'],'run_id':os.environ['GITHUB_RUN_ID'],'run_url':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],'cadence':'4-minute bursts on monitor chain and schedule; other triggers single capture','cycle':int(os.environ['TEL99_CYCLE']),'cycles':int(os.environ['TEL99_CYCLES']),'monitor_mode':os.environ.get('TEL99_MONITOR_MODE',''),'product_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()}
           d['published_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          radar=Path('site/terminal/radar.js')
+          if radar.is_file():
+              result=subprocess.run(['node',str(radar),str(d['as_of'])],input=json.dumps(d),
+                                    text=True,capture_output=True,check=True,timeout=10)
+              d['radar']=json.loads(result.stdout)
           p.write_text(json.dumps(d,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
           PY
           }
