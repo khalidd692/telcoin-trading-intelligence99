@@ -24,13 +24,15 @@ function generate(data,o={}){
  const defs=[
   {id:'support',name:'Défense du support',entry:l.support20,stop:l.support20-.5*atr,target:l.ema20,confirmed:supportHeld,condition:'Défense du support sur bougie 4h clôturée, puis 1h et 15m au-dessus de leur EMA20, volume 15m non nul.'},
   {id:'reversal',name:'Retournement confirmé',entry:l.ema20,stop:l.ema20-atr,target:l.resistance20,confirmed:near(l.ema20)&&l.rsi14>50&&l.macd_improving&&h.close>h.ema20,condition:'Clôture 4h au-dessus de l’EMA20, puis retest tenu sur la clôture suivante ; RSI4h > 50, MACD en amélioration, 1h > EMA20.'},
-  {id:'breakout',name:'Cassure puis retest',entry:oldResistance,stop:oldResistance-atr,target:day.resistance20,confirmed:near(oldResistance)&&l.volume_ratio>=1,condition:'Clôture 4h au-dessus de la résistance des 20 bougies précédant la cassure, puis retest tenu ; volume relatif ≥ 1.'}
+  {id:'breakout',name:'Cassure puis retest',entry:oldResistance,stop:oldResistance-atr,target:day.resistance20,confirmed:near(oldResistance)&&l.volume_ratio>=1,condition:'Clôture 4h au-dessus de la résistance des 20 bougies précédant la cassure, puis retest tenu ; volume relatif ≥ 1.'},
+  {id:'early',name:'Achat précoce · reprise courte',entry:m.close,stop:l.support20-.5*atr,target:l.ema20,confirmed:l.macd_improving&&l.close<l.ema20&&m.close>m.ema20&&m.volume_ratio>=1.5&&h.close>h.ema20,condition:'Sous EMA20 4h, MACD 4h en amélioration, clôtures 15m et 1h au-dessus de leurs EMA20 et volume 15m ≥ 1,5× sa référence.'}
  ];
  return defs.map(d=>{
   // Kraken TELUSD AssetPairs observed 2026-11-11: tick_size 0.000001.
   // Keep displayed and calculated proposal prices identical; recheck rules before execution.
   for(const key of ['entry','stop','target'])if(T.finite(d[key]))d[key]=Number((Math.floor(d[key]*1e6+1e-9)/1e6).toFixed(6));
-  const r=T.riskPlan(o.capital,d.entry,d.stop,d.target,o.fee,o.slip),reasons=[...bad,...common];
+  const executionSlip=o.slip+(spread??0)/2;
+  const r=T.riskPlan(o.capital,d.entry,d.stop,d.target,o.fee,executionSlip),reasons=[...bad,...common];
   const invalidated=T.finite(d.entry)&&T.finite(l.close)&&(d.id==='support'?l.close<d.entry:d.confirmed&&l.close<d.stop);
   if(invalidated)reasons.push('Support ou seuil d’invalidation cassé sur clôture 4h');
   if(!r.admissible)reasons.push(r.error||'RR net inférieur à 1,5');
@@ -42,7 +44,7 @@ function generate(data,o={}){
   const qty=!bad.length&&quoteOk&&budgetOk&&T.finite(r.qty)?Math.floor(r.qty*ratio*1e6)/1e6:null;
   const scale=qty!==null&&r.qty>0?qty/r.qty:0;
   const status=bad.length||invalidated||!r.admissible?'REJETÉ':!d.confirmed?'CONDITIONNEL':reasons.length?'CONDITIONNEL':'PRÊT À ÉVALUER';
-  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+o.slip)*o.fee,invalidation:'Clôture 4h sous '+(T.finite(d.stop)?d.stop.toFixed(6):'niveau indisponible')+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
+  return {...d,...r,qty,cash:qty===null?null:r.cash*scale,risk:qty===null?null:r.risk*scale,status,reasons,invalidated,calculatedAt:data.as_of,expiresAt:Math.min(data.as_of+900,(o.quote?.received||0)+120),fee:o.fee,slip:o.slip,executionSlip,spread,feeEstimate:qty===null?null:qty*d.entry*(1+executionSlip)*o.fee,invalidation:'Clôture 4h sous '+(T.finite(d.stop)?d.stop.toFixed(6):'niveau indisponible')+' USD ; stop non garanti en cas de gap.',hypothetical:!feesOk};
  });
 }
 function allocate(plans,capital,budgetUsd){

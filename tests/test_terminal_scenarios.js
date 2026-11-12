@@ -10,8 +10,8 @@ const S=()=>require('../site/terminal/scenarios.js');
 const now=1794394000;
 function fixture(){const latest={close:100,ema20:98,ema50:95,atr14:2,support20:96,resistance20:120,rsi14:55,macd_improving:true,volume_ratio:1.2,trend:'HAUSSIER'};return {as_of:now,frames:Object.fromEntries(Object.keys(T.steps).map(tf=>[tf,{ready:true,quality:{last_close:now},latest:{...latest},bars:[{t:now-2*T.steps[tf],c:100,h:101,l:97},{t:now-T.steps[tf],c:101,h:102,l:97}],series:[{ema20:98,resistance20:120}]}])),context:{}};}
 const options={now,quote:{price:102,bid:101.9,ask:102,received:now},capital:1000,budgetUsd:450,fee:.004,slip:.003};
-test('three scenarios keep unknown fees blocked and costs in RR',()=>{
- assert.equal(typeof S().generate,'function');const plans=S().generate(fixture(),options);assert.equal(plans.length,3);
+test('four scenarios keep unknown fees blocked and costs in RR',()=>{
+ assert.equal(typeof S().generate,'function');const plans=S().generate(fixture(),options);assert.equal(plans.length,4);assert.equal(plans.at(-1).id,'early');assert.ok(plans[0].executionSlip>options.slip);
  assert.ok(plans.every(p=>p.status!=='PRÊT À ÉVALUER'&&p.reasons.some(r=>r.includes('Frais'))));
  assert.ok(plans[0].rrNet<plans[0].rr);assert.ok(plans[0].risk<=2.5&&plans[0].cash<=450);
 });

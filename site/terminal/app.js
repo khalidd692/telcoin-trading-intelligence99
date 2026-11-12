@@ -9,10 +9,61 @@ const labels={breakout20:'Cassure 20',recovery30:'Reprise RSI30',divergence:'Div
 let scenarioPlans=[];
 let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuote=null;
 let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0;
+const S=window.TEL99SmartView;
+const technicalCache=new WeakMap();
+let renderedSmartFrame,renderedSmartAvailability;
+let chartPriceLines=[];
+let previousChartAvailability;
+function withWeekly(snapshot){
+ snapshot.frames['1W']=S.weekly(snapshot.frames['1D'],snapshot.as_of);
+ return snapshot;
+}
+function scoreGauge(name,votes){
+ const total=votes.buy+votes.sell+votes.neutral;
+ const score=total?(votes.buy-votes.sell)/total:0;
+ const verdict=!total?'Indisponible':score>=.5?'Achat fort':score>.1?'Acheter':score<=-.5?'Vente forte':score<-.1?'Vendre':'Neutre';
+ const theta=Math.PI*(1-score)/2;
+ return `<article class="smart-gauge"><b>${name}</b><svg viewBox="0 0 100 58" aria-hidden="true"><path d="M10 50 A40 40 0 0 1 25 19" fill="none" stroke="#e96883" stroke-width="5"/><path d="M29 16 A40 40 0 0 1 71 16" fill="none" stroke="#9aa8bc" stroke-width="5"/><path d="M75 19 A40 40 0 0 1 90 50" fill="none" stroke="#72a8fa" stroke-width="5"/>${total?`<line x1="50" y1="50" x2="${50+31*Math.cos(theta)}" y2="${50-31*Math.sin(theta)}" stroke="#e8effa" stroke-width="3" stroke-linecap="round"/>`:''}</svg><strong>${verdict}</strong><small>Acheter ${votes.buy} · Neutre ${votes.neutral} · Vendre ${votes.sell}</small></article>`;
+}
+function technicalTable(rows){
+ const action={1:'Acheter',0:'Neutre','-1':'Vendre'};
+ return '<div class="table-scroll"><table><thead><tr><th>Indicateur</th><th>Période</th><th>Valeur</th><th>Signal</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${r.name}</td><td>${r.period}</td><td>${fmt(r.value,8)}${T.finite(r.extra)?' / '+fmt(r.extra,8):''}</td><td class="${r.vote===1?'positive':r.vote===-1?'negative':''}">${action[r.vote]??'Indisponible'}</td></tr>`).join('')+'</tbody></table></div>';
+}
+function renderSmart(frame,availability){
+ const node=$('technical-widget');
+ const levels=$('smart-structure'), profile=$('smart-profile');
+ if(renderedSmartFrame===frame&&renderedSmartAvailability===availability)return;
+ renderedSmartFrame=frame;renderedSmartAvailability=availability;
+ if(availability!=='Disponible'){
+  node.innerHTML='<p class="amber-text">DONNÉES INSUFFISANTES · '+esc(availability)+'</p><div class="smart-gauges">'+['Résumé','Oscillateurs','Moyennes mobiles'].map(name=>scoreGauge(name,{buy:0,sell:0,neutral:0})).join('')+'</div>';
+  levels.textContent='Données insuffisantes pour des niveaux actuels.';
+  profile.textContent='Profil indisponible pour cette unité.';
+  return null;
+ }
+ if(!technicalCache.has(frame))technicalCache.set(frame,{technical:S.technical(frame,tf),levels:S.marketLevels(frame,tf)});
+ const {technical:r,levels:m}=technicalCache.get(frame);
+ const open=Object.fromEntries([...node.querySelectorAll('details[data-detail]')].map(x=>[x.dataset.detail,x.open]));
+ const details=(id,name,body)=>`<details data-detail="${id}" ${open[id]?'open':''}><summary>${name}</summary>${body}</details>`;
+ node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Résumé',r.total)}${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
+  details('osc','Oscillateurs · valeurs et votes',technicalTable(r.oscillators))+
+  details('ma','Moyennes mobiles · valeurs et votes',technicalTable(r.averages))+
+  details('piv','Pivots · classique, Fibonacci, Camarilla et Woodie',r.pivots.length?'<div class="table-scroll"><table><thead><tr><th>Niveau</th><th>Classique</th><th>Fibonacci</th><th>Camarilla</th><th>Woodie</th></tr></thead><tbody>'+r.pivots.map(row=>'<tr><td>'+row[0]+'</td>'+row.slice(1).map(v=>'<td>'+price(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p>Données insuffisantes.</p>')+
+  details('method','Méthode des votes',`<p>Une voix par indicateur disponible. Le score est (achats − ventes) ÷ votes. Verdict neutre entre −0,10 et +0,10, fort à partir de ±0,50. Les moyennes votent selon la position de la clôture. MACD et stochastiques votent selon la comparaison à leur signal. Momentum, AO et Bull Bear Power votent selon leur signe. ADX ≥ 25 utilise la direction DMI. RSI et Ultimate votent aux seuils 30 / 70, CCI −100 / +100 et Williams −80 / −20. Les indicateurs repartent après chaque interruption. Les pivots utilisent la période précédente et, pour Woodie, l’ouverture de la période analysée. Les jauges sont descriptives.</p>`);
+ levels.innerHTML=`<p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>Support pivot</dt><dd>${price(m.support)} $</dd><dt>Résistance pivot</dt><dd>${price(m.resistance)} $</dd><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. Order blocks, liquidité réelle et classification BOS / CHoCH indisponibles.</p>`;
+ const p=m.profile;
+ profile.innerHTML=p?`<p>POC <b>${price(p.poc)} $</b> · VAH ${price(p.vah)} $ · VAL ${price(p.val)} $</p><div class="smart-profile" aria-hidden="true">${p.bins.map((v,i)=>`<i class="${i===p.peak?'poc':i>=p.lo&&i<=p.hi?'accepted':''}" style="width:${100*v/Math.max(...p.bins)}%"></i>`).reverse().join('')}</div><p class="footnote">Estimation sur ${p.n} bougies, 24 classes, 70 % du volume. Chaque volume est placé au prix typique HLC3 de sa bougie. La répartition des transactions par prix reste inconnue.</p>`:'<p>Volume insuffisant.</p>';
+ return m;
+}
+function selectMarket(key){
+ document.querySelectorAll('[data-market-panel]').forEach(panel=>{panel.hidden=panel.dataset.marketPanel!==key;});
+ document.querySelectorAll('[data-market]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.market===key)));
+ save('market-widget',key);
+ if(key==='chart')resizeCharts();
+}
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function statusOf(frame){const last=frame.quality.last_close,age=Date.now()/1000-last;return frame.ready&&T.finite(data.as_of)&&Date.now()/1000-data.as_of<=900&&age>=0&&age<=T.steps[frame.interval]+300?'Disponible':frame.quality.last_segment_bars<50?'Série trop courte':'Périmé';}
+function statusOf(frame){const now=Date.now()/1000,last=frame.quality.last_close,age=now-last,min=frame.interval==='1W'?1:50;return frame.ready&&T.finite(data.as_of)&&now>=data.as_of-60&&now-data.as_of<=900&&T.finite(last)&&age>=0&&age<=S.steps[frame.interval]+300?'Disponible':frame.quality.last_segment_bars<min?'Série trop courte':'Périmé';}
 function rowClass(n){return T.finite(n)?n>=0?'positive':'negative':'';}
 function view(name){if(!['market','lab','risk','data'].includes(name))name='market';document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!=='view-'+name));document.querySelectorAll('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===name));$('view-title').textContent={market:'Centre de marché',lab:'Laboratoire quantitatif',risk:'Simulateur de risque',data:'Données & preuves'}[name];history.replaceState(null,'','#'+name);if(name==='market'&&chart)resizeCharts();}
 function renderTickers(){
@@ -37,8 +88,7 @@ function renderDecision(){
 }
 function renderWidgets(){
  const f=data.frames[tf], l=f.latest, availability=statusOf(f);
- if(availability!=='Disponible') $('technical-widget').innerHTML=`<p class="amber-text">${esc(tf)} · ${esc(availability)} : indicateurs masqués jusqu’à réception d’un snapshot valide.</p>`;
- else $('technical-widget').innerHTML=`<p>${esc(tf)} · ${esc(availability)} · clôture ${date(f.quality.last_close)} UTC</p><dl><dt>Structure EMA20 / EMA50</dt><dd>${esc(l.trend)}</dd><dt>RSI 14</dt><dd>${fmt(l.rsi14,1)}</dd><dt>Histogramme MACD</dt><dd>${fmt(l.macd_hist,7)}</dd><dt>ADX 14</dt><dd>${fmt(l.adx14,1)}</dd><dt>Volume relatif</dt><dd>${fmt(l.volume_ratio,2)} ×</dd></dl><p class="footnote">Indicateurs descriptifs : aucune note ne représente une probabilité de réussite.</p>`;
+ renderSmart(f,availability);
  const d=T.safeDecision(data),p=d.plan;
  if(d.status==='DONNÉES INSUFFISANTES') $('tradeplan-widget').innerHTML='<p class="amber-text">Données insuffisantes ou périmées : plan masqué. Aucun ordre.</p>';
  else if(!p||![p.entry,p.stop,p.target,p.rr_net].every(T.finite)) $('tradeplan-widget').innerHTML='<p class="amber-text">Aucun plan chiffré disponible pour ce snapshot. Aucun ordre.</p>';
@@ -46,7 +96,7 @@ function renderWidgets(){
 }
 function renderFrames(){
  renderWidgets();
- $('timeframe-table').innerHTML=Object.values(data.frames).sort((a,b)=>T.steps[a.interval]-T.steps[b.interval]).map(f=>{const l=f.latest,q=f.quality;return `<tr><td>${esc(f.interval)}</td><td class="${statusOf(f)==='Disponible'?'positive':'amber-text'}">${statusOf(f)}</td><td>${esc(l.trend)}</td><td>${fmt(l.rsi14,1)}</td><td>${fmt(l.adx14,1)}</td><td>${fmt(l.volume_ratio,2)} ×</td><td>${date(q.last_close)}</td></tr>`;}).join('');
+ $('timeframe-table').innerHTML=Object.values(data.frames).sort((a,b)=>S.steps[a.interval]-S.steps[b.interval]).map(f=>{const l=f.latest,q=f.quality;return `<tr><td>${esc(f.interval)}</td><td class="${statusOf(f)==='Disponible'?'positive':'amber-text'}">${statusOf(f)}</td><td>${esc(l.trend)}</td><td>${fmt(l.rsi14,1)}</td><td>${fmt(l.adx14,1)}</td><td>${fmt(l.volume_ratio,2)} ×</td><td>${date(q.last_close)}</td></tr>`;}).join('');
 }
 function renderFactors(){const f=data.frames[tf],l=f.latest,btc=data.context.btc4h?.correlation;
  $('factors').innerHTML=[['Structure · '+tf,l.trend??'INDISPONIBLE',!T.finite(l.ema50)?'EMA50 indisponible après la dernière interruption.':'EMA20 '+price(l.ema20)+' · EMA50 '+price(l.ema50),''],['Momentum · '+tf,fmt(l.rsi14,1),'RSI14 arithmétique · MACD '+(l.macd_improving?'en amélioration':'sans amélioration'),l.rsi14>50?'positive':'amber-text'],['Volatilité · '+tf,T.finite(l.atr14)?fmt(100*l.atr14/l.close,2)+' %':'—','ATR14 / clôture · ADX '+fmt(l.adx14,1),''],['Corrélation TEL / BTC',fmt(btc?.pearson,2),(btc?.n??0)+' rendements 4h alignés. Corrélation ≠ causalité.','']].map(([title,value,desc,cls])=>`<div class="factor"><div class="label">${esc(title)}</div><div class="metric ${cls}" style="${value.length>11?'font-size:17px':''}">${esc(value)}</div><p>${esc(desc)}</p></div>`).join('');
@@ -59,7 +109,7 @@ function setupCharts(){
  candles=chart.addSeries(L.CandlestickSeries,{upColor:'#65cdb0',downColor:'#da7985',borderVisible:false,wickUpColor:'#65cdb0',wickDownColor:'#da7985',priceFormat:{type:'price',precision:6,minMove:.000001}});
  chart.priceScale('right').applyOptions({scaleMargins:{top:.12,bottom:.23}});
  vol=chart.addSeries(L.HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:'volume',lastValueVisible:false,priceLineVisible:false});vol.priceScale().applyOptions({scaleMargins:{top:.86,bottom:0}});
- for(const [key,color] of [['ema20','#e8ad62'],['ema50','#74a3ed'],['sma200','#b8a0eb']])lines[key]=chart.addSeries(L.LineSeries,{color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
+ for(const [key,color] of [['ema20','#e8ad62'],['ema50','#74a3ed'],['sma200','#b8a0eb'],['vwap_session','#54c4ba']])lines[key]=chart.addSeries(L.LineSeries,{color,lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
  osc=L.createChart($('osc-chart'),{...common,width:$('osc-chart').clientWidth,height:$('osc-chart').clientHeight,timeScale:{...common.timeScale,visible:false}});
  oscLine=osc.addSeries(L.LineSeries,{color:'#b8a0eb',lineWidth:1,priceLineVisible:false,priceFormat:{type:'price',precision:2,minMove:.01}});
  chart.timeScale().subscribeVisibleLogicalRangeChange(range=>{if(range&&!rangeSync){rangeSync=true;osc.timeScale().setVisibleLogicalRange(range);rangeSync=false;}});
@@ -69,15 +119,23 @@ function setupCharts(){
 }
 function resizeCharts(){if(!chart||!$('chart').clientWidth)return;chart.resize($('chart').clientWidth,$('chart').clientHeight);osc.resize($('osc-chart').clientWidth,$('osc-chart').clientHeight);}
 function showOHLC(r){if(!r){$('ohlc').textContent='Aucune bougie disponible pour cette unité.';return;}$('ohlc').innerHTML=`O <b>${price(r.o??r.open)}</b> &nbsp; H <b>${price(r.h??r.high)}</b> &nbsp; L <b>${price(r.l??r.low)}</b> &nbsp; C <b>${price(r.c??r.close)}</b>`;}
-function renderChart(){renderWidgets();const f=data.frames[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
- document.querySelectorAll('[data-tf]').forEach(b=>b.classList.toggle('selected',b.dataset.tf===tf));
+function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvailability=statusOf(f);$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
+ document.querySelectorAll('[data-tf]').forEach(b=>{b.classList.toggle('selected',b.dataset.tf===tf);b.setAttribute('aria-pressed',String(b.dataset.tf===tf));});
  if(!chart)return;
  // Whitespace creates visible time gaps; no artificial OHLC points.
  const cs=[],vs=[];let previous=null;
- for(const r of f.bars){if(previous!==null&&r.t-previous>T.steps[tf]){cs.push({time:previous+T.steps[tf]});vs.push({time:previous+T.steps[tf]});}cs.push({time:r.t,open:r.o,high:r.h,low:r.l,close:r.c});vs.push({time:r.t,value:r.v,color:r.c>=r.o?'#234e46':'#4c2c38'});previous=r.t;}
+ for(const r of f.bars){if(previous!==null&&r.t-previous>S.steps[tf]){cs.push({time:previous+S.steps[tf]});vs.push({time:previous+S.steps[tf]});}cs.push({time:r.t,open:r.o,high:r.h,low:r.l,close:r.c});vs.push({time:r.t,value:r.v,color:r.c>=r.o?'#234e46':'#4c2c38'});previous=r.t;}
  candles.setData(cs);vol.setData(vs);
- for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(f.series,T.steps[tf],key));lines[key].applyOptions({visible:$(key).checked});}
- oscLine.setData(T.chartSeries(f.series,T.steps[tf],oscMode));
+ for(const line of chartPriceLines)candles.removePriceLine(line);
+ chartPriceLines=[];
+ if($('smart-levels').checked&&statusOf(f)==='Disponible'){
+  const m=technicalCache.get(f).levels;
+  const levels=[[m.support,'Support','#54c4ba'],[m.resistance,'Résistance','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),...(m.fvgs??[]).flatMap(z=>[[z.low,'FVG','#8a6bb0'],[z.high,'','#8a6bb0']])];
+  chartPriceLines=levels.filter(([p])=>T.finite(p)).map(([price,title,color])=>candles.createPriceLine({price,title,color,lineWidth:1,lineStyle:2,axisLabelVisible:!!title}));
+ }
+
+ for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(f.series,S.steps[tf],key));lines[key].applyOptions({visible:$(key).checked});}
+ oscLine.setData(T.chartSeries(f.series,S.steps[tf],oscMode));
  oscLine.applyOptions({color:oscMode==='rsi14'?'#b8a0eb':'#74a3ed',priceFormat:{type:'price',precision:oscMode==='rsi14'?2:7,minMove:oscMode==='rsi14'?.01:.0000001}});
  $('osc-value').textContent=fmt(f.latest[oscMode],oscMode==='rsi14'?2:7);
  if(!f.bars.length)return;
@@ -96,10 +154,10 @@ function renderEvents(){const tfFilter=$('event-tf').value,fam=$('event-family')
  $('events-table').innerHTML=data.lab.events.filter(r=>(tfFilter==='all'||r.timeframe===tfFilter)&&(fam==='all'||r.hypothesis===fam)).map(r=>`<tr><td>${labels[r.hypothesis]}</td><td>${r.timeframe}</td><td>${r.effective_horizon_hours} h${r.effective_horizon_hours!==r.horizon_hours?` <span class="amber-text">(demandé : ${r.horizon_hours}h)</span>`:''}</td><td>${r.n}</td><td class="${rowClass(r.mean_return_pct)}">${pct(r.mean_return_pct)}</td><td>${pct(r.mean_excess_pct)}</td><td>${r.inference.p===null?'N/A · effectif faible':fmt(r.inference.holm_p,3)}</td></tr>`).join('');
 }
 function renderQuality(){
- $('quality-table').innerHTML=Object.values(data.frames).map(f=>{const q=f.quality;return `<tr><td>${f.interval}</td><td>${q.source_rows}</td><td>${q.valid_bars}</td><td class="amber-text">${q.excluded_rows}</td><td>${q.missing_bars}</td><td>${q.segments}</td><td class="${q.last_segment_bars<50?'amber-text':'positive'}">${q.last_segment_bars} bougies</td></tr>`;}).join('');
+ $('quality-table').innerHTML=Object.values(data.frames).map(f=>{const q=f.quality;return `<tr><td>${f.interval}</td><td>${(q.source_rows??q.valid_bars)}</td><td>${q.valid_bars}</td><td class="amber-text">${q.excluded_rows}</td><td>${q.missing_bars}</td><td>${q.segments}</td><td class="${q.last_segment_bars<50?'amber-text':'positive'}">${q.last_segment_bars} bougies</td></tr>`;}).join('');
  const entries=[['Marché',data.market],['Fournisseur',data.source],['Capture UTC',data.captured_at],['Fichier source',data.source_path],['SHA-256 source',data.source_sha256],['Protocole expérimental',data.lab.experiments.protocol_sha256],['Exécution','Aucun ordre réel ou paper']];
  $('provenance').innerHTML=entries.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
- $('limits').innerHTML=[...data.limits,'Pas de macro, de carnet live intégré, de portefeuille persistant ni d’alertes automatiques dans cet incrément.'].map(x=>`<li>${esc(x)}</li>`).join('');
+ $('limits').innerHTML=[...data.limits,'BTC et ETH sont des cotations de contexte. Carnet L2 et flux institutionnels live indisponibles.'].map(x=>`<li>${esc(x)}</li>`).join('');
  $('quarantine').textContent=JSON.stringify(Object.fromEntries(Object.entries(data.frames).map(([tf,f])=>[tf,{reasons:f.quality.reasons,rows:f.excluded}])),null,2);
 }
 async function refreshEurUsd(){
@@ -142,7 +200,7 @@ async function refreshSnapshot(){
    }catch(e){lastErr=e;}
   }
   if(!next){if(lastErr)console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',lastErr.message);return;}
-  data=next;renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
+  data=withWeekly(next);renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
  }catch(e){console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',e.message);
  }finally{snapshotBusy=false;}
 }
@@ -153,14 +211,23 @@ function renderScenarios(){
  const node=$('conditional-scenarios');if(!node||!data)return;
  const fxOk=T.finite(eurUsd)&&Date.now()-eurUsdFetched<86400000;
  const budget=Number($('budget-eur').value),capital=Number($('capital').value),fee=Number($('fee').value)/100,slip=Number($('slip').value)/100;
- const options={quote:liveQuote,capital,budgetUsd:fxOk?budget*eurUsd:NaN,fee,slip,tv:data.independent_verification};
+ const options={quote:liveQuote,capital:fxOk?Math.min(capital,1000*eurUsd):capital,budgetUsd:fxOk?Math.min(budget,1000)*eurUsd:NaN,fee,slip,tv:data.independent_verification};
  scenarioPlans=window.TEL99Scenarios.generate(data,options);
- const a=window.TEL99Scenarios.allocate(scenarioPlans,capital,options.budgetUsd);
+ const a=window.TEL99Scenarios.allocate(scenarioPlans,options.capital,options.budgetUsd);
  const ready=scenarioPlans.filter(p=>p.status==='PRÊT À ÉVALUER');
- $('decision-quick').innerHTML='<b>'+esc((T.safeDecision(data).status==='DONNÉES INSUFFISANTES'||Object.values(data.frames).some(f=>statusOf(f)!=='Disponible'))?'DONNÉES INSUFFISANTES':ready.length?'ACHAT POSSIBLE':'ATTENDRE')+'</b><span>'+Object.entries(data.frames).map(([tf,f])=>esc(tf)+': '+esc(statusOf(f))+' · '+esc(f.latest.trend)).join('<br>')+'</span>';
+ const d=T.safeDecision(data);
+ const stale=d.status==='DONNÉES INSUFFISANTES'||['15m','1h','4h','1D'].some(key=>statusOf(data.frames[key])!=='Disponible');
+ const plans=scenarioPlans.filter(p=>[p.entry,p.stop,p.target].every(T.finite));
+ const watch=ready[0]??plans.find(p=>p.id==='reversal')??plans[0];
+ const status=stale?'DONNÉES INSUFFISANTES':ready.length?'ACHETER · PLAN À VÉRIFIER':watch&&/repli|pullback|support/i.test(watch.id)?'ATTENDRE REPLI':watch?'ATTENDRE CONFIRMATION':'NE PAS ACHETER';
+ const reason=stale?'La capture analytique ou une unité requise est indisponible.':watch?.reasons?.[0]??watch?.condition??'Aucun scénario chiffré admissible.';
+ const quote=liveQuote&&T.freshQuote(liveQuote)?liveQuote:null;
+ const f=data.frames['4h'];
+ const note=quote?'Kraken · reçu '+date(quote.received)+' UTC':'Dernière clôture 4 h · '+date(f.quality.last_close)+' UTC';
+ $('decision-quick').innerHTML=`<div class="decision-main"><b>${esc(status)}</b><strong>TEL/USD · ${price(quote?.price??f.latest.close)} $</strong></div><div class="decision-meta">${esc(note)} · Analyse ${date(data.as_of)} UTC</div><div class="decision-prices"><span>Entrée ${price(stale?null:watch?.entry)} $</span><span>Invalidation ${price(stale?null:watch?.stop)} $</span><span>Objectif ${price(stale?null:watch?.target)} $</span></div><span>${stale?'Confiance indéterminée':'Confiance limitée · avantage statistique non démontré'}. ${esc(reason)}</span>`;
  node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':'Aucun scénario prêt à évaluer.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<article class="scenario-card"><h3>${esc(p.name)} <span class="chip">${esc(p.status)}</span></h3><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></article>`).join('')+
- '<p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage '+fmt(slip*100,2)+' %. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
- '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives ne sont pas des ordres.</p>'+
+ '<p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage hors spread '+fmt(slip*100,2)+' %. Demi-spread ajouté à chaque côté dans le RR. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
+ '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(options.capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives sont calculées sans accès aux positions ouvertes. Vérifier la perte latente cumulée sur le capital de travail avant toute utilisation.</p>'+
  '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p>';
 }
 function bind(){
@@ -170,7 +237,10 @@ function bind(){
  document.querySelectorAll('[data-widget]').forEach(input=>{const key=input.dataset.widget,panel=document.querySelector('[data-widget-panel="'+key+'"]');input.checked=pref('widget:'+key,'true')==='true';const apply=()=>{panel.classList.toggle('hidden',!input.checked);save('widget:'+key,String(input.checked));if(key==='chart'&&input.checked)resizeCharts();};apply();input.addEventListener('change',apply);});
  document.querySelectorAll('[data-view]').forEach(e=>e.addEventListener('click',()=>view(e.dataset.view)));
  document.querySelectorAll('[data-tf]').forEach(e=>e.addEventListener('click',()=>{tf=e.dataset.tf;save('tf',tf);renderChart();}));
- for(const key of ['ema20','ema50','sma200']){$(key).checked=pref(key,key==='sma200'?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
+ $('smart-levels').addEventListener('change',renderChart);
+ document.querySelectorAll('[data-market]').forEach(b=>b.addEventListener('click',()=>selectMarket(b.dataset.market)));
+ selectMarket(['chart','technical','levels','plans','context'].includes(pref('market-widget','chart'))?pref('market-widget','chart'):'chart');
+ for(const key of ['ema20','ema50','sma200','vwap_session']){$(key).checked=pref(key,['sma200','vwap_session'].includes(key)?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
  $('chart-window').addEventListener('change',renderChart);
  for(const [id,key] of [['rsi-mode','rsi14'],['macd-mode','macd_hist']])$(id).addEventListener('click',()=>{oscMode=key;$('rsi-mode').classList.toggle('selected',key==='rsi14');$('macd-mode').classList.toggle('selected',key==='macd_hist');renderChart();});
  $('cost-scenario').addEventListener('change',renderExperiments);$('event-tf').addEventListener('change',renderEvents);$('event-family').addEventListener('change',renderEvents);
@@ -179,10 +249,11 @@ function bind(){
 }
 async function start(){try{
  const r=await fetch('data.json?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('Snapshot HTTP '+r.status);data=await r.json();if(data.schema_version!==1||data.market!=='KRAKEN:TELUSD')throw Error('Schéma ou marché incorrect');
+ data=withWeekly(data);
  tf=pref('tf','4h');if(!data.frames[tf])tf='4h';bind();setupCharts();renderTickers();renderDecision();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
- setInterval(()=>{renderTickers();renderDecision();renderFrames();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
+ setInterval(()=>{renderTickers();renderDecision();renderFrames();if(previousChartAvailability!==statusOf(data.frames[tf]))renderChart();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);

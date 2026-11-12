@@ -4,7 +4,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
 assets={}
-for name in ['index.html','app.js','core.js','scenarios.js','terminal.css','data.json','vendor/lightweight-charts-5.0.8.js']:
+for name in ['index.html','app.js','core.js','scenarios.js','smartview.js','terminal.css','data.json','vendor/lightweight-charts-5.0.8.js']:
  p=root/'site/terminal'/name
  kind={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'}[p.suffix]
  assets['/'+name]={'body':p.read_text(),'type':kind}
