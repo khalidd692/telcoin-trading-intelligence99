@@ -78,7 +78,7 @@ function renderRadar(){
  const frame=data.frames['1h'];
  const m=statusOf(frame)==='Disponible'?S.marketLevels(frame,'1h'):null;
  const profile=m?S.volumeProfile(frame):null;
- $('smart-profile').innerHTML=profile?`<p class="radar-values"><span>VAH <b>${price(profile.vah)}</b></span><span>POC <b>${price(profile.poc)}</b></span><span>VAL <b>${price(profile.val)}</b></span><span>Écart <b>${pct(100*(frame.latest.close/profile.poc-1))}</b></span></p><div class="smart-profile" aria-hidden="true">${profile.bins.map((v,i)=>`<i class="${i===profile.peak?'poc':i>=profile.lo&&i<=profile.hi?'accepted':''}" style="width:${100*v/Math.max(...profile.bins)}%"></i>`).reverse().join('')}</div><p class="radar-caption">8 jours · 60 classes · estimation HLC3 sur bougies 1h clôturées.</p>`:'<p>Profil indisponible. Il faut 192 bougies horaires clôturées et consécutives.</p>';
+ $('smart-profile').innerHTML=profile?`<p class="radar-values"><span>VAH <b>${price(profile.vah)}</b></span><span>POC <b>${price(profile.poc)}</b></span><span>VAL <b>${price(profile.val)}</b></span><span>Écart <b>${pct(100*(frame.latest.close/profile.poc-1))}</b></span></p><div class="smart-profile" aria-hidden="true">${profile.bins.map((v,i)=>`<i class="${i===profile.peak?'poc':i>=profile.lo&&i<=profile.hi?'accepted':''}" style="width:${100*v/Math.max(...profile.bins)}%"></i>`).reverse().join('')}</div><p class="radar-caption">8 jours · 60 classes · estimation HLC3 sur bougies 1h clôturées · zone de valeur à 70 % du volume.</p>`:'<p>Profil indisponible. Il faut 192 bougies horaires clôturées et consécutives.</p>';
  const structure=m?S.structureEvents(frame,'1h'):[];
  const zones=m?[...(m.fvgs??[]).map(z=>({...z,label:'FVG'})),...structure.filter(e=>e.zone).slice(-2).map(e=>({...e.zone,label:'OB estimé',side:e.side==='up'?'hausse':'baisse'}))]:[];
  $('radar-zones').innerHTML=m?(zones.length?`<ul class="radar-zones">${zones.map(z=>{
@@ -303,6 +303,42 @@ async function refreshSnapshot(){
 async function refreshQuote(){if(quoteBusy)return;quoteBusy=true;const b=$('refresh-quote');b.disabled=true;b.textContent='Connexion à Kraken…';
  try{const r=await fetch(hosted?'/api/quote':'https://api.kraken.com/0/public/Ticker?pair=TELUSD',{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error?.length)throw Error(j.error.join(', '));const p=T.parseTelTicker(j);if(p===null)throw Error('Paire Kraken ou cours invalide');liveQuote={price:p,bid:Number(Object.values(j.result)[0].b?.[0]),ask:Number(Object.values(j.result)[0].a?.[0]),received:Date.now()/1000};renderTickers();renderDecision();renderRisk();b.textContent='✓ Cours public reçu';
  }catch(e){liveQuote=null;renderTickers();renderDecision();renderRisk();b.textContent='↻ Réessayer le cours';$('freshness-banner').textContent='Cours public indisponible : '+e.message+'. Le snapshot historique reste affiché et conserve son horodatage.';}finally{quoteBusy=false;b.disabled=false;}}
+function renderRadarDecision(plans,watch){
+ const detailOpen=$('radar-reading').querySelector('details')?.open;
+ const reading=window.TEL99Radar.readRadar(data,plans);
+ const quote=T.freshQuote(liveQuote)?liveQuote:null;
+ const rr=T.finite(watch?.rrNet)?fmt(watch.rrNet,2)+' R':'indisponible';
+ const point=p=>p?price(p.level)+' $ · '+esc(p.unit):'—';
+ const factors=reading.factors.filter(f=>f.active===true).map(f=>f.id==='convergence'?'Convergence EMA20 15 min / 1 h':f.label);
+ const directions=reading.frames.map(f=>`<span><b>${esc(f.unit)}</b> ${esc(f.direction??'—')}</span>`).join('');
+ const evidence=reading.factors.map(f=>`<li>${f.active===null?'—':f.active?'✓':'○'} ${esc(f.label)}${f.detail?' · '+esc(f.detail):''}</li>`).join('');
+ const execution=watch?.status==='PRÊT À ÉVALUER'?'Contrôles disponibles · évaluation humaine':'Exécution non validée';
+ const spread=plans[0]?.spread;
+ const liquidity=T.finite(spread)?'Spread '+fmt(spread*100,2)+' % · profondeur non vérifiée':'Spread et profondeur indisponibles';
+ const blockers=reading.blockers;
+ $('radar-reading').innerHTML=`<div class="decision-main"><b>${esc(reading.status)}</b>${reading.status==='ALERTE PRÉCOCE'?'<span class="chip">NON CONFIRMÉE</span>':''}<strong>TEL/USD · ${price(quote?.price??data.frames['15m'].bars.at(-1)?.c)} $</strong></div>
+ <div class="decision-meta">Clôture 15 min ${date(reading.closedAt)} UTC · capture ${date(reading.asOf)} UTC · ${reading.factors.length?'données fraîches':'qualité insuffisante'}</div>
+ <div class="decision-meta">${quote?'Cotation Kraken reçue '+date(quote.received)+' UTC':'Cours de la dernière clôture 15 min'}</div>
+ <div class="radar-directions" aria-label="Directions par unité">${directions}</div>
+ <div class="decision-prices"><span>Niveau à surveiller <strong>${point(reading.watch)}</strong></span><span>Invalidation en clôture <strong>${point(reading.invalidation)}</strong></span></div>
+ <p class="radar-line"><strong>Facteurs favorables</strong> ${esc(factors.join(' · ')||'Aucun facteur actif vérifié.')}</p>
+ <p class="radar-line"><strong>${reading.status==='INVALIDATION'?'Motif':'Confirmation bloquée par'}</strong> ${esc((blockers.find(x=>x==='Confirmation non observée')??blockers[0])||'Aucun blocage détecté par le scénario.')}</p>
+ <details class="radar-reasons" ${detailOpen?'open':''}><summary>Facteurs, qualité et conditions</summary>
+ <ul>${evidence||reading.frames.map(f=>`<li>${esc(f.unit+' · '+f.quality)}</li>`).join('')}</ul>
+ <p>${esc(blockers.join(' · '))}</p>
+ ${watch?`<p><strong>${esc(watch.name)}</strong> · ${esc(watch.status)}<br>${esc(watch.condition)}<br>Entrée ${price(watch.entry)} $ · stop ${price(watch.stop)} $ · objectif ${price(watch.target)} $</p>`:''}
+ <p>RR net théorique ${rr} · ${execution}<br>Frais d’entrée estimés ${money(watch?.feeEstimate)} · frais personnels non vérifiés<br>${liquidity}</p></details>`;
+}
+async function refreshRadarHistory(){
+ const target=$('radar-history-rows');
+ try{
+  const response=await fetch('/evaluation/summary.json',{cache:'no-store',signal:AbortSignal.timeout(8000)});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const report=await response.json();
+  const rows=Array.isArray(report.recent_decisions)?report.recent_decisions:[];
+  target.innerHTML=rows.length?'<ol>'+rows.slice().reverse().map(r=>`<li><time>${date(r.observed_at)} UTC</time> · ${esc(r.previous_decision??'Première observation')} → <strong>${esc(r.decision)}</strong> · données ${r.data_valid?'valides':'insuffisantes'}${r.changed_factors?.length?'<br>'+esc(r.changed_factors.join(' · ')):''}</li>`).join('')+'</ol>':'<p>Le journal contient '+fmt(report.observations,0)+' observation(s). Les transitions détaillées apparaissent après les prochaines collectes.</p>';
+ }catch{target.textContent='Journal d’évaluation indisponible.';}
+}
 function renderScenarios(){
  const node=$('conditional-scenarios');if(!node||!data)return;
  const fxOk=T.finite(eurUsd)&&Date.now()-eurUsdFetched<86400000;
@@ -311,13 +347,9 @@ function renderScenarios(){
  scenarioPlans=window.TEL99Scenarios.generate(data,options);
  const a=window.TEL99Scenarios.allocate(scenarioPlans,options.capital,options.budgetUsd);
  const ready=scenarioPlans.filter(p=>p.status==='PRÊT À ÉVALUER');
- const {status,plan:watch,reason}=window.TEL99Scenarios.summarize(scenarioPlans,requiredDataIssues());
+ const {status,plan:watch}=window.TEL99Scenarios.summarize(scenarioPlans,requiredDataIssues());
  const blocked=status==='DONNÉES INSUFFISANTES';
- const quote=liveQuote&&T.freshQuote(liveQuote)?liveQuote:null;
- const f=data.frames['4h'];
- const note=quote?'Kraken · reçu '+date(quote.received)+' UTC':'Dernière clôture 4 h · '+date(f.quality.last_close)+' UTC';
- const prices=watch?`<div class="decision-prices"><span>Entrée ${price(watch.entry)} $</span><span>Invalidation ${price(watch.stop)} $</span><span>Objectif ${price(watch.target)} $</span><span>RR net ${fmt(watch.rrNet,2)}</span><span>Frais estimés ${T.finite(watch.feeEstimate)?money(watch.feeEstimate):'indisponibles'}</span></div>`:'';
- $('decision-quick').innerHTML=`<div class="decision-main"><b>${esc(status)}</b><strong>TEL/USD · ${price(quote?.price??f.latest.close)} $</strong></div><div class="decision-meta">${esc(note)} · Analyse ${date(data.as_of)} UTC</div>${prices}<span>${esc(reason)}</span>`;
+ renderRadarDecision(scenarioPlans,watch);
 
  const expanded=new Set([...node.querySelectorAll('details[data-scenario][open]')].map(x=>x.dataset.scenario));
  node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':blocked?'Évaluation bloquée par les données.':'Aucun plan admissible à l’exécution.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<details class="scenario-card" data-scenario="${p.id}" ${expanded.has(p.id)?'open':''}><summary><b>${esc(p.name)}</b><span class="chip">${esc(p.status)}</span></summary><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></details>`).join('')+
@@ -357,6 +389,7 @@ function bind(){
  for(const id of ['smart-levels','smart-pivots','smart-zones'])$(id).addEventListener('change',renderChart);
  document.querySelectorAll('[data-market]').forEach(b=>b.addEventListener('click',()=>selectMarket(b.dataset.market)));
  selectMarket('radar');
+ $('radar-history').addEventListener('toggle',()=>{if($('radar-history').open)refreshRadarHistory();});
  for(const key of ['ema20','ema50','sma200','vwap_session']){$(key).checked=pref(key,key==='sma200'?'false':'true')==='true';$(key).addEventListener('change',()=>{save(key,$(key).checked);renderChart();});}
  $('chart-window').addEventListener('change',renderChart);
  for(const [id,key] of [['rsi-mode','rsi14'],['macd-mode','macd_hist']])$(id).addEventListener('click',()=>{oscMode=key;$('rsi-mode').classList.toggle('selected',key==='rsi14');$('macd-mode').classList.toggle('selected',key==='macd_hist');renderChart();});

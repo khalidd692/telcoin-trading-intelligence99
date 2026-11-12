@@ -48,7 +48,7 @@ jobs:
         run: |
           node --check site/terminal/app.js
           node tests/test_terminal.js
-          node --test tests/test_terminal_scenarios.js tests/test_terminal_worker.js tests/test_terminal_smartview.js
+          node --test tests/test_terminal_*.js
           node tests/test_dashboard.js
           node tests/test_realtime.js
       - name: Deterministic terminal build

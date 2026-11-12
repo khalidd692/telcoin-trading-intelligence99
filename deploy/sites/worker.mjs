@@ -2,6 +2,7 @@
 const routes={
  '/api/quote':'https://api.kraken.com/0/public/Ticker?pair=TELUSD',
  '/api/fx':'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD',
+ '/evaluation/summary.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/refs/heads/tel99-evaluation-data/evaluation/summary.json',
  '/data.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json'
 };
 const reply=(body,type='application/json',status=200,extra={})=>new Response(body,{status,headers:{'Content-Type':type+'; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...extra}});
