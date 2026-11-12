@@ -24,6 +24,8 @@ class EvaluationTests(unittest.TestCase):
         future={"observed_at":"4600","price":"0.0011","data_valid":"true"}
         rows=[first,future]
         update(rows,4500)
+        self.assertNotIn("r_1h",first)
+        update(rows,4600)
         self.assertEqual(first.get("r_1h"),"10.00000")
         self.assertNotIn("r_4h",first)
     def test_no_future_observation(self):
