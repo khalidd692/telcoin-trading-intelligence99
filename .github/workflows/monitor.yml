@@ -342,3 +342,12 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/tel99-live-publication.yml
+
+  tel99-forward-observation:
+    # The reusable publisher inside this monitor does not emit a separate
+    # workflow_run event. Record its result explicitly once publication succeeds.
+    needs: tel99-publication
+    if: github.ref == 'refs/heads/main' && needs.tel99-publication.result == 'success'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/tel99-forward-evaluation.yml
