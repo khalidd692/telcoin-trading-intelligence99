@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794604416,
-  "observations": 46,
-  "valid_observations": 44,
+  "generated_at": 1794605250,
+  "observations": 47,
+  "valid_observations": 45,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -65,6 +65,14 @@
               "mean_pct": -1.57742
             }
           }
+        },
+        "observation_time_v3": {
+          "by_rsi_method": {
+            "wilder_rma_14_sma_seed": {
+              "count": 2,
+              "mean_pct": -1.65289
+            }
+          }
         }
       }
     },
@@ -87,16 +95,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794588735,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 zone"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794589590,
       "previous_decision": "ATTENDRE",
@@ -342,6 +340,17 @@
       "changed_factors": [
         "\u2212 reclaim",
         "\u2212 volume"
+      ],
+      "event": null
+    },
+    {
+      "observed_at": 1794605250,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ rsi",
+        "\u2212 convergence"
       ],
       "event": null
     }
