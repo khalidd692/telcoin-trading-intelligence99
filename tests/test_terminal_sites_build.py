@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -72,6 +73,26 @@ class SitesBuildProvenance(unittest.TestCase):
             run = subprocess.run([sys.executable, 'deploy/sites/build.py', directory], env=env,
                                  text=True, capture_output=True)
             self.assertNotEqual(run.returncode, 0)
+
+    def test_implicit_commit_refuses_modified_production_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo=Path(directory,'repo'); repo.mkdir()
+            names=['index.html','app.js','core.js','scenarios.js','smartview.js','radar.js','smartwidgets.js','terminal.css','data.json','vendor/lightweight-charts-5.0.8.js']
+            paths=['site/terminal/'+name for name in names]+['deploy/sites/worker.mjs','deploy/sites/build.py']
+            for name in paths:
+                target=repo/name; target.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(name,target)
+            subprocess.run(['git','init','-q'],cwd=repo,check=True)
+            subprocess.run(['git','config','user.name','TEL99 test'],cwd=repo,check=True)
+            subprocess.run(['git','config','user.email','test@example.invalid'],cwd=repo,check=True)
+            subprocess.run(['git','add',*paths],cwd=repo,check=True)
+            subprocess.run(['git','commit','-qm','test'],cwd=repo,check=True)
+            env=dict(os.environ);env.pop('TEL99_PRODUCT_COMMIT',None);env.pop('TEL99_PRODUCT_BLOBS_PATH',None);env.pop('TEL99_FALLBACK_DATA',None)
+            run=subprocess.run([sys.executable,'deploy/sites/build.py',str(Path(directory,'good'))],cwd=repo,env=env,text=True,capture_output=True)
+            self.assertEqual(run.returncode,0,run.stderr)
+            with (repo/'site/terminal/app.js').open('a') as f:f.write('\n// local modification\n')
+            run=subprocess.run([sys.executable,'deploy/sites/build.py',str(Path(directory,'dirty'))],cwd=repo,env=env,text=True,capture_output=True)
+            self.assertNotEqual(run.returncode,0)
+            self.assertIn('site/terminal/app.js',run.stderr)
 
 
 if __name__ == '__main__':

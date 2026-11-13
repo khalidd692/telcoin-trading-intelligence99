@@ -70,7 +70,7 @@ function allocate(plans,capital,budgetUsd){
 }
 function copyText(p,now=Date.now()/1000){
  if(p.status!=='PRÊT À ÉVALUER'||p.hypothetical||now>p.expiresAt||now<p.calculatedAt||!p.admissible||!T.finite(p.qty)||p.qty<=0)throw Error('Scénario non vérifié ou périmé : copie bloquée.');
- return `TEL99 — PROPOSITION À VÉRIFIER HUMAINEMENT — AUCUN ORDRE\nKRAKEN:TELUSD spot long, sans levier\n${p.name}\nEntrée limite ${p.entry} USD; stop ${p.stop}; objectif ${p.target}\n${p.condition}\nQuantité indicative ${p.qty} TEL; RR net ${p.rrNet}; risque planifié ${p.risk} USD\nCalcul ${new Date(p.calculatedAt*1000).toISOString()}\n${p.invalidation}\nUn ordre limite passif ne protège pas d’une chute. Réserve de 2 000 000 TEL exclue. Ne pas cumuler ces tailles individuelles.`;
+ return `TEL99 — PROPOSITION À VÉRIFIER HUMAINEMENT — AUCUN ORDRE\nKRAKEN:TELUSD spot long, sans levier\n${p.name}\nEntrée limite ${p.entry} USD; stop ${p.stop}; objectif ${p.target}\n${p.condition}\nQuantité indicative ${p.qty} TEL; RR net ${p.rrNet}; risque planifié ${p.risk} USD\nCalcul ${new Date(p.calculatedAt*1000).toISOString()}\n${p.invalidation}\nUn ordre limite passif ne protège pas d’une chute. Réserve long terme exclue. Ne pas cumuler ces tailles individuelles.`;
 }
 const api={generate,summarize,allocate,copyText};if(typeof module==='object')module.exports=api;else root.TEL99Scenarios=api;
 })(typeof window==='object'?window:globalThis);

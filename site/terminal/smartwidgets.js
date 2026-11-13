@@ -59,6 +59,23 @@ function horizonGroups(horizon){
  return groups;
 }
 function chartBars(frame,status){return ['Clôtures incohérentes','Provenance incohérente'].includes(status)?[]:Array.isArray(frame?.bars)?frame.bars:[];}
-const api={readBook,buyImpact,accumulation,layout,distancePct,gaugeFreshness,horizonGroups,chartBars};
+function readMarketTickers(payload){
+ if(!Array.isArray(payload?.error)||payload.error.length||!payload.result||typeof payload.result!=='object')return null;
+ const specs=[['TEL/USD','TEL','USD',['TELUSD','XTELZUSD']],['TEL/EUR','TEL','EUR',['TELEUR']],['BTC/USD','BTC','USD',['XXBTZUSD','XBTUSD']],['ETH/USD','ETH','USD',['XETHZUSD','ETHUSD']]];
+ const number=x=>{
+  if(typeof x==='number')return Number.isFinite(x)?x:NaN;
+  if(typeof x!=='string'||!/^\s*(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?\s*$/i.test(x))return NaN;
+  return Number(x);
+ };
+ const field=(row,key,index)=>Array.isArray(row?.[key])?number(row[key][index]):NaN;
+ return specs.map(([pair,base,currency,keys])=>{
+  const found=keys.filter(k=>Object.hasOwn(payload.result,k));
+  const item=found.length===1?payload.result[found[0]]:null;
+  const last=field(item,'c',0),bid=field(item,'b',0),ask=field(item,'a',0),open=number(item?.o),volume=field(item,'v',1);
+  return {pair,base,currency,price:positive(last)?last:null,change:positive(last)&&positive(open)?100*(last/open-1):null,volume:Number.isFinite(volume)&&volume>=0?volume:null,spread:positive(bid)&&positive(ask)&&ask>=bid?100*(ask-bid)/((ask+bid)/2):null};
+ });
+}
+function marketFresh(received,now){return positive(received)&&Number.isFinite(now)&&now>=received&&now-received<=120;}
+const api={readBook,buyImpact,accumulation,layout,distancePct,gaugeFreshness,horizonGroups,chartBars,readMarketTickers,marketFresh};
 if(typeof module==='object')module.exports=api;else root.TEL99Widgets=api;
 })(typeof window==='object'?window:globalThis);

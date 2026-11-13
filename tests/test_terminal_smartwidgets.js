@@ -76,3 +76,28 @@ test('le graphique masque les bougies de provenance ou de clôture incohérente'
   assert.deepEqual(W.chartBars(frame,'Provenance incohérente'),[]);
   assert.equal(W.chartBars(frame,'Capture périmée').length,2);
 });
+test('le comparateur conserve la devise et la source de chaque paire Kraken', () => {
+  const W=widgets();
+  const ticker=(last,bid,ask,open,volume)=>({c:[String(last),'1'],b:[String(bid)],a:[String(ask)],o:String(open),v:['0',String(volume)]});
+  const out=W.readMarketTickers({error:[],result:{TELUSD:ticker(1,0.99,1.01,0.8,100),TELEUR:ticker(0.9,0.89,0.91,0.8,200),XXBTZUSD:ticker(100,99,101,90,2),XETHZUSD:ticker(10,9.9,10.1,9,3)}});
+  assert.equal(out.length,4);
+  assert.equal(out[0].pair,'TEL/USD'); assert.equal(out[0].currency,'USD');
+  assert.equal(out[1].pair,'TEL/EUR'); assert.equal(out[1].currency,'EUR');
+  assert.equal(out[2].pair,'BTC/USD'); assert.equal(out[2].base,'BTC');
+  assert.equal(out[0].volume,100); assert.ok(Math.abs(out[0].change-25)<1e-9);
+  assert.ok(Math.abs(out[0].spread-2)<1e-9);
+  const partial=W.readMarketTickers({error:[],result:{TELUSD:ticker(1,1.01,0.99,0,100)}});
+  assert.equal(partial[0].price,1); assert.equal(partial[0].spread,null); assert.equal(partial[0].change,null);
+  assert.equal(partial[1].price,null);
+  assert.equal(W.readMarketTickers({error:['unknown pair'],result:{}}),null);
+  const malformed=W.readMarketTickers({error:[],result:{TELUSD:{c:'12.34',b:'10',a:'19',o:true,v:[0,false]}}});
+  assert.equal(malformed[0].price,null); assert.equal(malformed[0].spread,null);
+  assert.equal(malformed[0].change,null); assert.equal(malformed[0].volume,null);
+});
+test('une cotation de comparaison future ou vieille de plus de deux minutes est refusée', () => {
+  const W=widgets();
+  assert.equal(W.marketFresh(1000,1120),true);
+  assert.equal(W.marketFresh(1000,1121),false);
+  assert.equal(W.marketFresh(1001,1000),false);
+  assert.equal(W.marketFresh(0,1000),false);
+});

@@ -11,6 +11,7 @@ let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuot
 let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0,fxReferenceDate=null;
 const S=window.TEL99SmartView, W=window.TEL99Widgets;
 let depthBook=null, depthReceived=0, depthBusy=false, historyBusy=false, latestJournalEntry=null;
+let marketTickers=null, marketReceived=0, marketBusy=false, marketExpiryTimer=null;
 let cardState, cardCategory='Tous';
 const cardDefinitions=[
  ['chart','Graphique de prix','Techniques','Bougies, moyennes, niveaux et couches.',true],
@@ -23,6 +24,7 @@ const cardDefinitions=[
  ['liquidity','Carnet Kraken','Marché','Spread, profondeur et impact indicatif.',true],
  ['price','Fiche TEL/USD','Marché','Prix et variations sur une période.',true],
  ['macro','Contexte BTC / ETH','Marché','Clôtures, volume et corrélation calculée.',true],
+ ['markets','Comparateur de marchés','Marché','Prix, volume et spread des paires Kraken.',true],
  ['prospective','Statistiques prospectives','Marché','Observations et résultats futurs du journal.',true],
  ['fundamentals','Fondamentaux','Fondamentaux','Sources et recherches datées sur Telcoin.',true],
  ['accumulation','Accumulation personnelle','Personnel','Quantité et capital saisis localement.',true],
@@ -449,6 +451,27 @@ async function refreshDepth(){
   depthBook=book;depthReceived=Date.now()/1000;
  }catch{depthBook=null;depthReceived=0;}finally{depthBusy=false;button.disabled=false;renderLiquidity();}
 }
+function renderMarkets(){
+ const target=$('markets-widget');
+ const fresh=marketTickers&&W.marketFresh(marketReceived,Date.now()/1000),key=fresh?String(marketReceived):'stale';
+ if(target.dataset.rendered===key)return;
+ target.dataset.rendered=key;
+ if(!fresh){target.innerHTML='<p class="amber-text">Marchés Kraken indisponibles ou périmés. Actualisez pour réessayer.</p>';return;}
+ target.innerHTML=`<p class="radar-caption">Réponse Kraken reçue ${date(marketReceived)} UTC. La date du dernier échange n’est pas fournie : sa fraîcheur est inconnue.</p><div class="market-comparison">${marketTickers.map(m=>`<article><h3>${esc(m.pair)}</h3><span>Dernier échange · date inconnue</span><strong>${m.price===null?'Indisponible':fmt(m.price,m.base==='TEL'?6:2)+' '+(m.currency==='EUR'?'€':'$')}</strong><span>Variation depuis 00:00 UTC : ${pct(m.change)}</span><span>Volume 24 h : ${fmt(m.volume,2)} ${esc(m.base)}</span><span>Spread bid/ask : ${m.spread===null?'—':m.spread>0&&m.spread<0.0001?'&lt; 0,0001 %':fmt(m.spread,m.spread<0.01?4:2)+' %'}</span></article>`).join('')}</div><p class="radar-caption">Paires et devises affichées séparément ; spread rapporté au milieu bid/ask. TEL/USDT sur d’autres plateformes : non disponible dans ce flux. Les cotations ne modifient pas le radar Kraken TEL/USD.</p>`;
+}
+async function refreshMarkets(){
+ if(marketBusy)return;marketBusy=true;const button=$('markets-refresh');button.disabled=true;
+ try{
+  const url=hosted?'/api/markets':'https://api.kraken.com/0/public/Ticker?pair=TELUSD,TELEUR,XBTUSD,ETHUSD';
+  const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const tickers=W.readMarketTickers(await response.json());if(!tickers)throw Error('Données de marché invalides');
+  marketTickers=tickers;marketReceived=Date.now()/1000;
+ }catch{marketTickers=null;marketReceived=0;}finally{clearTimeout(marketExpiryTimer);if(marketTickers)marketExpiryTimer=setTimeout(renderMarkets,120010);marketBusy=false;button.disabled=false;renderMarkets();}
+}
+async function showProductVersion(){
+ try{const response=await fetch('/version.json',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('HTTP');const value=await response.json();if(!/^[a-f0-9]{40}$/.test(value.product_commit))throw Error('Version invalide');$('terminal-version').textContent='Version '+value.product_commit.slice(0,8);}catch{$('terminal-version').textContent='Version non identifiée';}
+}
 function renderPersonal(){
  const quantity=$('personal-tel').value, invested=$('personal-invested').value;
  const quote=T.freshQuote(liveQuote)?liveQuote.price:null;
@@ -494,7 +517,7 @@ function renderScenarios(){
  node.innerHTML='<p><b>'+ (ready.length?'Scénario prêt à une vérification humaine.':blocked?'Évaluation bloquée par les données.':'Aucun plan admissible à l’exécution.')+'</b> Frais personnels et profondeur non vérifiés. Les niveaux restent des hypothèses ; aucune stratégie validée.</p>'+scenarioPlans.map((p,i)=>`<details class="scenario-card" data-scenario="${p.id}" ${expanded.has(p.id)?'open':''}><summary><b>${esc(p.name)}</b><span class="chip">${esc(p.status)}</span></summary><p>${esc(p.condition)}</p><dl><dt>Entrée limite envisagée</dt><dd>${price(p.entry)} $</dd><dt>Stop théorique</dt><dd>${price(p.stop)} $</dd><dt>Objectif observé</dt><dd>${price(p.target)} $</dd><dt>RR net hypothétique</dt><dd>${fmt(p.rrNet,2)} / minimum 1,5</dd><dt>Quantité individuelle indicative</dt><dd>${fmt(p.qty,2)} TEL</dd><dt>Cash / risque planifié</dt><dd>${money(p.cash)} / ${money(p.risk)}</dd><dt>Frais d’entrée hypothétiques</dt><dd>${money(p.feeEstimate)}</dd><dt>Calcul UTC</dt><dd>${date(p.calculatedAt)}</dd></dl><p>${esc(p.invalidation)}</p><p class="amber-text">${p.reasons.map(esc).join(' · ')}</p><button class="button" data-copy-scenario="${i}" ${p.status==='PRÊT À ÉVALUER'?'':'disabled'}>Copier les paramètres vérifiés</button></details>`).join('')+
  '<details class="plan-method" '+(node.querySelector('.plan-method')?.open?'open':'')+'><summary>Budget, frais et dimensionnement</summary><p>Budget sélectionné : '+fmt(budget,0)+' € · '+esc($('eur-usd').value)+'.</p><p>Hypothèses par côté : frais '+fmt(fee*100,2)+' %, slippage hors spread '+fmt(slip*100,2)+' %. Demi-spread ajouté à chaque côté dans le RR. Spread observé : '+fmt(T.finite(scenarioPlans[0]?.spread)?scenarioPlans[0].spread*100:null,2)+' %. Coûts de conversion EUR non inclus.</p>'+
  '<p><b>Si plusieurs scénarios sont retenus :</b> enveloppe agrégée plafonnée à '+money(options.capital*.0025)+' de perte planifiée et '+money(options.budgetUsd)+' de cash. '+(a.valid&&a.items.length?a.items.map(p=>esc(p.id)+': '+fmt(p.qty,2)+' TEL').join(' · ')+' ; risque total '+money(a.risk)+'.':'Aucune allocation calculable.')+' Ces tailles alternatives sont calculées sans accès aux positions ouvertes. Vérifier la perte latente cumulée sur le capital de travail avant toute utilisation.</p>'+
- '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme de 2 000 000 TEL exclue.</p></details>';
+ '<div class="table-scroll"><table><thead><tr><th>Budget</th><th>USD</th><th>TEL au support*</th><th>Frais entrée*</th></tr></thead><tbody>'+[300,400,500].map(e=>{const p=window.TEL99Scenarios.generate(data,{...options,budgetUsd:fxOk?e*eurUsd:NaN})[0];return '<tr><td>'+e+' €</td><td>'+fmt(fxOk?e*eurUsd:null,2)+'</td><td>'+fmt(p.qty,2)+'</td><td>'+money(p.feeEstimate)+'</td></tr>';}).join('')+'</tbody></table></div><p class="footnote">* Dimensionnement hypothétique limité par le risque, pas investissement de tout le budget. Un stop ne garantit pas le prix de sortie ; une limite sous le marché ne protège pas d’une chute. Réserve long terme exclue.</p></details>';
 }
 function renderPricePeriod(){document.querySelectorAll('[data-price-days]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.priceDays)===priceDays)));renderRadarCanvas($('radar-price-chart'));}
 function bind(){
@@ -505,6 +528,8 @@ function bind(){
  }
  $('personal-clear').addEventListener('click',()=>{for(const id of ['personal-tel','personal-invested']){$(id).value='';save(id,'');}renderPersonal();});
  $('liquidity-refresh').addEventListener('click',refreshDepth);
+ $('markets-refresh').addEventListener('click',refreshMarkets);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden){renderMarkets();refreshMarkets();}});
  renderPersonal();
  $('technical-month').addEventListener('click',()=>{
   $('technical-widget').innerHTML='<p>Note mensuelle indisponible. Historique Kraken trop court pour les indicateurs requis.</p>';
@@ -549,12 +574,12 @@ async function start(){try{
  tf='15m';bind();setupCharts();renderTickers();renderDecision();renderRadar();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
- setInterval(()=>{renderTickers();renderDecision();renderRadar();renderFrames();renderLiquidity();renderPersonal();if(previousChartAvailability!==chartStatus(data.frames[tf],tf))renderChart();else if(renderedSmartSignature!==JSON.stringify(W.gaugeFreshness(data.frames,data.as_of,Date.now()/1000,window.TEL99Radar.frameCheck)))renderWidgets();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
+ setInterval(()=>{renderTickers();renderDecision();renderRadar();renderFrames();renderLiquidity();renderMarkets();renderPersonal();if(previousChartAvailability!==chartStatus(data.frames[tf],tf))renderChart();else if(renderedSmartSignature!==JSON.stringify(W.gaugeFreshness(data.frames,data.as_of,Date.now()/1000,window.TEL99Radar.frameCheck)))renderWidgets();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);
- refreshDepth();refreshRadarHistory();
- setInterval(()=>{if(!document.hidden){refreshDepth();refreshRadarHistory();}},60000);
+ refreshDepth();refreshMarkets();refreshRadarHistory();showProductVersion();
+ setInterval(()=>{if(!document.hidden){refreshDepth();refreshMarkets();refreshRadarHistory();}},60000);
  // Only accept a newer same-origin analytical snapshot with unchanged frozen research.
  refreshSnapshot();
  setInterval(refreshSnapshot,60000);

@@ -4,9 +4,17 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
 names=['index.html','app.js','core.js','scenarios.js','smartview.js','radar.js','smartwidgets.js','terminal.css','data.json','vendor/lightweight-charts-5.0.8.js']
+paths=['site/terminal/'+name for name in names]+['deploy/sites/worker.mjs','deploy/sites/build.py']
+def git_blob(name):
+ content=(root/name).read_bytes()
+ return hashlib.sha1(b'blob '+str(len(content)).encode()+b'\0'+content).hexdigest()
 sha=os.environ.get('TEL99_PRODUCT_COMMIT')
 if sha is None:
  sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+ for name in paths:
+  try: committed=subprocess.check_output(['git','rev-parse',sha+':'+name],cwd=root,text=True,stderr=subprocess.DEVNULL).strip()
+  except subprocess.CalledProcessError as exc: raise ValueError('Product file missing from commit: '+name) from exc
+  if committed!=git_blob(name):raise ValueError('Product file differs from commit: '+name)
 else:
  manifest_path=os.environ.get('TEL99_PRODUCT_BLOBS_PATH')
  if not manifest_path:
@@ -14,11 +22,10 @@ else:
  manifest=json.loads(Path(manifest_path).read_text())
  if manifest.get('commit')!=sha or not isinstance(manifest.get('files'),dict):
   raise ValueError('Product blob manifest does not match the requested commit')
- paths=['site/terminal/'+name for name in names]+['deploy/sites/worker.mjs','deploy/sites/build.py']
+ # The caller must obtain this manifest from a trusted tree for the given
+ # commit. This check validates file bytes, not the manifest's provenance.
  for name in paths:
-  content=(root/name).read_bytes()
-  digest=hashlib.sha1(b'blob '+str(len(content)).encode()+b'\0'+content).hexdigest()
-  if manifest['files'].get(name)!=digest:
+  if manifest['files'].get(name)!=git_blob(name):
    raise ValueError('Product file differs from manifest: '+name)
 if not re.fullmatch(r'[0-9a-f]{40}',sha):
  raise ValueError('TEL99 product commit must be a full lowercase SHA-1')
