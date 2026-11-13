@@ -1,14 +1,14 @@
 {
-  "generated_at": 1794588735,
-  "observations": 27,
-  "valid_observations": 26,
+  "generated_at": 1794589554,
+  "observations": 28,
+  "valid_observations": 27,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
-      "count": 15,
-      "mean_pct": -0.76125,
-      "positive_fraction": 0.3333,
+      "count": 16,
+      "mean_pct": -0.72227,
+      "positive_fraction": 0.3125,
       "rsi_method": "wilder_rma_14_sma_seed",
       "by_rsi_method": {
         "legacy_or_unknown": {
@@ -17,9 +17,23 @@
           "positive_fraction": 1.0
         },
         "wilder_rma_14_sma_seed": {
-          "count": 15,
-          "mean_pct": -0.76125,
-          "positive_fraction": 0.3333
+          "count": 16,
+          "mean_pct": -0.72227,
+          "positive_fraction": 0.3125
+        }
+      },
+      "by_outcome_method": {
+        "closed_candle_time_v2": {
+          "by_rsi_method": {
+            "legacy_or_unknown": {
+              "count": 1,
+              "mean_pct": 0.20862
+            },
+            "wilder_rma_14_sma_seed": {
+              "count": 16,
+              "mean_pct": -0.72227
+            }
+          }
         }
       }
     },
@@ -34,6 +48,16 @@
           "mean_pct": 0.53266,
           "positive_fraction": 0.6667
         }
+      },
+      "by_outcome_method": {
+        "closed_candle_time_v2": {
+          "by_rsi_method": {
+            "wilder_rma_14_sma_seed": {
+              "count": 3,
+              "mean_pct": 0.53266
+            }
+          }
+        }
       }
     },
     "24h": {
@@ -41,14 +65,16 @@
       "mean_pct": null,
       "positive_fraction": null,
       "rsi_method": "wilder_rma_14_sma_seed",
-      "by_rsi_method": {}
+      "by_rsi_method": {},
+      "by_outcome_method": {}
     },
     "7d": {
       "count": 0,
       "mean_pct": null,
       "positive_fraction": null,
       "rsi_method": "wilder_rma_14_sma_seed",
-      "by_rsi_method": {}
+      "by_rsi_method": {},
+      "by_outcome_method": {}
     }
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
@@ -260,6 +286,6 @@
       "event": null
     }
   ],
-  "outcome_method": "closed_candle_time_v2; legacy CSV results are preserved, not rewritten",
+  "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
   "legacy_results_preserved": true
 }
