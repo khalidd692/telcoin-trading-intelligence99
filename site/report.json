@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-13T18:15:06.085456+00:00",
+  "generated_at": "2026-11-13T18:28:47.928253+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
-  "status": "SURVEILLER",
+  "status": "ATTENDRE",
   "collection_status": "VALID",
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001428,
-      "bid": 0.001427,
-      "ask": 0.00143,
-      "spread_pct": 0.21001050052502374,
-      "quote_volume_24h": 80511.39507,
-      "change_pct_24h": 0.0091,
+      "last": 0.001437,
+      "bid": 0.001431,
+      "ask": 0.00144,
+      "spread_pct": 0.6269592476489104,
+      "quote_volume_24h": 80612.588798,
+      "change_pct_24h": 0.0162,
       "source": "MEXC public ticker",
-      "observed_at": "2026-11-13T18:15:08.889953+00:00"
+      "observed_at": "2026-11-13T18:28:47.976686+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001423,
-      "bid": 0.001424,
-      "ask": 0.001426,
-      "observed_at": "2026-11-13T18:15:09.373216+00:00"
+      "last": 0.001437,
+      "bid": 0.001436,
+      "ask": 0.00144,
+      "observed_at": "2026-11-13T18:28:48.350769+00:00"
     }
   },
   "checks": [
@@ -37,21 +37,21 @@
     },
     {
       "name": "MEXC spread",
-      "status": "PASS",
-      "value_pct": 0.21,
+      "status": "FAIL",
+      "value_pct": 0.627,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.3508,
+      "divergence_pct": 0.0,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-11-13T18:15:00+00:00",
-    "candle_age_seconds": 9,
+    "candle_age_seconds": 828,
     "close": 0.00143,
     "ema12": 0.001446539561127821,
     "ema26": 0.0014503128312032842,
@@ -257,10 +257,10 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "043451c1-520a-43e3-94de-0ab4acd7ef7f",
+  "collection_id": "67eb6527-d263-4cad-b057-9321e689593a",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.3508,
-    "mid_price_divergence_pct": 0.2453,
+    "last_price_divergence_pct": 0.0,
+    "mid_price_divergence_pct": 0.174,
     "check_basis": "last_price",
     "limit_pct": 1.0,
     "definitions": {
@@ -268,5 +268,5 @@
       "mid_price_divergence_pct": "écart absolu entre les milieux (bid+ask)/2 MEXC et KuCoin, en pourcentage"
     }
   },
-  "interpretation": "Feeds passed basic quality checks. SURVEILLER is not an entry instruction."
+  "interpretation": "At least one quality/confirmation check failed. Fail-closed: ATTENDRE."
 }
