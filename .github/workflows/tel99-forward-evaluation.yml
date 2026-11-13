@@ -40,7 +40,9 @@ jobs:
           git worktree add --detach /tmp/tel99-radar FETCH_HEAD
           node --test /tmp/tel99-radar/tests/test_terminal_radar.js
       - name: Regression tests
-        run: python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'
+        run: |
+          python -m unittest discover -s tests -p 'test_tel99_forward_evaluation.py'
+          python -m unittest discover -s tests -p 'test_tel99_rebounds.py'
       - name: Retrieve previous observations
         run: |
           git fetch origin tel99-evaluation-data
@@ -48,7 +50,7 @@ jobs:
           git show origin/tel99-evaluation-data:evaluation/observations.csv > /tmp/tel99-evaluation/observations.csv.tmp
           test -s /tmp/tel99-evaluation/observations.csv.tmp
           mv /tmp/tel99-evaluation/observations.csv.tmp /tmp/tel99-evaluation/observations.csv
-          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl; do
+          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl rebound_protocol.jsonl rebound_candles.jsonl rebound_coverage.jsonl; do
             if git cat-file -e "origin/tel99-evaluation-data:evaluation/$name" 2>/dev/null; then
               git show "origin/tel99-evaluation-data:evaluation/$name" > "/tmp/tel99-evaluation/$name.tmp"
               mv "/tmp/tel99-evaluation/$name.tmp" "/tmp/tel99-evaluation/$name"
@@ -65,7 +67,7 @@ jobs:
           mkdir -p evaluation
           cp /tmp/tel99-evaluation/observations.csv evaluation/observations.csv
           cp /tmp/tel99-evaluation/summary.json evaluation/summary.json
-          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl; do
+          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl rebound_protocol.jsonl rebound_candles.jsonl rebound_coverage.jsonl; do
             if [ -f "/tmp/tel99-evaluation/$name" ]; then cp "/tmp/tel99-evaluation/$name" "evaluation/$name"; fi
           done
           git add evaluation/observations.csv evaluation/summary.json evaluation/*.jsonl

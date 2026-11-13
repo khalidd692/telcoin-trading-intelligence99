@@ -10,6 +10,10 @@ import math
 import subprocess
 from pathlib import Path
 import urllib.request
+if __package__:
+    from . import rebounds
+else:
+    import rebounds
 
 FIELDS = ["observed_at","snapshot_at","market","decision","scenario","scenario_status","entry","stop","target","rr_net","price","price_source","price_at","data_valid","reason","r_1h","r_4h","r_24h","r_7d","outcome_1h","outcome_4h","outcome_24h","outcome_7d","factors","event"]
 HORIZONS = {"1h":3600,"4h":14400,"24h":86400,"7d":604800}
@@ -202,6 +206,69 @@ def append_transitions(path,rows):
                             'event':event})
         previous=state
     append_records(path,records)
+
+def record_rebounds(snapshot,row,rows,now,directory):
+    """Register the protocol before collecting data; append evidence only."""
+    protocol_path=directory/'rebound_protocol.jsonl'
+    candles_path=directory/'rebound_candles.jsonl'
+    coverage_path=directory/'rebound_coverage.jsonl'
+    radar=(snapshot or {}).get('radar') or {}
+    frame=((snapshot or {}).get('frames') or {}).get('15m') or {}
+    closed=(frame.get('quality') or {}).get('last_close')
+    verified=(row.get('data_valid')=='true' and snapshot.get('market')=='KRAKEN:TELUSD'
+        and snapshot.get('source')=='Kraken public REST / OHLC' and radar.get('asOf')==snapshot.get('as_of')
+        and finite(snapshot.get('as_of')) and finite(closed) and radar.get('closedAt')==closed
+        and radar.get('status') in ('ATTENDRE','ALERTE PRÉCOCE','CONFIRMATION TECHNIQUE','INVALIDATION')) if snapshot else False
+    for path in (protocol_path,candles_path,coverage_path):
+        append_records(path,[])
+    if not protocol_path.exists():
+        if candles_path.exists() or coverage_path.exists():
+            raise ValueError('rebound evidence exists without preregistration')
+        if not verified:
+            return None
+        start_at=(int(now)//rebounds.STEP+2)*rebounds.STEP
+        append_records(protocol_path,[{'id':rebounds.VERSION,'version':rebounds.VERSION,'registered_at':now,
+          'start_at':start_at,'source':'KRAKEN:TELUSD / Kraken public REST / OHLC','interval':'15m',
+          'thresholds_pct':list(rebounds.THRESHOLDS),'horizon_seconds':rebounds.HORIZON,
+          'attribution_seconds':rebounds.ATTRIBUTION,'primary_threshold_pct':5}])
+    protocols=[json.loads(line) for line in protocol_path.read_text().splitlines()]
+    if (len(protocols)!=1 or protocols[0].get('version')!=rebounds.VERSION or protocols[0].get('id')!=rebounds.VERSION
+        or not finite(protocols[0].get('start_at')) or not finite(protocols[0].get('registered_at'))
+        or protocols[0]['start_at']<=protocols[0]['registered_at'] or protocols[0]['start_at']%rebounds.STEP
+        or protocols[0].get('thresholds_pct')!=list(rebounds.THRESHOLDS)
+        or protocols[0].get('horizon_seconds')!=rebounds.HORIZON or protocols[0].get('attribution_seconds')!=rebounds.ATTRIBUTION):
+        raise ValueError('unexpected rebound protocol')
+    start_at=protocols[0]['start_at']
+    if verified:
+        existing={x['close_at'] for x in (json.loads(line) for line in candles_path.read_text().splitlines())} if candles_path.exists() else set()
+        records=[]
+        for b in frame.get('bars') or []:
+            t=b.get('t'); vals=[b.get(k) for k in ('o','h','l','c','v')]
+            if (not finite(t) or t%rebounds.STEP or not all(finite(x) for x in vals)
+                or min(vals[:4])<=0 or vals[4]<0 or not (vals[2]<=vals[0]<=vals[1] and vals[2]<=vals[3]<=vals[1])):
+                continue
+            end=t+rebounds.STEP
+            if start_at<=end<=snapshot['as_of'] and end not in existing:
+                records.append({'id':record_id(rebounds.VERSION,'candle',end),'close_at':end,'close':b['c'],'first_seen_at':now})
+                existing.add(end)
+        append_records(candles_path,records)
+        append_records(coverage_path,[{'id':record_id(rebounds.VERSION,'coverage',row.get('snapshot_at'),now),
+          'price_at':closed,'observed_at':now,'radar_covered':True}])
+    prices=[json.loads(x) for x in candles_path.read_text().splitlines()] if candles_path.exists() else []
+    coverage=[json.loads(x) for x in coverage_path.read_text().splitlines()] if coverage_path.exists() else []
+    events=[]
+    for obs in rows:
+        if obs.get('data_valid')!='true' or not obs.get('event'):
+            continue
+        try:
+            event=json.loads(obs['event']); seen=float(obs['observed_at']); candle=event.get('candle_closed_at')
+            if (event.get('market')=='KRAKEN:TELUSD' and event.get('data_valid') is True and finite(seen)
+                and finite(candle) and candle<=seen<=now and event.get('type')=='EARLY_ALERT'):
+                events.append({**event,'observed_at':seen})
+        except (ValueError,TypeError,AttributeError):
+            continue
+    return rebounds.evaluate(prices,events,start_at,now,coverage)
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--journal",default="evaluation/observations.csv")
@@ -243,12 +310,14 @@ def main():
           'personal_fees_verified':False,'execution':'no trades or orders'}])
     scored=append_outcomes(outcomes_path,rows,now,metadata_path)
     append_transitions(events_path,rows)
+    rebound_report=record_rebounds(d,row,rows,now,path.parent)
     valid=[r for r in scored if r.get("data_valid")=="true"]
     report={"generated_at":now,"observations":len(rows),"valid_observations":len(valid),"latest_decision":row["decision"],"latest_valid":row["data_valid"],"horizons":{},"disclaimer":"Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability."}
     report["recent_decisions"] = decision_history(rows)
     report["outcome_method"]="closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved"
     outcomes=[json.loads(line) for line in outcomes_path.read_text(encoding='utf-8').splitlines()] if outcomes_path.exists() else []
     report["legacy_results_preserved"]=True
+    report['rebounds']=rebound_report
     for h in HORIZONS:
         available=[r for r in outcomes if r.get('horizon')==h and r.get('status')=='OBSERVED_PRICE_RETURN_ONLY' and finite(r.get('price_return_pct'))]
         relevant=[r for r in available if r.get('method','closed_candle_time_v2')=='closed_candle_time_v2']

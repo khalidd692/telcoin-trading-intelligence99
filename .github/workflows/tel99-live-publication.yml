@@ -32,7 +32,7 @@ jobs:
           python-version: '3.12'
       - name: Collect, validate and publish Kraken snapshots
         env:
-          TEL99_CYCLES: ${{ (github.event_name == 'schedule' || github.event.inputs.mode == 'chain') && '4' || '1' }}
+          TEL99_CYCLES: '1'
           TEL99_MONITOR_MODE: ${{ github.event.inputs.mode || '' }}
         run: |
           collect() {
@@ -58,7 +58,7 @@ jobs:
           assert set(d['frames'])=={'15m','1h','4h','1D'} and set(d['context'])=={'btc4h','eth4h'}
           for f in d['frames'].values():
               assert f['quality']['last_close']<=d['as_of']
-          d['publication']={'event':os.environ['GITHUB_EVENT_NAME'],'run_id':os.environ['GITHUB_RUN_ID'],'run_url':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],'cadence':'4-minute bursts on monitor chain and schedule; other triggers single capture','cycle':int(os.environ['TEL99_CYCLE']),'cycles':int(os.environ['TEL99_CYCLES']),'monitor_mode':os.environ.get('TEL99_MONITOR_MODE',''),'product_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()}
+          d['publication']={'event':os.environ['GITHUB_EVENT_NAME'],'run_id':os.environ['GITHUB_RUN_ID'],'run_url':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],'cadence':'one capture per run; scheduled and monitor triggers may be delayed','cycle':int(os.environ['TEL99_CYCLE']),'cycles':int(os.environ['TEL99_CYCLES']),'monitor_mode':os.environ.get('TEL99_MONITOR_MODE',''),'product_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()}
           d['published_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
           radar=Path('site/terminal/radar.js')
           if radar.is_file():
