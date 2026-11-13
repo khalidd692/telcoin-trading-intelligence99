@@ -482,8 +482,8 @@ function renderPersonal(){
 function renderProspective(report){
  const target=$('prospective-widget');
  const horizons=['1h','4h','24h','7d'].map(key=>{
-  const [main,...other]=W.horizonGroups(report.horizons?.[key]);
-  return `<div><strong>${key}</strong><span>${main.count===null?'Indisponible':main.count+' observation(s)'} · ${esc(main.method)}</span>${other.length?'<small>'+other.map(x=>esc(x.method)+' : '+(x.count??'—')).join(' · ')+'</small>':''}</div>`;
+  const groups=W.horizonGroups(report.horizons?.[key]);
+  return `<div><strong>${key}</strong>${groups.map(g=>`<span>${g.count===null?'Indisponible':g.count+' observation(s)'} · ${esc(g.method)}</span><small>${g.meanPct===null?'Variation non disponible':'Variation moyenne du prix : '+pct(g.meanPct)}</small>`).join('')}</div>`;
  }).join('');
  target.innerHTML=`<p><strong>${fmt(report.observations,0)} observations</strong> · ${fmt(report.valid_observations,0)} valides · résumé ${date(report.generated_at)} UTC</p><div class="prospective-horizons">${horizons}</div><p class="radar-caption">Le journal cloud observe le radar sur les captures, sans les paramètres de risque saisis sur cet appareil : il ne peut pas enregistrer une confirmation fondée sur ces paramètres et peut différer de l’écran.</p><p class="radar-caption">Les catégories d’alertes et les versions de stratégie ne sont pas détaillées dans le résumé actuel. Résultats : variations de prix observées, sans ordre ni gain exécuté. Un petit échantillon ne permet pas d’estimer un taux de réussite fiable.</p>`;
 }

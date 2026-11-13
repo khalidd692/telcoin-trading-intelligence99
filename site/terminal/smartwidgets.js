@@ -54,8 +54,9 @@ function gaugeFreshness(frames,capture,now,frameStatus){
 function horizonGroups(horizon){
  const count=x=>Number.isInteger(x)&&x>=0?x:null;
  const method=typeof horizon?.rsi_method==='string'&&horizon.rsi_method?horizon.rsi_method:'méthode non indiquée';
- const groups=[{method,count:count(horizon?.count)}];
- if(horizon?.by_rsi_method&&typeof horizon.by_rsi_method==='object')for(const [name,value] of Object.entries(horizon.by_rsi_method))if(name!==method)groups.push({method:name,count:count(value?.count)});
+ const group=(name,value)=>{const n=count(value?.count);return {method:name,count:n,meanPct:n>0&&typeof value?.mean_pct==='number'&&Number.isFinite(value.mean_pct)?value.mean_pct:null};};
+ const groups=[group(method,horizon)];
+ if(horizon?.by_rsi_method&&typeof horizon.by_rsi_method==='object')for(const [name,value] of Object.entries(horizon.by_rsi_method))if(name!==method)groups.push(group(name,value));
  return groups;
 }
 function chartBars(frame,status){return ['Clôtures incohérentes','Provenance incohérente'].includes(status)?[]:Array.isArray(frame?.bars)?frame.bars:[];}

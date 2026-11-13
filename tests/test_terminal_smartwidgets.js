@@ -66,8 +66,10 @@ test('la fraîcheur multi-unités détecte l’expiration du 15 min même si le 
 test('un horizon absent reste indisponible et chaque méthode RSI apparaît une seule fois', () => {
   const W=widgets();
   assert.equal(typeof W.horizonGroups,'function');
-  assert.deepEqual(W.horizonGroups(undefined),[{method:'méthode non indiquée',count:null}]);
-  assert.deepEqual(W.horizonGroups({count:2,rsi_method:'wilder',by_rsi_method:{wilder:{count:2},legacy:{count:1}}}),[{method:'wilder',count:2},{method:'legacy',count:1}]);
+  assert.deepEqual(W.horizonGroups(undefined),[{method:'méthode non indiquée',count:null,meanPct:null}]);
+  assert.deepEqual(W.horizonGroups({count:2,mean_pct:1.25,rsi_method:'wilder',by_rsi_method:{wilder:{count:2,mean_pct:1.25},legacy:{count:1,mean_pct:-2}}}),[{method:'wilder',count:2,meanPct:1.25},{method:'legacy',count:1,meanPct:-2}]);
+  assert.equal(W.horizonGroups({count:0,mean_pct:0})[0].meanPct,null);
+  assert.equal(W.horizonGroups({count:1,mean_pct:'0.5'})[0].meanPct,null);
 });
 test('le graphique masque les bougies de provenance ou de clôture incohérente', () => {
   const W=widgets(), frame={bars:[{t:1},{t:2}]};
