@@ -99,6 +99,18 @@ function renderRadarCanvas(canvas){
  drawRadarCanvas(canvas,bars,{series:frame.series,levels:[[m.support,'#54c4ba'],[m.resistance,'#ee8990']]});
  document.querySelector('[data-preview-caption="'+unit+'"]').textContent=`Kraken · ${date(frame.quality.last_close)} UTC · ${availability}`;
 }
+function renderDailyCorrelations(){
+ const result=data.daily_correlations;
+ if(!result)return '<p>Corrélations 1D indisponibles dans cette capture.</p>';
+ const {symbols,matrix,n,window,last_close,first_return_close,last_by_symbol}=result;
+ const fresh=result.fresh&&last_close===Math.floor(Date.now()/86400000)*86400;
+ const coverage=symbols.map(symbol=>esc(symbol)+' '+date(last_by_symbol[symbol])).join(' · ');
+ const rows=matrix?.map((values,i)=>'<tr><th scope="row">'+esc(symbols[i])+'</th>'+
+  values.map(value=>'<td>'+fmt(value,3)+'</td>').join('')+'</tr>').join('');
+ return '<h3>Corrélations Kraken · 1D</h3>'+
+  (rows?'<table class="radar-macro"><thead><tr><th scope="col">Pearson</th>'+symbols.map(s=>'<th scope="col">'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>':'<p>Matrice indisponible. La fenêtre doit contenir 30 rendements communs.</p>')+
+  '<p class="radar-caption">'+n+'/'+window+' rendements logarithmiques alignés · '+date(first_return_close)+' → '+date(last_close)+' UTC · '+(fresh?'à jour':'clôtures incomplètes ou décalées')+'. Dernières clôtures par paire, UTC · '+coverage+'. Corrélation historique sur cette fenêtre.</p>';
+}
 function renderRadar(){
  if(!data)return;
  const frame=data.frames['1h'];
@@ -111,11 +123,18 @@ function renderRadar(){
   const c=frame.latest.close,edge=c<z.low?z.low:c>z.high?z.high:null;
   return `<li><b>${z.label} · ${z.side}</b><span>${price(z.low)}–${price(z.high)} $</span><span>${edge===null?'Dans la zone':pct(100*(edge/c-1))}</span></li>`;
  }).join('')}</ul>`:'<p>Aucune zone détectée sur la fenêtre.</p>')+'<p class="radar-caption">BOS dans le sens de la cassure précédente, CHoCH en sens inverse. OB estimé sur la dernière bougie opposée avant cassure.</p>':'<p>Données horaires insuffisantes ou périmées.</p>';
+ if(m){
+  const events=structure.slice().reverse().map(event=>'<li>'+date(event.time+3600)+' UTC · '+
+   esc(event.label)+(event.side==='up'?' haussière':' baissière')+' · '+price(event.price)+' $</li>').join('');
+  $('radar-zones').insertAdjacentHTML('beforeend','<details><summary>Événements de structure 1 h</summary>'+
+   (events?'<ul>'+events+'</ul>':'<p>Aucune cassure de pivot sur la fenêtre.</p>')+
+   '<p class="radar-caption">120 bougies clôturées au maximum. Pivots confirmés avec deux bougies de part et d’autre. Scanner de figures Smart View propriétaire, équivalence inconnue.</p></details>');
+ }
  const quote=liveQuote&&T.freshQuote(liveQuote)?liveQuote:null;
  $('radar-price-value').textContent=price(quote?.price??data.frames['1h'].latest.close)+' $ · '+(quote?'cotation '+date(quote.received):'clôture 1h '+date(frame.quality.last_close))+' UTC';
  const context=['btc4h','eth4h'].map(k=>data.context[k]);
  const row=(label,fn)=>`<tr><th scope="row">${label}</th>${context.map(c=>`<td>${fn(c)}</td>`).join('')}</tr>`;
- $('radar-macro').innerHTML='<table class="radar-macro"><thead><tr><th>Kraken</th><th>BTC/USD</th><th>ETH/USD</th></tr></thead><tbody>'+row('Clôture 4h',c=>c?money(c.latest.close):'—')+row('Date UTC',c=>date(c?.quality.last_close))+row('Volume 4h',c=>fmt(c?.latest.volume,2))+row('Corrélation TEL',c=>fmt(c?.correlation?.pearson,2))+'</tbody></table><p class="radar-caption">Contexte à la clôture. Variations multi-périodes et capitalisation indisponibles dans ce flux.</p>';
+ $('radar-macro').innerHTML='<table class="radar-macro"><thead><tr><th>Kraken</th><th>BTC/USD</th><th>ETH/USD</th></tr></thead><tbody>'+row('Clôture 4h',c=>c?money(c.latest.close):'—')+row('Date UTC',c=>date(c?.quality.last_close))+row('Volume 4h',c=>fmt(c?.latest.volume,2))+row('Corrélation TEL 4h',c=>fmt(c?.correlation?.pearson,2))+'</tbody></table><p class="radar-caption">Contexte à la clôture. Variations multi-périodes et capitalisation indisponibles dans ce flux.</p>'+renderDailyCorrelations();
  document.querySelectorAll('[data-preview],#radar-price-chart').forEach(renderRadarCanvas);
 }
 function withWeekly(snapshot){
@@ -337,6 +356,12 @@ function renderChart(){renderWidgets();const f=data.frames[tf],quality=chartStat
 function renderLab(){const f=data.lab.frozen;
  $('lab-summary').innerHTML=`<div class="summary-card"><span>Stratégies validées</span><b class="amber-text">0</b><small>Les preuves priment</small></div><div class="summary-card"><span>Candidats primaires</span><b>${f.candidates_total}</b><small>Tous rejetés par RR</small></div><div class="summary-card"><span>Études prédictives</span><b>${data.lab.events.length}</b><small>Résultats conservés</small></div>`;
  $('frozen-results').innerHTML=`<div class="table-scroll"><table><thead><tr><th>Phase exposée</th><th>Candidats</th><th>Rejets RR</th><th>Trades</th><th>Équité</th></tr></thead><tbody>${Object.entries(f.phase_diagnostics).map(([name,v])=>`<tr><td>${esc(name)}</td><td>${v.candidates}</td><td>${v.statuses['rejet:rr_inferieur_au_minimum']??0}</td><td>${f.results.central[name].n}</td><td>${money(v.ending_equity)}</td></tr>`).join('')}</tbody></table></div><p class="footnote">RR maximal : ${fmt(f.rr_gross_max,4)} · Seuil : 1,51 · ${f.n_bars} bougies retenues. Capital inchangé faute de position ; expectancy et profit factor non calculables.</p>`;
+ const setups=data.daily_rsi_setups;
+ $('daily-rsi-setups').innerHTML=setups?`<details><summary>Setup RSI14 &lt; 30 · TEL/USD 1D</summary>
+ <p>Kraken · RSI Wilder : franchissement sous 30 · réussite si la clôture à +5 bougies est supérieure à la clôture du signal.</p>
+ <p>${setups.successes}/${setups.n} réussites · ${fmt(setups.success_pct,1)} % · rendement médian ${pct(setups.median_return_pct)} · ${setups.pending} en attente · ${setups.gapped} avec données manquantes.</p>
+ <p>${date(setups.first_close)} → ${date(setups.last_close)} UTC · ${esc(setups.version)}. Étude descriptive, sans validation statistique. Les horizons peuvent se chevaucher.</p>
+ ${setups.events.length?'<div class="table-scroll"><table><thead><tr><th>Signal UTC</th><th>Clôture +5 UTC</th><th>RSI14</th><th>Rendement</th></tr></thead><tbody>'+setups.events.map(e=>`<tr><td>${date(e.signal_close)}</td><td>${date(e.outcome_close)}</td><td>${fmt(e.rsi14,2)}</td><td>${pct(e.return_pct)}</td></tr>`).join('')+'</tbody></table></div>':''}</details>`:'<p>Statistiques RSI 1D indisponibles dans cette capture.</p>';
  renderExperiments();renderEvents();
 }
 function renderExperiments(){const cost=$('cost-scenario').value;let rows=[],trades=[];
@@ -415,15 +440,16 @@ function renderRadarDecision(plans,watch){
  const blockers=reading.blockers;
  const scan=reading.smartview_scan;
  const scanResult=x=>x.complete===null?'données manquantes':x.complete?'toutes réunies':'conditions incomplètes';
- const scanLines=x=>x.conditions.map(c=>`<li>${c.result===null?'—':c.result?'✓':'○'} ${esc(c.label)}</li>`).join('');
+ const scanLines=x=>x.conditions.map(c=>`<li>${c.result===null?'Indisponible':c.result?'Vrai':'Faux'} · ${esc(c.label)}</li>`).join('');
  renderAnnotated(reading);
  $('radar-reading').innerHTML=`<div class="decision-main"><b>${esc(reading.status)}</b>${reading.status==='ALERTE PRÉCOCE'?'<span class="chip">NON CONFIRMÉE</span>':''}<strong>TEL/USD · ${price(quote?.price??data.frames['15m'].bars.at(-1)?.c)} $</strong></div>
  <div class="decision-meta">Clôture 15 min ${date(reading.closedAt)} UTC · capture ${date(reading.asOf)} UTC · ${reading.factors.length?'données fraîches':'qualité insuffisante'}</div>
  <div class="decision-meta">${quote?'Cotation Kraken reçue '+date(quote.received)+' UTC':'Cours de la dernière clôture 15 min'}</div>
  <div class="radar-directions" aria-label="Directions par unité">${directions}</div>
  <div class="decision-prices"><span>Niveau à surveiller <strong>${point(reading.watch)}</strong></span><span>Invalidation en clôture <strong>${point(reading.invalidation)}</strong></span></div>
- <p class="radar-line"><strong>Facteurs favorables</strong> ${esc(factors.join(' · ')||'Aucun facteur actif vérifié.')}</p>
- <p class="radar-line"><strong>${reading.status==='INVALIDATION'?'Motif':'Confirmation bloquée par'}</strong> ${esc((blockers.find(x=>x==='Confirmation non observée')??blockers[0])||'Aucun blocage détecté par le scénario.')}</p>
+ <p class="radar-line"><strong>Facteurs du détecteur précoce</strong> ${esc(factors.join(' · ')||(reading.factors.length?'Aucun facteur précoce actif.':'Facteurs indisponibles.'))}</p>
+ ${reading.event?.type==='CONFIRMATION'?'<p class="radar-line"><strong>Confirmation du scénario</strong> '+esc(reading.event.technical_condition??'Condition technique remplie.')+'</p>':''}
+ <p class="radar-line"><strong>${reading.status==='INVALIDATION'?'Motif':reading.event?.type==='CONFIRMATION'?'Contrôles d’exécution':'Confirmation bloquée par'}</strong> ${esc((blockers.find(x=>x==='Confirmation non observée')??blockers[0])||'Aucun blocage détecté par le scénario.')}</p>
  <details class="radar-reasons" ${detailOpen?'open':''}><summary>Facteurs, qualité et conditions</summary>
  <ul>${evidence||reading.frames.map(f=>`<li>${esc(f.unit+' · '+f.quality)}</li>`).join('')}</ul>
  <p>${esc(blockers.join(' · '))}</p>

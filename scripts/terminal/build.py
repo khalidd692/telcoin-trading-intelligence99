@@ -8,7 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 from src.terminal import model as M
-from scripts.terminal import research
+from scripts.terminal import daily, research
 ROOT=Path(__file__).resolve().parents[2]
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -28,7 +28,11 @@ def build(source, market_source=None):
     study=cached if cached.get('fingerprint')==research.fingerprint(historical_rows) else research.run(historical_rows)
     source_for_market=market_source or source
     raw=json.loads(source_for_market.read_text());asof=M.dt.datetime.fromisoformat(raw['captured_at'].replace('Z','+00:00')).timestamp()
-    analyzed={key:M.analyze(value,asof) for key,value in raw['datasets'].items()}
+    context_daily={
+        key:M.validate_dataset(raw['datasets'][key],asof)
+        for key in ('btc1d','eth1d') if key in raw['datasets']
+    }
+    analyzed={key:M.analyze(value,asof) for key,value in raw['datasets'].items() if key not in context_daily}
     frames={f['interval']:f for f in analyzed.values() if f['symbol']=='KRAKEN:TELUSD'}
     existing=json.loads((ROOT/'results/entry_research/results.json').read_text())
     frozen=json.loads((ROOT/'results/strategy_validation/results.json').read_text())
@@ -43,11 +47,13 @@ def build(source, market_source=None):
                            'quality':analyzed[k]['quality'],
                            'correlation':M.correlation(frames['4h']['bars'],analyzed[k]['bars'])}
                        for k in ('btc4h','eth4h') if k in analyzed},
+            'daily_correlations':daily.correlations(frames.get('1D'),context_daily.get('btc1d'),context_daily.get('eth1d'),asof),
+            'daily_rsi_setups':daily.rsi_setups(frames['1D']) if '1D' in frames else None,
             'decision':M.decision(frames,asof),
             'lab':{'frozen':frozen,'events':[event_view(r) for r in existing['comparisons']],'event_protocol':existing['protocol'],
                    'event_conclusion':existing['conclusion'],'experiments':study},
             'safety':{'real_orders':False,'paper_orders':False,'capital_reference':1000,'risk_fraction':.0025,'min_rr':1.51},
-            'code_sha256':{p:digest(ROOT/p) for p in ['src/terminal/model.py','scripts/terminal/build.py','scripts/terminal/research.py','scripts/strategy_backtest/engine.py','src/agent_analysis.py']},
+            'code_sha256':{p:digest(ROOT/p) for p in ['src/terminal/model.py','scripts/terminal/build.py','scripts/terminal/daily.py','scripts/terminal/research.py','scripts/strategy_backtest/engine.py','src/agent_analysis.py']},
             'limits':['Les fenêtres historiques ont déjà été explorées ; aucun holdout vierge.',
                       'Les trous peuvent correspondre à des périodes sans transactions : aucune interpolation.',
                       'RSI14 Wilder pour ce snapshot ; les études et snapshots plus anciens conservent leur RSI arithmétique. ATR Wilder ; VWAP limité à une session UTC entièrement observée.',

@@ -1,3 +1,4 @@
+import io
 import json
 import hashlib
 import subprocess
@@ -19,6 +20,14 @@ class PublicCollection(unittest.TestCase):
     def test_api_errors_and_wrong_pair_rejected(self):
         for obj in [{'error':['rate limit'],'result':{}},{'error':[],'result':{'ETHUSD':[],'last':0}}]:
             with self.assertRaises(ValueError):collect.normalize(obj,'KRAKEN:TELUSD','4h')
+
+    def test_fetch_never_keeps_krakens_provisional_last_row(self):
+        rows=[[1794268800+i*900,'1','2','.5','1.5','1.1','42',3] for i in range(2)]
+        payload={'error':[],'result':{'TELUSD':rows,'last':1794269700}}
+        with patch.object(collect.urllib.request,'urlopen',return_value=io.BytesIO(json.dumps(payload).encode())):
+            captured=collect.fetch(collect.CONFIG['tel15m'])
+        self.assertEqual(captured['count'],1)
+        self.assertEqual(captured['bars'][0]['t'],1794268800)
 
     def test_market_refresh_does_not_change_experiment_sample(self):
         source=Path('research/terminal/raw/tradingview_2026-11-10.json').resolve()

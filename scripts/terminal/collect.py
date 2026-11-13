@@ -16,6 +16,7 @@ from pathlib import Path
 CONFIG={'tel15m':('KRAKEN:TELUSD','15m',15),'tel1h':('KRAKEN:TELUSD','1h',60),
         'tel4h':('KRAKEN:TELUSD','4h',240),'tel1d':('KRAKEN:TELUSD','1D',1440),
         'btc4h':('KRAKEN:XBTUSD','4h',240),'eth4h':('KRAKEN:ETHUSD','4h',240)}
+DAILY_CONTEXT={'btc1d':('KRAKEN:XBTUSD','1D',1440),'eth1d':('KRAKEN:ETHUSD','1D',1440)}
 ALIASES={'KRAKEN:TELUSD':{'TELUSD'},'KRAKEN:XBTUSD':{'XXBTZUSD','XBTUSD'},
          'KRAKEN:ETHUSD':{'XETHZUSD','ETHUSD'}}
 
@@ -38,6 +39,10 @@ def fetch(config):
         if len(raw)>2_000_000:raise ValueError('Unexpected response size')
         payload=json.loads(raw)
     result=normalize(payload,symbol,interval)
+    # Kraken always includes the provisional final row, even across a batch rollover.
+    result['bars'].pop()
+    result['count']=len(result['bars'])
+    if not result['count']:raise ValueError('Empty closed Kraken history')
     result.update(endpoint=url,received_at=dt.datetime.now(dt.timezone.utc).isoformat())
     return result
 
@@ -46,8 +51,13 @@ def main():
     parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
     if args.output.exists():raise SystemExit('Capture already exists; choose a new filename')
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        futures={k:pool.submit(fetch,c) for k,c in CONFIG.items()}
-        datasets={k:f.result() for k,f in futures.items()}
+        futures={k:pool.submit(fetch,c) for k,c in (CONFIG | DAILY_CONTEXT).items()}
+        datasets={k:futures[k].result() for k in CONFIG}
+        for key in DAILY_CONTEXT:
+            try:
+                datasets[key]=futures[key].result()
+            except (OSError, ValueError, TypeError, IndexError, KeyError) as exc:
+                print(f'Optional Kraken daily series {key} unavailable: {exc}')
     data={'captured_at':dt.datetime.now(dt.timezone.utc).isoformat(),'source':'Kraken public REST / OHLC',
           'datasets':datasets}
     args.output.parent.mkdir(parents=True,exist_ok=True)
