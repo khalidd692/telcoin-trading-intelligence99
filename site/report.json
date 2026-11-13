@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-13T08:45:28.567515+00:00",
+  "generated_at": "2026-11-13T08:57:55.022963+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001422,
-      "bid": 0.001419,
+      "last": 0.001419,
+      "bid": 0.00142,
       "ask": 0.001424,
-      "spread_pct": 0.3517411185367579,
-      "quote_volume_24h": 80206.452194,
-      "change_pct_24h": 0.0178,
+      "spread_pct": 0.28129395218001974,
+      "quote_volume_24h": 79171.114913,
+      "change_pct_24h": 0.0035,
       "source": "MEXC public ticker",
-      "observed_at": "2026-11-13T08:45:28.596602+00:00"
+      "observed_at": "2026-11-13T08:57:55.434181+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -24,10 +24,10 @@
     },
     "kucoin_level1": {
       "status": "OK",
-      "last": 0.001411,
-      "bid": 0.001411,
-      "ask": 0.001415,
-      "observed_at": "2026-11-13T08:45:29.025865+00:00"
+      "last": 0.001417,
+      "bid": 0.001415,
+      "ask": 0.001417,
+      "observed_at": "2026-11-13T08:57:55.828866+00:00"
     }
   },
   "checks": [
@@ -38,20 +38,20 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.3517,
+      "value_pct": 0.2813,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.7766,
+      "divergence_pct": 0.141,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-11-13T08:45:00+00:00",
-    "candle_age_seconds": 28,
+    "candle_age_seconds": 775,
     "close": 0.001421,
     "ema12": 0.0014233154320144744,
     "ema26": 0.0014232273056886656,
@@ -257,10 +257,10 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "bf3cc3f6-e593-485d-b35c-e67dbee5c6be",
+  "collection_id": "a1146fc1-5cf1-4b85-853b-a3cdc87b1fc6",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.7766,
-    "mid_price_divergence_pct": 0.5998,
+    "last_price_divergence_pct": 0.141,
+    "mid_price_divergence_pct": 0.4228,
     "check_basis": "last_price",
     "limit_pct": 1.0,
     "definitions": {
