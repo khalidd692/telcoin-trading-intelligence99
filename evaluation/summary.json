@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794610183,
-  "observations": 53,
-  "valid_observations": 51,
+  "generated_at": 1794610996,
+  "observations": 54,
+  "valid_observations": 52,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 20,
-              "mean_pct": -0.36707
+              "count": 21,
+              "mean_pct": -0.27273
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 9,
-              "mean_pct": -1.44585
+              "count": 10,
+              "mean_pct": -1.23173
             }
           }
         }
@@ -110,38 +110,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794592860,
-      "previous_decision": "CONFIRMATION TECHNIQUE",
-      "decision": "INVALIDATION",
-      "data_valid": true,
-      "changed_factors": [],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:INVALIDATION:1794592800",
-        "market": "KRAKEN:TELUSD",
-        "type": "INVALIDATION",
-        "decision": "INVALIDATION",
-        "confirmed": false,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001446,
-        "price_at": 1794592800,
-        "candle_closed_at": 1794592800,
-        "snapshot_at": 1794592817.633796,
-        "data_valid": true,
-        "watch": null,
-        "invalidation": {
-          "level": 0.001449,
-          "unit": "15m"
-        },
-        "factors": [],
-        "blockers": [
-          "Cl\u00f4ture 15 min sous l\u2019invalidation de l\u2019alerte de la bougie pr\u00e9c\u00e9dente."
-        ]
-      }
-    },
     {
       "observed_at": 1794593760,
       "previous_decision": "INVALIDATION",
@@ -285,6 +253,17 @@
       "data_valid": true,
       "changed_factors": [
         "\u2212 reclaim"
+      ],
+      "event": null
+    },
+    {
+      "observed_at": 1794610996,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence",
+        "+ reclaim"
       ],
       "event": null
     }
