@@ -5,7 +5,7 @@ Le radar réutilise les bougies Kraken clôturées, les pivots confirmés et les
 Sur la dernière clôture 15 min, une **alerte précoce non confirmée** demande deux familles de facteurs.
 
 - Une réaction de prix. Cassure haussière d’un pivot confirmé, rebond avec clôture au-dessus du support pivot préexistant ou réaction au bord supérieur d’une zone haussière préexistante (FVG ou OB estimé).
-- Au moins un appui. Volume ≥ 1,5 fois la moyenne des 20 bougies précédentes, divergence RSI14, reprise de l’EMA20 ou du VWAP dans la même session UTC, ou clôtures 15 min et 1 h au-dessus de leur EMA20. Le 4 h est affiché comme troisième degré de convergence. La divergence compare les minima de clôture de deux fenêtres de cinq bougies et les RSI horodatés correspondants.
+- Au moins un appui. Volume ≥ 1,5 fois la moyenne des 20 bougies précédentes, divergence RSI14, reprise de l’EMA20 ou du VWAP dans la même session UTC, ou clôtures 15 min et 1 h au-dessus de leur EMA20. Le 4 h est affiché comme troisième degré de convergence. Le radar retient les bougies 1 h et 4 h déjà clôturées à la clôture 15 min analysée. La divergence compare les minima de clôture de deux fenêtres de cinq bougies et les RSI horodatés correspondants.
 
 Cette règle de surveillance ne dépend pas du RR et ne mesure ni probabilité ni rentabilité. Elle ne modifie pas les seuils de scénario. Les zones et pivots testés existaient avant la bougie de réaction. Un RSI seul ne déclenche rien.
 

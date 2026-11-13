@@ -64,3 +64,16 @@ test('the next confirmed close can invalidate the previous early alert',()=>{
  assert.equal(r.status,'INVALIDATION');assert.equal(r.event.type,'INVALIDATION');
  assert.equal(r.invalidation.unit,'15m');assert.equal(r.event.candle_closed_at,now+900);
 });
+test('convergence uses the higher-unit candle available at the 15m signal close',()=>{
+ const d=supportBounce(fixture()),m=d.frames['15m'],h=d.frames['1h'];
+ m.bars.pop();m.series.pop();m.quality.last_close=now-900;
+ m.bars.at(-3).l=95;m.bars.at(-8).h=104;
+ Object.assign(m.bars.at(-1),{l:95,c:102,v:10});
+ h.series.at(-2).ema20=105;
+ h.series.at(-1).ema20=100;
+ h.latest.ema20=100;h.latest.close=101;
+ const four=d.frames['4h'];four.latest.ema20=100;four.latest.close=101;
+ const r=readRadar(d,[],now);
+ assert.equal(r.factors.find(x=>x.id==='convergence').active,false);
+ assert.equal(r.status,'ATTENDRE');
+});

@@ -63,20 +63,21 @@ function readRadar(data,plans=[],now=Date.now()/1000){
   return {unit,quality,direction:quality==='Disponible'?frame.latest?.trend:null,closedAt:frame?.quality?.last_close};
  });
  const issues=frames.filter(f=>f.quality!=='Disponible').map(f=>f.unit+' · '+f.quality);
- if(data.market!=='KRAKEN:TELUSD'||data.source!=='Kraken public REST / OHLC'||now<data.as_of)issues.unshift('Source Kraken non vérifiée');
+ if(data.market!=='KRAKEN:TELUSD'||data.source!=='Kraken public REST / OHLC')issues.unshift('Source Kraken non vérifiée');
+ if(now<data.as_of)issues.unshift('Capture datée dans le futur');
  const closedAt=frames[0].closedAt;
  const base={frames,closedAt,asOf:data.as_of,factors:[],watch:null,invalidation:null,blockers:issues,event:null,status:'DONNÉES INSUFFISANTES'};
  if(issues.length)return base;
  const [m,h,f]=units.map(unit=>data.frames[unit]);
- const {early,factors,levels,structure,zone,held}=detect(m,h.latest,f.latest);
- const previousClose=m.bars.at(-2).t+steps['15m'];
- const latestAt=(frame,step)=>{
-  const point=frame.series?.findLast(r=>r.t+step<=previousClose);
+ const latestAt=(frame,step,asOf)=>{
+  const point=frame.series?.findLast(r=>r.t+step<=asOf);
   const candle=point&&frame.bars.find(b=>b.t===point.t);
   return candle?{ema20:point.ema20,close:candle.c}:null;
  };
+ const {early,factors,levels,structure,zone,held}=detect(m,latestAt(h,steps['1h'],closedAt),latestAt(f,steps['4h'],closedAt));
+ const previousClose=m.bars.at(-2).t+steps['15m'];
  const preceding=detect({bars:m.bars.slice(0,-1),series:m.series?.slice(0,-1)},
-  latestAt(h,steps['1h']),latestAt(f,steps['4h']));
+  latestAt(h,steps['1h'],previousClose),latestAt(f,steps['4h'],previousClose));
  const earlyStop=preceding.held?preceding.levels.support:preceding.zone?.low??preceding.levels.support;
  const earlyInvalidated=preceding.early&&finite(earlyStop)&&m.bars.at(-1).c<earlyStop;
  const {plan,reason}=plans.length?scenarios.summarize(plans):{};
@@ -95,6 +96,7 @@ function readRadar(data,plans=[],now=Date.now()/1000){
  const candle=swingInvalidated||(!invalidated&&confirmed)?f.quality.last_close:closedAt;
  const event=type?{schema_version:1,id:'KRAKEN:TELUSD:'+type+':'+candle,market:'KRAKEN:TELUSD',type,decision:statusLabels[type],
   confirmed:type==='CONFIRMATION',candle_closed_at:candle,snapshot_at:data.as_of,data_valid:true,watch,invalidation,
+  ...(type==='CONFIRMATION'?{scenario_id:confirmed.id,rr_net:confirmed.rrNet,spread:confirmed.spread,fee_estimate:confirmed.feeEstimate}:{}),
   factors:factors.filter(x=>x.active===true).map(x=>x.id),blockers}:null;
  return {...base,status:statusLabels[type]??'ATTENDRE',factors,watch,invalidation,blockers,event};
 }
