@@ -97,6 +97,40 @@ jobs:
           return 1
           }
           product=$(git rev-parse HEAD)
+          # A second trigger on the same closed candle can reuse the published
+          # snapshot. Recollect after a new product revision or incomplete feed.
+          if git fetch origin tel99-live-data && git show FETCH_HEAD:site/terminal/data.json > /tmp/tel99-current.json; then
+            if python - "$product" <<'PY'
+          import json, sys, time
+          from pathlib import Path
+          try:
+              current=json.loads(Path('/tmp/tel99-current.json').read_text())
+              now=time.time()
+              steps={'15m':900,'1h':3600,'4h':14400,'1D':86400}
+              reusable=(
+                  current['source']=='Kraken public REST / OHLC'
+                  and current['market']=='KRAKEN:TELUSD'
+                  and current['publication']['product_commit']==sys.argv[1]
+                  and current['daily_correlations']['n']==30
+                  and current['daily_correlations']['fresh']
+                  and 0<=now-current['as_of']<900
+                  and all(
+                      not current['frames'][unit]['quality']['invalid_tail']
+                      and current['frames'][unit]['quality']['last_close']==int(now)//seconds*seconds
+                      for unit,seconds in steps.items()
+                  )
+              )
+          except (OSError, KeyError, TypeError, ValueError):
+              reusable=False
+          sys.exit(0 if reusable else 1)
+          PY
+            then
+              echo 'Current closed candles already published by this product revision.'
+              cp /tmp/tel99-current.json /tmp/tel99-snapshot.json
+              echo 'TEL99_REUSED_SNAPSHOT=true' >> "$GITHUB_ENV"
+              exit 0
+            fi
+          fi
           start=$SECONDS
           for ((cycle=1; cycle<=TEL99_CYCLES; cycle++)); do
             wait_for=$((start + (cycle-1)*240 - SECONDS))
@@ -116,6 +150,8 @@ jobs:
           from pathlib import Path
           p=Path('/tmp/tel99-snapshot.json')
           lines=['## TEL99 — état de la publication et de l’analyse']
+          if os.environ.get('TEL99_REUSED_SNAPSHOT')=='true':
+              lines+=['Clôtures déjà publiées. Capture réutilisée, aucun nouvel appel Kraken.']
           if not p.is_file():
               lines+=['**DONNÉES INSUFFISANTES** : aucune capture Kraken validée. Aucun ordre.']
           else:
