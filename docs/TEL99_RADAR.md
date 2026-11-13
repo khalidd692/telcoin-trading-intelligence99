@@ -11,6 +11,10 @@ Cette règle de surveillance ne dépend pas du RR et ne mesure ni probabilité n
 
 La confirmation réutilise le statut `PRÊT À ÉVALUER` d’un scénario de confirmation, ses conditions techniques et son RR net ≥ 1,5. Des frais personnels, la profondeur du carnet et les autres contrôles du scénario peuvent bloquer cette validation. Le terminal public ne dispose pas des frais personnels ni de la profondeur pour la taille envisagée. Un scénario conditionnel garde son RR théorique, ses hypothèses de coûts et ses motifs de blocage.
 
+Le traitement cloud appelle actuellement le radar sans plans ni frais personnels vérifiés ; il peut calculer les alertes précoces et les invalidations, mais ne peut pas émettre de confirmation d'achat. La vérification de la cotation, des frais, du spread et de la profondeur reste manuelle. L'absence de plan ne change pas les conditions des alertes précoces.
+
+Depuis la version de calcul identifiée par `indicator_methods.rsi14 = wilder_rma_14_sma_seed`, le RSI du terminal utilise le lissage de Wilder, amorcé sur 14 variations. Les snapshots antérieurs sans ce marqueur et les études historiques conservent leur calcul arithmétique ; ne pas comparer directement les signaux RSI issus de méthodes différentes. Les seuils restent inchangés, sans validation supplémentaire de leur efficacité.
+
 Une invalidation est possible sur la clôture 4 h sous le support du moteur ou sur la clôture 15 min suivant immédiatement une alerte 15 min, sous son niveau d’invalidation. L’évaluation de cette alerte précédente exclut les clôtures 1 h et 4 h postérieures. L’invalidation structurelle 4 h a priorité.
 
 Les événements structurés `EARLY_ALERT`, `CONFIRMATION` et `INVALIDATION` portent un identifiant stable par marché, type et clôture. Le journal d’évaluation existant enregistre les changements et peut les exposer aux consommateurs. Les observations du journal restent ponctuelles et leur rendement mesure uniquement des variations de prix. Aucune réception push ni performance de stratégie ne découle de ces événements.

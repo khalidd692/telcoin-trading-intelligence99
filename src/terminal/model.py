@@ -1,6 +1,7 @@
 """Deterministic terminal analytics. Existing strategies remain unchanged.
 
-RSI/CCI/stochastic/DMI/MACD reuse src.agent_analysis (RSI is rolling arithmetic).
+CCI/stochastic/DMI/MACD reuse src.agent_analysis. Terminal RSI uses Wilder;
+legacy research keeps its original arithmetic RSI and is not recomputed.
 EMA and ATR reuse the frozen strategy engine. Indicators restart at every gap.
 """
 from __future__ import annotations
@@ -99,6 +100,31 @@ def validate_dataset(dataset, as_of):
 def _get(series,i):
     return series[i] if len(series)>i and finite(series[i]) else None
 
+def rsi_wilder_series(values, period=14):
+    """Wilder RSI with a simple-average seed; restart after invalid prices."""
+    if not isinstance(period, int) or isinstance(period, bool) or period < 1:
+        raise ValueError('period must be a positive integer')
+    result=[float('nan')]*len(values)
+    previous=None;gain=loss=0.0;count=0
+    for i,price in enumerate(values):
+        if not finite(price):
+            previous=None;gain=loss=0.0;count=0
+            continue
+        if previous is None:
+            previous=price
+            continue
+        change=price-previous;previous=price
+        up=max(change,0.0);down=max(-change,0.0)
+        if count<period:
+            gain+=up;loss+=down;count+=1
+            if count<period:continue
+            gain/=period;loss/=period
+        else:
+            gain=(gain*(period-1)+up)/period
+            loss=(loss*(period-1)+down)/period
+        result[i]=100*gain/(gain+loss) if gain+loss else 50.0
+    return result
+
 def analyze(dataset, as_of):
     v=validate_dataset(dataset,as_of);step=STEPS[dataset['interval']]
     out=[]
@@ -106,7 +132,7 @@ def analyze(dataset, as_of):
         c=[r['c'] for r in rows];h=[r['h'] for r in rows];l=[r['l'] for r in rows]
         e20=E.ema(c,20);e50=E.ema(c,50)
         bars=[E.Bar(dt.datetime.fromtimestamp(r['t'],UTC),r['o'],r['h'],r['l'],r['c'],r['v']) for r in rows]
-        atr=E.atr_wilder(bars);rsi=A.rsi_series(c);macd=A.macd_histogram(c)
+        atr=E.atr_wilder(bars);rsi=rsi_wilder_series(c);macd=A.macd_histogram(c)
         cci=A.cci_series(h,l,c);sk,sd=A.stochastic_series(h,l,c);dp,dm,adx=A.dmi_series(h,l,c)
         sma= A.sma_series(c,200)
         pv=vol=0;day=None;session_complete=False
@@ -135,6 +161,7 @@ def analyze(dataset, as_of):
     quality=v['quality'];last=quality['last_close']
     quality['fresh']=last is not None and 0<=as_of-last<=step+300 and not quality['invalid_tail']
     return {'symbol':dataset['symbol'],'interval':dataset['interval'],'as_of':as_of,
+            'indicator_methods':{'rsi14':'wilder_rma_14_sma_seed'},
             'quality':quality,'bars':v['bars'],'series':out,'latest':latest,
             'excluded':v['excluded'],'ready':quality['last_segment_bars']>=50 and quality['fresh']}
 

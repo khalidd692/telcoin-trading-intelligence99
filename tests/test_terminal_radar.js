@@ -35,6 +35,12 @@ test('momentum alone cannot trigger and favorable RR alone cannot confirm',()=>{
  assert.equal(r.status,'ATTENDRE');assert.equal(r.event,null);
  assert.deepEqual(r.blockers,['Confirmation non observée']);
 });
+test('cloud radar without plans explicitly requires manual confirmation checks',()=>{
+ const result=readRadar(fixture(),[],now);
+ assert.equal(result.status,'ATTENDRE');
+ assert.match(result.blockers.join(' '),/confirmation.*vérification manuelle/i);
+ assert.match(result.blockers.join(' '),/frais/i);
+});
 test('verified executable scenario alone may confirm, and source invalidation takes precedence',()=>{
  const d=fixture(),plan={id:'reversal',status:'PRÊT À ÉVALUER',confirmed:true,rrNet:1.5,entry:103,stop:95};
  assert.equal(readRadar(d,[plan],now).event.type,'CONFIRMATION');

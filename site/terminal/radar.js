@@ -92,7 +92,7 @@ function readRadar(data,plans=[],now=Date.now()/1000){
  const invalidation=finite(stopLevel)?{level:stopLevel,unit:shortInvalidation?'15m':'4h'}:null;
  const watch=!invalidated&&finite(watchLevel)?{level:watchLevel,unit:early&&!confirmed?'15m':plan||confirmed?'4h':'15m'}:null;
  const blockers=invalidated?[swingInvalidated?'Clôture 4 h sous le support structurel.':'Clôture 15 min sous l’invalidation de l’alerte de la bougie précédente.']:confirmed?[]:
-  plan?.reasons?.length?plan.reasons:[reason||'Aucune confirmation technique et économique vérifiée.'];
+  plan?.reasons?.length?plan.reasons:[reason||(plans.length?'Aucune confirmation technique et économique vérifiée.':'Confirmation : vérification manuelle nécessaire (cotation, frais personnels, spread et profondeur du carnet).')];
  const candle=swingInvalidated||(!invalidated&&confirmed)?f.quality.last_close:closedAt;
  const event=type?{schema_version:1,id:'KRAKEN:TELUSD:'+type+':'+candle,market:'KRAKEN:TELUSD',type,decision:statusLabels[type],
   confirmed:type==='CONFIRMATION',candle_closed_at:candle,snapshot_at:data.as_of,data_valid:true,watch,invalidation,

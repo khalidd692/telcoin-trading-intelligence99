@@ -50,7 +50,7 @@ def build(source, market_source=None):
             'code_sha256':{p:digest(ROOT/p) for p in ['src/terminal/model.py','scripts/terminal/build.py','scripts/terminal/research.py','scripts/strategy_backtest/engine.py','src/agent_analysis.py']},
             'limits':['Les fenêtres historiques ont déjà été explorées ; aucun holdout vierge.',
                       'Les trous peuvent correspondre à des périodes sans transactions : aucune interpolation.',
-                      'RSI14 arithmétique glissant ; ATR Wilder ; VWAP limité à une session UTC entièrement observée.',
+                      'RSI14 Wilder pour ce snapshot ; les études et snapshots plus anciens conservent leur RSI arithmétique. ATR Wilder ; VWAP limité à une session UTC entièrement observée.',
                       'Les coûts sont hypothétiques. Aucun carnet historique, aucune probabilité calibrée.',
                       'Les sources externes ne se rafraîchissent pas automatiquement quand cette page est fermée.']}
 
