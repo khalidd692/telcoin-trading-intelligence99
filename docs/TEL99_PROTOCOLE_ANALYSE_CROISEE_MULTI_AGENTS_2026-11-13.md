@@ -35,3 +35,14 @@ Références :
 - https://github.com/khalidd692/telcoin-trading-intelligence99
 - https://tel99-quant-terminal.skkly.chatgpt.site/#market
 - https://alpha.tradingview.com/dashboards/9f6534d9-4eb8-4ded-a6ca-b694fb98dfd3
+
+
+## Extension multifactorielle — critères de couverture et de non-redondance
+8. **On-chain TEL et réseau** : activité réelle et adresses actives si observables, distribution et concentration, mouvements des grands détenteurs, flux entrants/sortants des exchanges, transferts exceptionnels, émissions/déblocages et provenance des données. Ne jamais inférer « accumulation des whales » d'un simple transfert.
+9. **Microstructure et qualité d'exécution** : order-book imbalance à plusieurs profondeurs, liquidité affichée vs exécutée, spread médian, impact de marché pour le montant envisagé, slippage estimé, qualité des venues, risque de spoofing, volumes réels et volatilité pendant les annonces.
+10. **Dérivés et positionnement** : variation d'open interest, funding, basis, options/skew si disponible, concentrations de liquidations, divergences spot/futures, données CEX vs agrégateurs. Absence de marché dérivé TEL ≠ valeur nulle.
+11. **Régime de marché** : tendance/range, momentum, volatilité réalisée et implicite si disponible, BTC dominant ou rotation altcoins, volatilité des corrélations, choc macro et stress de liquidité. Adapter les seuils aux régimes sans réoptimisation opportuniste.
+12. **Facteurs indépendants** : regrouper RSI/MACD/EMA dans « tendance/momentum » pour ne pas compter trois fois la même information; familles distinctes : structure, liquidité, dérivés, on-chain, macro, fondamentaux, sentiment, risque/exécution. Documenter pondérations et données manquantes; ne pas fabriquer de score global ou de probabilité sans calibration historique.
+13. **Validation scientifique** : signaux définis avant observation, validation walk-forward / hors échantillon, sensibilité aux frais et au spread, biais de survivance, fuites temporelles, tests de stabilité par régime, faux positifs et opportunités manquées. Une absence de trades admissibles n'est pas une preuve de performance.
+14. **Calendrier et risques extrêmes** : CPI/PCE/NFP/FOMC, déblocages, migrations, incidents techniques, liquidité de week-end, réglementations, annonces Telcoin vérifiées. Préciser quand un catalyseur n'a pas été vérifié.
+15. **Sortie standard** : horodatage, couverture par famille (« vérifié », « indisponible », « périmé »), matrice pour/contre, scénario principal et scénario opposé, conditions d'activation/invalidation, niveaux limites indicatifs, frais et RR net, décision prudente. Ne pas qualifier « analyse complète » une analyse où des familles essentielles sont indisponibles; expliquer ces limites.
