@@ -22,7 +22,7 @@ Pour chaque demande de décision TEL, analyser des données indépendantes et fr
 
 ## Références de travail antérieures à préserver
 - Méthode TEL : accumulation de long terme + swing, entrée limite, évitement FOMO, surveillance BTC/ETH.
-- Cadre de risque de recherche : capital paper 1000 USD, risque max 0,25 %/trade, spot long, RR net >=1,5. Ne pas appliquer mécaniquement au portefeuille réel.
+- Cadre historique de recherche : capital paper 1000 USD et ancien seuil 0,25 %/trade (désormais abandonné pour les nouvelles propositions, résultats historiques inchangés). Spot long, RR net >=1,5 à vérifier; perte par position à définir selon stop, budget et tolérance explicitement confirmée.
 - Journal prospectif : distinguer ALERTE PRÉCOCE, CONFIRMATION, INVALIDATION, ATTENDRE; mesurer signaux et rebonds manqués à 1h/4h/24h/7j.
 - Smart View : correspondance fonctionnelle/visuelle réelle des widgets; 21 cartes TEL99 + radar ne prouvent pas 22 widgets Smart View identiques.
 - Audits et backtests historiques non concluants : ne pas présenter comme stratégie validée.
@@ -46,3 +46,6 @@ Références :
 13. **Validation scientifique** : signaux définis avant observation, validation walk-forward / hors échantillon, sensibilité aux frais et au spread, biais de survivance, fuites temporelles, tests de stabilité par régime, faux positifs et opportunités manquées. Une absence de trades admissibles n'est pas une preuve de performance.
 14. **Calendrier et risques extrêmes** : CPI/PCE/NFP/FOMC, déblocages, migrations, incidents techniques, liquidité de week-end, réglementations, annonces Telcoin vérifiées. Préciser quand un catalyseur n'a pas été vérifié.
 15. **Sortie standard** : horodatage, couverture par famille (« vérifié », « indisponible », « périmé »), matrice pour/contre, scénario principal et scénario opposé, conditions d'activation/invalidation, niveaux limites indicatifs, frais et RR net, décision prudente. Ne pas qualifier « analyse complète » une analyse où des familles essentielles sont indisponibles; expliquer ces limites.
+
+## Décision utilisateur la plus récente — risque par trade
+Décision du 13 novembre 2026 : le plafond fixe de risque de 0,25 % par trade n'est plus une contrainte voulue pour les nouvelles propositions TEL. Il était jugé trop restrictif. Ne pas le réintroduire comme règle active ni le remplacer automatiquement par 1 %, 2 % ou un autre chiffre. Conserver la trace historique des backtests et anciennes règles, sans réinterpréter leurs résultats. Pour tout nouveau swing : présenter le stop technique, la perte potentielle en EUR pour plusieurs tailles de position, les frais, le RR net, l'exposition globale et le budget ; demander une limite de perte acceptable avant de qualifier une taille d'ordre d'exécutable. Maintenir spot, sans levier, sans ordre réel ou simulé. Les règles codées/TradingView peuvent encore appliquer l'ancien seuil : les signaler comme obsolètes, ne pas les contourner sans audit/tests et autorisation de modification.
