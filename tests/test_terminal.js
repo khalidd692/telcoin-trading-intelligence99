@@ -49,3 +49,19 @@ assert.equal(T.frameStatus(frameAt,4134,4800,900),'Disponible');
 assert.equal(T.frameStatus(frameAt,4134,4801,900),'Clôture périmée');
 assert.equal(T.frameStatus(frameAt,4134,5035,900),'Capture périmée');
 assert.equal(T.frameStatus({...frameAt,ready:false,quality:{...frameAt.quality,last_segment_bars:12}},4134,4800,900),'Historique continu insuffisant');
+
+const fs=require('node:fs');
+const terminalApp=fs.readFileSync(require('node:path').join(__dirname,'../site/terminal/app.js'),'utf8');
+const cardBlock=terminalApp.slice(terminalApp.indexOf('const cardDefinitions=['),terminalApp.indexOf('].map(([id,title,category,description,visible])'));
+const cardIds=[...cardBlock.matchAll(/^ \['([^']+)',/gm)].map(match=>match[1]);
+assert.equal(cardIds.length,21,'All 21 catalog cards must remain present');
+assert.equal(new Set(cardIds).size,21,'Catalog card identifiers must remain unique');
+for(const id of ['guide','preview1h','preview4h','preview1d']){
+ assert.match(cardBlock,new RegExp("\\['"+id+"',[^\\n]*,true\\]"),id+' should be visible by default');
+}
+assert.match(terminalApp,/const feeds=\[\s*'\/data\.json\?t='/,'Hosted snapshot source remains available');
+assert.match(terminalApp,/raw\.githubusercontent\.com\/khalidd692\/telcoin-trading-intelligence99\/tel99-live-data\/site\/terminal\/data\.json/,'Live-data fallback is available');
+assert.match(terminalApp,/T\.acceptSnapshot\(data,candidate\)/,'Snapshot safety gate must remain enforced');
+assert.match(terminalApp,/candidate\.as_of>next\.as_of/,'Choose newest accepted snapshot');
+assert.match(terminalApp,/setInterval\(refreshSnapshot,60000\)/,'Automatic snapshot polling remains enabled');
+console.log('TEL99 widget inventory and refresh source regression passed');
