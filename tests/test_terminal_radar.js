@@ -26,6 +26,9 @@ test('an early support bounce and volume produce a non-confirmed alert without q
  assert.equal(result.watch.level,104);
  assert.equal(result.event.type,'EARLY_ALERT');
  assert.equal(result.event.confirmed,false);
+ assert.equal(result.event.price,102);
+ assert.equal(result.event.source,'Kraken public REST / OHLC');
+ assert.equal(result.event.rule_version,'tel99-radar-v1');
  assert.equal(result.event.candle_closed_at,now);
  assert.ok(result.factors.find(x=>x.id==='support').active);
 });
@@ -41,12 +44,46 @@ test('cloud radar without plans explicitly requires manual confirmation checks',
  assert.match(result.blockers.join(' '),/confirmation.*vérification manuelle/i);
  assert.match(result.blockers.join(' '),/frais/i);
 });
-test('verified executable scenario alone may confirm, and source invalidation takes precedence',()=>{
+test('technical confirmation does not require personal risk inputs, and invalidation takes precedence',()=>{
  const d=fixture(),plan={id:'reversal',status:'PRÊT À ÉVALUER',confirmed:true,rrNet:1.5,entry:103,stop:95};
- assert.equal(readRadar(d,[plan],now).event.type,'CONFIRMATION');
- assert.equal(readRadar(d,[{...plan,rrNet:1.49}],now).status,'ATTENDRE');
+ const confirmed=readRadar(d,[plan],now);
+ assert.equal(confirmed.event.type,'CONFIRMATION');
+ assert.equal(confirmed.status,'CONFIRMATION TECHNIQUE');
+ assert.equal(confirmed.risk_checked_buy,false);
+ assert.equal(readRadar(d,[{...plan,status:'CONDITIONNEL',rrNet:null}],now).status,'CONFIRMATION TECHNIQUE');
  d.decision.status='INVALIDATION';d.frames['4h'].bars.at(-1).c=89;
  assert.equal(readRadar(d,[plan],now).event.type,'INVALIDATION');
+});
+test('cloud radar can recognize a technical scenario without local risk settings',()=>{
+ const d=fixture();
+ Object.assign(d.frames['4h'].latest,{close:101,support20:99,ema20:100,atr14:2});
+ Object.assign(d.frames['1h'].latest,{close:101,ema20:100});
+ Object.assign(d.frames['15m'].latest,{close:101,ema20:100,volume_ratio:1});
+ const result=readRadar(d,[],now);
+ assert.equal(result.status,'CONFIRMATION TECHNIQUE');
+ assert.equal(result.risk_checked_buy,false);
+ assert.equal(result.event.type,'CONFIRMATION');
+ assert.equal(result.event.candle_closed_at,now);
+ assert.equal(result.event.risk_checked_buy,false);
+});
+test('Smart View scan evaluates six and five separate conditions on closed TEL 15m candles',()=>{
+ const d=fixture(), f=d.frames['15m'];
+ f.series.forEach((r,i)=>Object.assign(r,{ema20:100,ema50:98,rsi14:i===f.series.length-1?60:40,macd_hist:1,vwap_session:99}));
+ f.bars.at(-1).v=30;
+ const scan=readRadar(d,[],now).smartview_scan;
+ assert.equal(scan.early.conditions.length,6);
+ assert.equal(scan.early.satisfied,6);
+ assert.equal(scan.early.complete,true);
+ assert.equal(scan.invalidation.conditions.length,5);
+ assert.equal(scan.invalidation.complete,false);
+ assert.equal(scan.candle_closed_at,now);
+ assert.match(scan.vwap_note,/hypoth/i);
+});
+test('missing scan inputs are unknown, never converted into a full match',()=>{
+ const d=fixture();d.frames['15m'].series.at(-1).vwap_session=null;
+ const scan=readRadar(d,[],now).smartview_scan;
+ assert.equal(scan.early.complete,null);
+ assert.ok(scan.missing.length);
 });
 test('stale, future, gapped or unproven data cannot alert or display actionable levels',()=>{
  for(const mutate of [d=>d.as_of-=901,d=>d.frames['15m'].bars.at(-1).t+=900,d=>d.frames['15m'].bars.at(-2).t-=900,d=>d.frames['1h'].symbol='OTHER',d=>d.frames['15m'].quality.invalid_tail=true]){

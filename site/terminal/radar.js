@@ -6,7 +6,7 @@ const T=node?require('./core.js'):root.TEL99;
 const S=node?require('./smartview.js'):root.TEL99SmartView;
 const scenarios=node?require('./scenarios.js'):root.TEL99Scenarios;
 const {finite,steps}=T;
-const statusLabels={EARLY_ALERT:'ALERTE PRÉCOCE',CONFIRMATION:'ACHAT CONFIRMÉ',INVALIDATION:'INVALIDATION'};
+const statusLabels={EARLY_ALERT:'ALERTE PRÉCOCE',CONFIRMATION:'CONFIRMATION TECHNIQUE',INVALIDATION:'INVALIDATION'};
 function frameIntegrity(frame,unit,asOf){
  if(frame?.symbol!=='KRAKEN:TELUSD'||frame?.interval!==unit)return 'Provenance incohérente';
  if(!finite(frame.quality?.last_close)||!finite(asOf)||!finite(steps[unit]))return 'Clôtures incohérentes';
@@ -18,6 +18,36 @@ function frameIntegrity(frame,unit,asOf){
 function frameCheck(frame,unit,asOf,now){
  const status=T.frameStatus(frame,asOf,now,steps[unit]);
  return status!=='Disponible'?status:frameIntegrity(frame,unit,asOf);
+}
+// Expressions archived from Smart View, evaluated separately from the existing radar.
+// Series are calculated by TEL99; VWAP anchor and initialization parity are unverified.
+function smartViewScan(frame,asOf,now){
+ const base={version:'smartview-rules-15m-v1',source:'KRAKEN:TELUSD · Kraken public REST / OHLC',
+  candle_closed_at:frame?.quality?.last_close??null,
+  vwap_note:'VWAP de session UTC TEL99 : ancrage Smart View hypothétique ; équivalence non vérifiée.'};
+ const valid=frameCheck(frame,'15m',asOf,now)==='Disponible';
+ const bars=valid?frame.bars.slice(-20):[],series=valid?frame.series?.slice(-14)??[]:[];
+ const aligned=series.length===14&&bars.length===20&&series.every((r,i)=>r.t===bars[i+6].t);
+ const last=aligned?series.at(-1):{},bar=aligned?bars.at(-1):{};
+ const values=aligned&&series.every(r=>finite(r.rsi14))?series.map(r=>r.rsi14):[];
+ const rsiAvg=values.length===14?values.reduce((a,b)=>a+b,0)/14:null;
+ const volumeAvg=bars.length===20&&bars.every(r=>finite(r.v))?bars.reduce((a,b)=>a+b.v,0)/20:null;
+ const cmp=(a,b,up)=>finite(a)&&finite(b)?(up?a>b:a<b):null;
+ const make=(up)=>{
+  const op=up?'>':'<';
+  const pairs=[['close '+op+' EMA20',bar.c,last.ema20],['EMA20 '+op+' EMA50',last.ema20,last.ema50],
+   ['RSI14 '+op+' SMA(RSI14,14)',last.rsi14,rsiAvg],['MACD '+op+' signal',last.macd_hist,0]];
+  if(up)pairs.push(['volume > 1,5 × SMA(volume,20)',bar.v,finite(volumeAvg)?1.5*volumeAvg:null]);
+  pairs.push(['close '+op+' VWAP',bar.c,last.vwap_session]);
+  const conditions=pairs.map(([label,left,right])=>({label,left:finite(left)?left:null,right:finite(right)?right:null,result:cmp(left,right,up)}));
+  return {conditions,satisfied:conditions.filter(c=>c.result===true).length,
+   complete:conditions.some(c=>c.result===null)?null:conditions.every(c=>c.result)};
+ };
+ const early=make(true),invalidation=make(false);
+ const missing=[...new Set([...early.conditions,...invalidation.conditions].filter(c=>c.result===null).map(c=>c.label))];
+ if(!valid)missing.unshift('Bougies 15 min indisponibles, périmées ou incohérentes');
+ else if(!aligned)missing.unshift('Séries et bougies non alignées');
+ return {...base,early,invalidation,missing};
 }
 function divergence(bars,series){
  const closes=bars.slice(-10),readings=series.slice(-10);
@@ -69,7 +99,8 @@ function readRadar(data,plans=[],now=Date.now()/1000){
  if(data.market!=='KRAKEN:TELUSD'||data.source!=='Kraken public REST / OHLC')issues.unshift('Source Kraken non vérifiée');
  if(now<data.as_of)issues.unshift('Capture datée dans le futur');
  const closedAt=frames[0].closedAt;
- const base={frames,closedAt,asOf:data.as_of,factors:[],watch:null,invalidation:null,blockers:issues,event:null,status:'DONNÉES INSUFFISANTES'};
+ const base={frames,closedAt,asOf:data.as_of,factors:[],watch:null,invalidation:null,blockers:issues,event:null,status:'DONNÉES INSUFFISANTES',risk_checked_buy:false,
+  smartview_scan:smartViewScan(data.frames?.['15m'],data.as_of,now)};
  if(issues.length)return base;
  const [m,h,f]=units.map(unit=>data.frames[unit]);
  const latestAt=(frame,step,asOf)=>{
@@ -87,19 +118,23 @@ function readRadar(data,plans=[],now=Date.now()/1000){
  const technicalStop=data.decision?.invalidation;
  const swingInvalidated=data.decision?.status==='INVALIDATION'&&finite(technicalStop)&&f.bars.at(-1).c<technicalStop;
  const invalidated=swingInvalidated||earlyInvalidated;
- const confirmed=plans.find(p=>p.id!=='early'&&p.status==='PRÊT À ÉVALUER'&&p.confirmed&&finite(p.rrNet)&&p.rrNet>=1.5);
+ // Technical predicates are assessed even when quote, fees or RR are unavailable.
+ // They are observations only, never a risk-checked buy.
+ const technicalPlans=plans.length?plans:scenarios.generate(data,{now});
+ const confirmed=technicalPlans.find(p=>p.id!=='early'&&p.confirmed===true);
  const type=invalidated?'INVALIDATION':confirmed?'CONFIRMATION':early?'EARLY_ALERT':null;
  const watchLevel=confirmed?.entry??(early?(structure?.price??levels.resistance):plan?.entry??levels.resistance);
  const stopLevel=invalidated?(swingInvalidated?technicalStop:earlyStop):confirmed?.stop??(early?(held?levels.support:zone?.low??levels.support):plan?.stop??technicalStop);
  const shortInvalidation=(earlyInvalidated&&!swingInvalidated)||(early&&!confirmed&&!invalidated);
  const invalidation=finite(stopLevel)?{level:stopLevel,unit:shortInvalidation?'15m':'4h'}:null;
  const watch=!invalidated&&finite(watchLevel)?{level:watchLevel,unit:early&&!confirmed?'15m':plan||confirmed?'4h':'15m'}:null;
- const blockers=invalidated?[swingInvalidated?'Clôture 4 h sous le support structurel.':'Clôture 15 min sous l’invalidation de l’alerte de la bougie précédente.']:confirmed?[]:
+ const blockers=invalidated?[swingInvalidated?'Clôture 4 h sous le support structurel.':'Clôture 15 min sous l’invalidation de l’alerte de la bougie précédente.']:confirmed?['Confirmation technique uniquement : frais personnels, spread, liquidité et RR net restent à vérifier.']:
   plan?.reasons?.length?plan.reasons:[reason||(plans.length?'Aucune confirmation technique et économique vérifiée.':'Confirmation : vérification manuelle nécessaire (cotation, frais personnels, spread et profondeur du carnet).')];
- const candle=swingInvalidated||(!invalidated&&confirmed)?f.quality.last_close:closedAt;
+ const candle=swingInvalidated?f.quality.last_close:closedAt;
  const event=type?{schema_version:1,id:'KRAKEN:TELUSD:'+type+':'+candle,market:'KRAKEN:TELUSD',type,decision:statusLabels[type],
-  confirmed:type==='CONFIRMATION',candle_closed_at:candle,snapshot_at:data.as_of,data_valid:true,watch,invalidation,
-  ...(type==='CONFIRMATION'?{scenario_id:confirmed.id,rr_net:confirmed.rrNet,spread:confirmed.spread,fee_estimate:confirmed.feeEstimate}:{}),
+  confirmed:type==='CONFIRMATION',risk_checked_buy:false,rule_version:'tel99-radar-v1',source:data.source,
+  price:swingInvalidated?f.bars.at(-1).c:m.bars.at(-1).c,price_at:candle,candle_closed_at:candle,snapshot_at:data.as_of,data_valid:true,watch,invalidation,
+  ...(type==='CONFIRMATION'?{scenario_id:confirmed.id,technical_condition:confirmed.condition??null}:{}),
   factors:factors.filter(x=>x.active===true).map(x=>x.id),blockers}:null;
  return {...base,status:statusLabels[type]??'ATTENDRE',factors,watch,invalidation,blockers,event};
 }

@@ -413,6 +413,9 @@ function renderRadarDecision(plans,watch){
  const spread=plans[0]?.spread;
  const liquidity=T.finite(spread)?'Spread '+fmt(spread*100,2)+' % · profondeur non intégrée au scénario':'Spread du scénario indisponible';
  const blockers=reading.blockers;
+ const scan=reading.smartview_scan;
+ const scanResult=x=>x.complete===null?'données manquantes':x.complete?'toutes réunies':'conditions incomplètes';
+ const scanLines=x=>x.conditions.map(c=>`<li>${c.result===null?'—':c.result?'✓':'○'} ${esc(c.label)}</li>`).join('');
  renderAnnotated(reading);
  $('radar-reading').innerHTML=`<div class="decision-main"><b>${esc(reading.status)}</b>${reading.status==='ALERTE PRÉCOCE'?'<span class="chip">NON CONFIRMÉE</span>':''}<strong>TEL/USD · ${price(quote?.price??data.frames['15m'].bars.at(-1)?.c)} $</strong></div>
  <div class="decision-meta">Clôture 15 min ${date(reading.closedAt)} UTC · capture ${date(reading.asOf)} UTC · ${reading.factors.length?'données fraîches':'qualité insuffisante'}</div>
@@ -425,7 +428,13 @@ function renderRadarDecision(plans,watch){
  <ul>${evidence||reading.frames.map(f=>`<li>${esc(f.unit+' · '+f.quality)}</li>`).join('')}</ul>
  <p>${esc(blockers.join(' · '))}</p>
  ${watch?`<p><strong>${esc(watch.name)}</strong> · ${esc(watch.status)}<br>${esc(watch.condition)}<br>Entrée ${price(watch.entry)} $ · stop ${price(watch.stop)} $ · objectif ${price(watch.target)} $</p>`:''}
- <p>RR net théorique ${rr} · ${execution}<br>Frais d’entrée estimés ${money(watch?.feeEstimate)} · frais personnels non vérifiés<br>${liquidity}</p></details>`;
+ <p>RR net théorique ${rr} · ${execution}<br>Frais d’entrée estimés ${money(watch?.feeEstimate)} · frais personnels non vérifiés<br>${liquidity}</p>
+ <h3>Rule Scan Smart View · source distincte du radar</h3>
+ <p>${esc(scan.source)} · clôture ${date(scan.candle_closed_at)} UTC · ${esc(scan.version)}</p>
+ <p>Alerte : ${scan.early.satisfied}/6 · ${scanResult(scan.early)}</p><ul>${scanLines(scan.early)}</ul>
+ <p>Invalidation : ${scan.invalidation.satisfied}/5 · ${scanResult(scan.invalidation)}</p><ul>${scanLines(scan.invalidation)}</ul>
+ <p>${esc(scan.vwap_note)} Initialisation des indicateurs et équivalence au moteur Smart View non vérifiées. Aucune validation d’achat ni preuve de rentabilité.</p>
+ ${scan.missing.length?`<p>Données manquantes : ${esc(scan.missing.join(' · '))}</p>`:''}</details>`;
 }
 function renderAnnotated(reading){
  const changes=Array.isArray(latestJournalEntry?.changed_factors)?latestJournalEntry.changed_factors:[];
