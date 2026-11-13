@@ -75,6 +75,15 @@ test('le journal sépare les mesures anciennes et celles après observation',()=
  const groups=widgets().horizonGroups({by_outcome_method:{closed_candle_time_v2:{by_rsi_method:{wilder:{count:2,mean_pct:1}}},observation_time_v3:{by_rsi_method:{wilder:{count:1,mean_pct:-2}}}}});
  assert.deepEqual(groups,[{method:'Avant : depuis la clôture · wilder',count:2,meanPct:1},{method:'Depuis l’observation · wilder',count:1,meanPct:-2}]);
 });
+test('le suivi des rebonds conserve les cas inconnus et masque les données invalides',()=>{
+ const W=widgets();
+ assert.equal(W.reboundSummary(null),null);
+ const r=W.reboundSummary({version:'tel99-rebounds-v1',start_at:100,thresholds:{'5':{episodes:3,detected:1,missed:1,unknown:1,detection_fraction_known:.5}},false_positives:{count:0,evaluable:2,pending:1}});
+ assert.equal(r.thresholds['5'].unknown,1);
+ assert.equal(r.thresholds['5'].detection_fraction_known,.5);
+ assert.equal(r.false_positives.evaluable,2);
+ assert.equal(W.reboundSummary({version:'unknown'}),null);
+});
 test('le graphique masque les bougies de provenance ou de clôture incohérente', () => {
   const W=widgets(), frame={bars:[{t:1},{t:2}]};
   assert.equal(typeof W.chartBars,'function');

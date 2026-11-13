@@ -66,6 +66,20 @@ function horizonGroups(horizon){
  if(horizon?.by_rsi_method&&typeof horizon.by_rsi_method==='object')for(const [name,value] of Object.entries(horizon.by_rsi_method))if(name!==method)groups.push(group(name,value));
  return groups;
 }
+function reboundSummary(report){
+ if(report?.version!=='tel99-rebounds-v1'||!Number.isFinite(report.start_at))return null;
+ const count=x=>Number.isInteger(x)&&x>=0?x:null;
+ const thresholds={};
+ for(const key of ['2','3','5','10']){
+  const v=report.thresholds?.[key]??{};
+  thresholds[key]={episodes:count(v.episodes),detected:count(v.detected),missed:count(v.missed),unknown:count(v.unknown),
+   detection_fraction_known:Number.isFinite(v.detection_fraction_known)&&v.detection_fraction_known>=0&&v.detection_fraction_known<=1?v.detection_fraction_known:null,
+   median_lead_minutes:Number.isFinite(v.median_lead_minutes)?v.median_lead_minutes:null,
+   median_late_minutes:Number.isFinite(v.median_late_minutes)?v.median_late_minutes:null};
+ }
+ const f=report.false_positives??{};
+ return {version:report.version,start_at:report.start_at,thresholds,false_positives:{count:count(f.count),evaluable:count(f.evaluable),pending:count(f.pending)}};
+}
 function chartBars(frame,status){return ['Clôtures incohérentes','Provenance incohérente'].includes(status)?[]:Array.isArray(frame?.bars)?frame.bars:[];}
 function readMarketTickers(payload){
  if(!Array.isArray(payload?.error)||payload.error.length||!payload.result||typeof payload.result!=='object')return null;
@@ -84,6 +98,6 @@ function readMarketTickers(payload){
  });
 }
 function marketFresh(received,now){return positive(received)&&Number.isFinite(now)&&now>=received&&now-received<=120;}
-const api={readBook,buyImpact,accumulation,layout,distancePct,gaugeFreshness,horizonGroups,chartBars,readMarketTickers,marketFresh};
+const api={readBook,buyImpact,accumulation,layout,distancePct,gaugeFreshness,horizonGroups,reboundSummary,chartBars,readMarketTickers,marketFresh};
 if(typeof module==='object')module.exports=api;else root.TEL99Widgets=api;
 })(typeof window==='object'?window:globalThis);
