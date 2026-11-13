@@ -5,6 +5,15 @@ test('worker refuses writes and does not proxy arbitrary routes',async()=>{
  assert.equal((await worker.fetch(new Request('https://test/api/quote',{method:'POST'}))).status,405);
  assert.equal((await worker.fetch(new Request('https://test/api/order'))).status,404);
 });
+test('le carnet ne lit que le point public Kraken fixe',async()=>{
+ const old=global.fetch; let requested;
+ try{
+  global.fetch=async url=>{requested=String(url);return new Response('{"error":[],"result":{}}');};
+  const response=await worker.fetch(new Request('https://test/api/depth'));
+  assert.equal(response.status,200);
+  assert.equal(requested,'https://api.kraken.com/0/public/Depth?pair=TELUSD&count=100');
+ }finally{global.fetch=old;}
+});
 test('snapshot proxy rejects older data and research mutations',async()=>{
  const {validSnapshot}=await import('../deploy/sites/worker.mjs');
  const base={schema_version:1,market:'KRAKEN:TELUSD',source:'Kraken public REST / OHLC',as_of:100,research_source_sha256:'abc',lab:{x:1},safety:{real_orders:false,paper_orders:false},frames:Object.fromEntries(['15m','1h','4h','1D'].map(tf=>[tf,{symbol:'KRAKEN:TELUSD',interval:tf,bars:[]}]))};

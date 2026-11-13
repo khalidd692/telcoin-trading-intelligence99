@@ -7,14 +7,17 @@ const S=node?require('./smartview.js'):root.TEL99SmartView;
 const scenarios=node?require('./scenarios.js'):root.TEL99Scenarios;
 const {finite,steps}=T;
 const statusLabels={EARLY_ALERT:'ALERTE PRÉCOCE',CONFIRMATION:'ACHAT CONFIRMÉ',INVALIDATION:'INVALIDATION'};
-function frameCheck(frame,unit,asOf,now){
- const status=T.frameStatus(frame,asOf,now,steps[unit]);
- if(status!=='Disponible')return status;
- if(frame.symbol!=='KRAKEN:TELUSD'||frame.interval!==unit)return 'Provenance incohérente';
+function frameIntegrity(frame,unit,asOf){
+ if(frame?.symbol!=='KRAKEN:TELUSD'||frame?.interval!==unit)return 'Provenance incohérente';
+ if(!finite(frame.quality?.last_close)||!finite(asOf)||!finite(steps[unit]))return 'Clôtures incohérentes';
  const bars=frame.bars?.slice(-50);
  if(bars?.length!==50||bars.at(-1).t+steps[unit]!==frame.quality.last_close||frame.quality.last_close>asOf||
     bars.some((bar,i)=>![bar.t,bar.o,bar.h,bar.l,bar.c,bar.v].every(finite)||bar.t%steps[unit]!==0||(i>0&&bar.t-bars[i-1].t!==steps[unit])))return 'Clôtures incohérentes';
- return status;
+ return 'Disponible';
+}
+function frameCheck(frame,unit,asOf,now){
+ const status=T.frameStatus(frame,asOf,now,steps[unit]);
+ return status!=='Disponible'?status:frameIntegrity(frame,unit,asOf);
 }
 function divergence(bars,series){
  const closes=bars.slice(-10),readings=series.slice(-10);
@@ -100,7 +103,7 @@ function readRadar(data,plans=[],now=Date.now()/1000){
   factors:factors.filter(x=>x.active===true).map(x=>x.id),blockers}:null;
  return {...base,status:statusLabels[type]??'ATTENDRE',factors,watch,invalidation,blockers,event};
 }
-const api={readRadar};
+const api={readRadar,frameCheck,frameIntegrity};
 if(node){
  module.exports=api;
  if(require.main===module){

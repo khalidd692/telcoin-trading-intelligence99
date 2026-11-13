@@ -1,6 +1,7 @@
 // Fixed public read-only routes. Bundler supplies assets as an in-memory constant.
 const routes={
  '/api/quote':'https://api.kraken.com/0/public/Ticker?pair=TELUSD',
+ '/api/depth':'https://api.kraken.com/0/public/Depth?pair=TELUSD&count=100',
  '/api/fx':'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD',
  '/evaluation/summary.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/refs/heads/tel99-evaluation-data/evaluation/summary.json',
  '/data.json':'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json'

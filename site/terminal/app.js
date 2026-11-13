@@ -8,10 +8,34 @@ const money=x=>fmt(x,2)+' $';
 const labels={breakout20:'Cassure 20',recovery30:'Reprise RSI30',divergence:'Divergence RSI',oversold:'Survente RSI',pullback:'Repli EMA20'};
 let scenarioPlans=[];
 let data,tf='4h',oscMode='rsi14',chart,osc,candles,vol,lines={},oscLine,liveQuote=null;
-let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0;
-const S=window.TEL99SmartView;
+let rangeSync=false,quoteBusy=false,snapshotBusy=false,eurUsd=null,eurUsdFetched=0,fxReferenceDate=null;
+const S=window.TEL99SmartView, W=window.TEL99Widgets;
+let depthBook=null, depthReceived=0, depthBusy=false, historyBusy=false, latestJournalEntry=null;
+let cardState, cardCategory='Tous';
+const cardDefinitions=[
+ ['chart','Graphique de prix','Techniques','Bougies, moyennes, niveaux et couches.',true],
+ ['levels','Niveaux clés','Techniques','Supports, résistances et Fibonacci.',true],
+ ['zones','Zones SMC','Techniques','Structure, blocs et déséquilibres estimés.',true],
+ ['profile','Profil de volume','Techniques','Estimation du volume par classes de prix.',true],
+ ['technical','Jauge technique','Techniques','Votes et indicateurs par unité.',true],
+ ['tradeplan','Plan de trade','Techniques','Scénario conditionnel et risque net.',true],
+ ['scenarios','Scénarios conditionnels','Techniques','Hypothèses de repli et de confirmation.',true],
+ ['liquidity','Carnet Kraken','Marché','Spread, profondeur et impact indicatif.',true],
+ ['price','Fiche TEL/USD','Marché','Prix et variations sur une période.',true],
+ ['macro','Contexte BTC / ETH','Marché','Clôtures, volume et corrélation calculée.',true],
+ ['prospective','Statistiques prospectives','Marché','Observations et résultats futurs du journal.',true],
+ ['fundamentals','Fondamentaux','Fondamentaux','Sources et recherches datées sur Telcoin.',true],
+ ['accumulation','Accumulation personnelle','Personnel','Quantité et capital saisis localement.',true],
+ ['decision','Centre de décision','Techniques','Détails de la décision swing.',true],
+ ['factors','Carte des facteurs','Techniques','Indicateurs et contradictions.',true],
+ ['frames','Convergence temporelle','Techniques','Qualité et données par unité.',true],
+ ['guide','Guide du radar','Personnel','Signification des états du radar.',false],
+ ['preview1h','Aperçu 1 h','Techniques','Graphique compact de structure.',false],
+ ['preview4h','Aperçu 4 h','Techniques','Graphique compact de confirmation.',false],
+ ['preview1d','Aperçu 1 jour','Techniques','Graphique compact de contexte.',false]
+].map(([id,title,category,description,visible])=>({id,title,category,description,visible}));
 const technicalCache=new WeakMap();
-let renderedSmartFrame,renderedSmartAvailability;
+let renderedSmartFrame,renderedSmartAvailability,renderedSmartSignature;
 let chartPriceLines=[], structureMarkers;
 let technicalDetail=null;
 let previousChartAvailability;
@@ -60,14 +84,14 @@ function renderRadarCanvas(canvas){
  if(canvas.id==='radar-price-chart'){
   const unit=priceDays===1?'1h':'1D',frame=data.frames[unit];
   const count=priceDays===1?25:priceDays+1;
-  const bars=frame.bars.slice(-count);
+  const availability=chartStatus(frame,unit),bars=W.chartBars(frame,availability).slice(-count);
   const complete=bars.length===count&&bars.at(-1).t-bars[0].t===priceDays*86400;
   drawRadarCanvas(canvas,complete?bars:[],{asLine:true});
-  $('radar-price-note').textContent=complete?`${pct(100*(bars.at(-1).c/bars[0].c-1))} sur ${priceDays} j · clôture ${date(frame.quality.last_close)} UTC · ${statusOf(frame)}`:'Historique Kraken insuffisant pour cette période.';
+  $('radar-price-note').textContent=complete?`${pct(100*(bars.at(-1).c/bars[0].c-1))} sur ${priceDays} j · clôture ${date(frame.quality.last_close)} UTC · ${availability}`:`Historique indisponible : ${availability}.`;
   return;
  }
- const unit=canvas.dataset.preview,frame=data.frames[unit],availability=statusOf(frame);
- const slice=frame.bars.slice(-55),cut=slice.findLastIndex((r,i)=>i>0&&r.t-slice[i-1].t!==S.steps[unit]);
+ const unit=canvas.dataset.preview,frame=data.frames[unit],availability=chartStatus(frame,unit);
+ const slice=W.chartBars(frame,availability).slice(-55),cut=slice.findLastIndex((r,i)=>i>0&&r.t-slice[i-1].t!==S.steps[unit]);
  const bars=slice.slice(Math.max(0,cut));
  const m=availability==='Disponible'?S.marketLevels(frame,unit):{};
  drawRadarCanvas(canvas,bars,{series:frame.series,levels:[[m.support,'#54c4ba'],[m.resistance,'#ee8990']]});
@@ -76,7 +100,7 @@ function renderRadarCanvas(canvas){
 function renderRadar(){
  if(!data)return;
  const frame=data.frames['1h'];
- const m=statusOf(frame)==='Disponible'?S.marketLevels(frame,'1h'):null;
+ const m=chartStatus(frame,'1h')==='Disponible'?S.marketLevels(frame,'1h'):null;
  const profile=m?S.volumeProfile(frame):null;
  $('smart-profile').innerHTML=profile?`<p class="radar-values"><span>VAH <b>${price(profile.vah)}</b></span><span>POC <b>${price(profile.poc)}</b></span><span>VAL <b>${price(profile.val)}</b></span><span>Écart <b>${pct(100*(frame.latest.close/profile.poc-1))}</b></span></p><div class="smart-profile" aria-hidden="true">${profile.bins.map((v,i)=>`<i class="${i===profile.peak?'poc':i>=profile.lo&&i<=profile.hi?'accepted':''}" style="width:${100*v/Math.max(...profile.bins)}%"></i>`).reverse().join('')}</div><p class="radar-caption">8 jours · 60 classes · estimation HLC3 sur bougies 1h clôturées · zone de valeur à 70 % du volume.</p>`:'<p>Profil indisponible. Il faut 192 bougies horaires clôturées et consécutives.</p>';
  const structure=m?S.structureEvents(frame,'1h'):[];
@@ -111,12 +135,26 @@ function technicalTable(rows){
  const action={1:'Acheter',0:'Neutre','-1':'Vendre'};
  return '<div class="table-scroll smart-table"><table><thead><tr><th>Indicateur</th><th>Valeur</th><th>Signal</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${r.name}<small>${r.period}</small></td><td>${fmt(r.value,8)}${T.finite(r.extra)?' / '+fmt(r.extra,8):''}</td><td class="${r.vote===1?'positive':r.vote===-1?'negative':''}">${action[r.vote]??'Indisponible'}</td></tr>`).join('')+'</tbody></table></div>';
 }
+function multiUnitGauges(){
+ const quality=W.gaugeFreshness(data.frames,data.as_of,Date.now()/1000,window.TEL99Radar.frameCheck);
+ return '<div class="multi-unit-gauges">'+['15m','1h','4h','1D'].map(unit=>{
+  const frame=data.frames[unit];
+  if(quality[unit]!=='Disponible')return `<div><b>${unit}</b><span>${esc(quality[unit])}</span></div>`;
+  if(!technicalCache.has(frame))technicalCache.set(frame,{technical:S.technical(frame,unit),levels:S.marketLevels(frame,unit)});
+  const r=technicalCache.get(frame).technical,total=r.total.buy+r.total.sell+r.total.neutral;
+  if(!total)return `<div><b>${unit}</b><span>Indicateurs insuffisants</span></div>`;
+  const score=(r.total.buy-r.total.sell)/total;
+  const direction=score>.1?'Haussière':score<-.1?'Baissière':'Neutre';
+  return `<div><b>${unit} · ${direction}</b><span class="vote-bar"><i style="left:${Math.max(0,Math.min(100,50+score*50))}%"></i></span><small>MM ${r.averageCounts.buy}↑ / ${r.averageCounts.sell}↓ · Osc. ${r.counts.buy}↑ / ${r.counts.sell}↓ · ADX ${fmt(frame.latest?.adx14,1)}</small></div>`;
+ }).join('')+'</div><p class="radar-caption">Votes techniques descriptifs et ADX de tendance ; ce ne sont pas des probabilités.</p>';
+}
 function renderSmart(frame,availability){
  const node=$('technical-widget');
  const levels=$('smart-structure');
  const monthly=$('technical-month').getAttribute('aria-pressed')==='true';
- if(renderedSmartFrame===frame&&renderedSmartAvailability===availability)return;
- renderedSmartFrame=frame;renderedSmartAvailability=availability;
+ const signature=JSON.stringify(W.gaugeFreshness(data.frames,data.as_of,Date.now()/1000,window.TEL99Radar.frameCheck));
+ if(renderedSmartFrame===frame&&renderedSmartAvailability===availability&&renderedSmartSignature===signature)return;
+ renderedSmartFrame=frame;renderedSmartAvailability=availability;renderedSmartSignature=signature;
  if(availability!=='Disponible'){
   if(!monthly)node.innerHTML='<p class="amber-text">DONNÉES INSUFFISANTES · '+esc(availability)+'</p><div class="smart-gauges">'+['Oscillateurs','Résumé','Moyennes mobiles'].map(name=>scoreGauge(name,null)).join('')+'</div>';
   levels.textContent='Données insuffisantes pour des niveaux actuels.';
@@ -125,13 +163,15 @@ function renderSmart(frame,availability){
  if(!technicalCache.has(frame))technicalCache.set(frame,{technical:S.technical(frame,tf),levels:S.marketLevels(frame,tf)});
  const {technical:r,levels:m}=technicalCache.get(frame);
  const details=(id,name,body)=>`<section data-technical-panel="${id}" ${technicalDetail===id?'':'hidden'}><h3>${name}</h3>${body}</section>`;
- if(!monthly)node.innerHTML=`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Résumé',r.total)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
+ if(!monthly)node.innerHTML=multiUnitGauges()+`<p>${esc(tf)} · clôture ${date(frame.quality.last_close)} UTC</p><div class="smart-gauges">${scoreGauge('Oscillateurs',r.counts)}${scoreGauge('Résumé',r.total)}${scoreGauge('Moyennes mobiles',r.averageCounts)}</div>`+
   '<div class="technical-menu" aria-label="Tableaux techniques">'+[['osc','Oscillateurs'],['ma','Moyennes'],['piv','Pivots'],['method','Méthode']].map(([key,label])=>`<button type="button" data-technical="${key}" aria-pressed="${technicalDetail===key}">${label}</button>`).join('')+'</div>'+
   details('osc','Oscillateurs · valeurs et votes',technicalTable(r.oscillators))+
   details('ma','Moyennes mobiles · valeurs et votes',technicalTable(r.averages))+
   details('piv','Pivots · classique, Fibonacci, Camarilla et Woodie',r.pivots.length?'<div class="table-scroll smart-pivot-table"><table><thead><tr><th>Niveau</th><th>Classique</th><th>Fibonacci</th><th>Camarilla</th><th>Woodie</th></tr></thead><tbody>'+r.pivots.map(row=>'<tr><td>'+row[0]+'</td>'+row.slice(1).map(v=>'<td>'+price(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'<p>Données insuffisantes.</p>')+
   details('method','Méthode des votes',`<p>Une voix par indicateur disponible. Le score est (achats − ventes) ÷ votes. Verdict neutre entre −0,10 et +0,10, fort à partir de ±0,50. Les moyennes votent selon la position de la clôture. MACD et stochastiques votent selon la comparaison à leur signal. Momentum, AO et Bull Bear Power votent selon leur signe. ADX ≥ 25 utilise la direction DMI. RSI et Ultimate votent aux seuils 30 / 70, CCI −100 / +100 et Williams −80 / −20. Les indicateurs repartent après chaque interruption. Les pivots utilisent la période précédente et, pour Woodie, l’ouverture de la période analysée. Les jauges sont descriptives.</p>`);
- levels.innerHTML=`<p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>Support pivot</dt><dd>${price(m.support)} $</dd><dt>Résistance pivot</dt><dd>${price(m.resistance)} $</dd><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. La carte Zones précise les heuristiques SMC.</p>`;
+ const reference=frame.latest?.close;
+ const levelRows=[['Dernier pivot haut',m.resistance,'resistance'],['Clôture',reference,'current'],['Dernier pivot bas',m.support,'support']].map(([name,value,kind])=>`<div class="level-row ${kind}"><span>${name}</span><b>${price(value)} $</b><small>${kind==='current'?'Référence':pct(W.distancePct(value,reference))}</small></div>`).join('');
+ levels.innerHTML=`<div class="level-rows">${levelRows}</div><p class="radar-caption">Distances par rapport à la clôture ${esc(tf)} · ${date(frame.quality.last_close)} UTC. Un pivot franchi n’est pas automatiquement une résistance ou un support actif.</p><p>Structure des pivots confirmés · ${esc(m.trend??'indisponible')}. ${esc(m.breaks??'Aucune cassure du dernier pivot sur la dernière clôture.')}</p><dl><dt>FVG récents non comblés</dt><dd>${m.fvgs?.map(z=>price(z.low)+'–'+price(z.high)+' $ · '+z.side).join(' / ')||'Aucun détecté'}</dd><dt>Retracements sur fenêtre</dt><dd>${m.fib?.map(([k,v])=>fmt(k*100,1)+' % · '+price(v)).join(' / ')||'—'}</dd></dl><p class="footnote">Pivots à deux bougies de chaque côté. Les niveaux sont des repères de structure. La carte Zones précise les heuristiques SMC.</p>`;
  return m;
 }
 function selectMarket(key){
@@ -143,8 +183,62 @@ function selectMarket(key){
 }
 function pref(key,fallback){try{return localStorage.getItem('tel99:'+key)??fallback;}catch{return fallback;}}
 function save(key,v){try{localStorage.setItem('tel99:'+key,v);}catch{/* Privacy mode still usable. */}}
+function defaultCards(useLegacy=true){
+ const visible={};
+ for(const card of cardDefinitions){
+  const old=useLegacy?pref('widget:'+card.id,''):'';
+  visible[card.id]=old==='true'?true:old==='false'?false:card.visible;
+ }
+ return {order:cardDefinitions.map(x=>x.id),visible};
+}
+function applyCards(){
+ let anchor=$('widget-catalog');
+ cardState.order.forEach((id,index)=>{
+  const panel=document.querySelector('[data-card-id="'+id+'"]');
+  if(panel){anchor.after(panel);anchor=panel;panel.style.order=String(index+10);panel.classList.toggle('hidden',!cardState.visible[id]);}
+ });
+ save('cards-v1',JSON.stringify(cardState));
+ if(chart)resizeCharts();
+}
+function renderCardCatalog(){
+ const categories=['Tous','Techniques','Fondamentaux','Screening','Marché','Personnel'];
+ $('widget-categories').innerHTML=categories.map(name=>`<button type="button" data-category="${name}" aria-pressed="${cardCategory===name}">${name}</button>`).join('');
+ const query=$('widget-search').value.trim().toLocaleLowerCase('fr');
+ const cards=cardState.order.map(id=>cardDefinitions.find(x=>x.id===id)).filter(card=>card&&(cardCategory==='Tous'||card.category===cardCategory)&&(!query||(card.title+' '+card.description).toLocaleLowerCase('fr').includes(query)));
+ const views={chart:'Graphique',technical:'Note technique',levels:'Niveaux clés',plans:'Plan de trade',context:'Contexte'};
+ $('widget-list').innerHTML=cards.length?cards.map(card=>{
+  const panel=document.querySelector('[data-card-id="'+card.id+'"]'),viewName=views[panel?.dataset.marketPanel]??'Radar';
+  return `<div class="widget-option"><label><input type="checkbox" data-card-toggle="${card.id}" ${cardState.visible[card.id]?'checked':''}><span><strong>${esc(card.title)}</strong><small>${esc(card.description)} · Vue ${esc(viewName)}</small></span></label><div class="widget-move"><button type="button" data-card-open="${card.id}" aria-label="Voir ${esc(card.title)}">Voir</button><button type="button" data-card-move="${card.id}" data-direction="-1" aria-label="Monter ${esc(card.title)}">↑</button><button type="button" data-card-move="${card.id}" data-direction="1" aria-label="Descendre ${esc(card.title)}">↓</button></div></div>`;
+ }).join(''):'<p>Aucun widget dans cette catégorie.</p>';
+}
+function bindCardCatalog(){
+ let saved;try{saved=JSON.parse(pref('cards-v1','null'));}catch{saved=null;}
+ const defaults=defaultCards();
+ cardState={order:W.layout(saved?.order,defaults.order),visible:{...defaults.visible}};
+ if(saved?.visible&&typeof saved.visible==='object')for(const id of defaults.order)if(typeof saved.visible[id]==='boolean')cardState.visible[id]=saved.visible[id];
+ applyCards();renderCardCatalog();
+ $('widget-search').addEventListener('input',renderCardCatalog);
+ $('widget-categories').addEventListener('click',event=>{const b=event.target.closest('[data-category]');if(b){cardCategory=b.dataset.category;renderCardCatalog();}});
+ $('widget-list').addEventListener('change',event=>{const input=event.target.closest('[data-card-toggle]');if(input){const id=input.dataset.cardToggle,panel=document.querySelector('[data-card-id="'+id+'"]');cardState.visible[id]=input.checked;applyCards();if(input.checked&&panel?.hidden)selectMarket(panel.dataset.marketPanel);}});
+ $('widget-list').addEventListener('click',event=>{
+  const open=event.target.closest('[data-card-open]');
+  if(open){const id=open.dataset.cardOpen,panel=document.querySelector('[data-card-id="'+id+'"]');if(panel){cardState.visible[id]=true;applyCards();selectMarket(panel.dataset.marketPanel);$('widget-catalog').open=false;panel.scrollIntoView({block:'start'});}return;}
+  const button=event.target.closest('[data-card-move]');if(!button)return;
+  const index=cardState.order.indexOf(button.dataset.cardMove),next=index+Number(button.dataset.direction);
+  if(index<0||next<0||next>=cardState.order.length)return;
+  [cardState.order[index],cardState.order[next]]=[cardState.order[next],cardState.order[index]];
+  applyCards();renderCardCatalog();
+  $('widget-list').querySelector('[data-card-move="'+button.dataset.cardMove+'"][data-direction="'+button.dataset.direction+'"]')?.focus();
+ });
+ $('widget-reset').addEventListener('click',()=>{cardState=defaultCards(false);cardCategory='Tous';$('widget-search').value='';applyCards();renderCardCatalog();});
+}
 function download(name,obj){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function statusOf(frame){return T.frameStatus(frame,data.as_of,Date.now()/1000,S.steps[frame?.interval]);}
+function chartStatus(frame,unit){
+ if(!(unit in T.steps))return statusOf(frame);
+ const integrity=window.TEL99Radar.frameIntegrity(frame,unit,data.as_of);
+ return integrity==='Disponible'?window.TEL99Radar.frameCheck(frame,unit,data.as_of,Date.now()/1000):integrity;
+}
 function requiredDataIssues(){
  const results=Object.keys(T.steps).map(unit=>[unit,statusOf(data.frames?.[unit])]);
  return results.filter(([,status])=>status!=='Disponible').map(([unit,status])=>unit+' · '+status);
@@ -173,7 +267,7 @@ function renderDecision(){
  $('freshness-banner').textContent=`Snapshot analytique : ${date(data.as_of)} UTC. ${missing.length?'Attention : '+missing.join(', ')+' indisponible ou périmé.':'Unités analysables à la clôture.'} ${liveQuote?'Le cours public reçu ne rafraîchit ni les indicateurs ni les signaux.':'Le bouton de cours interroge l’API publique Kraken, indépendamment de l’analyse.'}`;
 }
 function renderWidgets(){
- const f=data.frames[tf], l=f.latest, availability=statusOf(f);
+ const f=data.frames[tf], l=f.latest, availability=chartStatus(f,tf);
  renderSmart(f,availability);
  const d=T.safeDecision(data),p=d.plan;
  if(d.status==='DONNÉES INSUFFISANTES'||requiredDataIssues().length) $('tradeplan-widget').innerHTML='<p class="amber-text">Données insuffisantes ou périmées : plan masqué. Aucun ordre.</p>';
@@ -191,7 +285,7 @@ function renderFactors(){const f=data.frames[tf],l=f.latest,btc=data.context.btc
 function setupCharts(){
  const L=window.LightweightCharts;
  if(!L){$('chart').innerHTML='<p class="load-error">Bibliothèque de graphiques indisponible. Les tableaux restent accessibles.</p>';return;}
- const common={layout:{background:{color:'#10151d'},textColor:'#7e8da3',fontFamily:'ui-monospace,monospace',fontSize:10,attributionLogo:true},grid:{vertLines:{color:'#1a2330'},horzLines:{color:'#1a2330'}},rightPriceScale:{borderColor:'#283343',minimumWidth:78},timeScale:{borderColor:'#283343',timeVisible:true,secondsVisible:false},crosshair:{mode:L.CrosshairMode.Normal,vertLine:{color:'#677b91',labelBackgroundColor:'#344458'},horzLine:{color:'#677b91',labelBackgroundColor:'#344458'}},handleScroll:{vertTouchDrag:false},localization:{locale:'fr-FR'}};
+ const common={layout:{background:{color:'#111315'},textColor:'#a4a6ad',fontFamily:'ui-monospace,monospace',fontSize:10,attributionLogo:true},grid:{vertLines:{color:'#24262a'},horzLines:{color:'#24262a'}},rightPriceScale:{borderColor:'#34363a',minimumWidth:78},timeScale:{borderColor:'#34363a',timeVisible:true,secondsVisible:false},crosshair:{mode:L.CrosshairMode.Normal,vertLine:{color:'#777b82',labelBackgroundColor:'#35383d'},horzLine:{color:'#777b82',labelBackgroundColor:'#35383d'}},handleScroll:{vertTouchDrag:false},localization:{locale:'fr-FR'}};
  chart=L.createChart($('chart'),{...common,width:$('chart').clientWidth,height:$('chart').clientHeight});
  candles=chart.addSeries(L.CandlestickSeries,{upColor:'#65cdb0',downColor:'#da7985',borderVisible:false,wickUpColor:'#65cdb0',wickDownColor:'#da7985',priceFormat:{type:'price',precision:6,minMove:.000001}});
  structureMarkers=L.createSeriesMarkers(candles,[]);
@@ -202,40 +296,40 @@ function setupCharts(){
  oscLine=osc.addSeries(L.LineSeries,{color:'#b8a0eb',lineWidth:1,priceLineVisible:false,priceFormat:{type:'price',precision:2,minMove:.01}});
  chart.timeScale().subscribeVisibleLogicalRangeChange(range=>{if(range&&!rangeSync){rangeSync=true;osc.timeScale().setVisibleLogicalRange(range);rangeSync=false;}});
  osc.timeScale().subscribeVisibleLogicalRangeChange(range=>{if(range&&!rangeSync){rangeSync=true;chart.timeScale().setVisibleLogicalRange(range);rangeSync=false;}});
- chart.subscribeCrosshairMove(p=>{const r=p.seriesData?.get(candles);if(r?.open)showOHLC(r);else showOHLC(data.frames[tf].bars.at(-1));});
+ chart.subscribeCrosshairMove(p=>{const frame=data.frames[tf],bars=W.chartBars(frame,chartStatus(frame,tf)),r=p.seriesData?.get(candles);if(!bars.length)showOHLC(null);else if(r?.open)showOHLC(r);else showOHLC(bars.at(-1));});
  new ResizeObserver(resizeCharts).observe($('chart'));
 }
 function resizeCharts(){if(!chart||!$('chart').clientWidth)return;chart.resize($('chart').clientWidth,$('chart').clientHeight);osc.resize($('osc-chart').clientWidth,$('osc-chart').clientHeight);}
 function showOHLC(r){if(!r){$('ohlc').textContent='Aucune bougie disponible pour cette unité.';return;}$('ohlc').innerHTML=`O <b>${price(r.o??r.open)}</b> &nbsp; H <b>${price(r.h??r.high)}</b> &nbsp; L <b>${price(r.l??r.low)}</b> &nbsp; C <b>${price(r.c??r.close)}</b>`;}
-function renderChart(){renderWidgets();const f=data.frames[tf];previousChartAvailability=statusOf(f);$('radar-chart-title').textContent=chartTitles[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+statusOf(f);showOHLC(f.bars.at(-1));renderFactors();
+function renderChart(){renderWidgets();const f=data.frames[tf],quality=chartStatus(f,tf),bars=W.chartBars(f,quality);previousChartAvailability=quality;$('radar-chart-title').textContent=chartTitles[tf];$('chart-meta').textContent=f.quality.valid_bars.toLocaleString('fr-FR')+' bougies · '+quality;showOHLC(bars.at(-1));renderFactors();
  document.querySelectorAll('[data-tf]').forEach(b=>{b.classList.toggle('selected',b.dataset.tf===tf);b.setAttribute('aria-pressed',String(b.dataset.tf===tf));});
  if(!chart)return;
  // Whitespace creates visible time gaps; no artificial OHLC points.
  const cs=[],vs=[];let previous=null;
- for(const r of f.bars){if(previous!==null&&r.t-previous>S.steps[tf]){cs.push({time:previous+S.steps[tf]});vs.push({time:previous+S.steps[tf]});}cs.push({time:r.t,open:r.o,high:r.h,low:r.l,close:r.c});vs.push({time:r.t,value:r.v,color:r.c>=r.o?'#234e46':'#4c2c38'});previous=r.t;}
+ for(const r of bars){if(previous!==null&&r.t-previous>S.steps[tf]){cs.push({time:previous+S.steps[tf]});vs.push({time:previous+S.steps[tf]});}cs.push({time:r.t,open:r.o,high:r.h,low:r.l,close:r.c});vs.push({time:r.t,value:r.v,color:r.c>=r.o?'#234e46':'#4c2c38'});previous=r.t;}
  candles.setData(cs);vol.setData(vs);
  for(const line of chartPriceLines)candles.removePriceLine(line);
  chartPriceLines=[];
- const marketStructure=statusOf(f)==='Disponible'?technicalCache.get(f)?.levels??S.marketLevels(f,tf):null;
+ const marketStructure=quality==='Disponible'?technicalCache.get(f)?.levels??S.marketLevels(f,tf):null;
  const events=marketStructure?S.structureEvents(f,tf):[];
  const swings=$('smart-pivots').checked?(marketStructure?.pivots??[]).map(p=>({
   time:p.time,position:p.side==='high'?'aboveBar':'belowBar',shape:'circle',size:.45,text:p.label,color:p.side==='high'?'#f28b9a':'#54c4ba'
  })):[];
  const marks=$('smart-pivots').checked?events.map(e=>({time:e.time,position:e.side==='up'?'aboveBar':'belowBar',shape:e.side==='up'?'arrowUp':'arrowDown',size:.6,text:e.label,color:'#b8a0eb'})):[];
  structureMarkers?.setMarkers([...swings,...marks].sort((a,b)=>a.time-b.time));
- if(($('smart-levels').checked||$('smart-zones').checked)&&statusOf(f)==='Disponible'){
+ if(($('smart-levels').checked||$('smart-zones').checked)&&quality==='Disponible'){
   const m=marketStructure;
-  const levels=$('smart-levels').checked?[[m.support,'Support','#54c4ba'],[m.resistance,'Résistance','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),]:[];
+  const levels=$('smart-levels').checked?[[m.support,'Pivot bas','#54c4ba'],[m.resistance,'Pivot haut','#e96883'],[m.profile?.poc,'POC','#e8ad62'],...(m.fib??[]).map(([k,v])=>[v,'Fib '+fmt(k*100,1)+' %','#64748b']),]:[];
   if($('smart-zones').checked)for(const [label,zones] of [['FVG',m.fvgs??[]],['OB estimé',events.filter(e=>e.zone).slice(-2).map(e=>e.zone)]])for(const z of zones)levels.push([z.low,label,'#8a6bb0'],[z.high,'','#8a6bb0']);
   chartPriceLines=levels.filter(([p])=>T.finite(p)).map(([price,title,color])=>candles.createPriceLine({price,title,color,lineWidth:1,lineStyle:2,axisLabelVisible:!!title}));
  }
 
  $('vwap_session').disabled=S.steps[tf]>=86400;
- for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(f.series,S.steps[tf],key));lines[key].applyOptions({visible:$(key).checked&&!$(key).disabled});}
- oscLine.setData(T.chartSeries(f.series,S.steps[tf],oscMode));
+ for(const key of Object.keys(lines)){lines[key].setData(T.chartSeries(bars.length?f.series:[],S.steps[tf],key));lines[key].applyOptions({visible:$(key).checked&&!$(key).disabled});}
+ oscLine.setData(T.chartSeries(bars.length?f.series:[],S.steps[tf],oscMode));
  oscLine.applyOptions({color:oscMode==='rsi14'?'#b8a0eb':'#74a3ed',priceFormat:{type:'price',precision:oscMode==='rsi14'?2:7,minMove:oscMode==='rsi14'?.01:.0000001}});
- $('osc-value').textContent=fmt(f.latest[oscMode],oscMode==='rsi14'?2:7);
- if(!f.bars.length)return;
+ $('osc-value').textContent=bars.length?fmt(f.latest[oscMode],oscMode==='rsi14'?2:7):'—';
+ if(!bars.length)return;
  const count=$('chart-window').value;if(count==='all')chart.timeScale().fitContent();else chart.timeScale().setVisibleLogicalRange({from:Math.max(0,cs.length-Number(count)),to:cs.length+3});
 }
 function renderLab(){const f=data.lab.frozen;
@@ -254,7 +348,7 @@ function renderQuality(){
  $('quality-table').innerHTML=Object.values(data.frames).map(f=>{const q=f.quality;return `<tr><td>${f.interval}</td><td>${(q.source_rows??q.valid_bars)}</td><td>${q.valid_bars}</td><td class="amber-text">${q.excluded_rows}</td><td>${q.missing_bars}</td><td>${q.segments}</td><td class="${q.last_segment_bars<50?'amber-text':'positive'}">${q.last_segment_bars} bougies</td></tr>`;}).join('');
  const entries=[['Marché',data.market],['Fournisseur',data.source],['Capture UTC',data.captured_at],['Fichier source',data.source_path],['SHA-256 source',data.source_sha256],['Protocole expérimental',data.lab.experiments.protocol_sha256],['Exécution','Aucun ordre réel ou paper']];
  $('provenance').innerHTML=entries.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
- $('limits').innerHTML=[...data.limits,'BTC et ETH sont des cotations de contexte. Carnet L2 et flux institutionnels live indisponibles.'].map(x=>`<li>${esc(x)}</li>`).join('');
+ $('limits').innerHTML=[...data.limits,'BTC et ETH sont des cotations de contexte. Le carnet Kraken est un instantané public distinct du moteur décisionnel ; flux institutionnels indisponibles.'].map(x=>`<li>${esc(x)}</li>`).join('');
  $('quarantine').textContent=JSON.stringify(Object.fromEntries(Object.entries(data.frames).map(([tf,f])=>[tf,{reasons:f.quality.reasons,rows:f.excluded}])),null,2);
 }
 async function refreshEurUsd(){
@@ -263,8 +357,8 @@ async function refreshEurUsd(){
   if(!response.ok)throw Error('FX HTTP '+response.status);
   const fx=T.parseFx(await response.json());if(!fx)throw Error('Taux FX périmé');
   const {rate,date:dateStr}=fx;
-  eurUsd=rate;eurUsdFetched=Date.now();$('eur-usd').value=fmt(rate,5)+' USD (référence '+dateStr+')';
- }catch(e){eurUsd=null;$('eur-usd').value='Indisponible';}
+  eurUsd=rate;eurUsdFetched=Date.now();fxReferenceDate=dateStr;$('eur-usd').value=fmt(rate,5)+' USD (référence '+dateStr+')';
+ }catch(e){eurUsd=null;fxReferenceDate=null;$('eur-usd').value='Indisponible';}
  renderRisk();
 }
 function renderEuroBudget(){
@@ -315,8 +409,9 @@ function renderRadarDecision(plans,watch){
  const evidence=reading.factors.map(f=>`<li>${f.active===null?'—':f.active?'✓':'○'} ${esc(f.label)}${f.detail?' · '+esc(f.detail):''}</li>`).join('');
  const execution=watch?.status==='PRÊT À ÉVALUER'?'Contrôles disponibles · évaluation humaine':'Exécution non validée';
  const spread=plans[0]?.spread;
- const liquidity=T.finite(spread)?'Spread '+fmt(spread*100,2)+' % · profondeur non vérifiée':'Spread et profondeur indisponibles';
+ const liquidity=T.finite(spread)?'Spread '+fmt(spread*100,2)+' % · profondeur non intégrée au scénario':'Spread du scénario indisponible';
  const blockers=reading.blockers;
+ renderAnnotated(reading);
  $('radar-reading').innerHTML=`<div class="decision-main"><b>${esc(reading.status)}</b>${reading.status==='ALERTE PRÉCOCE'?'<span class="chip">NON CONFIRMÉE</span>':''}<strong>TEL/USD · ${price(quote?.price??data.frames['15m'].bars.at(-1)?.c)} $</strong></div>
  <div class="decision-meta">Clôture 15 min ${date(reading.closedAt)} UTC · capture ${date(reading.asOf)} UTC · ${reading.factors.length?'données fraîches':'qualité insuffisante'}</div>
  <div class="decision-meta">${quote?'Cotation Kraken reçue '+date(quote.received)+' UTC':'Cours de la dernière clôture 15 min'}</div>
@@ -330,15 +425,58 @@ function renderRadarDecision(plans,watch){
  ${watch?`<p><strong>${esc(watch.name)}</strong> · ${esc(watch.status)}<br>${esc(watch.condition)}<br>Entrée ${price(watch.entry)} $ · stop ${price(watch.stop)} $ · objectif ${price(watch.target)} $</p>`:''}
  <p>RR net théorique ${rr} · ${execution}<br>Frais d’entrée estimés ${money(watch?.feeEstimate)} · frais personnels non vérifiés<br>${liquidity}</p></details>`;
 }
+function renderAnnotated(reading){
+ const changes=Array.isArray(latestJournalEntry?.changed_factors)?latestJournalEntry.changed_factors:[];
+ const changed=latestJournalEntry?`${changes.length?changes.map(esc).join(' · '):'Aucun facteur modifié dans cette observation'} · journal ${date(latestJournalEntry.observed_at)} UTC`:'Journal détaillé indisponible.';
+ const blocked=reading.status==='DONNÉES INSUFFISANTES';
+ const missing=blocked?'Données actuelles insuffisantes.':(reading.blockers??[]).map(esc).join(' · ')||'Aucun blocage indiqué.';
+ const invalidation=!blocked&&reading.invalidation?`${price(reading.invalidation.level)} $ · ${esc(reading.invalidation.unit)}`:'Non disponible';
+ $('annotated-summary').innerHTML=`<div><b>Ce qui change</b><span>${changed}</span></div><div><b>Ce qui manque</b><span>${missing}</span></div><div><b>Ce qui invalide</b><span>${invalidation}</span></div>`;
+}
+function renderLiquidity(){
+ const target=$('liquidity-widget'),age=Date.now()/1000-depthReceived;
+ if(!depthBook||!T.finite(age)||age<0||age>120){target.innerHTML='<p class="amber-text">Carnet indisponible ou périmé. Actualisez pour obtenir un nouvel instantané.</p>';return;}
+ const b=depthBook,fx=T.finite(eurUsd)&&Date.now()-eurUsdFetched<86400000?eurUsd:null;
+ const amounts=[100,250,500,1000].map(amount=>{const x=W.buyImpact(b,amount,fx);return `<tr><th scope="row">${amount} €</th><td>${x?price(x.average)+' $':'—'}</td><td>${x?pct(x.slippagePct):'Indisponible'}</td></tr>`;}).join('');
+ target.innerHTML=`<p class="radar-caption">Kraken public · reçu ${date(depthReceived)} UTC · 100 niveaux maximum par côté.</p><div class="liquidity-metrics"><span>Meilleur bid <b>${price(b.bid)} $</b></span><span>Meilleur ask <b>${price(b.ask)} $</b></span><span>Spread <b>${price(b.spread)} $ · ${fmt(b.spreadPct,2)} %</b></span><span>Déséquilibre <b>${pct(b.imbalance)}</b></span><span>Profondeur bid <b>${money(b.bidDepth)}</b></span><span>Profondeur ask <b>${money(b.askDepth)}</b></span></div><h3>Impact indicatif à l’achat</h3><div class="table-scroll"><table class="liquidity-table"><thead><tr><th>Montant</th><th>Prix moyen</th><th>Au-delà du meilleur ask</th></tr></thead><tbody>${amounts}</tbody></table></div><p class="radar-caption">Spread rapporté au milieu bid/ask ; déséquilibre calculé sur la valeur en USD des niveaux visibles. Conversion EUR/USD : ${fx?'Frankfurter, référence '+esc(fxReferenceDate):'indisponible'}. Impact hors frais, conversion réelle et spread ; profondeur insuffisante = indisponible. Un carnet peut disparaître avant toute exécution.</p>`;
+}
+async function refreshDepth(){
+ if(depthBusy)return;depthBusy=true;const button=$('liquidity-refresh');button.disabled=true;
+ try{
+  const response=await fetch(hosted?'/api/depth':'https://api.kraken.com/0/public/Depth?pair=TELUSD&count=100',{cache:'no-store',signal:AbortSignal.timeout(12000)});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const book=W.readBook(await response.json());if(!book)throw Error('Carnet invalide');
+  depthBook=book;depthReceived=Date.now()/1000;
+ }catch{depthBook=null;depthReceived=0;}finally{depthBusy=false;button.disabled=false;renderLiquidity();}
+}
+function renderPersonal(){
+ const quantity=$('personal-tel').value, invested=$('personal-invested').value;
+ const quote=T.freshQuote(liveQuote)?liveQuote.price:null;
+ const fx=T.finite(eurUsd)&&Date.now()-eurUsdFetched<86400000?eurUsd:null;
+ const result=quantity!==''&&invested!==''?W.accumulation(Number(quantity),Number(invested),quote,fx):null;
+ $('personal-result').innerHTML=result?`<div class="personal-values"><span>Prix de revient <b>${fmt(result.averageEur,6)} € / TEL</b></span><span>Valorisation au dernier prix échangé <b>${result.valueUsd===null?'Cours indisponible':money(result.valueUsd)}</b></span><span>Valeur en euros <b>${result.valueEur===null?'Conversion indisponible':fmt(result.valueEur,2)+' €'}</b></span><span>Écart indicatif <b>${result.pnlEur===null?'—':fmt(result.pnlEur,2)+' €'}</b></span></div><p class="radar-caption">${quote?'Dernier prix échangé reçu de Kraken '+date(liveQuote.received)+' UTC ; heure de la transaction non fournie. ':''}Ce n’est pas un prix de vente garanti. Conversion indicative ; frais de vente et fiscalité non inclus.</p>`:'<p class="radar-caption">Saisissez une quantité positive et le total investi en euros.</p>';
+}
+function renderProspective(report){
+ const target=$('prospective-widget');
+ const horizons=['1h','4h','24h','7d'].map(key=>{
+  const [main,...other]=W.horizonGroups(report.horizons?.[key]);
+  return `<div><strong>${key}</strong><span>${main.count===null?'Indisponible':main.count+' observation(s)'} · ${esc(main.method)}</span>${other.length?'<small>'+other.map(x=>esc(x.method)+' : '+(x.count??'—')).join(' · ')+'</small>':''}</div>`;
+ }).join('');
+ target.innerHTML=`<p><strong>${fmt(report.observations,0)} observations</strong> · ${fmt(report.valid_observations,0)} valides · résumé ${date(report.generated_at)} UTC</p><div class="prospective-horizons">${horizons}</div><p class="radar-caption">Les catégories d’alertes et les versions de stratégie ne sont pas détaillées dans le résumé actuel. Résultats : variations de prix observées, sans ordre ni gain exécuté. Un petit échantillon ne permet pas d’estimer un taux de réussite fiable.</p>`;
+}
 async function refreshRadarHistory(){
+ if(historyBusy)return;historyBusy=true;
  const target=$('radar-history-rows');
  try{
   const response=await fetch('/evaluation/summary.json',{cache:'no-store',signal:AbortSignal.timeout(8000)});
   if(!response.ok)throw Error('HTTP '+response.status);
   const report=await response.json();
+  renderProspective(report);
   const rows=Array.isArray(report.recent_decisions)?report.recent_decisions:[];
-  target.innerHTML=rows.length?'<ol>'+rows.slice().reverse().map(r=>`<li><time>${date(r.observed_at)} UTC</time> · ${esc(r.previous_decision??'Première observation')} → <strong>${esc(r.decision)}</strong> · données ${r.data_valid?'valides':'insuffisantes'}${r.changed_factors?.length?'<br>'+esc(r.changed_factors.join(' · ')):''}</li>`).join('')+'</ol>':'<p>Le journal contient '+fmt(report.observations,0)+' observation(s). Les transitions détaillées apparaissent après les prochaines collectes.</p>';
- }catch{target.textContent='Journal d’évaluation indisponible.';}
+  latestJournalEntry=rows.reduce((latest,row)=>!latest||row.observed_at>latest.observed_at?row:latest,null);
+  target.innerHTML=rows.length?'<ol>'+rows.slice().reverse().map(r=>`<li><time>${date(r.observed_at)} UTC</time> · ${esc(r.previous_decision??'Première observation')} → <strong>${esc(r.decision)}</strong> · données ${r.data_valid?'valides':'insuffisantes'}${Array.isArray(r.changed_factors)&&r.changed_factors.length?'<br>'+esc(r.changed_factors.join(' · ')):''}</li>`).join('')+'</ol>':'<p>Le journal contient '+fmt(report.observations,0)+' observation(s). Les transitions détaillées apparaissent après les prochaines collectes.</p>';
+  if(data)renderAnnotated(window.TEL99Radar.readRadar(data,scenarioPlans));
+ }catch{latestJournalEntry=null;target.textContent='Journal d’évaluation indisponible.';$('prospective-widget').textContent='Journal prospectif indisponible.';if(data)renderAnnotated(window.TEL99Radar.readRadar(data,scenarioPlans));}finally{historyBusy=false;}
 }
 function renderScenarios(){
  const node=$('conditional-scenarios');if(!node||!data)return;
@@ -361,6 +499,13 @@ function renderScenarios(){
 function renderPricePeriod(){document.querySelectorAll('[data-price-days]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.priceDays)===priceDays)));renderRadarCanvas($('radar-price-chart'));}
 function bind(){
  $('sidebar-toggle').addEventListener('click',()=>{$('sidebar-toggle').setAttribute('aria-expanded',String($('app-sidebar').classList.toggle('sidebar-open')));});
+ bindCardCatalog();
+ for(const [id,key] of [['personal-tel','personal-tel'],['personal-invested','personal-invested']]){
+  $(id).value=pref(key,'');$(id).addEventListener('input',()=>{save(key,$(id).value);renderPersonal();});
+ }
+ $('personal-clear').addEventListener('click',()=>{for(const id of ['personal-tel','personal-invested']){$(id).value='';save(id,'');}renderPersonal();});
+ $('liquidity-refresh').addEventListener('click',refreshDepth);
+ renderPersonal();
  $('technical-month').addEventListener('click',()=>{
   $('technical-widget').innerHTML='<p>Note mensuelle indisponible. Historique Kraken trop court pour les indicateurs requis.</p>';
   renderedSmartFrame=undefined;
@@ -404,10 +549,12 @@ async function start(){try{
  tf='15m';bind();setupCharts();renderTickers();renderDecision();renderRadar();renderFrames();renderChart();renderLab();renderQuality();
  const l=data.frames['4h'].latest,d=T.safeDecision(data),p=d.status==='DONNÉES INSUFFISANTES'?null:d.plan;$('entry').value=p?(l.close??''):'';$('stop').value=p?.stop??'';$('target').value=p?.target??'';renderRisk();refreshEurUsd();
  $('loading').classList.add('hidden');view(location.hash.slice(1)||'market');
- setInterval(()=>{renderTickers();renderDecision();renderRadar();renderFrames();if(previousChartAvailability!==statusOf(data.frames[tf]))renderChart();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
+ setInterval(()=>{renderTickers();renderDecision();renderRadar();renderFrames();renderLiquidity();renderPersonal();if(previousChartAvailability!==chartStatus(data.frames[tf],tf))renderChart();else if(renderedSmartSignature!==JSON.stringify(W.gaugeFreshness(data.frames,data.as_of,Date.now()/1000,window.TEL99Radar.frameCheck)))renderWidgets();$('clock').textContent=new Date().toLocaleTimeString('fr-FR',{timeZone:'UTC'})+' UTC';},15000);
  // Public quote only: never relabel a static analytical snapshot as live.
  refreshQuote();
  setInterval(()=>{if(!document.hidden)refreshQuote();},60000);
+ refreshDepth();refreshRadarHistory();
+ setInterval(()=>{if(!document.hidden){refreshDepth();refreshRadarHistory();}},60000);
  // Only accept a newer same-origin analytical snapshot with unchanged frozen research.
  refreshSnapshot();
  setInterval(refreshSnapshot,60000);
