@@ -55,6 +55,13 @@ function horizonGroups(horizon){
  const count=x=>Number.isInteger(x)&&x>=0?x:null;
  const method=typeof horizon?.rsi_method==='string'&&horizon.rsi_method?horizon.rsi_method:'méthode non indiquée';
  const group=(name,value)=>{const n=count(value?.count);return {method:name,count:n,meanPct:n>0&&typeof value?.mean_pct==='number'&&Number.isFinite(value.mean_pct)?value.mean_pct:null};};
+ if(horizon?.by_outcome_method&&Object.keys(horizon.by_outcome_method).length){
+  const labels={closed_candle_time_v2:'Avant : depuis la clôture',observation_time_v3:'Depuis l’observation'};
+  const separated=[];
+  for(const [kind,entry] of Object.entries(horizon.by_outcome_method))
+   for(const [name,value] of Object.entries(entry?.by_rsi_method??{}))separated.push(group((labels[kind]??kind)+' · '+name,value));
+  if(separated.length)return separated;
+ }
  const groups=[group(method,horizon)];
  if(horizon?.by_rsi_method&&typeof horizon.by_rsi_method==='object')for(const [name,value] of Object.entries(horizon.by_rsi_method))if(name!==method)groups.push(group(name,value));
  return groups;

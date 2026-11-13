@@ -71,6 +71,10 @@ test('un horizon absent reste indisponible et chaque méthode RSI apparaît une 
   assert.equal(W.horizonGroups({count:0,mean_pct:0})[0].meanPct,null);
   assert.equal(W.horizonGroups({count:1,mean_pct:'0.5'})[0].meanPct,null);
 });
+test('le journal sépare les mesures anciennes et celles après observation',()=>{
+ const groups=widgets().horizonGroups({by_outcome_method:{closed_candle_time_v2:{by_rsi_method:{wilder:{count:2,mean_pct:1}}},observation_time_v3:{by_rsi_method:{wilder:{count:1,mean_pct:-2}}}}});
+ assert.deepEqual(groups,[{method:'Avant : depuis la clôture · wilder',count:2,meanPct:1},{method:'Depuis l’observation · wilder',count:1,meanPct:-2}]);
+});
 test('le graphique masque les bougies de provenance ou de clôture incohérente', () => {
   const W=widgets(), frame={bars:[{t:1},{t:2}]};
   assert.equal(typeof W.chartBars,'function');
