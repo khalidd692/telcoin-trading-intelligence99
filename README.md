@@ -1,5 +1,22 @@
 # Telcoin Trading Intelligence
 
+## TEL99 : terminal Kraken actuel
+
+Le terminal [TEL99](https://tel99-quant-terminal.skkly.chatgpt.site/#market) est un produit distinct du moniteur historique TEL/USDT décrit ci-dessous. Son marché de référence est **KRAKEN:TELUSD**, en lecture seule et sans ordre réel ou simulé.
+
+| Branche | Rôle |
+| --- | --- |
+| `codex/tel99-quant-terminal` | Code produit, calculs et interface du terminal. |
+| `main` | Workflows GitHub Actions, évaluation prospective et moniteur historique MEXC/KuCoin. |
+| `tel99-live-data` | Snapshots Kraken publiés et horodatés. |
+| `tel99-evaluation-data` | Observations, événements et résultats prospectifs en lecture seule. |
+
+Le site hébergé dispose d'une version publiée distincte de ces branches ; un commit GitHub ne modifie pas à lui seul son interface. Le workflow de publication utilise le code de la branche produit. GitHub Actions peut être retardé : vérifier l'heure de capture et traiter les données périmées comme indisponibles. Le journal ne prouve ni exécution ni rentabilité. Les anciens résultats restent conservés lors des changements de méthode.
+
+---
+
+## Moniteur historique MEXC / KuCoin
+
 Système **en lecture seule** de surveillance du marché TEL/USDT : collecte de données publiques,
 calcul d'indicateurs déterministes, analyse multi-unités de temps, détection de retournements
 et backtest historique hors échantillon.

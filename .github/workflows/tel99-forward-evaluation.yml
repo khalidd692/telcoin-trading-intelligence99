@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+  workflow_run:
+    workflows: ["TEL99 live market snapshots"]
+    types: [completed]
+    branches: [main]
   push:
     branches: [main]
     paths: ['.github/workflows/tel99-forward-evaluation.yml']
@@ -15,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   observe:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -39,7 +44,15 @@ jobs:
         run: |
           git fetch origin tel99-evaluation-data
           mkdir -p /tmp/tel99-evaluation
-          git show origin/tel99-evaluation-data:evaluation/observations.csv > /tmp/tel99-evaluation/observations.csv || true
+          git show origin/tel99-evaluation-data:evaluation/observations.csv > /tmp/tel99-evaluation/observations.csv.tmp
+          test -s /tmp/tel99-evaluation/observations.csv.tmp
+          mv /tmp/tel99-evaluation/observations.csv.tmp /tmp/tel99-evaluation/observations.csv
+          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl; do
+            if git cat-file -e "origin/tel99-evaluation-data:evaluation/$name" 2>/dev/null; then
+              git show "origin/tel99-evaluation-data:evaluation/$name" > "/tmp/tel99-evaluation/$name.tmp"
+              mv "/tmp/tel99-evaluation/$name.tmp" "/tmp/tel99-evaluation/$name"
+            fi
+          done
       - name: Observe and score matured horizons (no trades)
         run: |
           python scripts/terminal/evaluate_observations.py --journal /tmp/tel99-evaluation/observations.csv --report /tmp/tel99-evaluation/summary.json --radar /tmp/tel99-radar/site/terminal/radar.js
@@ -51,7 +64,10 @@ jobs:
           mkdir -p evaluation
           cp /tmp/tel99-evaluation/observations.csv evaluation/observations.csv
           cp /tmp/tel99-evaluation/summary.json evaluation/summary.json
-          git add evaluation/observations.csv evaluation/summary.json
+          for name in outcomes.jsonl events.jsonl observation_metadata.jsonl; do
+            if [ -f "/tmp/tel99-evaluation/$name" ]; then cp "/tmp/tel99-evaluation/$name" "evaluation/$name"; fi
+          done
+          git add evaluation/observations.csv evaluation/summary.json evaluation/*.jsonl
           if ! git diff --cached --quiet; then
             git commit -m 'data: record read-only TEL99 forward observation'
             git push origin HEAD:tel99-evaluation-data

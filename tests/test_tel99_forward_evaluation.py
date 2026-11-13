@@ -1,5 +1,7 @@
 """Forward-observation regression checks. Run: python -m unittest tests.test_tel99_forward_evaluation"""
 import unittest
+import tempfile
+from pathlib import Path
 from scripts.terminal.evaluate_observations import observe, update
 
 def fixture(now=2000000):
@@ -19,9 +21,12 @@ class EvaluationTests(unittest.TestCase):
     def test_order_safety_rejected(self):
         d=fixture();d["safety"]["paper_orders"]=True
         self.assertEqual(observe(d,2000000)["data_valid"],"false")
+    def test_candle_after_snapshot_is_rejected(self):
+        d=fixture();d['frames']['15m']['quality']['last_close']=d['as_of']+1
+        self.assertEqual(observe(d,2000000)['data_valid'],'false')
     def test_matured_return_not_future_leak(self):
-        first={"observed_at":"1000","price":"0.001","data_valid":"true"}
-        future={"observed_at":"4600","price":"0.0011","data_valid":"true"}
+        first={"observed_at":"1000","price_at":"1000","price":"0.001","data_valid":"true"}
+        future={"observed_at":"4600","price_at":"4600","price":"0.0011","data_valid":"true"}
         rows=[first,future]
         update(rows,4500)
         self.assertNotIn("r_1h",first)
@@ -29,9 +34,63 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(first.get("r_1h"),"10.00000")
         self.assertNotIn("r_4h",first)
     def test_no_future_observation(self):
-        first={"observed_at":"1000","price":"0.001","data_valid":"true"}
+        first={"observed_at":"1000","price_at":"1000","price":"0.001","data_valid":"true"}
         update([first],5000)
         self.assertNotIn("r_1h",first)
+
+    def test_outcome_never_uses_candle_before_horizon_or_after_observation(self):
+        first={"observed_at":"1000","price_at":"900","price":"0.001","data_valid":"true"}
+        early={"observed_at":"4600","price_at":"4499","price":"0.0011","data_valid":"true"}
+        impossible={"observed_at":"4700","price_at":"4800","price":"0.0012","data_valid":"true"}
+        update([first,early,impossible],5000)
+        self.assertNotIn("r_1h",first)
+
+    def test_missing_or_corrupt_existing_journal_is_not_treated_as_new(self):
+        from scripts.terminal.evaluate_observations import read_journal
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'observations.csv'
+            with self.assertRaises(FileNotFoundError): read_journal(path)
+            path.write_text('')
+            with self.assertRaises(ValueError): read_journal(path)
+            path.write_text('observed_at,broken\n1,2\n')
+            with self.assertRaises(ValueError): read_journal(path)
+
+    def test_observations_are_append_only_and_outcomes_are_separate_and_deduplicated(self):
+        import csv
+        from scripts.terminal.evaluate_observations import FIELDS, read_journal, append_observation, append_outcomes
+        with tempfile.TemporaryDirectory() as d:
+            journal=Path(d)/'observations.csv'; outcomes=Path(d)/'outcomes.jsonl'
+            with journal.open('w',newline='') as f: csv.DictWriter(f,fieldnames=FIELDS).writeheader()
+            first={"observed_at":"1000","snapshot_at":"999","market":"KRAKEN:TELUSD","price_at":"900","price":"0.001","data_valid":"true"}
+            later={"observed_at":"4600","snapshot_at":"4599","market":"KRAKEN:TELUSD","price_at":"4500","price":"0.0011","data_valid":"true"}
+            append_observation(journal, first)
+            before=journal.read_bytes()
+            append_observation(journal, later)
+            self.assertTrue(journal.read_bytes().startswith(before))
+            original=journal.read_bytes()
+            rows=read_journal(journal)
+            append_outcomes(outcomes, rows, 4600)
+            once=outcomes.read_text()
+            append_outcomes(outcomes, rows, 4600)
+            self.assertEqual(outcomes.read_text(),once)
+            self.assertEqual(journal.read_bytes(),original)
+            self.assertEqual(len(once.splitlines()),1)
+            import json
+            outcome=json.loads(once)
+            self.assertEqual(outcome['outcome_price_at'],4500)
+            self.assertEqual(outcome['outcome_observed_at'],4600)
+
+    def test_transitions_are_append_only_and_deduplicated(self):
+        import json
+        from scripts.terminal.evaluate_observations import append_transitions
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'events.jsonl'
+            rows=[dict(observed_at='100',snapshot_at='99',market='KRAKEN:TELUSD',price_at='90',data_valid='true',decision='ATTENDRE',factors='[]'),
+                  dict(observed_at='200',snapshot_at='199',market='KRAKEN:TELUSD',price_at='190',data_valid='true',decision='ALERTE PRÉCOCE',factors='["volume"]',event='{"id":"early-1","type":"EARLY_ALERT"}')]
+            append_transitions(path,rows);before=path.read_bytes()
+            append_transitions(path,rows)
+            self.assertEqual(path.read_bytes(),before)
+            self.assertEqual(len({json.loads(line)['id'] for line in before.splitlines()}),2)
 
 if __name__=="__main__":unittest.main()
 
