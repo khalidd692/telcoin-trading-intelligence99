@@ -31,10 +31,10 @@ const cardDefinitions=[
  ['decision','Centre de décision','Techniques','Détails de la décision swing.',true],
  ['factors','Carte des facteurs','Techniques','Indicateurs et contradictions.',true],
  ['frames','Convergence temporelle','Techniques','Qualité et données par unité.',true],
- ['guide','Guide du radar','Personnel','Signification des états du radar.',false],
- ['preview1h','Aperçu 1 h','Techniques','Graphique compact de structure.',false],
- ['preview4h','Aperçu 4 h','Techniques','Graphique compact de confirmation.',false],
- ['preview1d','Aperçu 1 jour','Techniques','Graphique compact de contexte.',false]
+ ['guide','Guide du radar','Personnel','Signification des états du radar.',true],
+ ['preview1h','Aperçu 1 h','Techniques','Graphique compact de structure.',true],
+ ['preview4h','Aperçu 4 h','Techniques','Graphique compact de confirmation.',true],
+ ['preview1d','Aperçu 1 jour','Techniques','Graphique compact de contexte.',true]
 ].map(([id,title,category,description,visible])=>({id,title,category,description,visible}));
 const technicalCache=new WeakMap();
 let renderedSmartFrame,renderedSmartAvailability,renderedSmartSignature;
@@ -407,15 +407,23 @@ function renderRisk(){renderEuroBudget();if(data)renderScenarios();const vals=['
 async function refreshSnapshot(){
  if(snapshotBusy||document.hidden)return;snapshotBusy=true;
  try{
-  const feeds=hosted?['/data.json']:['data.json?t='+Date.now(),'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json?t='+Date.now()];
+  // The hosted /data.json may lag behind the independently published GitHub data branch.
+  // Read both sources and accept only a validated newer capture; never downgrade a snapshot.
+  const stamp=Date.now();
+  const feeds=[
+   '/data.json?t='+stamp,
+   'https://raw.githubusercontent.com/khalidd692/telcoin-trading-intelligence99/tel99-live-data/site/terminal/data.json?t='+stamp
+  ];
   let next=null,lastErr=null;
-  for(const feed of feeds){
-   try{
-    const r=await fetch(feed,{cache:'no-store',signal:AbortSignal.timeout(12000)});
-    if(!r.ok)throw Error('Snapshot HTTP '+r.status);
-    const candidate=await r.json();
-    if(T.acceptSnapshot(data,candidate)){next=candidate;break;}
-   }catch(e){lastErr=e;}
+  const results=await Promise.allSettled(feeds.map(async feed=>{
+   const r=await fetch(feed,{cache:'no-store',signal:AbortSignal.timeout(12000)});
+   if(!r.ok)throw Error('Snapshot HTTP '+r.status);
+   return r.json();
+  }));
+  for(const result of results){
+   if(result.status==='rejected'){lastErr=result.reason;continue;}
+   const candidate=result.value;
+   if(T.acceptSnapshot(data,candidate)&&(!next||candidate.as_of>next.as_of))next=candidate;
   }
   if(!next){if(lastErr)console.warn('TEL99: actualisation analytique indisponible; snapshot existant conservé',lastErr.message);return;}
   data=withWeekly(next);renderTickers();renderDecision();renderRadar();renderFrames();renderChart();renderLab();renderQuality();renderRisk();
