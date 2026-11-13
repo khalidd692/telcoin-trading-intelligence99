@@ -127,7 +127,7 @@ def decision_history(rows):
         previous = state
     return history[-12:]
 
-def update(rows,now):
+def update(rows,now,metadata=None):
     # Observation outcomes are price-to-price changes, NOT backtested fills, profit or trade results.
     for row in rows:
         if row.get("data_valid")!="true": continue
@@ -135,6 +135,8 @@ def update(rows,now):
             observed=float(row["observed_at"]); start=float(row["price_at"]); base=float(row["price"])
         except (ValueError,TypeError,KeyError): continue
         if not all(math.isfinite(x) for x in (observed,start,base)) or base<=0 or start>observed or observed>now: continue
+        method=(metadata or {}).get(observation_id(row),{}).get('outcome_method','closed_candle_time_v2')
+        origin=observed if method=='observation_time_v3' else start
         for label,seconds in HORIZONS.items():
             key="r_"+label
             if row.get(key): continue
@@ -144,7 +146,7 @@ def update(rows,now):
                 try:
                     observed_later=float(later["observed_at"]);t=float(later["price_at"]);p=float(later["price"])
                     if (later.get("data_valid")=="true" and all(math.isfinite(x) for x in (observed_later,t,p))
-                        and start+seconds<=t<=start+seconds+7200 and t<=observed_later<=now and p>0):
+                        and origin+seconds<=t<=origin+seconds+7200 and t<=observed_later<=now and p>0):
                         eligible.append((t,observed_later,p))
                 except (ValueError,TypeError,KeyError): pass
             if eligible:
@@ -154,16 +156,16 @@ def update(rows,now):
                 row["outcome_price_at_"+label]=t
                 row["outcome_observed_at_"+label]=seen_at
                 row["outcome_price_"+label]=p
-            elif now>start+seconds+7200:
+            elif now>origin+seconds+7200:
                 row["outcome_"+label]="MISSING_OBSERVATION"
 
 def append_outcomes(path,rows,now,metadata_path=None):
     """Append price outcomes separately; never change prior observation rows."""
-    scored=copy.deepcopy(rows);update(scored,now)
-    records=[]
     metadata={}
     if metadata_path and metadata_path.exists():
         metadata={x['observation_id']:x for x in (json.loads(line) for line in metadata_path.read_text(encoding='utf-8').splitlines())}
+    scored=copy.deepcopy(rows);update(scored,now,metadata)
+    records=[]
     for original,row in zip(rows,scored):
         for horizon in HORIZONS:
             status=row.get('outcome_'+horizon)
@@ -176,7 +178,7 @@ def append_outcomes(path,rows,now,metadata_path=None):
                             'outcome_observed_at':row.get('outcome_observed_at_'+horizon),
                             'outcome_close':row.get('outcome_price_'+horizon),
                             'rsi_method':metadata.get(oid,{}).get('rsi_method','legacy_or_unknown'),
-                            'method':'closed_candle_time_v2',
+                            'method':metadata.get(oid,{}).get('outcome_method','closed_candle_time_v2'),
                             'disclaimer':'Observed price return only; not a trade or profit.'})
     append_records(path,records)
     return scored
@@ -235,6 +237,7 @@ def main():
         append_records(metadata_path,[{'id':record_id('metadata',oid),'observation_id':oid,
           'product_commit':((d or {}).get('publication') or {}).get('product_commit'),
           'rsi_method':(((d or {}).get('frames') or {}).get('15m') or {}).get('indicator_methods',{}).get('rsi14','legacy_or_unknown'),
+          'outcome_method':'observation_time_v3',
           'fee_per_side_hypothesis':plan.get('fee_per_side'),
           'slippage_per_side_hypothesis':plan.get('slippage_per_side'),
           'personal_fees_verified':False,'execution':'no trades or orders'}])
@@ -243,17 +246,26 @@ def main():
     valid=[r for r in scored if r.get("data_valid")=="true"]
     report={"generated_at":now,"observations":len(rows),"valid_observations":len(valid),"latest_decision":row["decision"],"latest_valid":row["data_valid"],"horizons":{},"disclaimer":"Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability."}
     report["recent_decisions"] = decision_history(rows)
-    report["outcome_method"]="closed_candle_time_v2; legacy CSV results are preserved, not rewritten"
+    report["outcome_method"]="closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved"
     outcomes=[json.loads(line) for line in outcomes_path.read_text(encoding='utf-8').splitlines()] if outcomes_path.exists() else []
     report["legacy_results_preserved"]=True
     for h in HORIZONS:
-        relevant=[r for r in outcomes if r.get('horizon')==h and r.get('status')=='OBSERVED_PRICE_RETURN_ONLY' and finite(r.get('price_return_pct'))]
+        available=[r for r in outcomes if r.get('horizon')==h and r.get('status')=='OBSERVED_PRICE_RETURN_ONLY' and finite(r.get('price_return_pct'))]
+        relevant=[r for r in available if r.get('method','closed_candle_time_v2')=='closed_candle_time_v2']
         grouped={}
         for method in sorted({r.get('rsi_method','legacy_or_unknown') for r in relevant}):
             nums=[r['price_return_pct'] for r in relevant if r.get('rsi_method','legacy_or_unknown')==method]
             grouped[method]={"count":len(nums),"mean_pct":round(sum(nums)/len(nums),5),"positive_fraction":round(sum(x>0 for x in nums)/len(nums),4)}
         current=grouped.get('wilder_rma_14_sma_seed',{'count':0,'mean_pct':None,'positive_fraction':None})
-        report["horizons"][h]={**current,'rsi_method':'wilder_rma_14_sma_seed','by_rsi_method':grouped}
+        by_outcome_method={}
+        for method in sorted({r.get('method','closed_candle_time_v2') for r in available}):
+            subset=[r for r in available if r.get('method','closed_candle_time_v2')==method]
+            per_rsi={}
+            for rsi in sorted({r.get('rsi_method','legacy_or_unknown') for r in subset}):
+                nums=[r['price_return_pct'] for r in subset if r.get('rsi_method','legacy_or_unknown')==rsi]
+                per_rsi[rsi]={'count':len(nums),'mean_pct':round(sum(nums)/len(nums),5)}
+            by_outcome_method[method]={'by_rsi_method':per_rsi}
+        report["horizons"][h]={**current,'rsi_method':'wilder_rma_14_sma_seed','by_rsi_method':grouped,'by_outcome_method':by_outcome_method}
     rp=Path(args.report);rp.parent.mkdir(parents=True,exist_ok=True);rp.write_text(json.dumps(report,indent=2)+"\n")
     print(json.dumps(report))
 if __name__=="__main__":main()

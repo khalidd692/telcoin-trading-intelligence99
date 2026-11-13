@@ -38,6 +38,17 @@ class EvaluationTests(unittest.TestCase):
         update([first],5000)
         self.assertNotIn("r_1h",first)
 
+    def test_new_observation_horizon_starts_when_signal_was_observed(self):
+        from scripts.terminal.evaluate_observations import observation_id
+        first={"observed_at":"1000","price_at":"900","price":"0.001","data_valid":"true"}
+        too_early={"observed_at":"4500","price_at":"4500","price":"0.0011","data_valid":"true"}
+        valid={"observed_at":"4600","price_at":"4600","price":"0.0012","data_valid":"true"}
+        metadata={observation_id(first):{'outcome_method':'observation_time_v3'}}
+        update([first,too_early],4500,metadata)
+        self.assertNotIn('r_1h',first)
+        update([first,too_early,valid],4600,metadata)
+        self.assertEqual(first['r_1h'],'20.00000')
+
     def test_outcome_never_uses_candle_before_horizon_or_after_observation(self):
         first={"observed_at":"1000","price_at":"900","price":"0.001","data_valid":"true"}
         early={"observed_at":"4600","price_at":"4499","price":"0.0011","data_valid":"true"}
@@ -79,6 +90,25 @@ class EvaluationTests(unittest.TestCase):
             outcome=json.loads(once)
             self.assertEqual(outcome['outcome_price_at'],4500)
             self.assertEqual(outcome['outcome_observed_at'],4600)
+
+    def test_versioned_outcome_keeps_old_data_and_records_new_method(self):
+        import json
+        from scripts.terminal.evaluate_observations import append_outcomes, observation_id
+        first={'observed_at':'1000','snapshot_at':'999','market':'KRAKEN:TELUSD','price_at':'900','price':'1','data_valid':'true'}
+        early={'observed_at':'4500','snapshot_at':'4499','market':'KRAKEN:TELUSD','price_at':'4500','price':'1.1','data_valid':'true'}
+        later={'observed_at':'4600','snapshot_at':'4599','market':'KRAKEN:TELUSD','price_at':'4600','price':'1.2','data_valid':'true'}
+        with tempfile.TemporaryDirectory() as d:
+            outcomes=Path(d)/'outcomes.jsonl'; meta=Path(d)/'metadata.jsonl'
+            meta.write_text(json.dumps({'id':'m','observation_id':observation_id(first),'outcome_method':'observation_time_v3'})+'\n')
+            append_outcomes(outcomes,[first,early],4500,meta)
+            self.assertFalse(outcomes.exists())
+            append_outcomes(outcomes,[first,early,later],4600,meta)
+            original=outcomes.read_bytes()
+            record=json.loads(original)
+            self.assertEqual(record['method'],'observation_time_v3')
+            self.assertEqual(record['outcome_price_at'],4600)
+            append_outcomes(outcomes,[first,early,later],4600,meta)
+            self.assertEqual(outcomes.read_bytes(),original)
 
     def test_transitions_are_append_only_and_deduplicated(self):
         import json
