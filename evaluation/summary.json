@@ -1,14 +1,14 @@
 {
-  "generated_at": 1794590691,
-  "observations": 31,
-  "valid_observations": 30,
+  "generated_at": 1794591208,
+  "observations": 32,
+  "valid_observations": 31,
   "latest_decision": "CONFIRMATION TECHNIQUE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
-      "count": 18,
-      "mean_pct": -0.61139,
-      "positive_fraction": 0.3889,
+      "count": 19,
+      "mean_pct": -0.58646,
+      "positive_fraction": 0.3684,
       "rsi_method": "wilder_rma_14_sma_seed",
       "by_rsi_method": {
         "legacy_or_unknown": {
@@ -17,9 +17,9 @@
           "positive_fraction": 1.0
         },
         "wilder_rma_14_sma_seed": {
-          "count": 18,
-          "mean_pct": -0.61139,
-          "positive_fraction": 0.3889
+          "count": 19,
+          "mean_pct": -0.58646,
+          "positive_fraction": 0.3684
         }
       },
       "by_outcome_method": {
@@ -30,31 +30,31 @@
               "mean_pct": 0.20862
             },
             "wilder_rma_14_sma_seed": {
-              "count": 18,
-              "mean_pct": -0.61139
+              "count": 19,
+              "mean_pct": -0.58646
             }
           }
         }
       }
     },
     "4h": {
-      "count": 3,
-      "mean_pct": 0.53266,
-      "positive_fraction": 0.6667,
+      "count": 4,
+      "mean_pct": 0.31358,
+      "positive_fraction": 0.5,
       "rsi_method": "wilder_rma_14_sma_seed",
       "by_rsi_method": {
         "wilder_rma_14_sma_seed": {
-          "count": 3,
-          "mean_pct": 0.53266,
-          "positive_fraction": 0.6667
+          "count": 4,
+          "mean_pct": 0.31358,
+          "positive_fraction": 0.5
         }
       },
       "by_outcome_method": {
         "closed_candle_time_v2": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 3,
-              "mean_pct": 0.53266
+              "count": 4,
+              "mean_pct": 0.31358
             }
           }
         }
@@ -79,17 +79,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794556633,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 rsi",
-        "\u2212 zone"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794578262,
       "previous_decision": "ATTENDRE",
@@ -310,13 +299,50 @@
           "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
         ]
       }
+    },
+    {
+      "observed_at": 1794591208,
+      "previous_decision": "CONFIRMATION TECHNIQUE",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1794591000",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.00145,
+        "price_at": 1794591000,
+        "candle_closed_at": 1794591000,
+        "snapshot_at": 1794591203.800158,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001443,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.001377,
+          "unit": "4h"
+        },
+        "scenario_id": "reversal",
+        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
+        "factors": [],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
   "legacy_results_preserved": true,
   "rebounds": {
     "version": "tel99-rebounds-v1",
-    "start_at": 1794591900,
+    "start_at": 1794592800,
     "thresholds": {
       "2": {
         "episodes": 0,
