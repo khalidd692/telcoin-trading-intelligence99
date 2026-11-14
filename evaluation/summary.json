@@ -1,9 +1,9 @@
 {
-  "generated_at": 1794686252,
-  "observations": 139,
-  "valid_observations": 134,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1794686312,
+  "observations": 140,
+  "valid_observations": 135,
+  "latest_decision": "CONFIRMATION TECHNIQUE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 103,
-              "mean_pct": 0.09178
+              "count": 104,
+              "mean_pct": 0.08638
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 91,
-              "mean_pct": 0.35393
+              "count": 92,
+              "mean_pct": 0.35672
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 12,
-              "mean_pct": 2.51482
+              "count": 13,
+              "mean_pct": 2.50187
             }
           }
         }
@@ -127,48 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794675666,
-      "previous_decision": "CONFIRMATION TECHNIQUE",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ zone"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1794675600",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001484,
-        "price_at": 1794675600,
-        "candle_closed_at": 1794675600,
-        "snapshot_at": 1794675639.712365,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001449,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001382,
-          "unit": "4h"
-        },
-        "scenario_id": "reversal",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
-        "factors": [
-          "convergence",
-          "zone"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1794677304,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -595,6 +553,47 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1794686312,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1794685500",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001483,
+        "price_at": 1794685500,
+        "candle_closed_at": 1794685500,
+        "snapshot_at": 1794686281.360897,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001449,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.001382,
+          "unit": "4h"
+        },
+        "scenario_id": "reversal",
+        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
+        "factors": [
+          "convergence"
+        ],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
