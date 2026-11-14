@@ -1,8 +1,8 @@
 {
-  "generated_at": 1794653553,
-  "observations": 102,
-  "valid_observations": 99,
-  "latest_decision": "ALERTE PR\u00c9COCE",
+  "generated_at": 1794654373,
+  "observations": 103,
+  "valid_observations": 100,
+  "latest_decision": "INVALIDATION",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 68,
-              "mean_pct": 0.01895
+              "count": 69,
+              "mean_pct": 0.00281
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 56,
-              "mean_pct": -0.00602
+              "count": 57,
+              "mean_pct": 0.01996
             }
           }
         }
@@ -119,16 +119,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794629029,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794639653,
       "previous_decision": "ATTENDRE",
@@ -337,6 +327,46 @@
         ],
         "blockers": [
           "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
+        ]
+      }
+    },
+    {
+      "observed_at": 1794654373,
+      "previous_decision": "ALERTE PR\u00c9COCE",
+      "decision": "INVALIDATION",
+      "data_valid": true,
+      "changed_factors": [
+        "+ zone",
+        "\u2212 convergence",
+        "\u2212 reclaim",
+        "\u2212 support"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:INVALIDATION:1794654000",
+        "market": "KRAKEN:TELUSD",
+        "type": "INVALIDATION",
+        "decision": "INVALIDATION",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001445,
+        "price_at": 1794654000,
+        "candle_closed_at": 1794654000,
+        "snapshot_at": 1794654339.027001,
+        "data_valid": true,
+        "watch": null,
+        "invalidation": {
+          "level": 0.001453,
+          "unit": "15m"
+        },
+        "factors": [
+          "volume",
+          "zone"
+        ],
+        "blockers": [
+          "Cl\u00f4ture 15 min sous l\u2019invalidation de l\u2019alerte de la bougie pr\u00e9c\u00e9dente."
         ]
       }
     }
