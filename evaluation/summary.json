@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794660952,
-  "observations": 110,
-  "valid_observations": 107,
+  "generated_at": 1794661764,
+  "observations": 111,
+  "valid_observations": 108,
   "latest_decision": "CONFIRMATION TECHNIQUE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 76,
-              "mean_pct": 0.10632
+              "count": 77,
+              "mean_pct": 0.13279
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 64,
-              "mean_pct": 0.16321
+              "count": 65,
+              "mean_pct": 0.18075
             }
           }
         }
@@ -119,16 +119,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794644573,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 zone"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794645395,
       "previous_decision": "ATTENDRE",
@@ -414,6 +404,45 @@
         "price_at": 1794660300,
         "candle_closed_at": 1794660300,
         "snapshot_at": 1794660918.025373,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001446,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.001378,
+          "unit": "4h"
+        },
+        "scenario_id": "reversal",
+        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
+        "factors": [
+          "convergence"
+        ],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
+    },
+    {
+      "observed_at": 1794661764,
+      "previous_decision": "CONFIRMATION TECHNIQUE",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1794661200",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001477,
+        "price_at": 1794661200,
+        "candle_closed_at": 1794661200,
+        "snapshot_at": 1794661733.715045,
         "data_valid": true,
         "watch": {
           "level": 0.001446,
