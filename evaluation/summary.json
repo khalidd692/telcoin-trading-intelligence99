@@ -1,8 +1,8 @@
 {
-  "generated_at": 1794687953,
-  "observations": 142,
-  "valid_observations": 136,
-  "latest_decision": "ALERTE PR\u00c9COCE",
+  "generated_at": 1794688775,
+  "observations": 143,
+  "valid_observations": 137,
+  "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 106,
-              "mean_pct": 0.09055
+              "count": 107,
+              "mean_pct": 0.08028
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 94,
-              "mean_pct": 0.34697
+              "count": 95,
+              "mean_pct": 0.33975
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 14,
-              "mean_pct": 2.45133
+              "count": 15,
+              "mean_pct": 2.3381
             }
           }
         }
@@ -127,51 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794678926,
-      "previous_decision": "CONFIRMATION TECHNIQUE",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ volume",
-        "+ zone",
-        "\u2212 reclaim"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1794678300",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001486,
-        "price_at": 1794678300,
-        "candle_closed_at": 1794678300,
-        "snapshot_at": 1794678901.015703,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001449,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001382,
-          "unit": "4h"
-        },
-        "scenario_id": "reversal",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
-        "factors": [
-          "volume",
-          "convergence",
-          "zone"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1794679768,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -562,6 +517,16 @@
           "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
         ]
       }
+    },
+    {
+      "observed_at": 1794688775,
+      "previous_decision": "ALERTE PR\u00c9COCE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 volume"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
