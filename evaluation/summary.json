@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794678130,
-  "observations": 130,
-  "valid_observations": 126,
+  "generated_at": 1794678926,
+  "observations": 131,
+  "valid_observations": 127,
   "latest_decision": "CONFIRMATION TECHNIQUE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 95,
-              "mean_pct": 0.09721
+              "count": 96,
+              "mean_pct": 0.10539
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 83,
-              "mean_pct": 0.3562
+              "count": 84,
+              "mean_pct": 0.36083
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 4,
-              "mean_pct": 1.75414
+              "count": 6,
+              "mean_pct": 1.99701
             }
           }
         }
@@ -127,16 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794668914,
-      "previous_decision": "CONFIRMATION TECHNIQUE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [
-        "\u2212 convergence"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794669139,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -583,6 +573,51 @@
           "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
         ]
       }
+    },
+    {
+      "observed_at": 1794678926,
+      "previous_decision": "CONFIRMATION TECHNIQUE",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ volume",
+        "+ zone",
+        "\u2212 reclaim"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1794678300",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001486,
+        "price_at": 1794678300,
+        "candle_closed_at": 1794678300,
+        "snapshot_at": 1794678901.015703,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001449,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.001382,
+          "unit": "4h"
+        },
+        "scenario_id": "reversal",
+        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
+        "factors": [
+          "volume",
+          "convergence",
+          "zone"
+        ],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -592,24 +627,24 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 0,
+        "episodes": 1,
         "detected": 0,
         "missed": 0,
-        "unknown": 0,
+        "unknown": 1,
         "detection_fraction_known": null,
-        "late_alerts": 0,
+        "late_alerts": 1,
         "median_lead_minutes": null,
-        "median_late_minutes": null
+        "median_late_minutes": 154.4
       },
       "3": {
-        "episodes": 0,
+        "episodes": 1,
         "detected": 0,
         "missed": 0,
-        "unknown": 0,
+        "unknown": 1,
         "detection_fraction_known": null,
-        "late_alerts": 0,
+        "late_alerts": 1,
         "median_lead_minutes": null,
-        "median_late_minutes": null
+        "median_late_minutes": 154.4
       },
       "5": {
         "episodes": 0,
