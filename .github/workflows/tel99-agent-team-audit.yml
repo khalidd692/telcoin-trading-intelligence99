@@ -1,0 +1,29 @@
+name: TEL99 agent team read-only audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate audit tests
+        run: python -m unittest discover -s tests -p test_team_audit.py -v
+      - name: Validate agent team tests (security, config, delegation)
+        run: python -m unittest discover -s tests -p test_agent_team.py -v
+      - name: Check agent definitions match team_config
+        run: python scripts/agents/render_agents.py --check
+      - name: Inventory twelve specialized roles
+        run: python scripts/agents/team_audit.py --output /tmp/tel99-team-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tel99-agent-team-audit
+          path: /tmp/tel99-team-audit.json
+          retention-days: 7
