@@ -111,3 +111,23 @@ Limites : le pilote complet n'a pas été relancé (consigne). Le garde-fou rest
 de défense en profondeur ; les contrôles primaires demeurent l'allowlist `terminal`,
 `sub_agent_scope` et la politique de confirmation.
 
+## Revue de sécurité (14 novembre 2026) — défauts critiques corrigés
+
+Lors de la revue finale de la PR #64, des défauts **vérifiables** ont été trouvés dans le
+garde-fou et corrigés dans un commit supplémentaire :
+
+1. **Outils disque non bloqués.** La liste testait l'égalité exacte : `mkfs.ext4`, `mkfs.xfs`,
+   `mke2fs`, `shred`, `wipefs`, `fdisk`, `parted`, `sgdisk`, `blkdiscard` passaient (exit 0).
+   Corrigé : ajout de la famille disque + correspondance par préfixe pointé (`mkfs.*`).
+2. **Contournement du mot de tête.** `\rm`, `RM` (casse) et `rm${IFS}-rf` n'étaient pas
+   détectés. Corrigé : normalisation du mot de tête (backslash initial, `${IFS}`, minuscules).
+3. **Évasion par interpréteur.** `python3 -c "os.system(...)"`, `perl -e "system(...)"`,
+   `node -e "child_process.execSync(...)"` exécutaient des sous-processus. Corrigé : blocage des
+   motifs d'évasion (`os.system`, `subprocess.`, `system(`, `child_process`, `execSync`…) dans les
+   interpréteurs connus, sans bloquer la lecture légitime (`open('x').read()`, `unittest`…).
+
+Ces corrections restent **heuristiques** : elles réduisent la surface d'attaque, elles ne
+garantissent pas une isolation complète. La liste des interpréteurs et des motifs doit être
+maintenue à mesure que de nouveaux cas apparaissent.
+
+

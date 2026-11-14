@@ -205,6 +205,46 @@ class GuardSecurityTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run_guard(command), 2, command)
 
+    def test_disk_tools_and_dotted_variants_are_blocked(self):
+        # Regression: the exact-match list missed mkfs.ext4 and the disk family.
+        for command in ["mkfs.ext4 /dev/sdb", "mkfs.xfs /dev/sdb", "mke2fs /dev/sdb",
+                        "shred -u secret", "wipefs -a /dev/sdb", "fdisk /dev/sdb",
+                        "parted /dev/sdb", "sgdisk -Z /dev/sdb",
+                        "blkdiscard /dev/sdb"]:
+            with self.subTest(command=command):
+                self.assertEqual(run_guard(command), 2, command)
+
+    def test_head_word_obfuscation_is_blocked(self):
+        # Regression: \rm, RM and rm${IFS} slipped past the head matcher.
+        for command in ["\\rm -rf /tmp/x", "RM -rf /tmp/x", "rm${IFS}-rf /tmp/x",
+                        "\\mv a b"]:
+            with self.subTest(command=command):
+                self.assertEqual(run_guard(command), 2, command)
+
+    def test_interpreter_escape_to_subprocess_is_blocked(self):
+        # Regression: an interpreter could shell out and bypass the guard.
+        for command in [
+            "python3 -c \"import os; os.system('rm -rf /')\"",
+            "python3 -c \"import subprocess; subprocess.run(['rm','-rf','/'])\"",
+            "perl -e \"system('rm -rf /')\"",
+            "ruby -e \"system('rm -rf /')\"",
+            "node -e \"require('child_process').execSync('rm -rf /')\"",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(run_guard(command), 2, command)
+
+    def test_plain_interpreter_reads_are_allowed(self):
+        # The escape rule must not block ordinary read-only interpreter use.
+        for command in [
+            "python -c \"print(open('x').read())\"",
+            "python3 -c \"import json; print(json.load(open('a')))\"",
+            "python3 -m unittest discover -s tests",
+            "python3 -c \"print(sum(range(10)))\"",
+            "python3 -c \"import re; print(re.findall('a', 'banana'))\"",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(run_guard(command), 0, command)
+
 
 class TeamConfigTests(unittest.TestCase):
     """The central configuration must stay safe and consistent."""

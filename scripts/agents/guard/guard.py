@@ -44,7 +44,14 @@ MUTATING_HEADS = {
     "reboot", "iptables", "crontab", "at", "docker", "kubectl", "terraform",
     "ansible", "scp", "rsync", "ssh", "brew", "snap", "apt", "apt-get", "yum",
     "dnf", "apk", "wrangler", "git-lfs",
+    # Disk / filesystem tools: destroying a device is never a read-only action.
+    "mke2fs", "mkswap", "shred", "wipefs", "fdisk", "sfdisk", "parted", "sgdisk",
+    "gdisk", "blkdiscard", "hdparm", "losetup", "cryptsetup", "swapon", "swapoff",
+    "e2fsck", "resize2fs", "debugfs",
 }
+
+# Heads that must also match their dotted variants (``mkfs.ext4``, ``deploy.sh``).
+MUTATING_PREFIXES = {"mkfs", "deploy"}
 
 # Prefix words that wrap another command; the guard looks past them.
 WRAPPERS = {"env", "command", "builtin", "nohup", "time", "nice", "stdbuf",
@@ -52,6 +59,18 @@ WRAPPERS = {"env", "command", "builtin", "nohup", "time", "nice", "stdbuf",
 
 # Shells that can run a nested command via -c.
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "csh", "tcsh"}
+
+# Interpreters that can run a nested command via -c / -e.
+INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "nodejs",
+                "php", "lua", "tclsh", "osascript", "rscript"}
+
+# Inside an interpreter segment, shelling out escapes the read-only contract.
+ESCAPE_PATTERNS = [
+    r"\bos\.system\b", r"\bos\.popen\b", r"\bos\.exec[lv]\w*\b",
+    r"\bos\.spawn\w*\b", r"\bsubprocess\.", r"\bpty\.spawn\b",
+    r"\bcommands\.getoutput\b", r"\bsystem\s*\(", r"\bexec\s*\(",
+    r"\bchild_process\b", r"\bexecSync\b", r"\bspawnSync\b", r"\bexecFile\w*\b",
+]
 
 # Package / dependency installation, matched inside a segment.
 INSTALL_PATTERNS = [
@@ -204,7 +223,13 @@ def split_segments(command: str) -> list[str]:
 
 
 def head_words(segment: str) -> list[str]:
-    """Return the effective command tokens, skipping assignments and wrappers."""
+    """Return the effective command tokens, skipping assignments and wrappers.
+
+    Leading backslashes (``\\rm``) and the ``${IFS}`` / ``$IFS`` expansion are
+    neutralised first, because they are common ways to hide a command from a
+    naive head matcher.
+    """
+    segment = re.sub(r"\$\{IFS\}|\$IFS", " ", segment)
     try:
         tokens = segment.split()
     except ValueError:
@@ -216,11 +241,11 @@ def head_words(segment: str) -> list[str]:
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", token):
             i += 1
             continue
-        base = token.rsplit("/", 1)[-1]
+        base = token.rsplit("/", 1)[-1].lstrip("\\")
         if base in WRAPPERS:
             i += 1
             continue
-        out = tokens[i:]
+        out = [t.lstrip("\\") for t in tokens[i:]]
         break
     return out
 
@@ -267,15 +292,21 @@ def decide(event: dict) -> tuple[int, str]:
         words = head_words(segment)
         if not words:
             continue
-        base = words[0].rsplit("/", 1)[-1]
+        base = words[0].rsplit("/", 1)[-1].lower()
 
-        if base in MUTATING_HEADS or base.startswith("deploy"):
+        if is_mutating_head(base):
             return 2, f"guard: BLOCKED (mutating command {base!r})"
 
         if base == "git":
             sub = next((w for w in words[1:] if not w.startswith("-")), "")
             if is_git_mutation(sub, words, segment):
                 return 2, f"guard: BLOCKED (git {sub or 'mutating'})"
+
+        # Inside an interpreter, shelling out escapes the read-only contract.
+        if base in INTERPRETERS:
+            for pattern in ESCAPE_PATTERNS:
+                if re.search(pattern, segment, re.I):
+                    return 2, "guard: BLOCKED (interpreter escape to a subprocess)"
 
         for pattern in INSTALL_PATTERNS + WRITE_PATTERNS + NETWORK_PATTERNS:
             if re.search(pattern, segment, re.I):
@@ -289,6 +320,19 @@ def decide(event: dict) -> tuple[int, str]:
             return 2, "guard: BLOCKED (output redirection to a file)"
 
     return 0, ""
+
+
+def is_mutating_head(base: str) -> bool:
+    """True if the head word names a mutating command.
+
+    Handles dotted variants (``mkfs.ext4``) and the ``deploy*`` prefix.
+    """
+    if base in MUTATING_HEADS:
+        return True
+    stem = base.split(".", 1)[0]
+    if stem in MUTATING_PREFIXES or base in MUTATING_PREFIXES:
+        return True
+    return base.startswith("deploy")
 
 
 # ``git remote`` and ``git config`` are read-only in their listing forms.
