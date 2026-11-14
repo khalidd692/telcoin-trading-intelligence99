@@ -1,9 +1,9 @@
 {
-  "generated_at": 1794687141,
-  "observations": 141,
-  "valid_observations": 135,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1794687953,
+  "observations": 142,
+  "valid_observations": 136,
+  "latest_decision": "ALERTE PR\u00c9COCE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 104,
-              "mean_pct": 0.08638
+              "count": 106,
+              "mean_pct": 0.09055
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 92,
-              "mean_pct": 0.35672
+              "count": 94,
+              "mean_pct": 0.34697
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 13,
-              "mean_pct": 2.50187
+              "count": 14,
+              "mean_pct": 2.45133
             }
           }
         }
@@ -127,49 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794678130,
-      "previous_decision": "CONFIRMATION TECHNIQUE",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ convergence",
-        "+ reclaim"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1794677400",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001484,
-        "price_at": 1794677400,
-        "candle_closed_at": 1794677400,
-        "snapshot_at": 1794678096.066861,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001449,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001382,
-          "unit": "4h"
-        },
-        "scenario_id": "reversal",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
-        "factors": [
-          "convergence",
-          "reclaim"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1794678926,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -564,6 +521,47 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1794687953,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ALERTE PR\u00c9COCE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ volume",
+        "+ zone"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:EARLY_ALERT:1794687300",
+        "market": "KRAKEN:TELUSD",
+        "type": "EARLY_ALERT",
+        "decision": "ALERTE PR\u00c9COCE",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001475,
+        "price_at": 1794687300,
+        "candle_closed_at": 1794687300,
+        "snapshot_at": 1794687926.799978,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001508,
+          "unit": "15m"
+        },
+        "invalidation": {
+          "level": 0.001422,
+          "unit": "15m"
+        },
+        "factors": [
+          "volume",
+          "zone"
+        ],
+        "blockers": [
+          "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -614,8 +612,8 @@
       }
     },
     "false_positives": {
-      "count": 0,
-      "evaluable": 0,
+      "count": 1,
+      "evaluable": 1,
       "pending": 5,
       "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
