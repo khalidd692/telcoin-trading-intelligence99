@@ -199,7 +199,13 @@ def main() -> int:
 
     cfg.validate()
     suffix = args.suffix or time.strftime("%H%M%S")
-    llm = llm_config(args.profile)
+    try:
+        llm = llm_config(args.profile)
+    except FileNotFoundError as exc:
+        if not args.dry_run:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        llm = {}
     payload = build_payload(args.mission, suffix, llm)
 
     if args.dry_run:
