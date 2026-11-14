@@ -15,6 +15,11 @@ Usage (inside an OpenHands session, agent-server on :60000):
 
     python scripts/agents/run_pilot.py --dry-run
     python scripts/agents/run_pilot.py --wait
+    python scripts/agents/run_pilot.py --follow <conversation_id>
+
+A launcher timeout (``--wait``) is not a work failure: the conversation keeps
+running server-side. Resume watching it with ``--follow <id>``, which never
+starts a second conversation.
 
 Environment:
     TEL99_API_BASE        default http://localhost:60000
@@ -100,7 +105,13 @@ def request(method: str, path: str, payload: dict | None = None) -> tuple[int, o
 
 
 def build_agent_definitions(suffix: str) -> list[dict]:
-    """Inline agent definitions with per-run unique names and the guard hook."""
+    """Inline agent definitions with per-run unique names and the guard hook.
+
+    The budget-discipline paragraph is appended here, at runtime, rather than
+    in ``team_config.full_prompt()``: it must reach the sub-agents without
+    rewriting the committed ``.agents/agents/*.md`` files (owned by another
+    team). The hard caps are unchanged; only the guidance is added.
+    """
     names = cfg.unique_names(suffix)
     hooks = cfg.hook_config()
     definitions = []
@@ -111,7 +122,7 @@ def build_agent_definitions(suffix: str) -> list[dict]:
                 "description": spec.description,
                 "model": "inherit",
                 "tools": list(spec.tools),
-                "system_prompt": spec.full_prompt(),
+                "system_prompt": spec.full_prompt() + "\n\n" + cfg.BUDGET_DISCIPLINE,
                 "permission_mode": spec.permission_mode,
                 "max_iteration_per_run": cfg.DEFAULT_AGENT_MAX_ITERATIONS,
                 "max_budget_per_run": cfg.DEFAULT_AGENT_MAX_BUDGET_USD,
@@ -132,7 +143,10 @@ def build_mission(mission: str, suffix: str) -> str:
         "Delegue chaque sous-tache avec l'outil de delegation, en restreignant les "
         "outils du parent (sub_agent_scope). Verifie chaque preuve, distingue constat "
         "et hypothese, puis resume preuves, limites et actions necessitant un accord. "
-        "N'essaie jamais de contourner le garde-fou.\n\n"
+        "N'essaie jamais de contourner le garde-fou.\n"
+        "BUDGET: si un sous-agent atteint sa limite de budget, ne le relance pas "
+        "automatiquement; exploite son rapport partiel et signale la limite. Une "
+        "tache coupee par le budget n'est pas un echec du travail.\n\n"
         f"Mission: {mission}"
     )
 
@@ -171,16 +185,52 @@ def build_payload(mission: str, suffix: str, llm: dict | None = None) -> dict:
     }
 
 
-def wait_for(cid: str, timeout: int) -> str:
+# Terminal execution states reported by the agent-server. Anything else means
+# the conversation is still running.
+TERMINAL_STATES = ("finished", "error", "stopped")
+
+# Human-readable meaning of each wait outcome. A launcher timeout is NOT a
+# failure of the work: the conversation keeps running server-side and can be
+# followed again with --follow.
+STATUS_MEANING = {
+    "finished": "work finished",
+    "error": "conversation ended with an error (inspect events)",
+    "stopped": "conversation was stopped",
+    "timeout": "launcher gave up waiting; the conversation MAY still be running "
+               "server-side -- resume with: run_pilot.py --follow <id>",
+    "unreachable": "agent-server not reachable; the conversation was not observed",
+}
+
+
+def conversation_state(cid: str) -> str | None:
+    """Return the execution status, or None if the server did not answer."""
+    status, info = request("GET", f"/api/conversations/{cid}")
+    if status != 200 or not isinstance(info, dict):
+        return None
+    return info.get("execution_status")
+
+
+def wait_for(cid: str, timeout: int, poll: float = 5.0) -> str:
+    """Poll a conversation until it reaches a terminal state or the deadline.
+
+    Returns one of ``finished``/``error``/``stopped``, ``timeout`` when the
+    deadline passed while the conversation was still running, or
+    ``unreachable`` when the server never answered. ``timeout`` is deliberately
+    distinct from ``error``: it is a limit of the watcher, not a failure of the
+    work, and the conversation remains followable.
+    """
     deadline = time.time() + timeout
-    while time.time() < deadline:
-        _, info = request("GET", f"/api/conversations/{cid}")
-        if isinstance(info, dict):
-            state = info.get("execution_status")
-            if state in ("finished", "error", "stopped"):
+    answered = False
+    while True:
+        state = conversation_state(cid)
+        if state is not None:
+            answered = True
+            if state in TERMINAL_STATES:
                 return state
-        time.sleep(5)
-    return "timeout"
+        if time.time() >= deadline:
+            break
+        time.sleep(poll)
+    return "timeout" if answered else "unreachable"
 
 
 def main() -> int:
@@ -195,7 +245,23 @@ def main() -> int:
     parser.add_argument("--wait", action="store_true",
                         help="poll until the conversation finishes")
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--follow", metavar="CONVERSATION_ID", default=None,
+                        help="resume watching an existing conversation instead of "
+                             "starting a new one")
     args = parser.parse_args()
+
+    # Follow an existing conversation: never creates a new one, so a launcher
+    # timeout can be recovered without spending a second coordinator budget.
+    if args.follow:
+        print(f"following conversation: {args.follow}")
+        state = wait_for(args.follow, args.timeout)
+        print(f"final status: {state} ({STATUS_MEANING.get(state, 'unknown')})")
+        if state == "timeout":
+            print(f"the work may still be running; re-run: "
+                  f"run_pilot.py --follow {args.follow} --timeout {args.timeout}")
+        # timeout/unreachable are watcher limits, not work failures: exit 0 so a
+        # caller does not mistake them for an error. A real error exits 2.
+        return 2 if state in ("error", "stopped") else 0
 
     cfg.validate()
     suffix = args.suffix or time.strftime("%H%M%S")
@@ -224,8 +290,14 @@ def main() -> int:
     print(f"conversation: {cid}")
     print(f"agent names: {cfg.unique_names(suffix)}")
     print(f"verify with: python scripts/agents/verify_delegation.py {cid} --suffix {suffix}")
+    print(f"follow with: python scripts/agents/run_pilot.py --follow {cid}")
     if args.wait and cid:
-        print(f"final status: {wait_for(cid, args.timeout)}")
+        state = wait_for(cid, args.timeout)
+        print(f"final status: {state} ({STATUS_MEANING.get(state, 'unknown')})")
+        if state == "timeout":
+            print(f"the work may still be running; re-run: "
+                  f"run_pilot.py --follow {cid} --timeout {args.timeout}")
+        return 2 if state in ("error", "stopped") else 0
     return 0
 
 
