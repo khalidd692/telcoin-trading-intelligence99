@@ -190,3 +190,6 @@ body{font-size:14px}.sidebar,.topbar{background:#0b0c0e}.sidebar{border-color:va
  .liquidity-metrics,.personal-values{grid-template-columns:repeat(2,minmax(0,1fr))}.prospective-horizons,.multi-unit-gauges{grid-template-columns:repeat(2,minmax(0,1fr))}.personal-inputs,.annotated-summary,.ticker-grid{grid-template-columns:1fr}
  .chart-toolbar{flex-wrap:wrap}.overlays label{font-size:11px}.catalog-content{padding:0 10px 12px}.widget-option small{font-size:11px}
 }
+
+/* Mobile touch targets: align segmented controls on the 44px standard already used across the terminal. */
+@media(max-width:700px){.segmented button{min-height:44px}.osc-head .segmented button{min-height:44px}}
