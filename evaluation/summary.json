@@ -1,8 +1,8 @@
 {
-  "generated_at": 1794652729,
-  "observations": 101,
-  "valid_observations": 98,
-  "latest_decision": "ATTENDRE",
+  "generated_at": 1794653553,
+  "observations": 102,
+  "valid_observations": 99,
+  "latest_decision": "ALERTE PR\u00c9COCE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 67,
-              "mean_pct": 0.02434
+              "count": 68,
+              "mean_pct": 0.01895
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 55,
-              "mean_pct": -0.04698
+              "count": 56,
+              "mean_pct": -0.00602
             }
           }
         }
@@ -119,16 +119,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794628228,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794629029,
       "previous_decision": "ATTENDRE",
@@ -305,6 +295,50 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1794653553,
+      "previous_decision": "ATTENDRE",
+      "decision": "ALERTE PR\u00c9COCE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence",
+        "+ reclaim",
+        "+ support"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:EARLY_ALERT:1794653100",
+        "market": "KRAKEN:TELUSD",
+        "type": "EARLY_ALERT",
+        "decision": "ALERTE PR\u00c9COCE",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001456,
+        "price_at": 1794653100,
+        "candle_closed_at": 1794653100,
+        "snapshot_at": 1794653525.057017,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001471,
+          "unit": "15m"
+        },
+        "invalidation": {
+          "level": 0.001453,
+          "unit": "15m"
+        },
+        "factors": [
+          "support",
+          "volume",
+          "convergence",
+          "reclaim"
+        ],
+        "blockers": [
+          "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -357,7 +391,7 @@
     "false_positives": {
       "count": 0,
       "evaluable": 0,
-      "pending": 4,
+      "pending": 5,
       "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
