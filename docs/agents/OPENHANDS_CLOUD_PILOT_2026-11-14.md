@@ -54,13 +54,60 @@ Le lanceur actuel est volontairement en **lecture seule** et interdit toute écr
 
 | Mesure | Résultat / preuve |
 |---|---|
-| Branche et SHA de départ | |
-| Modèle et coût réellement affiché | |
-| Vérifications initiales | |
-| Nombre de délégations observées | |
-| Résultat de `verify_delegation.py` | |
-| État final du dépôt (`git status`) | |
-| Correction réalisée (essai 2) | |
-| Tests, erreurs et limites | |
+| Branche et SHA de départ | `agents/openhands-cloud-pilot-20261114` @ `359c07c7` |
+| Modèle et coût réellement affiché | non relancé (consigne : pas de nouveau pilote avant correctifs) |
+| Vérifications initiales | `git status --porcelain` vide ; `guard.py`/`run_pilot.py` identiques à la branche Hermes (aucun conflit) |
+| Nombre de délégations observées | non relancé dans cet essai |
+| Résultat de `verify_delegation.py` | non relancé dans cet essai |
+| État final du dépôt (`git status`) | voir « Essai 2 — résultat » ci-dessous |
+| Correction réalisée (essai 2) | voir « Essai 2 — résultat » ci-dessous |
+| Tests, erreurs et limites | 48 tests `test_agent_team.py` OK ; 529 tests dépôt OK (3 ignorés) |
 
-Ne pas déclarer la relance ou la correction validée sans exécution réelle dans OpenHands Cloud.
+## Essai 2 — résultat (14 novembre 2026)
+
+Corrections réalisées sur la branche isolée, sans merge ni déploiement. Fichiers modifiés :
+`scripts/agents/guard/guard.py`, `scripts/agents/run_pilot.py`, `scripts/agents/team_config.py`,
+`tests/test_agent_team.py`. Aucun fichier de Kilo, Hermes, du terminal TEL99 ni `AGENTS.md`
+n'a été touché.
+
+1. Garde-fou (`guard.py`).
+   - Échec fermé : JSON invalide, `{}`, tableau JSON, absence de `tool_name`, absence de
+     `tool_input`, commande vide -> **exit 2** (blocage). Avant : exit 0 (autorisation).
+   - `curl … | sh`, `wget … | bash`, `… | python3` et variantes (`| sudo sh`) -> **bloqués**.
+     Avant : `curl | sh` passait.
+   - Faux positifs réduits : le contenu des chaînes entre guillemets est ignoré pour la
+     détection de redirection et de pipe, donc `echo "a -> b"`, `grep -n "=>" file` et
+     `python3 -c "print(1 > 0)"` ne sont plus bloqués.
+   - Formes de lecture de git autorisées : `git remote -v`, `git --no-pager remote -v`,
+     `git remote show`, `git config --get/--list`. Les formes mutantes (`git remote add`,
+     `git config user.name`) restent bloquées.
+
+2. Budget des sous-agents (`team_config.py`, `run_pilot.py`).
+   - Ajout d'un paragraphe de discipline de budget injecté au **runtime** dans chaque
+     sous-agent (exploration bornée ~12 commandes, rapport final obligatoire même partiel,
+     pas de relance automatique). Les fichiers `.agents/agents/*.md` ne sont pas régénérés.
+   - **Aucun plafond n'est relevé** : `max_budget_per_run` et `max_iteration_per_run`
+     restent `DEFAULT_AGENT_*` (contrôlés par variables d'environnement). Un test le vérifie.
+
+3. Suivi du coordinateur (`run_pilot.py`).
+   - `wait_for` renvoie un statut distinct : `finished` / `error` / `stopped` / `timeout` /
+     `unreachable`. Un `timeout` du lanceur n'est plus confondu avec une erreur de travail.
+   - Nouvelle option `--follow <conversation_id>` : reprend le suivi d'une conversation
+     existante sans en créer une nouvelle (aucun second budget coordinateur).
+   - Codes de sortie : `timeout`/`unreachable` -> 0 (limite de l'observateur) ; `error`/
+     `stopped` -> 2 (échec réel).
+
+Preuves d'exécution :
+
+```text
+python -m unittest discover -s tests -p 'test_agent_team.py'   -> Ran 48 tests  OK
+python -m unittest discover -s tests                           -> Ran 529 tests OK (skipped=3)
+python scripts/agents/render_agents.py --check                 -> OK: 13 fichiers conformes
+python scripts/agents/run_pilot.py --follow 1db92a3d-... --timeout 20
+    -> final status: finished (work finished)   exit 0
+```
+
+Limites : le pilote complet n'a pas été relancé (consigne). Le garde-fou reste une heuristique
+de défense en profondeur ; les contrôles primaires demeurent l'allowlist `terminal`,
+`sub_agent_scope` et la politique de confirmation.
+

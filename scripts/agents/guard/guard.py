@@ -7,13 +7,22 @@ call may proceed.
 Contract (OpenHands SDK 1.62.0): exit code 2 BLOCKS the action before it runs;
 exit code 0 allows it. Exit code 1 does NOT block, so this guard never uses it.
 
-Only ``terminal`` commands are policed. Everything else is allowed so the guard
-cannot accidentally freeze the agent.
+Only ``terminal`` commands are policed. Other tools are allowed so the guard
+cannot accidentally freeze the agent on a tool it does not understand.
 
 Design: the command is split on shell separators (``;``, ``&&``, ``||``, ``|``,
 newlines) and each segment is judged by its HEAD word, not by a substring
 search. A substring approach wrongly blocks read-only commands such as
 ``find deploy -type f`` or ``grep -n deploy-pages file``; head analysis does not.
+
+Fail-closed: an unparseable or incomplete event (bad JSON, missing
+``tool_name``, missing/empty ``tool_input.command``) BLOCKS. An event the guard
+cannot interpret must not be allowed through silently.
+
+Pipelines that feed a network fetch into a shell or interpreter
+(``curl … | sh``, ``wget … | bash``, ``… | python3``) are blocked even though
+neither side is mutating on its own. Quoted text is ignored for that scan, so
+``echo "a | sh"`` is not a false positive.
 
 This is a defence-in-depth heuristic. The primary controls remain the per-agent
 ``tools=["terminal"]`` allowlist, ``sub_agent_scope`` and the confirmation
@@ -91,6 +100,73 @@ TRADING_PATTERN = (
 )
 PAPER_PATTERN = r"\bpaper\s+(order|trade|account)\b"
 
+# Commands that fetch remote content. Feeding one of these into a shell or an
+# interpreter runs code that was not reviewed, so the pipeline is blocked even
+# though each side looks harmless alone.
+NETWORK_FETCHERS = {
+    "curl", "wget", "fetch", "httpie", "http", "aria2c",
+}
+# Right-hand sides of a pipe that execute the piped bytes.
+PIPE_EXECUTORS = SHELLS | {
+    "python", "python3", "perl", "ruby", "node", "php", "lua", "tclsh", "osascript",
+}
+
+
+def strip_quoted(text: str) -> str:
+    """Return ``text`` with the contents of quoted spans removed.
+
+    Used for scans (redirection, pipe-to-shell) where a character inside a
+    string literal is not shell syntax: ``echo "a > b"`` writes nothing to a
+    file, and ``echo "x | sh"`` runs no shell.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+                out.append(ch)
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def pipes_into_executor(segment: str) -> bool:
+    """True if a network fetch is piped into a shell or interpreter.
+
+    ``curl … | sh``, ``wget -qO- … | bash``, ``curl … | python3`` are blocked.
+    Quoted spans are removed first, so ``echo "curl x | sh"`` is not matched.
+    """
+    code = strip_quoted(segment)
+    parts = [p.strip() for p in code.split("|")]
+    if len(parts) < 2:
+        return False
+    fetches = False
+    for part in parts[:-1]:
+        words = head_words(part)
+        if words and words[0].rsplit("/", 1)[-1] in NETWORK_FETCHERS:
+            fetches = True
+            break
+    if not fetches:
+        return False
+    for part in parts[1:]:
+        words = head_words(part)
+        if words and words[0].rsplit("/", 1)[-1] in PIPE_EXECUTORS:
+            return True
+    return False
+
 
 def split_segments(command: str) -> list[str]:
     """Split a shell command on separators, keeping quoted parts intact."""
@@ -154,14 +230,29 @@ def _strip_quotes(text: str) -> str:
 
 
 def decide(event: dict) -> tuple[int, str]:
-    """Return (exit_code, reason). 2 blocks, 0 allows."""
-    tool = event.get("tool_name") or ""
-    tool_input = event.get("tool_input") or {}
-    command = ""
-    if isinstance(tool_input, dict):
-        command = tool_input.get("command") or tool_input.get("cmd") or ""
-    if tool != "terminal" or not command:
+    """Return (exit_code, reason). 2 blocks, 0 allows.
+
+    Fails closed: an event this function cannot interpret is blocked, not
+    allowed. Only a well-formed event for a non-``terminal`` tool passes
+    without inspection.
+    """
+    tool = event.get("tool_name")
+    if not isinstance(tool, str) or not tool:
+        return 2, "guard: BLOCKED (event without tool_name)"
+    if tool != "terminal":
         return 0, ""
+
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 2, "guard: BLOCKED (terminal event without tool_input)"
+    command = tool_input.get("command") or tool_input.get("cmd") or ""
+    if not isinstance(command, str) or not command.strip():
+        return 2, "guard: BLOCKED (terminal event without a command)"
+
+    # A network fetch piped into a shell or interpreter runs unreviewed code.
+    # Checked on the whole command because split_segments() splits on "|".
+    if pipes_into_executor(command):
+        return 2, "guard: BLOCKED (network fetch piped into a shell/interpreter)"
 
     segments = split_segments(command)
     # Expand nested shell invocations (bash -c '...') one level deep.
@@ -183,8 +274,7 @@ def decide(event: dict) -> tuple[int, str]:
 
         if base == "git":
             sub = next((w for w in words[1:] if not w.startswith("-")), "")
-            if sub in GIT_MUTATING or (sub == "branch" and
-                                       re.search(r"-[dD]\b", segment)):
+            if is_git_mutation(sub, words, segment):
                 return 2, f"guard: BLOCKED (git {sub or 'mutating'})"
 
         for pattern in INSTALL_PATTERNS + WRITE_PATTERNS + NETWORK_PATTERNS:
@@ -201,13 +291,45 @@ def decide(event: dict) -> tuple[int, str]:
     return 0, ""
 
 
+# ``git remote`` and ``git config`` are read-only in their listing forms.
+GIT_REMOTE_READONLY = {"", "-v", "--verbose", "show", "get-url"}
+GIT_CONFIG_READONLY_FLAGS = ("--get", "--get-all", "--get-regexp", "--list", "-l",
+                             "--get-urlmatch")
+
+
+def is_git_mutation(sub: str, words: list[str], segment: str) -> bool:
+    """True if a ``git <sub>`` invocation writes to the repo, its refs or config.
+
+    Read-only forms are allowed: ``git remote -v``, ``git remote show``,
+    ``git remote get-url``, ``git config --get …``. Global flags such as
+    ``--no-pager`` before the sub-command are handled.
+    """
+    if sub == "branch":
+        return bool(re.search(r"-[dD]\b", segment))
+    # Tokens after the sub-command itself (skip global flags like --no-pager).
+    try:
+        idx = words.index(sub)
+    except ValueError:
+        idx = 1
+    after = words[idx + 1:]
+    if sub == "remote":
+        verb = next((w for w in after if not w.startswith("-")), "")
+        return verb not in GIT_REMOTE_READONLY
+    if sub == "config":
+        return not any(f in after for f in GIT_CONFIG_READONLY_FLAGS)
+    return sub in GIT_MUTATING
+
+
 def has_write_redirection(segment: str) -> bool:
     """True if the segment redirects output to a real file.
 
-    Allowed: ``>/dev/null`` and ``2>&1`` style descriptor duplication.
+    Quoted spans are ignored, so ``echo "a > b"`` and ``python3 -c "print(1 > 0)"``
+    are not false positives. Allowed: ``>/dev/null`` and ``2>&1`` descriptor
+    duplication.
     """
-    for match in re.finditer(r">>?", segment):
-        rest = segment[match.end():]
+    code = strip_quoted(segment)
+    for match in re.finditer(r">>?", code):
+        rest = code[match.end():]
         if match.group() == ">" and rest.startswith("&"):
             continue
         stripped = rest.lstrip()
@@ -218,11 +340,15 @@ def has_write_redirection(segment: str) -> bool:
 
 
 def main() -> int:
+    raw = sys.stdin.read()
     try:
-        event = json.load(sys.stdin)
+        event = json.loads(raw)
     except Exception:
-        sys.stderr.write("guard: unparseable event, allowing\n")
-        return 0
+        sys.stderr.write("guard: BLOCKED (unparseable event)\n")
+        return 2
+    if not isinstance(event, dict):
+        sys.stderr.write("guard: BLOCKED (event is not an object)\n")
+        return 2
     code, reason = decide(event)
     if code != 0:
         sys.stderr.write(reason + "\n")

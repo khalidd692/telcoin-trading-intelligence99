@@ -38,6 +38,22 @@ READ_ONLY_CONTRACT = (
     "Un garde-fou (hook PreToolUse) bloque au runtime toute commande interdite."
 )
 
+# Budget discipline injected into every sub-agent prompt.
+#
+# Observed failure mode of the pilot: a sub-agent spent its whole per-run budget
+# on exploration and stopped with ``MaxBudgetReached`` and no usable report, so
+# the coordinator had to relaunch a fresh (expensive) agent. The contract below
+# caps exploration and requires a final report even when incomplete. It never
+# raises a ceiling: the caps stay operator-controlled (TEL99_AGENT_* env vars).
+BUDGET_DISCIPLINE = (
+    "DISCIPLINE DE BUDGET (obligatoire): tu disposes d'un budget serre. Limite "
+    "ton exploration a environ 12 commandes utiles, va droit au but, ne cree "
+    "aucun fichier temporaire. Produis TOUJOURS un rapport final concis, meme "
+    "partiel, avant d'epuiser le budget: constats prouves (commande + sortie "
+    "brute), limites, et ce qui reste a verifier. Ne demande pas de relance et "
+    "n'essaie pas d'obtenir un budget plus eleve."
+)
+
 
 @dataclass(frozen=True)
 class AgentSpec:
