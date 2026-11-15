@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "project": "tel99",
+  "entries": [
+    {
+      "id": "guard-git-value-options",
+      "project": "tel99",
+      "kind": "fix",
+      "title": "Le garde-fou doit ignorer les options globales de git a valeur",
+      "body": "git -C <dir> push et git -c k=v commit cachaient la sous-commande derriere sa valeur, car le garde ne lisait que le premier jeton sans tiret. Correctif: sauter les options a valeur (GIT_VALUE_OPTIONS) avant de chercher la sous-commande. Idem pour timeout/nice/xargs qui passaient leur argument en tete, et pour find -delete/-exec.",
+      "tags": [
+        "guard",
+        "git",
+        "security",
+        "bypass"
+      ],
+      "source": "commit 62f0c00",
+      "commit": "62f0c00",
+      "author": "tel99-dev",
+      "created_at": "2026-11-15T22:35:54Z",
+      "version": 1,
+      "confidence": 0.9,
+      "verified": true,
+      "verified_by": "tel99-dev",
+      "supersedes": "",
+      "superseded_by": ""
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-15T22:35:54Z",
+      "actor": "agent",
+      "action": "record",
+      "id": "guard-git-value-options",
+      "version": 1
+    }
+  ]
+}
