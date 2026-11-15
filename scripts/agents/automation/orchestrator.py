@@ -334,6 +334,52 @@ def _lock_expired(record: dict) -> bool:
     return when <= datetime.now(timezone.utc)
 
 
+def reconcile_stale_active(state: dict, dry_run: bool) -> str | None:
+    """Reconcile a mission left ``active`` by an interrupted run.
+
+    A run that is killed mid-mission (deploy, quota exhaustion, host reboot)
+    leaves ``state["active"]`` set and the mission out of ``processed``. Without
+    reconciliation the next run would abort forever with "a mission is already
+    active" — the queue would be wedged by a mission that no longer runs.
+
+    The single source of truth for "is a mission really running" is the atomic
+    KV lock. So:
+
+    * If the KV lock is still held and unexpired, another run owns the mission:
+      return a reason string and let the caller abort.
+    * Otherwise nothing is running. Clear ``active`` and return ``None`` so the
+      mission becomes eligible again and is resumed (never lost, never
+      duplicated: it is not in ``processed`` yet).
+
+    Never clears ``active`` when the lock cannot be read (KV unavailable), so a
+    real run can never silently run two missions at once.
+    """
+    active = state.get("active")
+    if not active:
+        return None
+    if dry_run:
+        # A dry run does not touch persistent state; it only reports.
+        return None
+    if not kv_available():
+        return (
+            "a mission is recorded as active but the atomic KV lock cannot be "
+            "read; refusing to reconcile without proof it is not running"
+        )
+    lock = kv_get(_LOCK_KEY)
+    if isinstance(lock, dict) and not _lock_expired(lock):
+        return (
+            f"a mission is already active (lock held by {lock.get('owner')} "
+            f"until {lock.get('expires_at')})"
+        )
+    journal_entry(
+        state, "stale_active_reconciled",
+        previous=active, note="lock expired or absent; mission re-queued for resume",
+    )
+    state["active"] = None
+    save_state(state)
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Run phase reporting (so the platform shows real progress, not "Starting")
 # --------------------------------------------------------------------------- #
@@ -547,12 +593,17 @@ def run(config: dict, offline: bool = False) -> int:
         save_state(state)
         return 2
 
-    # One mission at a time.
+    # One mission at a time, with automatic recovery from interruption.
     active = state.get("active")
     if active and not config["dry_run"]:
-        journal_entry(state, "abort", reason="a mission is already active", active=active)
-        save_state(state)
-        return 2
+        reason = reconcile_stale_active(state, config["dry_run"])
+        if reason:
+            journal_entry(state, "abort", reason=reason, active=active)
+            save_state(state)
+            return 2
+        active = state.get("active")
+        if not active:
+            journal_entry(state, "resume", note="interrupted mission re-queued for resume")
 
     if offline:
         journal_entry(state, "offline", note="no network calls; selection logic only")

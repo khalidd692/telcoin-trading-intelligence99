@@ -685,5 +685,86 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(orchestrator.preflight.check_budget(payload), [])
 
 
+class ResumeAfterInterruptionTests(unittest.TestCase):
+    """An interrupted mission must be re-queued, never lost nor duplicated."""
+
+    def _state(self, active=True):
+        return {
+            "version": 1,
+            "processed": [],
+            "active": (
+                {"issue": 70, "work_branch": "agent/mission-70-x",
+                 "started_at": "2026-11-14T00:00:00Z", "owner": "run-a"}
+                if active else None
+            ),
+            "journal": [],
+        }
+
+    def test_expired_lock_requeues_the_interrupted_mission(self):
+        original_avail = orchestrator.kv_available
+        original_get = orchestrator.kv_get
+        saved = orchestrator.save_state
+        try:
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: {
+                "owner": "run-a", "expires_at": "2000-01-01T00:00:00Z"
+            }
+            orchestrator.save_state = lambda state: None
+            state = self._state()
+            reason = orchestrator.reconcile_stale_active(state, dry_run=False)
+        finally:
+            orchestrator.kv_available = original_avail
+            orchestrator.kv_get = original_get
+            orchestrator.save_state = saved
+        self.assertIsNone(reason)
+        self.assertIsNone(state["active"])
+        # The mission is still unprocessed, so it is resumed, not lost.
+        self.assertEqual(state["processed"], [])
+
+    def test_live_lock_still_blocks_a_second_mission(self):
+        original_avail = orchestrator.kv_available
+        original_get = orchestrator.kv_get
+        try:
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: {
+                "owner": "run-a", "expires_at": "2999-01-01T00:00:00Z"
+            }
+            reason = orchestrator.reconcile_stale_active(self._state(), dry_run=False)
+        finally:
+            orchestrator.kv_available = original_avail
+            orchestrator.kv_get = original_get
+        self.assertIsNotNone(reason)
+        self.assertIn("run-a", reason)
+
+    def test_unreadable_lock_refuses_to_reconcile(self):
+        # Fail-closed: without the lock we cannot prove nothing is running.
+        original_avail = orchestrator.kv_available
+        try:
+            orchestrator.kv_available = lambda: False
+            state = self._state()
+            reason = orchestrator.reconcile_stale_active(state, dry_run=False)
+        finally:
+            orchestrator.kv_available = original_avail
+        self.assertIsNotNone(reason)
+        self.assertIsNotNone(state["active"])
+
+    def test_dry_run_never_touches_persistent_state(self):
+        original_avail = orchestrator.kv_available
+        try:
+            orchestrator.kv_available = lambda: True
+            state = self._state()
+            reason = orchestrator.reconcile_stale_active(state, dry_run=True)
+        finally:
+            orchestrator.kv_available = original_avail
+        self.assertIsNone(reason)
+        self.assertIsNotNone(state["active"])
+
+    def test_no_active_mission_is_a_noop(self):
+        state = self._state(active=False)
+        self.assertIsNone(
+            orchestrator.reconcile_stale_active(state, dry_run=False)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
