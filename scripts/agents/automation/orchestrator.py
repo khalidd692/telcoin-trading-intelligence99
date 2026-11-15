@@ -50,6 +50,20 @@ import policy  # noqa: E402
 import preflight  # noqa: E402
 import team_config as cfg  # noqa: E402
 
+# Optional: the bus bridge adds a durable ledger (KV in the cloud) on top of the
+# orchestrator's own state. It is imported defensively so the orchestrator keeps
+# working even if the protocol package is absent.
+try:
+    from automation import bus_bridge  # noqa: E402
+except Exception:  # noqa: BLE001 - the bus is an enhancement, not a dependency
+    bus_bridge = None
+
+try:
+    from protocol.bus import Bus  # noqa: E402
+    from protocol.store import default_store  # noqa: E402
+except Exception:  # noqa: BLE001
+    Bus = None
+
 REPO_ROOT = SCRIPTS.parents[1]
 DEFAULT_CONFIG = {
     "repository": "khalidd692/telcoin-trading-intelligence99",
@@ -663,6 +677,28 @@ def run(config: dict, offline: bool = False) -> int:
     journal_entry(state, "mission_selected", issue=mission["number"],
                   title=mission.get("title", ""), work_branch=work_branch)
 
+    # --- Bus ledger: dedup, persistence and centralised results. ---
+    bus = None
+    bus_corr = None
+    if bus_bridge is not None and Bus is not None:
+        try:
+            bus = Bus(REPO_ROOT / "bus", store=default_store(REPO_ROOT / "bus"))
+            bus_corr = bus_bridge.correlation_id(config["repository"], mission["number"])
+            if bus_bridge.is_already_finished(bus, bus_corr):
+                journal_entry(state, "bus_skip", reason="mission already finished",
+                              correlation_id=bus_corr)
+                save_state(state)
+                return 0
+            opened = bus_bridge.open_or_resume(
+                bus, repository=config["repository"], issue=mission,
+                work_branch=work_branch,
+            )
+            journal_entry(state, "bus_mission", **opened,
+                          storage=bus.storage_report())
+        except Exception as exc:  # noqa: BLE001 - the bus must never block a run
+            journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
+            bus = None
+
     if config["dry_run"]:
         journal_entry(state, "dry_run", note="no conversation started",
                       would_run_until=policy.utcnow_iso())
@@ -722,6 +758,20 @@ def run(config: dict, offline: bool = False) -> int:
         report_phase("running coordinator")
         final = wait_for(cid, deadline)
         journal_entry(state, "conversation_finished", conversation=cid, status=final)
+
+        # --- Persist the outcome on the bus (survives container destruction). ---
+        if bus is not None and bus_corr is not None:
+            try:
+                outcome = bus_bridge.record_outcome(
+                    bus, bus_corr, success=(final == "finished"),
+                    summary=f"conversation {final} for issue #{mission['number']}",
+                    conversation_id=str(cid), work_branch=work_branch,
+                    status_detail=f"final status {final}",
+                )
+                journal_entry(state, "bus_outcome", **{
+                    k: v for k, v in outcome.items() if k != "result"})
+            except Exception as exc:  # noqa: BLE001
+                journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
 
         state["processed"] = sorted(processed | {mission["number"]})
         state["active"] = None

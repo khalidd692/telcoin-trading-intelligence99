@@ -24,12 +24,12 @@ submits an order, merges a branch or changes a permission.
 
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
 from dataclasses import dataclass, field
 
 from .envelope import (Envelope, TERMINAL_STATES, new_id, utcnow_iso, validate)
+from .store import FileStore, default_store, store_report
 
 _HERE = pathlib.Path(__file__).resolve()
 _AGENTS_DIR = _HERE.parents[1]           # scripts/agents
@@ -59,6 +59,7 @@ class MissionRecord:
     errors: list[dict] = field(default_factory=list)
     result: dict | None = None
     resumable: bool = False
+    learnings: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +75,7 @@ class MissionRecord:
             "errors": self.errors,
             "result": self.result,
             "resumable": self.resumable,
+            "learnings": self.learnings,
         }
 
     @classmethod
@@ -91,10 +93,18 @@ class MissionRecord:
 class Bus:
     """File-backed bus with an actor registry and loop control."""
 
-    def __init__(self, root: str | pathlib.Path | None = None) -> None:
+    def __init__(self, root: str | pathlib.Path | None = None,
+                 store=None) -> None:
         self.root = pathlib.Path(root or DEFAULT_BUS_ROOT)
+        # A store is the durable substrate. With none supplied we use the KV
+        # store when the automation run provides one, else local files, so the
+        # same bus code survives a cloud container destruction.
+        self.store = store or default_store(self.root)
         self.actors: dict[str, dict] = {}
         self.register_default_actors()
+
+    def storage_report(self) -> dict:
+        return store_report(self.store)
 
     # -- actor registry -----------------------------------------------------
     def register_default_actors(self) -> None:
@@ -125,40 +135,31 @@ class Bus:
 
     def save_mission(self, record: MissionRecord) -> None:
         record.updated_at = utcnow_iso()
-        self._missions_dir().mkdir(parents=True, exist_ok=True)
-        path = self._record_path(record.correlation_id)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(record.to_dict(), indent=2, ensure_ascii=False) + "\n",
-                       encoding="utf-8")
-        tmp.replace(path)
+        self.store.put(f"missions/{record.correlation_id}", record.to_dict())
 
     def load_mission(self, correlation_id: str) -> MissionRecord | None:
-        path = self._record_path(correlation_id)
-        if not path.is_file():
+        data = self.store.get(f"missions/{correlation_id}")
+        if not isinstance(data, dict):
             return None
         try:
-            return MissionRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
+            return MissionRecord.from_dict(data)
+        except (TypeError, ValueError):
             return None
 
     def list_missions(self) -> list[str]:
-        if not self._missions_dir().is_dir():
-            return []
-        return sorted(p.stem for p in self._missions_dir().glob("*.json"))
+        prefix = "missions/"
+        return [k[len(prefix):] for k in self.store.keys(prefix)]
 
-    def persist_envelope(self, envelope: Envelope) -> pathlib.Path:
-        self._envelopes_dir().mkdir(parents=True, exist_ok=True)
-        path = self._envelopes_dir() / f"{envelope.envelope_id}.json"
-        path.write_text(envelope.to_json(), encoding="utf-8")
-        return path
+    def persist_envelope(self, envelope: Envelope) -> None:
+        self.store.put(f"envelopes/{envelope.envelope_id}", envelope.to_dict())
 
     def read_envelope(self, envelope_id: str) -> Envelope | None:
-        path = self._envelopes_dir() / f"{envelope_id}.json"
-        if not path.is_file():
+        data = self.store.get(f"envelopes/{envelope_id}")
+        if not isinstance(data, dict):
             return None
         try:
-            return Envelope.from_json(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            return Envelope.from_dict(data)
+        except (KeyError, TypeError, ValueError):
             return None
 
     # -- mission lifecycle --------------------------------------------------

@@ -42,6 +42,15 @@ def cmd_actors(args) -> int:
         caps = ",".join(actor.get("capabilities", []))
         print(f"- {actor_id:<24} [{actor['environment']:<9}] {flag:<14} {caps}")
     print(f"\nconnected: {bus.connected_actors()}")
+    print(f"storage: {bus.storage_report()}")
+    return 0
+
+
+def cmd_ledger(args) -> int:
+    from automation import bus_bridge
+
+    bus = Bus(args.bus_root)
+    print(json.dumps(bus_bridge.ledger(bus), indent=2, ensure_ascii=False))
     return 0
 
 
@@ -117,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("actors", help="show the actor registry")
     p.set_defaults(func=cmd_actors)
+
+    p = sub.add_parser("ledger", help="show the mission ledger")
+    p.set_defaults(func=cmd_ledger)
 
     p = sub.add_parser("capabilities", help="probe real capabilities")
     p.set_defaults(func=cmd_capabilities)
