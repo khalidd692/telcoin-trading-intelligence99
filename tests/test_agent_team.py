@@ -118,6 +118,19 @@ class GuardSecurityTests(unittest.TestCase):
         "sh -c 'git push'",
         "xargs rm",
         "env FOO=1 rm -rf /tmp/y",
+        # Regression: git global value options hid the real sub-command.
+        "git -C /tmp/repo commit -m x",
+        "git -C /tmp/repo push origin main",
+        "git -c user.name=x commit -m y",
+        "git --work-tree=/tmp/x checkout -- .",
+        # Regression: a wrapper's own argument hid the wrapped command.
+        "timeout 5 rm -rf /tmp/z",
+        "nice -n 10 rm -rf /tmp/z",
+        "xargs -I{} rm {}",
+        # Regression: a destructive find action is not a read-only inspection.
+        "find /tmp -delete",
+        "find . -name '*.pyc' -delete",
+        "find . -exec rm {} ;",
     ]
     ALLOWED = [
         "ls -la",
@@ -138,6 +151,14 @@ class GuardSecurityTests(unittest.TestCase):
         "grep -c order file",
         "python3 scripts/agents/team_audit.py",
         "python3 -m unittest discover -s tests",
+        # The new rules must not block legitimate read-only forms.
+        "git -C /repo status",
+        "git --no-pager log -1",
+        "git -C /repo remote -v",
+        "find . -name '*.py' -print",
+        "find deploy -type f",
+        "timeout 5 ls",
+        "nice ls",
     ]
 
     def test_blocked_commands_return_exit_2(self):

@@ -91,3 +91,15 @@
 - Protocole d'échange v1 + bus dans `scripts/agents/protocol/` (envelope, bus, cli,
   demo, schema, adapters). Bus refuse tout acteur `connected:false` (Kilo).
 - Aucune CI sur une PR de base ≠ `main`.
+
+## Autonomie cloud (PR #74, 2026-11-15)
+- Orchestrateur cloud = `scripts/agents/automation/orchestrator.py` (venu de PR #66), réuni au
+  bus de PR #73 sur `feat/agents-cloud-autonomy-integration-20261115`. Pont = `automation/bus_bridge.py`.
+- Persistance durable = `protocol/store.py` KvStore (AUTOMATION_KV_TOKEN) ; sinon FileStore.
+- `main` NON protégée (protected:false, rulesets:[]) et le PAT n'a pas la permission Administration
+  (GET protection -> 403) => protection main = action humaine.
+- Hors sandbox cloud : pas de KV lock => orchestrator refuse toute mission réelle (fail-closed, voulu).
+- Mission autorisée réelle = issue #70 (label `tel99-mission`).
+- PIÈGE : `journal_entry(state, ..., **dict)` casse si le dict contient une clé `state`.
+- PIÈGE : tests qui dépendent de OPENHANDS_API_KEY échouent en CI (quota None -> fail-closed).
+- CI : workflow `tel99-agent-team-audit.yml` tourne sur la branche d'équipe (PR + push).
