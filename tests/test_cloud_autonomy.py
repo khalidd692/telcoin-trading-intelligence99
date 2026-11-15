@@ -17,6 +17,7 @@ Run:
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -347,6 +348,58 @@ class RuntimeVerifierTests(unittest.TestCase):
             data_dir = pathlib.Path(tmp) / "data"
             (data_dir / "abc123").mkdir(parents=True)
             self.assertEqual(verify_runtime.verify("abc123", str(data_dir), None), 1)
+
+
+class CallbackTests(unittest.TestCase):
+    """The script runner does not complete a run by itself: prove the callback."""
+
+    def test_fire_callback_posts_completed_to_the_service(self):
+        import http.server
+        import threading
+
+        received = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                received["body"] = json.loads(self.rfile.read(length))
+                received["auth"] = self.headers.get("Authorization")
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+
+        env = dict(os.environ)
+        env["AUTOMATION_CALLBACK_URL"] = f"http://127.0.0.1:{server.server_port}/cb"
+        env["AUTOMATION_CALLBACK_API_KEY"] = "k"
+        env["AUTOMATION_RUN_ID"] = "run-1"
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import sys;sys.path.insert(0,'%s');import orchestrator;"
+             "orchestrator.fire_callback('COMPLETED')" % AUTOMATION],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        thread.join(timeout=5)
+        server.server_close()
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+        self.assertEqual(received.get("body", {}).get("status"), "COMPLETED")
+        self.assertEqual(received.get("body", {}).get("run_id"), "run-1")
+        self.assertEqual(received.get("auth"), "Bearer k")
+
+    def test_fire_callback_is_a_noop_without_a_url(self):
+        env = {k: v for k, v in os.environ.items() if k != "AUTOMATION_CALLBACK_URL"}
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import sys;sys.path.insert(0,'%s');import orchestrator;"
+             "orchestrator.fire_callback('COMPLETED')" % AUTOMATION],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
 
 
 if __name__ == "__main__":

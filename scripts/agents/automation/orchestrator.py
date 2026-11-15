@@ -108,13 +108,66 @@ def github_token() -> str:
 
     A dedicated ``TEL99_GITHUB_TOKEN`` is preferred so the automation is not
     granted more rights than reading issues. The injected provider token is a
-    fallback, used read-only here.
+    fallback, used read-only here. On Cloud the token may be stored as a secret
+    and fetched through the agent server, so ``get_secret`` is tried last.
     """
-    return (
-        os.environ.get("TEL99_GITHUB_TOKEN")
-        or os.environ.get("GITHUB_TOKEN")
-        or ""
+    for name in ("TEL99_GITHUB_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    for name in ("TEL99_GITHUB_TOKEN", "GITHUB_TOKEN"):
+        try:
+            value = get_secret(name)
+        except Exception:
+            value = ""
+        if value:
+            return value
+    return ""
+
+
+def get_secret(name: str) -> str:
+    """Fetch a named secret from the agent server (Cloud and local).
+
+    Uses ``AGENT_SERVER_URL`` on a local Agent Canvas and
+    ``OPENHANDS_CLOUD_API_URL`` + ``SANDBOX_ID`` on Cloud.
+    """
+    key = os.environ.get("SESSION_API_KEY") or os.environ.get("OH_SESSION_API_KEYS_0", "")
+    url = os.environ.get("AGENT_SERVER_URL", "").rstrip("/")
+    if url:
+        url = f"{url}/api/settings/secrets/{name}"
+    else:
+        api = os.environ["OPENHANDS_CLOUD_API_URL"].rstrip("/")
+        url = f"{api}/api/v1/sandboxes/{os.environ['SANDBOX_ID']}/settings/secrets/{name}"
+    req = urllib.request.Request(url, headers={"X-Session-API-Key": key})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode().strip()
+
+
+def fire_callback(status: str = "COMPLETED", error: str | None = None) -> None:
+    """Signal run completion to the automation service.
+
+    The script runner does not mark a run complete on its own, so this must be
+    called on every exit path — success and error alike. Without it the run
+    stays RUNNING until the platform timeout.
+    """
+    url = os.environ.get("AUTOMATION_CALLBACK_URL", "")
+    if not url:
+        return
+    body = {"status": status, "run_id": os.environ.get("AUTOMATION_RUN_ID", "")}
+    if error:
+        body["error"] = error
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.environ.get('AUTOMATION_CALLBACK_API_KEY', '')}",
+        },
     )
+    try:
+        urllib.request.urlopen(req, timeout=30)
+    except Exception as exc:  # never fail the run on a callback error
+        print(f"callback error: {exc}", file=sys.stderr)
 
 
 def _request(method, url, payload=None, headers=None, timeout=60):
@@ -497,7 +550,17 @@ def main() -> int:
                         help="selection logic only; no network calls")
     args = parser.parse_args()
     config = load_config(args.config)
-    return run(config, offline=args.offline)
+    try:
+        code = run(config, offline=args.offline)
+    except Exception as exc:  # noqa: BLE001 - report any failure to the platform
+        print(f"ERROR: {exc}", file=sys.stderr)
+        fire_callback("FAILED", str(exc))
+        return 1
+    # The script runner does not complete a run on its own: signal it on every
+    # exit path so the run never stays RUNNING until the platform timeout.
+    fire_callback("COMPLETED" if code == 0 else "FAILED",
+                  None if code == 0 else f"orchestrator exit {code}")
+    return code
 
 
 if __name__ == "__main__":
