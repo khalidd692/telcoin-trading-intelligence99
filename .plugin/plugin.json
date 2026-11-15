@@ -1,0 +1,97 @@
+{
+  "name": "tel99-cloud-autonomy",
+  "version": "0.1.0",
+  "description": "TEL99 read-only autonomy: select one authorised GitHub mission and drive the existing Analyst -> Developer -> Verifier team on an isolated branch. No permanent automation is enabled by this file.",
+  "automation": {
+    "schema_version": "openhands.automation.plugin.v1",
+    "entrypoint": {
+      "runner": "script",
+      "command": "python3 scripts/agents/automation/orchestrator.py --config \"$AUTOMATION_CONFIG_PATH\""
+    },
+    "runtime": {
+      "llm_profile": {
+        "required": true,
+        "default_name": "openhands_deepseek-v4.1-flash"
+      }
+    },
+    "config_schema": {
+      "type": "object",
+      "required": ["repository", "mission_label"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "GitHub repository (owner/name) the missions are read from. Must be in the TEL99 allowlist."
+        },
+        "mission_label": {
+          "type": "string",
+          "default": "tel99-mission",
+          "description": "Only issues carrying this label are eligible. Other labels are ignored."
+        },
+        "base_branch": {
+          "type": "string",
+          "default": "agents/hermes-simple-team-20261114",
+          "description": "Branch the work branch is cut from. Protected branches are rejected."
+        },
+        "work_branch_prefix": {
+          "type": "string",
+          "default": "agent/mission-",
+          "description": "Prefix for the isolated work branch created for each mission."
+        },
+        "max_concurrent_missions": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 1,
+          "description": "Hard cap. The schema allows only 1: one active mission at a time."
+        },
+        "max_runtime_seconds": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 60,
+          "description": "Deadline for the whole run. Children are stopped when it is reached."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "description": "Coordinator iteration cap."
+        },
+        "max_budget_usd": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.01,
+          "description": "Coordinator budget cap, in USD."
+        },
+        "agent_max_iterations": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "description": "Per-sub-agent iteration cap."
+        },
+        "agent_max_budget_usd": {
+          "type": "number",
+          "default": 0.25,
+          "minimum": 0.01,
+          "description": "Per-sub-agent budget cap, in USD."
+        },
+        "quota_min_remaining": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 0,
+          "description": "Refuse to start when the free daily conversation quota has less than this left."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, select and validate a mission but start no conversation. Activation flips this to false."
+        }
+      }
+    },
+    "suggested_trigger": {
+      "type": "cron",
+      "schedule": "0 3 * * *",
+      "timezone": "UTC"
+    }
+  }
+}

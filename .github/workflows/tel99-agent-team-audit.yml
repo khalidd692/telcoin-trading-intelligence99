@@ -18,8 +18,12 @@ jobs:
         run: python -m unittest discover -s tests -p test_team_audit.py -v
       - name: Validate agent team tests (security, config, delegation)
         run: python -m unittest discover -s tests -p test_agent_team.py -v
+      - name: Validate cloud-autonomy plugin tests (policy, guard, runtime proof)
+        run: python -m unittest discover -s tests -p test_cloud_autonomy.py -v
       - name: Check agent definitions match team_config
         run: python scripts/agents/render_agents.py --check
+      - name: Validate the cloud-autonomy plugin manifest
+        run: python scripts/agents/automation/orchestrator.py --offline
       - name: Inventory twelve specialized roles
         run: python scripts/agents/team_audit.py --output /tmp/tel99-team-audit.json
       - uses: actions/upload-artifact@v4
