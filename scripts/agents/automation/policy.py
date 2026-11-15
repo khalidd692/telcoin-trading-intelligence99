@@ -157,7 +157,17 @@ def evaluate_preconditions(
             f"{max_concurrent_missions} allowed at a time"
         )
 
-    if quota_remaining is not None and quota_remaining < quota_min_remaining:
+    if quota_remaining is None:
+        # Fail-closed: an unknown quota (absent, unreadable, or the API
+        # unreachable) is treated as "cannot verify", never as "ok". A real
+        # mission must not start when the free-conversation budget cannot be
+        # confirmed. A dry_run starts no conversation, so it may proceed.
+        if not dry_run:
+            reasons.append(
+                "free conversation quota unknown (absent, unreadable or "
+                "inaccessible): refusing to start"
+            )
+    elif quota_remaining < quota_min_remaining:
         reasons.append(
             f"free conversation quota too low: {quota_remaining} left, "
             f"minimum {quota_min_remaining} required"

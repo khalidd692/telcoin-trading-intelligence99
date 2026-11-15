@@ -179,8 +179,18 @@ class PreconditionTests(unittest.TestCase):
     def test_concurrency_above_cap_is_refused(self):
         self.assertTrue(self._go(max_concurrent_missions=3))
 
-    def test_unknown_quota_does_not_block(self):
-        self.assertEqual(self._go(quota_remaining=None), [])
+    def test_unknown_quota_is_refused_for_a_real_run(self):
+        # Fail-closed: an unknown quota must block a real mission.
+        self.assertTrue(self._go(quota_remaining=None, dry_run=False))
+
+    def test_unknown_quota_does_not_block_a_dry_run(self):
+        # A dry run starts no conversation, so it may rehearse the selection.
+        self.assertEqual(self._go(quota_remaining=None, dry_run=True), [])
+
+    def test_absent_quota_key_is_refused(self):
+        # quota_remaining() returns None when the API is unreachable, the key
+        # is missing, or the response has no "remaining" field.
+        self.assertTrue(self._go(quota_remaining=None, dry_run=False))
 
 
 class WorkBranchTests(unittest.TestCase):
@@ -524,6 +534,17 @@ class LockTests(unittest.TestCase):
         self.assertFalse(acquired)
         self.assertIn("run-a", detail)
 
+    def test_lock_refuses_when_no_atomic_kv_is_available(self):
+        # Fail-closed: without an atomic KV lock a real mission must not start.
+        original = orchestrator.kv_available
+        try:
+            orchestrator.kv_available = lambda: False
+            acquired, detail = orchestrator.acquire_lock("run-a")
+        finally:
+            orchestrator.kv_available = original
+        self.assertFalse(acquired)
+        self.assertIn("atomic KV", detail)
+
     def test_an_expired_lock_can_be_retaken(self):
         original_kv_get = orchestrator.kv_get
         original_avail = orchestrator.kv_available
@@ -541,6 +562,127 @@ class LockTests(unittest.TestCase):
             orchestrator._request = original_req
         # Expired lock: the run attempts to take it and then confirms ownership.
         self.assertIsInstance(acquired, bool)
+
+
+class QuotaTests(unittest.TestCase):
+    """quota_remaining() must return None (not a guess) when unverifiable."""
+
+    def test_missing_api_key_returns_none(self):
+        saved = dict(orchestrator.os.environ)
+        try:
+            orchestrator.os.environ.pop("OPENHANDS_API_KEY", None)
+            orchestrator.os.environ.pop("TEL99_CLOUD_API_KEY", None)
+            self.assertIsNone(orchestrator.quota_remaining())
+        finally:
+            orchestrator.os.environ.clear()
+            orchestrator.os.environ.update(saved)
+
+    def test_unreachable_api_returns_none(self):
+        original_req = orchestrator._request
+        saved = dict(orchestrator.os.environ)
+        try:
+            orchestrator.os.environ["OPENHANDS_API_KEY"] = "x"
+            orchestrator._request = lambda *a, **k: (503, {"detail": "down"})
+            self.assertIsNone(orchestrator.quota_remaining())
+        finally:
+            orchestrator._request = original_req
+            orchestrator.os.environ.clear()
+            orchestrator.os.environ.update(saved)
+
+    def test_response_without_remaining_field_returns_none(self):
+        original_req = orchestrator._request
+        saved = dict(orchestrator.os.environ)
+        try:
+            orchestrator.os.environ["OPENHANDS_API_KEY"] = "x"
+            orchestrator._request = lambda *a, **k: (200, {"daily_limit": 20})
+            self.assertIsNone(orchestrator.quota_remaining())
+        finally:
+            orchestrator._request = original_req
+            orchestrator.os.environ.clear()
+            orchestrator.os.environ.update(saved)
+
+
+class BudgetTests(unittest.TestCase):
+    """The budget must be enforced by the payload, not merely displayed."""
+
+    def test_coordinator_carries_a_bounded_budget(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        self.assertEqual(payload["max_budget_per_run"], cfg["max_budget_usd"])
+        self.assertEqual(payload["max_iterations"], cfg["max_iterations"])
+
+    def test_every_sub_agent_carries_a_bounded_budget(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        for definition in payload["agent_definitions"]:
+            self.assertEqual(definition["max_budget_per_run"],
+                             cfg["agent_max_budget_usd"])
+            self.assertEqual(definition["max_iteration_per_run"],
+                             cfg["agent_max_iterations"])
+
+    def test_budget_is_positive_and_below_the_ceiling(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        self.assertGreater(cfg["max_budget_usd"], 0)
+        self.assertLessEqual(cfg["max_budget_usd"], 5.0)
+        self.assertLessEqual(cfg["agent_max_budget_usd"], cfg["max_budget_usd"])
+
+    def test_payload_declares_positive_budgets(self):
+        # A non-positive budget would be accepted by the schema as "no budget";
+        # the orchestrator must never send one.
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        self.assertGreater(payload["max_budget_per_run"], 0)
+        for definition in payload["agent_definitions"]:
+            self.assertGreater(definition["max_budget_per_run"], 0)
+
+    def test_preflight_refuses_a_missing_coordinator_budget(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        payload["max_budget_per_run"] = None
+        problems = orchestrator.preflight.check_budget(payload)
+        self.assertTrue(any("coordinator max_budget_per_run" in p for p in problems))
+
+    def test_preflight_refuses_a_non_positive_sub_agent_budget(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        payload["agent_definitions"][0]["max_budget_per_run"] = 0
+        problems = orchestrator.preflight.check_budget(payload)
+        self.assertTrue(any("must be a positive number" in p for p in problems))
+
+    def test_preflight_refuses_a_budget_above_the_ceiling(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        payload["max_budget_per_run"] = 999.0
+        problems = orchestrator.preflight.check_budget(payload)
+        self.assertTrue(any("exceeds ceiling" in p for p in problems))
+
+    def test_preflight_refuses_missing_iterations(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        payload["max_iterations"] = None
+        problems = orchestrator.preflight.check_budget(payload)
+        self.assertTrue(any("max_iterations" in p for p in problems))
+
+    def test_real_payload_passes_the_budget_check(self):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        self.assertEqual(orchestrator.preflight.check_budget(payload), [])
 
 
 if __name__ == "__main__":
