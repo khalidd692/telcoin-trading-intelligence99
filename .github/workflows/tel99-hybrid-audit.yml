@@ -1,0 +1,35 @@
+name: TEL99 hybrid read-only audit
+on:
+  repository_dispatch:
+    types: [tel99_hybrid_audit_v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tel99-hybrid-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.event_name == 'workflow_dispatch' || github.event.client_payload.source == 'cloudflare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate cloud team
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_team.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_autonomy.py' -v
+      - name: Produce report
+        run: |
+          mkdir -p /tmp/tel99-hybrid
+          printf 'Issue: %s\nSource: %s\nSHA: %s\n' "${{ github.event.client_payload.issue }}" "${{ github.event_name }}" "${{ github.sha }}" > /tmp/tel99-hybrid/report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tel99-hybrid-readonly-audit
+          path: /tmp/tel99-hybrid/report.txt
+          retention-days: 7
