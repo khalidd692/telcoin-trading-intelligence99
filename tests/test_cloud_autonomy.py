@@ -78,6 +78,13 @@ class PluginManifestTests(unittest.TestCase):
         self.assertEqual(entry["runner"], "script")
         self.assertIn("orchestrator.py", entry["command"])
 
+    def test_entrypoint_has_no_shell_metacharacters(self):
+        # The plugin schema rejects ;&|`$(){}<>!\ in entrypoint.command.
+        data = json.loads(PLUGIN.read_text(encoding="utf-8"))
+        command = data["automation"]["entrypoint"]["command"]
+        for ch in ';&|`$(){}<>!\\"':
+            self.assertNotIn(ch, command, f"metacharacter {ch!r} in entrypoint")
+
     def test_schema_pins_one_mission_at_a_time(self):
         data = json.loads(PLUGIN.read_text(encoding="utf-8"))
         prop = data["automation"]["config_schema"]["properties"]["max_concurrent_missions"]

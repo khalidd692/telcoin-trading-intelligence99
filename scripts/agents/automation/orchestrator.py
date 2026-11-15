@@ -338,6 +338,14 @@ def journal_entry(state: dict, event: str, **fields) -> None:
 # Main
 # --------------------------------------------------------------------------- #
 def load_config(path: str | None) -> dict:
+    """Load the validated plugin config.
+
+    The plugin entrypoint has no shell metacharacters, so the config path is
+    taken from the environment variable the script runner injects
+    (``AUTOMATION_CONFIG_PATH``) when ``--config`` is not given.
+    """
+    if not path:
+        path = os.environ.get("AUTOMATION_CONFIG_PATH")
     config = dict(DEFAULT_CONFIG)
     if path:
         try:
