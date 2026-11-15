@@ -136,9 +136,14 @@ class EndToEndTests(unittest.TestCase):
         orchestrator._KV_TOKEN = "tok"
         # The bus reads these at call time to pick the durable store.
         self._env = {k: os.environ.get(k)
-                     for k in ("AUTOMATION_API_URL", "AUTOMATION_KV_TOKEN")}
+                     for k in ("AUTOMATION_API_URL", "AUTOMATION_KV_TOKEN",
+                               "OPENHANDS_API_KEY")}
         os.environ["AUTOMATION_API_URL"] = "https://kv.example"
         os.environ["AUTOMATION_KV_TOKEN"] = "tok"
+        # quota_remaining() needs an API key to even attempt the (faked) call;
+        # without it the run is refused fail-closed and the test would depend on
+        # the host environment. Pin it so the test is deterministic.
+        os.environ["OPENHANDS_API_KEY"] = "test-key"
         self._cwd = os.getcwd()
         os.chdir(ROOT)
 
