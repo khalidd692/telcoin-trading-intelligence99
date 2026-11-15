@@ -108,6 +108,58 @@ def check_payload(payload: dict) -> list[str]:
     return problems
 
 
+# Hard ceiling for the *whole* conversation (coordinator + every sub-agent).
+# Declared budgets are only a promise: the runtime enforces the
+# conversation-level ``max_budget_per_run`` and stops the run with
+# ``MaxBudgetReached``. Sub-agent cost rolls up into that accumulated cost, so
+# this ceiling is what actually bounds the total spend.
+BUDGET_CEILING_USD = 5.0
+
+
+def _is_positive_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def check_budget(payload: dict, ceiling_usd: float = BUDGET_CEILING_USD) -> list[str]:
+    """Refuse a payload whose total budget is missing, non-positive or unbounded.
+
+    The conversation-level ``max_budget_per_run`` is the value the runtime
+    enforces, so it must be present, strictly positive and at or below the
+    ceiling. Every declared sub-agent budget must also be positive: a ``None``
+    or ``0`` would be read as "no budget" by the schema.
+    """
+    problems: list[str] = []
+    total = payload.get("max_budget_per_run")
+    if not _is_positive_number(total):
+        problems.append(
+            f"coordinator max_budget_per_run must be a positive number, got {total!r}"
+        )
+    elif total > ceiling_usd:
+        problems.append(
+            f"coordinator max_budget_per_run {total} exceeds ceiling {ceiling_usd}"
+        )
+
+    definitions = payload.get("agent_definitions") or []
+    for definition in definitions:
+        budget = definition.get("max_budget_per_run")
+        if not _is_positive_number(budget):
+            problems.append(
+                f"{definition.get('name')}: max_budget_per_run must be a positive "
+                f"number, got {budget!r}"
+            )
+        elif budget > ceiling_usd:
+            problems.append(
+                f"{definition.get('name')}: max_budget_per_run {budget} exceeds "
+                f"ceiling {ceiling_usd}"
+            )
+
+    iterations = payload.get("max_iterations")
+    if not (isinstance(iterations, int) and not isinstance(iterations, bool)
+            and iterations > 0):
+        problems.append(f"coordinator max_iterations must be a positive integer, got {iterations!r}")
+    return problems
+
+
 def preflight(payload: dict | None = None) -> list[str]:
     """Return every reason the run must NOT proceed. Empty means safe."""
     reasons = []
@@ -115,4 +167,5 @@ def preflight(payload: dict | None = None) -> list[str]:
     reasons += check_team_config()
     if payload is not None:
         reasons += check_payload(payload)
+        reasons += check_budget(payload)
     return reasons

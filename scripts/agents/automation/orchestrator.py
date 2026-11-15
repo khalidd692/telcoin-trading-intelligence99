@@ -271,14 +271,12 @@ def acquire_lock(owner: str, ttl_seconds: int = 7200) -> tuple[bool, str]:
     cloud runs racing each other cannot both start a mission. The lock carries
     an ``expires_at`` so a crashed run cannot wedge the queue forever.
 
-    Returns ``(acquired, detail)``. Without a KV store the lock cannot be made
-    atomic, so it falls back to the local state file and says so.
+    Fail-closed: without an atomic KV lock there is no way to guarantee that a
+    concurrent run is not already working on the same mission, so a real
+    mission must NOT start. Returns ``(False, reason)`` in that case.
     """
     if not kv_available():
-        state = load_state()
-        if state.get("active") and not _lock_expired(state.get("active")):
-            return False, "local lock held by another run"
-        return True, "local lock (KV unavailable): not atomic across pods"
+        return False, "no atomic KV lock available: refusing to start a real mission"
 
     existing = kv_get(_LOCK_KEY)
     if isinstance(existing, dict) and not _lock_expired(existing):
@@ -640,6 +638,7 @@ def run(config: dict, offline: bool = False) -> int:
 
     payload = build_payload(mission, work_branch, config, llm)
     payload_problems = preflight.check_payload(payload)
+    payload_problems += preflight.check_budget(payload)
     if payload_problems:
         release_lock(owner)
         journal_entry(state, "abort", reason="payload preflight failed",

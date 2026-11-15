@@ -1,6 +1,12 @@
 name: TEL99 agent team read-only audit
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - agents/hermes-simple-team-20261114
+  push:
+    branches:
+      - agents/hermes-simple-team-20261114
 permissions:
   contents: read
 jobs:
