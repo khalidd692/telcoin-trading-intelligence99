@@ -93,8 +93,31 @@ L'activation est un acte explicite : elle n'est pas réalisée par ce dépôt.
 - **Le quota n'est pas un plafond financier** (voir plus haut).
 - **L'isolation des sous-agents** est vérifiée après coup (`base_state.json`),
   pas empêchée par construction.
-- **Aucun run réel n'a été exécuté** avec ce plugin dans cet environnement :
-  seuls la logique de sélection, les préconditions, le garde-fou et le
-  vérificateur sont testés hors ligne.
-- **Le cron n'est pas encore prouvé pour ce plugin** : le déclenchement cron de
-  la plateforme a été démontré séparément, mais pas encore avec ce manifeste.
+- **Aucun run réel n'a exécuté le travail des agents** : le run `dry_run`
+  observé sélectionne une mission et s'arrête ; il ne prouve pas le
+  comportement des sous-agents sur une vraie mission.
+- **Le cron n'est pas encore prouvé pour ce manifeste** : le déclenchement cron
+  de la plateforme a été démontré séparément, mais pas encore avec ce plugin.
+
+## Constats de validation (faits observés)
+
+Validé contre la plateforme réelle le 15/11/2026 :
+
+- **Manifeste accepté** : `POST /api/automation/v1/plugin-spec` → HTTP 201,
+  `state: INACTIVE`, `enabled: false`. Aucune automation permanente créée.
+- **Le schéma rejette les métacaractères shell** dans `entrypoint.command`
+  (`;&|` + `$(){}<>!\`). D'où une commande simple et le chemin de config lu via
+  `AUTOMATION_CONFIG_PATH`.
+- **Run `dry_run` terminé** : `status: COMPLETED`, `conversation_id: null`,
+  `cost: null` — aucune conversation, aucune dépense.
+- **Défaut trouvé et corrigé** : un runner `script` **ne marque pas** son run
+  terminé tout seul. Sans `fire_callback`, le run restait `RUNNING` jusqu'au
+  timeout plateforme (observé ~15 min en « Starting automation »). Après ajout
+  de `fire_callback` sur chaque chemin de sortie, le même run termine en
+  **5 secondes** (`completed_at` renseigné).
+- Le plugin est bien **récupéré depuis GitHub** à la résolution
+  (`fetched_plugins[].resolved_ref` = commit de la branche).
+
+Ces constats sont des mesures de plateforme, pas des garanties : les tarifs,
+quotas et comportements peuvent changer.
+
