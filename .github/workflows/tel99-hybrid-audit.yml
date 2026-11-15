@@ -41,12 +41,12 @@ jobs:
           node-version: '20'
 
       - name: Cloudflare Worker unit tests (no deploy, no network)
-        run: node --test \"cloudflare/tel99-hybrid/test/*.test.mjs\"
+        run: node --test 'cloudflare/tel99-hybrid/test/*.test.mjs'
 
       - name: Worker syntax and config are valid
         run: |
           node --check cloudflare/tel99-hybrid/src/index.js
-          node -e "const s=require('fs').readFileSync('cloudflare/tel99-hybrid/wrangler.jsonc','utf8').replace(/\\/\\/.*$/gm,''); const c=JSON.parse(s); if(c.triggers.crons.length!==0) throw new Error('cron must stay empty until approved'); if(c.vars.TEL99_ENABLED!=='false') throw new Error('must ship disabled'); console.log('wrangler config safe');"
+          node cloudflare/tel99-hybrid/scripts/check-config.mjs
 
       - name: Validate the automation plugin (deterministic, no conversation)
         run: |
