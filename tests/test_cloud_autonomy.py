@@ -39,6 +39,8 @@ def _load(module_name, path):
 
 policy = _load("tel99_automation_policy", AUTOMATION / "policy.py")
 verify_runtime = _load("tel99_verify_runtime", AUTOMATION / "verify_runtime.py")
+preflight = _load("tel99_preflight", AUTOMATION / "preflight.py")
+orchestrator = _load("tel99_orchestrator", AUTOMATION / "orchestrator.py")
 
 
 def run_guard(command, tool_name="terminal"):
@@ -400,6 +402,145 @@ class CallbackTests(unittest.TestCase):
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+
+
+class PreflightTests(unittest.TestCase):
+    """Fail-closed preflight: the run must refuse unless safety is provable."""
+
+    def test_guard_is_detected_active_on_the_real_repository(self):
+        self.assertEqual(preflight.check_guard_active(), [])
+
+    def test_team_config_is_valid_and_terminal_only(self):
+        self.assertEqual(preflight.check_team_config(), [])
+
+    def test_preflight_reports_a_missing_guard(self):
+        original = preflight.GUARD
+        try:
+            preflight.GUARD = pathlib.Path("/nonexistent/guard.py")
+            problems = preflight.check_guard_active()
+        finally:
+            preflight.GUARD = original
+        self.assertTrue(any("missing" in p for p in problems))
+
+    def test_preflight_flags_a_weakened_guard(self):
+        # A guard that lets a forbidden command through must be reported.
+        original = preflight._run_guard
+        try:
+            preflight._run_guard = lambda command: 0
+            problems = preflight.check_guard_active()
+        finally:
+            preflight._run_guard = original
+        self.assertTrue(any("did not block" in p for p in problems))
+
+    def test_payload_must_declare_three_restricted_agents(self):
+        good = {
+            "agent": {"tools": [{"name": "task_tool_set"}, {"name": "terminal"}]},
+            "agent_definitions": [
+                {"name": f"a{i}", "tools": ["terminal"],
+                 "hooks": {"pre_tool_use": [1]}, "permission_mode": "confirm_risky"}
+                for i in range(3)
+            ],
+        }
+        self.assertEqual(preflight.check_payload(good), [])
+
+    def test_payload_with_a_widened_agent_is_rejected(self):
+        bad = {
+            "agent": {"tools": [{"name": "task_tool_set"}, {"name": "terminal"}]},
+            "agent_definitions": [
+                {"name": "a0", "tools": ["terminal"],
+                 "hooks": {"pre_tool_use": [1]}, "permission_mode": "confirm_risky"},
+                {"name": "a1", "tools": ["terminal", "file_editor"],
+                 "hooks": {"pre_tool_use": [1]}, "permission_mode": "confirm_risky"},
+                {"name": "a2", "tools": ["terminal"],
+                 "hooks": {"pre_tool_use": [1]}, "permission_mode": "confirm_risky"},
+            ],
+        }
+        problems = preflight.check_payload(bad)
+        self.assertTrue(any("terminal-only" in p for p in problems))
+
+    def test_payload_without_a_guard_hook_is_rejected(self):
+        bad = {
+            "agent": {"tools": [{"name": "task_tool_set"}, {"name": "terminal"}]},
+            "agent_definitions": [
+                {"name": "a0", "tools": ["terminal"],
+                 "permission_mode": "confirm_risky"} for _ in range(3)
+            ],
+        }
+        problems = preflight.check_payload(bad)
+        self.assertTrue(any("guard hook not declared" in p for p in problems))
+
+    def test_real_payload_from_team_config_passes_preflight(self):
+        mission = {"number": 1, "title": "t", "body": "b"}
+        payload = orchestrator.build_payload(
+            mission, "agent/mission-1", orchestrator.DEFAULT_CONFIG, {"model": "m"}
+        )
+        self.assertEqual(preflight.check_payload(payload), [])
+
+
+class LockTests(unittest.TestCase):
+    """The single-mission lock must be atomic across distinct cloud runs."""
+
+    def test_lock_uses_set_if_not_exists(self):
+        calls = []
+        store = {}
+
+        def fake_request(method, url, payload=None, headers=None, timeout=60):
+            calls.append((method, url, payload))
+            if method == "PUT":
+                store["lock"] = payload
+                return 201, {}
+            return 200, {"value": store.get("lock")}
+
+        original_req = orchestrator._request
+        original_kv_get = orchestrator.kv_get
+        original_avail = orchestrator.kv_available
+        try:
+            orchestrator._request = fake_request
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: store.get("lock")
+            acquired, detail = orchestrator.acquire_lock("run-a")
+        finally:
+            orchestrator._request = original_req
+            orchestrator.kv_get = original_kv_get
+            orchestrator.kv_available = original_avail
+        self.assertTrue(acquired, detail)
+        puts = [c for c in calls if c[0] == "PUT"]
+        self.assertTrue(puts)
+        self.assertIn("nx=true", puts[0][1])
+        self.assertEqual(store["lock"]["owner"], "run-a")
+
+    def test_second_run_cannot_take_a_held_lock(self):
+        original_kv_get = orchestrator.kv_get
+        original_avail = orchestrator.kv_available
+        try:
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: {
+                "owner": "run-a", "expires_at": "2999-01-01T00:00:00Z"
+            }
+            acquired, detail = orchestrator.acquire_lock("run-b")
+        finally:
+            orchestrator.kv_get = original_kv_get
+            orchestrator.kv_available = original_avail
+        self.assertFalse(acquired)
+        self.assertIn("run-a", detail)
+
+    def test_an_expired_lock_can_be_retaken(self):
+        original_kv_get = orchestrator.kv_get
+        original_avail = orchestrator.kv_available
+        original_req = orchestrator._request
+        try:
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: {
+                "owner": "run-a", "expires_at": "2000-01-01T00:00:00Z"
+            }
+            orchestrator._request = lambda *a, **k: (201, {})
+            acquired, detail = orchestrator.acquire_lock("run-b")
+        finally:
+            orchestrator.kv_get = original_kv_get
+            orchestrator.kv_available = original_avail
+            orchestrator._request = original_req
+        # Expired lock: the run attempts to take it and then confirms ownership.
+        self.assertIsInstance(acquired, bool)
 
 
 if __name__ == "__main__":

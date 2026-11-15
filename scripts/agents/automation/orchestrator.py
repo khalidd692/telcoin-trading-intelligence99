@@ -47,6 +47,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(HERE))
 
 import policy  # noqa: E402
+import preflight  # noqa: E402
 import team_config as cfg  # noqa: E402
 
 REPO_ROOT = SCRIPTS.parents[1]
@@ -258,6 +259,129 @@ def save_state(state: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Cross-run lock (one mission at a time, across distinct cloud runs)
+# --------------------------------------------------------------------------- #
+_LOCK_KEY = "active_mission_lock"
+
+
+def acquire_lock(owner: str, ttl_seconds: int = 7200) -> tuple[bool, str]:
+    """Try to take the single mission lock atomically.
+
+    Uses the KV store's conditional ``PUT ?nx=true`` (set-if-not-exists) so two
+    cloud runs racing each other cannot both start a mission. The lock carries
+    an ``expires_at`` so a crashed run cannot wedge the queue forever.
+
+    Returns ``(acquired, detail)``. Without a KV store the lock cannot be made
+    atomic, so it falls back to the local state file and says so.
+    """
+    if not kv_available():
+        state = load_state()
+        if state.get("active") and not _lock_expired(state.get("active")):
+            return False, "local lock held by another run"
+        return True, "local lock (KV unavailable): not atomic across pods"
+
+    existing = kv_get(_LOCK_KEY)
+    if isinstance(existing, dict) and not _lock_expired(existing):
+        return False, f"lock held by {existing.get('owner')} until {existing.get('expires_at')}"
+
+    record = {
+        "owner": owner,
+        "acquired_at": policy.utcnow_iso(),
+        "expires_at": _expiry_iso(ttl_seconds),
+    }
+    # nx=true only writes when the key does not already exist.
+    status, body = _request(
+        "PUT", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}?nx=true", record,
+        headers={"Authorization": f"Bearer {_KV_TOKEN}"},
+    )
+    if status in (200, 201):
+        # Confirm we are the owner: a concurrent run may have written first.
+        current = kv_get(_LOCK_KEY)
+        if isinstance(current, dict) and current.get("owner") == owner:
+            return True, "lock acquired"
+        return False, "lock taken by a concurrent run"
+    if status == 409:
+        return False, "lock already exists"
+    return False, f"lock write failed: HTTP {status}"
+
+
+def release_lock(owner: str) -> None:
+    """Release the lock only if this run owns it."""
+    if not kv_available():
+        return
+    current = kv_get(_LOCK_KEY)
+    if isinstance(current, dict) and current.get("owner") == owner:
+        _request("DELETE", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}",
+                 headers={"Authorization": f"Bearer {_KV_TOKEN}"})
+
+
+def _expiry_iso(ttl_seconds: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).replace(
+        microsecond=0
+    ).isoformat().replace("+00:00", "Z")
+
+
+def _lock_expired(record: dict) -> bool:
+    expires = (record or {}).get("expires_at")
+    if not expires:
+        return False
+    from datetime import datetime, timezone
+
+    try:
+        when = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return when <= datetime.now(timezone.utc)
+
+
+# --------------------------------------------------------------------------- #
+# Run phase reporting (so the platform shows real progress, not "Starting")
+# --------------------------------------------------------------------------- #
+def report_phase(phase: str) -> None:
+    """Report the current phase to the automation service, if configured."""
+    run_id = os.environ.get("AUTOMATION_RUN_ID", "")
+    base = os.environ.get("AUTOMATION_API_URL", "").rstrip("/")
+    token = os.environ.get("AUTOMATION_KV_TOKEN", "")
+    if not (run_id and base):
+        return
+    _request(
+        "POST", f"{base}/v1/runs/{run_id}/phase", {"phase": phase},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Environment diagnostics (read-only; printed to the run journal)
+# --------------------------------------------------------------------------- #
+def diagnose_environment() -> dict:
+    """Report what the run can actually reach, without changing anything.
+
+    This is what turns an assumption into a fact: whether an agent server is
+    reachable, whether the KV lock is available, and which API base is used.
+    """
+    server = agent_server_base()
+    reachable = False
+    detail = ""
+    try:
+        status, body = _request("GET", f"{server}/api/conversations", timeout=15)
+        reachable = status in (200, 401, 403)
+        detail = f"HTTP {status}"
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
+        detail = f"unreachable: {type(exc).__name__}"
+    return {
+        "agent_server_base": server,
+        "agent_server_reachable": reachable,
+        "agent_server_detail": detail,
+        "cloud_api_base": cloud_api_base(),
+        "kv_lock_available": kv_available(),
+        "session_key_present": bool(session_key()),
+        "github_token_present": bool(github_token()),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # GitHub mission queue (read-only)
 # --------------------------------------------------------------------------- #
 def list_mission_issues(repository: str, mission_label: str) -> list[dict]:
@@ -414,9 +538,10 @@ def run(config: dict, offline: bool = False) -> int:
     state = load_state()
     started = time.time()
     deadline = started + int(config["max_runtime_seconds"])
+    owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
 
     journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
-                  repository=config["repository"], offline=offline)
+                  repository=config["repository"], offline=offline, owner=owner)
 
     # --- Stop on error: refuse before any spend when a precondition fails. ---
     if not policy.repository_allowed(config["repository"]):
@@ -436,6 +561,18 @@ def run(config: dict, offline: bool = False) -> int:
         print(json.dumps(config, indent=2))
         save_state(state)
         return 0
+
+    # --- Environment facts (read-only). Turns assumptions into evidence. ---
+    env = diagnose_environment()
+    journal_entry(state, "environment", **env)
+
+    # --- Fail-closed preflight: refuse unless the guard and team are active. ---
+    reasons = preflight.preflight()
+    if reasons:
+        journal_entry(state, "abort", reason="preflight failed", problems=reasons)
+        save_state(state)
+        return 2
+    journal_entry(state, "preflight_ok", checks=["guard", "team_config"])
 
     # --- Quota check (never assume the conversation quota is a money cap). ---
     remaining = quota_remaining()
@@ -483,7 +620,15 @@ def run(config: dict, offline: bool = False) -> int:
         save_state(state)
         return 0
 
-    # --- Start the coordinator (existing team, unchanged). ---
+    # --- Cross-run lock: only one mission may run, across distinct runs. ---
+    acquired, detail = acquire_lock(owner, ttl_seconds=int(config["max_runtime_seconds"]) + 600)
+    if not acquired:
+        journal_entry(state, "abort", reason="mission lock not acquired", detail=detail)
+        save_state(state)
+        return 2
+    journal_entry(state, "lock_acquired", detail=detail, owner=owner)
+
+    # --- Build the coordinator payload and prove it declares 3 restricted agents. ---
     profile = os.environ.get("TEL99_LLM_PROFILE", "openhands_deepseek-v4.1-flash")
     llm = {"model": cfg.DEFAULT_MODEL, "usage_id": "default"}
     profile_path = pathlib.Path.home() / ".openhands" / "profiles" / f"{profile}.json"
@@ -494,31 +639,46 @@ def run(config: dict, offline: bool = False) -> int:
                                    "reasoning_effort") if k in raw}
 
     payload = build_payload(mission, work_branch, config, llm)
-    state["active"] = {"issue": mission["number"], "work_branch": work_branch,
-                       "started_at": policy.utcnow_iso()}
-    save_state(state)
-
-    status, body = _request(
-        "POST", f"{agent_server_base()}/api/conversations", payload,
-        headers={"X-Session-API-Key": session_key()},
-    )
-    if status not in (200, 201) or not isinstance(body, dict):
-        journal_entry(state, "abort", reason=f"conversation start failed: HTTP {status}")
-        state["active"] = None
+    payload_problems = preflight.check_payload(payload)
+    if payload_problems:
+        release_lock(owner)
+        journal_entry(state, "abort", reason="payload preflight failed",
+                      problems=payload_problems)
         save_state(state)
         return 2
+    journal_entry(state, "payload_ok",
+                  sub_agents=[d.get("name") for d in payload.get("agent_definitions", [])])
 
-    cid = body.get("id") or body.get("conversation_id")
-    journal_entry(state, "conversation_started", conversation=cid, issue=mission["number"])
-
-    # --- Wait, bounded by the deadline; stop children on timeout. ---
-    final = wait_for(cid, deadline)
-    journal_entry(state, "conversation_finished", conversation=cid, status=final)
-
-    state["processed"] = sorted(processed | {mission["number"]})
-    state["active"] = None
+    state["active"] = {"issue": mission["number"], "work_branch": work_branch,
+                       "started_at": policy.utcnow_iso(), "owner": owner}
     save_state(state)
-    return 0 if final == "finished" else 2
+    report_phase("starting coordinator")
+
+    try:
+        status, body = _request(
+            "POST", f"{agent_server_base()}/api/conversations", payload,
+            headers={"X-Session-API-Key": session_key()},
+        )
+        if status not in (200, 201) or not isinstance(body, dict):
+            journal_entry(state, "abort", reason=f"conversation start failed: HTTP {status}")
+            state["active"] = None
+            save_state(state)
+            return 2
+
+        cid = body.get("id") or body.get("conversation_id")
+        journal_entry(state, "conversation_started", conversation=cid, issue=mission["number"])
+
+        # --- Wait, bounded by the deadline; stop children on timeout. ---
+        report_phase("running coordinator")
+        final = wait_for(cid, deadline)
+        journal_entry(state, "conversation_finished", conversation=cid, status=final)
+
+        state["processed"] = sorted(processed | {mission["number"]})
+        state["active"] = None
+        save_state(state)
+        return 0 if final == "finished" else 2
+    finally:
+        release_lock(owner)
 
 
 TERMINAL_STATES = ("finished", "error", "stopped")
@@ -548,8 +708,15 @@ def main() -> int:
                         help="path to the validated plugin config JSON")
     parser.add_argument("--offline", action="store_true",
                         help="selection logic only; no network calls")
+    parser.add_argument("--diagnose", action="store_true",
+                        help="print environment facts and preflight, then exit")
     args = parser.parse_args()
     config = load_config(args.config)
+    if args.diagnose:
+        report = {"environment": diagnose_environment(),
+                  "preflight_problems": preflight.preflight()}
+        print(json.dumps(report, indent=2))
+        return 0 if not report["preflight_problems"] else 2
     try:
         code = run(config, offline=args.offline)
     except Exception as exc:  # noqa: BLE001 - report any failure to the platform
