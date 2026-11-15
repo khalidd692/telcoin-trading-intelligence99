@@ -1,8 +1,8 @@
 {
-  "generated_at": 1794768134,
-  "observations": 231,
-  "valid_observations": 225,
-  "latest_decision": "ALERTE PR\u00c9COCE",
+  "generated_at": 1794768933,
+  "observations": 232,
+  "valid_observations": 226,
+  "latest_decision": "INVALIDATION",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 194,
-              "mean_pct": -0.01044
+              "count": 195,
+              "mean_pct": -0.01111
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 182,
-              "mean_pct": -0.12297
+              "count": 183,
+              "mean_pct": -0.12229
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 103,
-              "mean_pct": -0.7963
+              "count": 104,
+              "mean_pct": -0.82801
             }
           }
         }
@@ -127,43 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794746873,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "INVALIDATION",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 reclaim",
-        "\u2212 support"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:INVALIDATION:1794746700",
-        "market": "KRAKEN:TELUSD",
-        "type": "INVALIDATION",
-        "decision": "INVALIDATION",
-        "confirmed": false,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001435,
-        "price_at": 1794746700,
-        "candle_closed_at": 1794746700,
-        "snapshot_at": 1794746825.998898,
-        "data_valid": true,
-        "watch": null,
-        "invalidation": {
-          "level": 0.001438,
-          "unit": "15m"
-        },
-        "factors": [
-          "volume"
-        ],
-        "blockers": [
-          "Cl\u00f4ture 15 min sous l\u2019invalidation de l\u2019alerte de la bougie pr\u00e9c\u00e9dente."
-        ]
-      }
-    },
     {
       "observed_at": 1794747686,
       "previous_decision": "INVALIDATION",
@@ -305,6 +268,41 @@
         ],
         "blockers": [
           "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
+        ]
+      }
+    },
+    {
+      "observed_at": 1794768933,
+      "previous_decision": "ALERTE PR\u00c9COCE",
+      "decision": "INVALIDATION",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 volume",
+        "\u2212 zone"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:INVALIDATION:1794768300",
+        "market": "KRAKEN:TELUSD",
+        "type": "INVALIDATION",
+        "decision": "INVALIDATION",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001429,
+        "price_at": 1794768300,
+        "candle_closed_at": 1794768300,
+        "snapshot_at": 1794768900.086942,
+        "data_valid": true,
+        "watch": null,
+        "invalidation": {
+          "level": 0.001431,
+          "unit": "15m"
+        },
+        "factors": [],
+        "blockers": [
+          "Cl\u00f4ture 15 min sous l\u2019invalidation de l\u2019alerte de la bougie pr\u00e9c\u00e9dente."
         ]
       }
     }
