@@ -677,7 +677,7 @@ def run(config: dict, offline: bool = False) -> int:
     journal_entry(state, "mission_selected", issue=mission["number"],
                   title=mission.get("title", ""), work_branch=work_branch)
 
-    # --- Bus ledger: dedup, persistence and centralised results. ---
+    # --- Bus ledger: dedup (read-only). A finished mission is never retried. ---
     bus = None
     bus_corr = None
     if bus_bridge is not None and Bus is not None:
@@ -689,12 +689,6 @@ def run(config: dict, offline: bool = False) -> int:
                               correlation_id=bus_corr)
                 save_state(state)
                 return 0
-            opened = bus_bridge.open_or_resume(
-                bus, repository=config["repository"], issue=mission,
-                work_branch=work_branch,
-            )
-            journal_entry(state, "bus_mission", **opened,
-                          storage=bus.storage_report())
         except Exception as exc:  # noqa: BLE001 - the bus must never block a run
             journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
             bus = None
@@ -712,6 +706,20 @@ def run(config: dict, offline: bool = False) -> int:
         save_state(state)
         return 2
     journal_entry(state, "lock_acquired", detail=detail, owner=owner)
+
+    # --- Open (or resume) the bus mission now that we hold the single lock. ---
+    if bus is not None and bus_corr is not None:
+        try:
+            opened = bus_bridge.open_or_resume(
+                bus, repository=config["repository"], issue=mission,
+                work_branch=work_branch,
+            )
+            journal_entry(state, "bus_mission", action=opened["action"],
+                          correlation_id=opened["correlation_id"],
+                          mission_state=opened["state"],
+                          storage=bus.storage_report())
+        except Exception as exc:  # noqa: BLE001 - the bus must never block a run
+            journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
 
     # --- Build the coordinator payload and prove it declares 3 restricted agents. ---
     profile = os.environ.get("TEL99_LLM_PROFILE", "openhands_deepseek-v4.1-flash")
@@ -768,8 +776,8 @@ def run(config: dict, offline: bool = False) -> int:
                     conversation_id=str(cid), work_branch=work_branch,
                     status_detail=f"final status {final}",
                 )
-                journal_entry(state, "bus_outcome", **{
-                    k: v for k, v in outcome.items() if k != "result"})
+                journal_entry(state, "bus_outcome", mission_state=outcome["state"],
+                              learning=(outcome.get("learning") or {}).get("id"))
             except Exception as exc:  # noqa: BLE001
                 journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
 
