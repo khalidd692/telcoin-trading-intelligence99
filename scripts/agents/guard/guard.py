@@ -81,6 +81,14 @@ INSTALL_PATTERNS = [
     r"\bgo\s+install\b", r"\bapt(-get)?\s+install\b",
 ]
 
+# ``git`` global options that consume the FOLLOWING token as their value. Without
+# this, ``git -C <dir> push`` hides ``push`` behind ``<dir>`` and slips past the
+# guard, which only inspects the first dash-free token.
+GIT_VALUE_OPTIONS = {
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+    "--config-env", "--super-prefix", "--attr-source",
+}
+
 # Git subcommands that write to the repository or its refs.
 GIT_MUTATING = {
     "commit", "push", "checkout", "switch", "reset", "clean", "add", "merge",
@@ -222,6 +230,11 @@ def split_segments(command: str) -> list[str]:
     return [s.strip() for s in segments if s.strip()]
 
 
+# A bare value passed to a wrapper (the duration of ``timeout``, the priority of
+# ``nice``): never a command name, so it must not become the head word.
+_WRAPPER_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+
+
 def head_words(segment: str) -> list[str]:
     """Return the effective command tokens, skipping assignments and wrappers.
 
@@ -244,6 +257,12 @@ def head_words(segment: str) -> list[str]:
         base = token.rsplit("/", 1)[-1].lstrip("\\")
         if base in WRAPPERS:
             i += 1
+            # Skip the wrapper's own arguments (``timeout 5``, ``nice -n 10``,
+            # ``xargs -I{}``) so the wrapped command becomes the head word.
+            while i < len(tokens) and (
+                tokens[i].startswith("-") or _WRAPPER_VALUE_RE.match(tokens[i])
+            ):
+                i += 1
             continue
         out = [t.lstrip("\\") for t in tokens[i:]]
         break
@@ -298,9 +317,16 @@ def decide(event: dict) -> tuple[int, str]:
             return 2, f"guard: BLOCKED (mutating command {base!r})"
 
         if base == "git":
-            sub = next((w for w in words[1:] if not w.startswith("-")), "")
-            if is_git_mutation(sub, words, segment):
+            sub, sub_idx = _git_subcommand(words)
+            if is_git_mutation(sub, words, segment, sub_idx):
                 return 2, f"guard: BLOCKED (git {sub or 'mutating'})"
+
+        # A destructive ``find`` action (delete, exec, output to file) writes or
+        # runs commands, which is not a read-only inspection.
+        if base == "find" and re.search(
+            r"(^|\s)-(delete|exec|execdir|ok|okdir|fls|fprint\w*)\b", segment
+        ):
+            return 2, "guard: BLOCKED (find with a destructive action)"
 
         # Inside an interpreter, shelling out escapes the read-only contract.
         if base in INTERPRETERS:
@@ -341,7 +367,27 @@ GIT_CONFIG_READONLY_FLAGS = ("--get", "--get-all", "--get-regexp", "--list", "-l
                              "--get-urlmatch")
 
 
-def is_git_mutation(sub: str, words: list[str], segment: str) -> bool:
+def _git_subcommand(words: list[str]) -> tuple[str, int]:
+    """Return (sub-command, index) for a ``git`` invocation.
+
+    Skips leading global options, including the value-taking ones
+    (``git -C <dir> push``), so the real sub-command is found.
+    """
+    i = 1
+    while i < len(words):
+        token = words[i]
+        if token in GIT_VALUE_OPTIONS:
+            i += 2
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        return token, i
+    return "", i
+
+
+def is_git_mutation(sub: str, words: list[str], segment: str,
+                    sub_idx: int | None = None) -> bool:
     """True if a ``git <sub>`` invocation writes to the repo, its refs or config.
 
     Read-only forms are allowed: ``git remote -v``, ``git remote show``,
@@ -351,11 +397,12 @@ def is_git_mutation(sub: str, words: list[str], segment: str) -> bool:
     if sub == "branch":
         return bool(re.search(r"-[dD]\b", segment))
     # Tokens after the sub-command itself (skip global flags like --no-pager).
-    try:
-        idx = words.index(sub)
-    except ValueError:
-        idx = 1
-    after = words[idx + 1:]
+    if sub_idx is None:
+        try:
+            sub_idx = words.index(sub)
+        except ValueError:
+            sub_idx = 1
+    after = words[sub_idx + 1:]
     if sub == "remote":
         verb = next((w for w in after if not w.startswith("-")), "")
         return verb not in GIT_REMOTE_READONLY
