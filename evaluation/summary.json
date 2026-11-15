@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794714149,
-  "observations": 171,
-  "valid_observations": 165,
+  "generated_at": 1794714969,
+  "observations": 172,
+  "valid_observations": 166,
   "latest_decision": "CONFIRMATION TECHNIQUE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 134,
-              "mean_pct": 0.00011
+              "count": 135,
+              "mean_pct": 0.0074
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 122,
-              "mean_pct": -0.28747
+              "count": 123,
+              "mean_pct": -0.27015
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 43,
-              "mean_pct": 0.03972
+              "count": 44,
+              "mean_pct": 0.04516
             }
           }
         }
@@ -127,18 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794701039,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 rsi",
-        "\u2212 support",
-        "\u2212 volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794704341,
       "previous_decision": "ATTENDRE",
@@ -402,6 +390,48 @@
         "scenario_id": "support",
         "technical_condition": "D\u00e9fense du support sur bougie 4h cl\u00f4tur\u00e9e, puis 1h et 15m au-dessus de leur EMA20, volume 15m non nul.",
         "factors": [
+          "convergence"
+        ],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
+    },
+    {
+      "observed_at": 1794714969,
+      "previous_decision": "CONFIRMATION TECHNIQUE",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ volume"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1794714300",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001437,
+        "price_at": 1794714300,
+        "candle_closed_at": 1794714300,
+        "snapshot_at": 1794714932.065493,
+        "data_valid": true,
+        "watch": {
+          "level": 0.001384,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.00135,
+          "unit": "4h"
+        },
+        "scenario_id": "support",
+        "technical_condition": "D\u00e9fense du support sur bougie 4h cl\u00f4tur\u00e9e, puis 1h et 15m au-dessus de leur EMA20, volume 15m non nul.",
+        "factors": [
+          "volume",
           "convergence"
         ],
         "blockers": [
