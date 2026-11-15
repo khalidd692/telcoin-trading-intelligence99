@@ -1,0 +1,24 @@
+{
+  // Safe by default: no cron trigger; do not deploy until explicitly approved.
+  "name": "tel99-hybrid-scheduler",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-15",
+  "workers_dev": false,
+  "vars": {
+    // Master switch. The Worker does nothing until this is "true" AND the
+    // GITHUB_DISPATCH_TOKEN secret is set.
+    "TEL99_ENABLED": "false"
+  },
+  // Optional dedup store. When bound, an issue already dispatched is skipped
+  // for 6h so repeated cron ticks do not re-dispatch the same mission.
+  // Uncomment and create the namespace (`wrangler kv namespace create TEL99_DEDUP`)
+  // before relying on dedup; the Worker runs fine without it.
+  // "kv_namespaces": [
+  //   { "binding": "TEL99_DEDUP", "id": "<namespace-id>" }
+  // ],
+  "triggers": {
+    // Intentionally empty. Add one UTC cron only after explicit approval,
+    // e.g. "0 6 * * *" (07:00 Europe/Paris in winter).
+    "crons": []
+  }
+}
