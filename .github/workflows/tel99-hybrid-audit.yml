@@ -1,13 +1,20 @@
 name: TEL99 hybrid read-only audit
+
+# Deterministic, AI-free work only. This workflow never starts an OpenHands
+# conversation and never writes to the repository. It is triggered either by the
+# Cloudflare Worker (repository_dispatch) or manually.
 on:
   repository_dispatch:
     types: [tel99_hybrid_audit_v1]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: tel99-hybrid-audit
   cancel-in-progress: false
+
 jobs:
   audit:
     if: github.event_name == 'workflow_dispatch' || github.event.client_payload.source == 'cloudflare'
@@ -17,17 +24,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Validate cloud team
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cloudflare Worker unit tests (no deploy, no network)
+        run: node --test \"cloudflare/tel99-hybrid/test/*.test.mjs\"
+
+      - name: Worker syntax and config are valid
+        run: |
+          node --check cloudflare/tel99-hybrid/src/index.js
+          node -e "const s=require('fs').readFileSync('cloudflare/tel99-hybrid/wrangler.jsonc','utf8').replace(/\\/\\/.*$/gm,''); const c=JSON.parse(s); if(c.triggers.crons.length!==0) throw new Error('cron must stay empty until approved'); if(c.vars.TEL99_ENABLED!=='false') throw new Error('must ship disabled'); console.log('wrangler config safe');"
+
+      - name: Validate the automation plugin (deterministic, no conversation)
         run: |
           python -m unittest discover -s tests -p 'test_agent_team.py' -v
           python -m unittest discover -s tests -p 'test_cloud_autonomy.py' -v
+
       - name: Produce report
         run: |
           mkdir -p /tmp/tel99-hybrid
-          printf 'Issue: %s\nSource: %s\nSHA: %s\n' "${{ github.event.client_payload.issue }}" "${{ github.event_name }}" "${{ github.sha }}" > /tmp/tel99-hybrid/report.txt
+          {
+            echo "issue=${{ github.event.client_payload.issue }}"
+            echo "source=${{ github.event_name }}"
+            echo "sha=${{ github.sha }}"
+            echo "ref=${{ github.ref }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > /tmp/tel99-hybrid/report.txt
+          cat /tmp/tel99-hybrid/report.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: tel99-hybrid-readonly-audit
