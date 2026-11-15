@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tel99.local/schemas/agent-message-v1.json",
+  "title": "TEL99 Agent Interchange Envelope (v1)",
+  "description": "Versioned envelope exchanged between OpenHands, Hermes and Kilo. One envelope carries one mission or sub-mission, its unique ids, its execution state, its result, its evidence, its errors, its validated learnings and its resume information. The envelope is transport-agnostic: the same bytes travel through a file bus, a Git commit or an HTTP body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "envelope_id", "created_at", "origin", "kind", "state"],
+  "properties": {
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "tel99-agent-interchange" },
+        "version": { "const": 1 }
+      }
+    },
+    "envelope_id": {
+      "type": "string",
+      "description": "Unique id of this envelope (UUIDv4 or deterministic slug).",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "description": "Id shared by every envelope of the same distributed mission.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "parent_envelope_id": {
+      "type": ["string", "null"],
+      "description": "Envelope that spawned this sub-mission, if any."
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "origin": { "$ref": "#/$defs/actor" },
+    "target": {
+      "oneOf": [{ "$ref": "#/$defs/actor" }, { "type": "null" }],
+      "description": "Intended recipient; null means broadcast."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["mission", "sub_mission", "result", "evidence", "error", "learning", "resume", "heartbeat"]
+    },
+    "state": { "$ref": "#/$defs/state" },
+    "priority": { "type": "integer", "minimum": 0, "maximum": 9, "default": 5 },
+    "mission": {
+      "oneOf": [{ "$ref": "#/$defs/mission" }, { "type": "null" }]
+    },
+    "result": {
+      "oneOf": [{ "$ref": "#/$defs/result" }, { "type": "null" }]
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence" },
+      "default": []
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/error" },
+      "default": []
+    },
+    "learnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/learning" },
+      "default": []
+    },
+    "resume": {
+      "oneOf": [{ "$ref": "#/$defs/resume" }, { "type": "null" }]
+    },
+    "budget": { "$ref": "#/$defs/budget" },
+    "tags": { "type": "array", "items": { "type": "string" }, "default": [] }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "id"],
+      "properties": {
+        "environment": {
+          "type": "string",
+          "enum": ["openhands", "hermes", "kilo", "human", "unknown"],
+          "description": "Which environment produced or consumes the envelope."
+        },
+        "id": {
+          "type": "string",
+          "description": "Stable identifier inside the environment (agent name, model id, user handle)."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "connected": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this actor has a live, verified transport. false means declared but NOT connected."
+        }
+      }
+    },
+    "state": {
+      "type": "string",
+      "description": "Execution state. Terminal states are done, failed, cancelled.",
+      "enum": [
+        "queued", "claimed", "running", "blocked", "awaiting_human",
+        "done", "failed", "cancelled"
+      ]
+    },
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "default": "" },
+        "acceptance_criteria": {
+          "type": "array", "items": { "type": "string" }, "default": []
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "description"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "state": { "$ref": "#/$defs/state" },
+              "assigned_to": { "type": ["string", "null"] }
+            }
+          },
+          "default": []
+        },
+        "read_only": { "type": "boolean", "default": true },
+        "work_branch": { "type": ["string", "null"], "default": null }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "partial", "failure", "not_run"]
+        },
+        "summary": { "type": "string", "default": "" },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": ["string", "null"] },
+              "bytes": { "type": ["integer", "null"] }
+            }
+          },
+          "default": []
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "string", "boolean", "null"] },
+          "default": {}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "claim"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["command", "test", "file", "url", "measurement", "log"]
+        },
+        "claim": { "type": "string" },
+        "command": { "type": ["string", "null"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "output_digest": { "type": ["string", "null"] },
+        "observed_at": { "type": ["string", "null"] },
+        "reproducible": { "type": "boolean", "default": false }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean", "default": false },
+        "attempt": { "type": "integer", "minimum": 1, "default": 1 },
+        "max_attempts": { "type": "integer", "minimum": 1, "default": 3 },
+        "fatal": { "type": "boolean", "default": false }
+      }
+    },
+    "learning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["procedure", "decision", "error", "fix", "fact"],
+          "default": "fact"
+        },
+        "verified": { "type": "boolean", "default": false },
+        "verified_by": { "type": ["string", "null"] },
+        "source_envelope_id": { "type": ["string", "null"] }
+      }
+    },
+    "resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resumable": { "type": "boolean", "default": false },
+        "checkpoint": { "type": ["string", "null"] },
+        "next_step_id": { "type": ["string", "null"] },
+        "completed_step_ids": {
+          "type": "array", "items": { "type": "string" }, "default": []
+        },
+        "attempts": { "type": "integer", "minimum": 0, "default": 0 },
+        "deadline": { "type": ["string", "null"] }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": { "type": ["integer", "null"] },
+        "max_budget_usd": { "type": ["number", "null"] },
+        "max_runtime_seconds": { "type": ["integer", "null"] },
+        "quota_remaining_at_start": { "type": ["integer", "null"] },
+        "free_only": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}
