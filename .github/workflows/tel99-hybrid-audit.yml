@@ -41,7 +41,7 @@ jobs:
           node-version: '20'
 
       - name: Cloudflare Worker unit tests (no deploy, no network)
-        run: node --test 'cloudflare/tel99-hybrid/test/*.test.mjs'
+        run: node --test cloudflare/tel99-hybrid/test/worker.test.mjs
 
       - name: Worker syntax and config are valid
         run: |
