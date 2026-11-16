@@ -169,3 +169,17 @@
 - PIÈGE : `kv_meta_probe` renvoie `supported` seulement si la clé EXISTE ; sonder AVANT
   acquisition -> `key_absent:true`. Sonder APRÈS acquire.
 - PR #76 : 85 fichiers, +13060/-0, mergeable=clean, CI 4/4. 680 tests OK (skipped=6).
+
+## Mission C — clôture technique (2026-11-16, PR #76 head 7cfd5caf)
+- Config d'automation : la clé `_comment` violait `additionalProperties:false` -> SUPPRIMÉE.
+  Test `test_shipped_automation_config_matches_the_plugin_schema` valide la config EXACTE
+  contre le schéma (jsonschema 4.26 dispo après `pip install jsonschema`).
+- Arrêt d'urgence fiabilisé : frein LOCAL (env `TEL99_EMERGENCY_STOP`, sentinelle
+  `.tel99-automation-state/EMERGENCY_STOP`, drapeau config `emergency_stop`) évalué AVANT
+  `load_state()` -> le chemin arrêté ne fait AUCUN accès réseau (avant : load_state lisait le KV).
+  Clé KV `emergency_stop` vérifiée ensuite. Deux portées distinctes documentées :
+  « prochain lancement » vs « interrompre une conversation pilotée par le run ».
+  `wait_for(cid, deadline, poll, state_dir=...)` relit le frein local, appelle
+  `interrupt_conversation` et retourne `stopped`. Diagnostic : `scope=next_run_and_owned_conversation`.
+- `docs/agents/ACTIVATION_DOSSIER.md` = index du dossier final d'activation.
+- 688 tests OK (skipped=6) ; CI PR #76 4/4 ; automations=0.
