@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from urllib.parse import urlparse
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -175,6 +177,150 @@ class MemoryTests(unittest.TestCase):
     def test_invalid_kind_is_rejected(self):
         with self.assertRaises(ValueError):
             self._entry("tel99", "a", kind="nonsense")
+
+
+class _InMemoryBackend:
+    """A minimal durable-backend double implementing the protocol contract."""
+
+    backend = "kv"
+    durable_across_container = True
+
+    def __init__(self):
+        self.data: dict = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def put(self, key, value):
+        self.data[key] = value
+
+    def keys(self, prefix=""):
+        return [k for k in self.data if k.startswith(prefix)]
+
+    def durable(self):
+        return True
+
+
+class DurableMemoryTests(unittest.TestCase):
+    """The memory must be able to survive a container when given a backend."""
+
+    def _entry(self, project, entry_id, **kw):
+        return memory.Entry(id=entry_id, project=project,
+                            kind=kw.get("kind", "fact"),
+                            title=kw.get("title", entry_id),
+                            body=kw.get("body", ""), tags=kw.get("tags", ()))
+
+    def test_file_store_is_not_durable_and_backend_is(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(memory.MemoryStore(tmp).durable())
+        self.assertTrue(memory.MemoryStore(backend=_InMemoryBackend()).durable())
+
+    def test_second_store_reads_what_the_first_recorded(self):
+        # Two separate MemoryStore instances sharing one durable backend stand
+        # in for two independent runs: run B must see run A's entry.
+        backend = _InMemoryBackend()
+        run_a = memory.MemoryStore(backend=backend)
+        run_a.record(self._entry("tel99", "fact-1", title="freshness rule"))
+        run_b = memory.MemoryStore(backend=backend)
+        got = run_b.get("tel99", "fact-1")
+        self.assertIsNotNone(got)
+        self.assertEqual(got.title, "freshness rule")
+        self.assertEqual([e.id for e in run_b.search("tel99", "freshness")],
+                         ["fact-1"])
+
+    def test_backend_isolation_is_preserved(self):
+        backend = _InMemoryBackend()
+        store = memory.MemoryStore(backend=backend)
+        store.record(self._entry("tel99", "secret", title="tel99 only"))
+        store.record(self._entry("other", "private", title="other project"))
+        tel = {e.id for e in store.all_entries("tel99")}
+        other = {e.id for e in store.all_entries("other")}
+        self.assertIn("secret", tel)
+        self.assertNotIn("private", tel)
+        self.assertNotIn("secret", other)
+
+    def test_backend_keys_are_namespaced_under_memory(self):
+        backend = _InMemoryBackend()
+        store = memory.MemoryStore(backend=backend)
+        store.record(self._entry("tel99", "x", title="x"))
+        self.assertTrue(all(k.startswith("memory/") for k in backend.keys()))
+
+    def test_file_root_still_works_after_backend_support(self):
+        # Backward compatibility: file storage keeps its on-disk layout.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = memory.MemoryStore(tmp)
+            store.record(self._entry("tel99", "a", title="alpha"))
+            self.assertTrue((pathlib.Path(tmp) / "projects" / "tel99.json").is_file())
+            self.assertEqual(store.get("tel99", "a").title, "alpha")
+
+    def test_store_without_root_or_backend_raises_on_write(self):
+        store = memory.MemoryStore()
+        self.assertFalse(store.durable())
+        with self.assertRaises(ValueError):
+            store.record(self._entry("tel99", "a", title="alpha"))
+
+
+class KvBackedMemoryTests(unittest.TestCase):
+    """MemoryStore over the real KvStore wire protocol (local KV server)."""
+
+    def setUp(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        outer = self
+        self.kv: dict = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _send(self, code, obj):
+                body = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                key = urlparse(self.path).path.rsplit("/", 1)[-1]
+                if key not in outer.kv:
+                    return self._send(404, {"detail": "not found"})
+                return self._send(200, {"value": outer.kv[key]})
+
+            def do_PUT(self):
+                key = urlparse(self.path).path.rsplit("/", 1)[-1]
+                length = int(self.headers.get("Content-Length", 0))
+                value = json.loads(self.rfile.read(length).decode() or "null")
+                outer.kv[key] = value
+                return self._send(201, {"key": key})
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+
+    def test_kv_backed_store_round_trips_over_http(self):
+        from protocol.store import KvStore
+        base = f"http://127.0.0.1:{self.port}"
+        run_a = memory.MemoryStore(backend=KvStore(base, "tok", prefix="tel99-memory"))
+        self.assertTrue(run_a.durable())
+        run_a.record(memory.Entry(id="k1", project="tel99", kind="fact",
+                                  title="kv durable", body=""))
+        # A brand-new client (as a second run would create) reads it back.
+        run_b = memory.MemoryStore(backend=KvStore(base, "tok", prefix="tel99-memory"))
+        self.assertEqual(run_b.get("tel99", "k1").title, "kv durable")
+
+    def test_kv_backend_is_namespaced(self):
+        from protocol.store import KvStore
+        base = f"http://127.0.0.1:{self.port}"
+        store = memory.MemoryStore(backend=KvStore(base, "tok", prefix="tel99-memory"))
+        store.record(memory.Entry(id="k1", project="tel99", kind="fact",
+                                  title="x", body=""))
+        self.assertTrue(all(k.startswith("tel99-memory.") for k in self.kv))
 
 
 class ImprovementTests(unittest.TestCase):

@@ -30,6 +30,8 @@ jobs:
         run: python -m unittest discover -s tests -p test_agent_team.py -v
       - name: Validate the intelligence layer (router, shared memory, improvement)
         run: python -m unittest discover -s tests -p test_agent_intelligence.py -v
+      - name: Validate the TEL99 signal-coherence contract (isolated fixture)
+        run: python -m unittest discover -s tests -p test_signal_coherence.py -v
       - name: Validate the v1 exchange protocol and the OpenHands/Hermes/Kilo bus
         run: python -m unittest discover -s tests -p test_agent_protocol.py -v
       - name: Validate cloud-autonomy plugin tests (policy, guard, runtime proof)

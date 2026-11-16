@@ -120,32 +120,72 @@ class Entry:
 
 
 class MemoryStore:
-    """A file-backed, project-isolated knowledge store."""
+    """A project-isolated knowledge store.
 
-    def __init__(self, root: str | pathlib.Path) -> None:
-        self.root = pathlib.Path(root)
+    By default it persists to plain JSON files under ``root`` (the historical
+    behaviour, used locally and by the tests). It can instead be given a
+    ``backend`` — any object exposing the tiny ``get(key)`` / ``put(key, value)``
+    contract of :mod:`scripts.agents.protocol.store` (``FileStore`` or the
+    durable ``KvStore``). With a ``KvStore`` backend the same knowledge survives
+    the destruction of a cloud container, so a second, independent run can read
+    what the first recorded. The store never invents a storage layer of its own:
+    it reuses the existing protocol backend.
+    """
+
+    # Namespace for the durable backend, kept distinct from the bus's
+    # ``missions/`` and ``envelopes/`` keys.
+    BACKEND_PREFIX = "memory"
+
+    def __init__(self, root: str | pathlib.Path | None = None, *,
+                 backend=None) -> None:
+        self.root = pathlib.Path(root) if root is not None else None
+        self.backend = backend
 
     # -- paths --------------------------------------------------------------
     def _path(self, project: str) -> pathlib.Path:
+        if self.root is None:
+            raise ValueError("file storage requires a root directory")
         if project == COMMON_PROJECT:
             return self.root / "common.json"
         return self.root / "projects" / f"{slug(project)}.json"
 
+    def _backend_key(self, project: str) -> str:
+        return f"{self.BACKEND_PREFIX}/projects/{slug(project)}"
+
+    def durable(self) -> bool:
+        """True only when the backing store survives a container."""
+        if self.backend is not None and hasattr(self.backend, "durable"):
+            return bool(self.backend.durable())
+        return False
+
+    @staticmethod
+    def _empty(project: str) -> dict:
+        return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
+                "history": []}
+
     def _load(self, project: str) -> dict:
+        if self.backend is not None:
+            raw = self.backend.get(self._backend_key(project))
+            if not isinstance(raw, dict):
+                return self._empty(project)
+            raw.setdefault("entries", [])
+            raw.setdefault("history", [])
+            return raw
         path = self._path(project)
         if not path.is_file():
-            return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
-                    "history": []}
+            return self._empty(project)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
-                    "history": []}
+            return self._empty(project)
         data.setdefault("entries", [])
         data.setdefault("history", [])
         return data
 
     def _save(self, project: str, data: dict) -> None:
+        if self.backend is not None:
+            self.backend.put(self._backend_key(project), data)
+            return
         path = self._path(project)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
