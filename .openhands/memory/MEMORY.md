@@ -131,3 +131,24 @@
 - PIÈGE : `journal_entry(state, ..., **dict)` casse si le dict contient une clé `state`.
 - PIÈGE : tests qui dépendent de OPENHANDS_API_KEY échouent en CI (quota None -> fail-closed).
 - CI : workflow `tel99-agent-team-audit.yml` tourne sur la branche d'équipe (PR + push).
+
+## Preuves cloud (2026-11-16, branche `converge/tel99-main-20261116`, PR #76)
+- MODÈLE GRATUIT PROUVÉ : `openhands/deepseek-v4.1-flash` = défaut du compte cloud ;
+  run réel `TEL99-FREE-OK`, quota cloud inchangé (20/20, used_today=0). Le proxy managé
+  direct (`llm-proxy.app.all-hands.dev`) refuse (403) : seul le chemin agent-server/conversations marche.
+- DÉLÉGATION PROUVÉE : `POST /api/conversations` avec `agent` + TaskTool -> 3 vraies sous-conversations
+  (`task:task_N`) sous `/var/openhands/conversations/<cid>/subagents/<id>/base_state.json`.
+  Chaque sous-agent : tools=`["terminal"]`, `hook_config.pre_tool_use` présent, budgets plafonnés.
+  Inspecter ces fichiers = preuve d'isolation réelle (pas `allowed_tools` de la requête).
+- GARDE-FOU PROUVÉ : sur `rm -rf`, `HookExecutionEvent.exit_code=2`, `blocked_actions` =
+  "guard: BLOCKED (mutating command 'rm')", AUCUNE ObservationEvent, cible intacte. exit 2 = bloque.
+- KV CAS PROUVÉ de bout en bout contre un vrai serveur HTTP local (GET ?meta=true, PUT ?nx=true,
+  PUT ?if_version=N, 409 conflit). KV cloud user-scoped = BLOQUÉ sans automation matérialisée
+  (GET/PUT /api/automation/v1/kv -> 400 "automation_id required"). 0 automation => pas de KV cloud.
+- MANIFESTE `.plugin` validé côté serveur : `GET /api/automation/v1/plugin-spec/preflight?source=…&ref=…&repo_path=.plugin`
+  -> HTTP 200, `resolved_ref`, `suggested_trigger`. Le POST `/validate` avec `plugin`/`config` renvoie
+  `extra_forbidden` (schéma strict) : utiliser preflight, pas validate.
+- WORKFLOW `tel99-hybrid-audit.yml` (repository_dispatch) ABSENT de `main` : il n'existe que sur les
+  branches de PR (#71, #76). L'« actif » listé par l'API Actions inclut des workflows non fusionnés.
+- Worker hybride `tel99-hybrid-scheduler` : `workers_dev:false` -> 404 (attendu) ; relais WS public
+  `telcoin-public-ws-relay` -> /health 200.
