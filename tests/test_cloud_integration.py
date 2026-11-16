@@ -71,17 +71,25 @@ class KvStoreTests(unittest.TestCase):
         saved = self.saved
 
         def fake_request(store_self, method, url, payload=None):
-            key = url.split("/v1/kv/", 1)[1] if "/v1/kv/" in url else ""
+            # Mirror the real cloud KV: the key is a single path segment, so a
+            # key containing "/" is a routing miss (404), and ?prefix= is
+            # ignored server-side.
+            if "/v1/kv/" in url:
+                wire = url.split("/v1/kv/", 1)[1].split("?", 1)[0]
+            else:
+                wire = ""
             if method == "GET":
-                if "?prefix=" in url:
-                    prefix = url.split("?prefix=", 1)[1]
-                    keys = [k for k in saved if k.startswith(prefix)]
-                    return 200, {"keys": keys}
-                if key in saved:
-                    return 200, {"value": saved[key]}
+                if not wire:  # list all keys
+                    return 200, {"keys": list(saved)}
+                if "/" in wire:
+                    return 404, "routing miss"
+                if wire in saved:
+                    return 200, {"value": saved[wire]}
                 return 404, "missing"
             if method == "PUT":
-                saved[key] = payload
+                if "/" in wire:
+                    return 404, "routing miss"
+                saved[wire] = payload
                 return 200, {}
             return 200, {}
 
@@ -106,6 +114,21 @@ class KvStoreTests(unittest.TestCase):
     def test_kv_store_is_durable(self):
         self.assertTrue(self.store.durable())
         self.assertEqual(self.store.backend, "kv")
+
+    def test_wire_key_never_contains_a_slash(self):
+        # The cloud KV routes on a single segment: a "/" in the wire key is a
+        # routing 404, so the store must never emit one.
+        self.assertNotIn("/", self.store._wire("missions/x"))
+        self.assertEqual(self.store._wire("missions/x"), "tel99-bus.missions.x")
+
+    def test_slash_key_roundtrip_through_wire_mapping(self):
+        self.store.put("missions/msn-gh-7-deadbeef", {"state": "queued"})
+        self.assertEqual(
+            self.store.get("missions/msn-gh-7-deadbeef"), {"state": "queued"}
+        )
+        self.assertEqual(
+            self.store.keys("missions/"), ["missions/msn-gh-7-deadbeef"]
+        )
 
 
 class DefaultStoreTests(unittest.TestCase):

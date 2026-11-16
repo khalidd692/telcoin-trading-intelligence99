@@ -362,7 +362,9 @@ class EndToEndTests(unittest.TestCase):
         """If the durable final write fails, the mission is NOT marked done."""
         # Opening writes the mission record twice (create, then envelope link);
         # fail the first write of the final record (write #3).
-        self.cloud.fail_kv_put_key = "tel99-bus/missions/msn-gh-70-f2dd9a84926f"
+        self.cloud.fail_kv_put_key = KvStore(
+            "https://kv.example", "tok"
+        )._wire("missions/msn-gh-70-f2dd9a84926f")
         self.cloud.fail_kv_put_after = 2
         code, out = self._run(self._config())
         self.assertEqual(code, 2, out)

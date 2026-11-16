@@ -77,17 +77,29 @@ class FileStore:
 
 
 class KvStore:
-    """The automation KV store. Durable across container destruction."""
+    """The automation KV store. Durable across container destruction.
+
+    The cloud KV routes ``/v1/kv/{key}`` on a single path segment: a key that
+    contains ``/`` is answered with a routing 404, not a stored value. Internal
+    keys keep ``/`` (``missions/<id>``) so the file store and the bus are
+    unchanged; on the wire it is mapped to ``.``, which envelope and mission ids
+    never contain.
+    """
 
     backend = "kv"
+    _SEP = "."
 
     def __init__(self, base: str, token: str, prefix: str = "tel99-bus") -> None:
         self.base = base.rstrip("/")
         self.token = token
         self.prefix = prefix
 
-    def _key(self, key: str) -> str:
-        return f"{self.prefix}/{key}"
+    def _wire(self, key: str) -> str:
+        return f"{self.prefix}{self._SEP}{key}".replace("/", self._SEP)
+
+    def _unwire(self, wire: str) -> str:
+        rest = wire[len(self.prefix) + len(self._SEP):]
+        return rest.replace(self._SEP, "/", 1)
 
     def _request(self, method: str, url: str, payload=None):
         data = json.dumps(payload).encode() if payload is not None else None
@@ -102,20 +114,20 @@ class KvStore:
             return exc.code, exc.read().decode(errors="ignore")
 
     def get(self, key: str):
-        status, body = self._request("GET", f"{self.base}/v1/kv/{self._key(key)}")
+        status, body = self._request("GET", f"{self.base}/v1/kv/{self._wire(key)}")
         if status == 200 and isinstance(body, dict):
             return body.get("value")
         return None
 
     def put(self, key: str, value) -> None:
-        status, _ = self._request("PUT", f"{self.base}/v1/kv/{self._key(key)}", value)
+        status, _ = self._request("PUT", f"{self.base}/v1/kv/{self._wire(key)}", value)
         if status not in (200, 201, 204):
             raise StoreError(f"KV write failed for {key!r}: HTTP {status}")
 
     def keys(self, prefix: str = "") -> list[str]:
-        status, body = self._request(
-            "GET", f"{self.base}/v1/kv?prefix={self._key(prefix)}"
-        )
+        # The cloud KV ignores ``?prefix=``; filter on the client so the result
+        # matches the file store's contract exactly.
+        status, body = self._request("GET", f"{self.base}/v1/kv")
         if status != 200:
             return []
         if isinstance(body, dict):
@@ -124,11 +136,14 @@ class KvStore:
             raw = body
         else:
             raw = []
+        head = f"{self.prefix}{self._SEP}"
         out = []
         for item in raw:
             key = item.get("key") if isinstance(item, dict) else item
-            if isinstance(key, str) and key.startswith(f"{self.prefix}/"):
-                out.append(key[len(self.prefix) + 1:])
+            if isinstance(key, str) and key.startswith(head):
+                internal = self._unwire(key)
+                if internal.startswith(prefix):
+                    out.append(internal)
         return sorted(out)
 
     def durable(self) -> bool:
