@@ -1127,5 +1127,113 @@ class EmergencyStopTests(unittest.TestCase):
         self.assertFalse(called["diag"], "the brake must precede any probe")
 
 
+class UnattendedConfirmationTests(unittest.TestCase):
+    """An unattended run must never stall on a confirmation it cannot answer."""
+
+    def test_payload_does_not_confirm_unknown_risk(self):
+        """UNKNOWN-risk coordination actions must not require a confirmation.
+
+        The security analyzer rates ``task_tool_set``/``task_tracker`` as UNKNOWN.
+        With ``confirm_unknown: True`` the coordinator freezes in
+        ``waiting_for_confirmation`` and the platform timeout kills the run.
+        """
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        payload = orchestrator.build_payload(
+            issue(12), "agent/mission-12-fix", cfg, {"model": "m"}
+        )
+        policy = payload["confirmation_policy"]
+        self.assertEqual(policy["kind"], "ConfirmRisky")
+        self.assertFalse(policy["confirm_unknown"])
+
+    def test_wait_for_fails_fast_on_a_confirmation_stall(self):
+        saved = dict(os.environ)
+        original_req = orchestrator._request
+        original_interrupt = orchestrator.interrupt_conversation
+        calls = {"interrupt": []}
+        try:
+            os.environ.pop(emergency.ENV_FLAG, None)
+            orchestrator._request = lambda *a, **k: (
+                200, {"execution_status": "waiting_for_confirmation"}
+            )
+            orchestrator.interrupt_conversation = (
+                lambda cid: calls["interrupt"].append(cid) or True
+            )
+            final = orchestrator.wait_for("cid-z", deadline=time.time() + 5,
+                                          poll=0, confirm_grace_polls=3)
+        finally:
+            orchestrator._request = original_req
+            orchestrator.interrupt_conversation = original_interrupt
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(final, "confirmation_required")
+        self.assertEqual(calls["interrupt"], ["cid-z"])
+
+    def test_run_aborts_without_processing_the_mission(self):
+        """A confirmation stall aborts the run and leaves the mission resumable."""
+        saved = dict(os.environ)
+        originals = {
+            name: getattr(orchestrator, name)
+            for name in ("load_state", "save_state", "kv_available", "kv_get",
+                         "diagnose_environment", "preflight", "quota_remaining",
+                         "list_mission_issues", "acquire_lock", "release_lock",
+                         "_request", "wait_for", "interrupt_conversation",
+                         "report_phase", "bus_bridge")
+        }
+        written = {}
+
+        class _Preflight:
+            @staticmethod
+            def preflight():
+                return []
+
+            @staticmethod
+            def check_payload(payload):
+                return []
+
+            @staticmethod
+            def check_budget(payload):
+                return []
+
+            @staticmethod
+            def check_model(payload):
+                return []
+
+        try:
+            os.environ.pop(emergency.ENV_FLAG, None)
+            orchestrator.bus_bridge = None
+            orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                               "active": None, "journal": []}
+            orchestrator.save_state = lambda state: written.update(state)
+            orchestrator.kv_available = lambda: False
+            orchestrator.kv_get = lambda key: None
+            orchestrator.diagnose_environment = lambda: {}
+            orchestrator.preflight = _Preflight
+            orchestrator.quota_remaining = lambda: 20
+            orchestrator.list_mission_issues = lambda repo, label: [
+                {"number": 12, "title": "Fix", "labels": [{"name": "tel99-mission"}],
+                 "state": "open", "body": "b"}
+            ]
+            orchestrator.acquire_lock = lambda owner, ttl_seconds=0: (True, "ok")
+            orchestrator.release_lock = lambda owner: None
+            orchestrator.report_phase = lambda phase: None
+            orchestrator._request = lambda *a, **k: (201, {"id": "conv-1"})
+            orchestrator.wait_for = lambda *a, **k: "confirmation_required"
+            orchestrator.interrupt_conversation = lambda cid: True
+            cfg = dict(orchestrator.DEFAULT_CONFIG)
+            cfg["dry_run"] = False
+            cfg["require_durable_bus"] = False
+            code = orchestrator.run(cfg)
+        finally:
+            for name, value in originals.items():
+                setattr(orchestrator, name, value)
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 2)
+        self.assertIsNone(written.get("active"))
+        self.assertEqual(written.get("processed", []), [])
+        events = [e.get("event") for e in written.get("journal", [])]
+        self.assertIn("abort", events)
+
+
 if __name__ == "__main__":
     unittest.main()
