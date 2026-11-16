@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794824044,
-  "observations": 293,
-  "valid_observations": 287,
+  "generated_at": 1794824835,
+  "observations": 294,
+  "valid_observations": 288,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 256,
-              "mean_pct": -0.00222
+              "count": 257,
+              "mean_pct": -0.00329
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 244,
-              "mean_pct": -0.05483
+              "count": 245,
+              "mean_pct": -0.05175
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 164,
-              "mean_pct": -0.36192
+              "count": 165,
+              "mean_pct": -0.36056
             }
           }
         }
@@ -127,47 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794813239,
-      "previous_decision": "ATTENDRE",
-      "decision": "ALERTE PR\u00c9COCE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ support",
-        "+ volume"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:EARLY_ALERT:1794812400",
-        "market": "KRAKEN:TELUSD",
-        "type": "EARLY_ALERT",
-        "decision": "ALERTE PR\u00c9COCE",
-        "confirmed": false,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001432,
-        "price_at": 1794812400,
-        "candle_closed_at": 1794812400,
-        "snapshot_at": 1794813202.241962,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001432,
-          "unit": "15m"
-        },
-        "invalidation": {
-          "level": 0.001428,
-          "unit": "15m"
-        },
-        "factors": [
-          "support",
-          "volume"
-        ],
-        "blockers": [
-          "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
-        ]
-      }
-    },
     {
       "observed_at": 1794814055,
       "previous_decision": "ALERTE PR\u00c9COCE",
@@ -346,6 +305,17 @@
       "data_valid": true,
       "changed_factors": [
         "\u2212 convergence"
+      ],
+      "event": null
+    },
+    {
+      "observed_at": 1794824835,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ reclaim",
+        "+ volume"
       ],
       "event": null
     }
