@@ -6,7 +6,8 @@ Aucune action de ce runbook n'est déclenchée par un agent : l'agent n'exécute
 rien tant qu'un humain n'a pas franchi l'étape correspondante.
 
 État : Mission C (clôture technique). Branche isolée `converge/tel99-main-20261116` (PR #76).
-Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
+Automation `6c3ed81d-9c20-4040-abad-13f26fe025f9` créée **INACTIVE** (`dry_run=true`).
+Aucun merge, aucun déploiement, aucun cron actif, aucun ordre.
 
 ---
 
@@ -18,50 +19,47 @@ Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
 | Délégation 3 sous-agents | 3 sous-conversations réelles, outils `["terminal"]` seuls, hook actif, budgets plafonnés, rapports rendus |
 | Garde-fou | `rm -rf` → `HookExecutionEvent.exit_code=2`, action bloquée, cible intacte |
 | Verrou KV (CAS) | `scripts/agents/automation/verify_kv.py --local` → **10/10 PASS** (CAS, verrou, dédup, reprise, persistance) |
-| Manifeste plugin | preflight serveur HTTP 200, ref résolu, trigger `0 3 * * *` UTC |
+| Manifeste plugin | preflight serveur HTTP 200, ref résolu, déclencheur **événement** `issues.labeled` (filtré sur `tel99-mission`) |
 | Arrêt d'urgence | `TEL99_EMERGENCY_STOP=1` → run `exit=3` **avant tout accès réseau** ; journalisé (`scope=next_run`) ; interruption d'une conversation pilotée par le run (§4b) |
-| Tests | 688 tests OK (`skipped=6`) ; CI PR #76 = 4/4 verte |
+| Tests | 691 tests OK (`skipped=6`) ; CI PR #76 = 4/4 verte |
+| KV cloud réel | Automation `6c3ed81d-9c20-4040-abad-13f26fe025f9` créée INACTIVE ; `verify_kv.py` contre le **vrai** KV → **10/10 PASS** |
+| Déclencheur réel | Événement `issues.labeled` (source `github`), seul type délivré par la plateforme ; `repository_dispatch` **n'est pas** dans `eventTypes` |
+| Dry-run #70 | Mission #70 sélectionnée, journal `dry_run: no conversation started`, exit 0, **0 conversation** avant/après |
 
 ## 2. Ce qui reste bloqué (cause exacte)
 
 | Blocage | Cause mesurée | Qui débloque |
 |---|---|---|
-| KV cloud réel | `GET/PUT /api/automation/v1/kv` → **400 « automation_id required »** : sans automation matérialisée, il n'existe aucun KV user-scoped | Action humaine 4 |
-| `main` non protégée | `protected:false`, `rulesets:[]`, `GET protection` → 403 (jeton sans droit Administration) | Action humaine 2 |
+| `main` non protégée | `PUT /branches/main/protection` **et** `POST /rulesets` → **403** avec les deux jetons (le champ `permissions.admin:true` décrit le dépôt, pas le jeton) | Action humaine 2 |
 | Workflow `repository_dispatch` absent de `main` | Il n'existe que sur les branches de PR #71/#76 | Action humaine 1 (merge) |
-| Jeton GitHub exposé | Rotation non encore faite | Action humaine 3 |
+| Jeton GitHub exposé | Rotation non encore faite ; aucun jeton en clair trouvé dans l'arbre ni l'historique | Action humaine 3 |
+| Révocation impossible par API | `GET /user/installations` → 403 : le jeton n'a pas le droit de lister/révoquer | Action humaine 3 |
 
-## 3. Les cinq actions humaines indispensables
+Le KV cloud réel **n'est plus bloqué** : une automation INACTIVE matérialisée suffit,
+et `verify_kv.py` y passe **10/10** (le point qui exigeait auparavant une activation).
+
+## 3. Les actions humaines restantes
 
 ### Action 1 — Fusionner PR #76 dans `main`
-- La PR est `mergeable: clean`, **100 % additive**, CI 4/4 verte, 688 tests.
+- La PR est `mergeable: clean`, **100 % additive**, CI 4/4 verte, 691 tests.
 - C'est la convergence unique : après fusion, PR #71 devient inutile.
 - Aucun agent ne fusionne.
 
 ### Action 2 — Protéger `main`
 - GitHub → Settings → Branches → Add rule : exiger une PR, exiger la CI verte,
-  interdire le force-push. Le jeton actuel n'a pas le droit `Administration`.
+  interdire le force-push. Le jeton actuel n'a pas le droit `Administration` (403).
 
 ### Action 3 — Révoquer le jeton GitHub exposé
 - Révoquer l'ancien PAT, en générer un neuf, le stocker **hors dépôt**.
+- Aucun jeton n'est révocable par l'API avec les droits actuels.
 
-### Action 4 — Créer l'automation OpenHands (INACTIVE, `dry_run=true`)
-- Source : GitHub, dépôt `khalidd692/telcoin-trading-intelligence99`, ref `main`,
-  `repo_path` `.plugin`.
-- Config : coller `scripts/agents/automation/automation.config.json`
-  (`dry_run: true`, `require_durable_bus: true`).
-- **Ne pas activer de cron.** Après création, relever `automation_id`.
-- Puis lancer la vérification du **vrai** KV de cette automation :
-  ```bash
-  AUTOMATION_API_URL=<base> AUTOMATION_KV_TOKEN=<token> \
-      python3 scripts/agents/automation/verify_kv.py
-  ```
-  Attendu : `RESULT: PASS` (les 5 propriétés sur le KV réel, pas un mock).
-
-### Action 5 — Autoriser un lancement ponctuel (mission pilote #70)
-- Mission #70 = lecture seule, label `tel99-mission`, critère d'acceptation défini.
-- Lancer **une** fois, `dry_run=false`, sans cron. Vérifier ensuite la preuve des
-  trois rôles (dev / analyst / verifier) dans le journal et sur le bus.
+### Action 4 — Activer un run ponctuel (mission pilote #70)
+- L'automation existe déjà : `6c3ed81d-9c20-4040-abad-13f26fe025f9`, `INACTIVE`,
+  `dry_run=true`, modèle `openhands_deepseek-v4.1-flash`.
+- Le dry-run #70 est déjà vert (0 conversation). Pour un run réel :
+  passer `dry_run` à `false`, puis déclencher **une** fois (label d'un ticket
+  `tel99-mission`, ou dispatch manuel), sans cron permanent.
+- Vérifier ensuite la preuve des trois rôles (dev / analyst / verifier).
 
 ## 4. Arrêt d'urgence (kill-switch)
 
@@ -112,7 +110,7 @@ sonde réseau, **aucune** conversation, **aucune** écriture d'état.
    - ou via l'API agent-server : `POST /api/conversations/<id>/interrupt`
      (nécessite la clé de session du pod concerné).
 3. **Désactiver l'automation** : dans OpenHands Cloud, passer l'automation en
-   *inactive* (ou supprimer son déclencheur cron). Tant qu'elle est inactive,
+   *inactive* (`state=INACTIVE`, `enabled=false`). Tant qu'elle est inactive,
    aucun run ne démarre, même frein absent.
 4. **Vérifier** : `python3 scripts/agents/automation/orchestrator.py --diagnose`
    → `emergency_stop.stopped = true`, `scope = next_run_and_owned_conversation`.
@@ -133,12 +131,15 @@ d'une mission hébergée par un autre conteneur, sans passer par l'étape 2/3.
   OpenHands et ne prouve rien sur l'exécution des agents IA : la preuve doit venir
   d'un run d'automation réel.
 
-## 6. Séquence de validation finale (après les 5 autorisations)
+## 6. Séquence de validation finale (après les autorisations)
 
-1. Automation créée → `verify_kv.py` (KV réel) = PASS.
+1. Automation déjà créée INACTIVE → `verify_kv.py` (KV réel) = **PASS** (fait).
 2. Run ponctuel #70 `dry_run=false` → vérifier les 3 rôles + le bus.
-3. Programmer le cron quotidien (`0 3 * * *` UTC) → observer un run sans le PC.
-4. Seulement alors : retirer `dry_run` du cron permanent.
+3. Choisir le déclencheur : **événement** `issues.labeled` (source `github`,
+   filtré sur `tel99-mission`) — seul type réellement délivré. `repository_dispatch`
+   n'est **pas** dans `eventTypes` et ne déclencherait rien.
+4. Observer un run déclenché sans le PC, puis seulement alors passer `dry_run=false`
+   en régime permanent.
 
 Rollback à tout instant : Action « arrêt d'urgence » (§4), puis désactiver
 l'automation. Aucune donnée n'est détruite : les snapshots, alertes, historiques

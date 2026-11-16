@@ -98,10 +98,11 @@
         }
       }
     },
-    "suggested_trigger": {
-      "type": "cron",
-      "schedule": "0 3 * * *",
-      "timezone": "UTC"
+    "suggested_trigger_template": {
+      "type": "event",
+      "source": "github",
+      "on": "issues.labeled",
+      "filter": "repository.full_name == {{ json config.repository }} && contains(issue.labels[].name, {{ json config.mission_label }})"
     }
   }
 }

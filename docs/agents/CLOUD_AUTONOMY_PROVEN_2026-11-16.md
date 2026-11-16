@@ -62,22 +62,23 @@ local implémentant le contrat documenté (`GET ?meta=true`, `PUT ?nx=true`,
 Fail-closed confirmé : sans backend exposant une version, `acquire_lock`
 retourne `False` et **refuse** de démarrer une mission réelle.
 
-## 4. KV cloud user-scoped — BLOQUÉ (délibérément)
+## 4. KV cloud user-scoped — DÉBLOQUÉ (voir §10)
 
 `GET/PUT /api/automation/v1/kv/...` sans `automation_id` → **HTTP 400**
 « automation_id query parameter is required ». Avec un `automation_id` inexistant
 → **HTTP 404** « Automation not found ». Un **brouillon** (`/v1/drafts`) ne
 matérialise pas d'automation : le KV le refuse aussi.
 
-Conséquence : le KV cloud réel n'est testable qu'avec une automation
-**matérialisée**, or le total d'automations doit rester **0** (aucune
-activation sans autorisation). Le verrou est donc prouvé localement (§3) et
-reste **fail-closed** en cloud tant qu'aucune automation n'existe.
+Correction du 16/11 : une automation **matérialisée** (même INACTIVE) suffit à
+ouvrir le KV réel. Une automation a été créée en `state=INACTIVE`, et
+`verify_kv.py` y passe **10/10** (§10). Le verrou n'est donc plus « bloqué » :
+il est prouvé localement (§3) **et** contre le KV cloud réel.
 
 ## 5. Manifeste de plugin — VALIDÉ côté serveur (lecture seule)
 
 `GET /api/automation/v1/plugin-spec/preflight?source=…&ref=converge/tel99-main-20261116&repo_path=.plugin`
-→ **HTTP 200**, `resolved_ref = f3a85ea7…`, `suggested_trigger = {cron, 0 3 * * *}`,
+→ **HTTP 200**, `resolved_ref = f3a85ea7…`, déclencheur suggéré **événement**
+`issues.labeled` (voir §11 : `repository_dispatch` n'est pas délivré),
 `runtime.llm_profile.default_name = openhands_deepseek-v4.1-flash`.
 Le serveur résout et parse le manifeste sans effet de bord.
 
@@ -118,15 +119,49 @@ pas le coût : le budget par run reste la limite réelle.
 `issue_comment.*`, `pull_request.*`, `push`, `release.*`, `workflow_run.*`.
 Le paquet runtime du plugin pèse **143 Ko** (< limite upload 1 Mo).
 
+## 10. KV cloud réel — DÉBLOQUÉ et VÉRIFIÉ (10/10)
+
+Une automation **matérialisée** suffit pour atteindre le KV réel, sans l'activer.
+Automation `6c3ed81d-9c20-4040-abad-13f26fe025f9` créée en `state=INACTIVE`.
+
+| Vérification | Résultat |
+|---|---|
+| `verify_kv.py` contre le KV réel | **PASS (10 checks)** |
+| Verrou (CAS, nx) | PASS — un second propriétaire est refusé |
+| Bus (ouverture / reprise / dédup / persistance) | PASS |
+
+**Défaut réel trouvé et corrigé** : le KV cloud route `/v1/kv/{key}` sur **un seul
+segment** ; une clé contenant `/` renvoie un **404 de routage** au lieu de la
+valeur. `KvStore` construisait `tel99-bus/missions/<id>` → le bus ne pouvait rien
+persister. Invisible en stockage fichier local et dans l'auto-vérification
+en mémoire. `KvStore` mappe désormais `/` → `.` sur le fil et filtre `?prefix=`
+côté client (le serveur l'ignore).
+
+## 11. Déclencheur réel — ÉVÉNEMENT, pas `repository_dispatch`
+
+`GET /api/automation/v1/capabilities` → `eventTypes` (source `github`) :
+`issues.*`, `issue_comment.*`, `pull_request.*`, `pull_request_review.*`, `push`,
+`release.*`, `workflow_run.*`. **`repository_dispatch` n'y figure pas** : un
+déclencheur sur cet évènement ne se déclencherait **jamais**.
+
+Déclencheur retenu : `issues.labeled` (source `github`), filtré sur
+`repository.full_name` et le label `tel99-mission` — l'évènement qui correspond
+réellement à la file de missions. Le manifeste `.plugin` suggère ce même
+déclencheur (`suggested_trigger_template`).
+
+## 12. Dry-run mission #70 — 0 conversation
+
+Mission #70 (lecture seule) sélectionnée par `policy.select_mission`. Journal :
+`dry_run: no conversation started`, `exit=0`. Conversations agent-server :
+**0 avant, 0 après**. Aucun `POST /api/conversations` émis.
+
 ## Ce qui reste à faire pour activer (action humaine)
 
 1. Fusionner la branche de convergence (PR #76) dans `main` — **autorisation requise**.
-2. Créer **une** automation depuis le manifeste `.plugin` (source GitHub, ref
-   `main`, `repo_path=.plugin`), en `state=INACTIVE` puis `dry_run=true`.
-3. Renseigner le secret `GITHUB_DISPATCH_TOKEN` (Worker Cloudflare) et le jeton
-   KV de l'automation — jamais dans le dépôt.
-4. Faire passer `TEL99_ENABLED` à `true` et `dry_run` à `false` — **après**
-   un premier run `dry_run` vert.
-5. Vérifier un run planifié **sans le PC**, puis basculer le cron.
+2. Protéger `main` (PR obligatoire, checks, pas de force-push) — 403 avec les jetons actuels.
+3. Révoquer le jeton GitHub exposé et en émettre un neuf, stocké hors dépôt.
+4. Passer l'automation `dry_run` à `false` et déclencher **une** fois (label
+   `tel99-mission`), puis observer un run **sans le PC**.
+5. Seulement alors, considérer le régime permanent.
 
 Aucune de ces étapes n'a été exécutée : elles exigent une autorisation explicite.

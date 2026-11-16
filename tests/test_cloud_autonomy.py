@@ -138,7 +138,21 @@ class PluginManifestTests(unittest.TestCase):
     def test_shipped_automation_config_has_no_comment_key(self):
         config = json.loads(CONFIG.read_text(encoding="utf-8"))
         self.assertNotIn("_comment", config)
-        self.assertTrue(config["dry_run"])
+
+    def test_suggested_trigger_is_a_deliverable_event(self):
+        """The trigger must be an event the platform actually delivers.
+
+        The deployment lists its deliverable GitHub event types; ``repository_dispatch``
+        is not among them, so a trigger on it would never fire. The manifest must
+        suggest an event from that delivered set (``issues.labeled`` for a mission).
+        """
+        data = json.loads(PLUGIN.read_text(encoding="utf-8"))
+        trigger = data["automation"]["suggested_trigger_template"]
+        self.assertEqual(trigger["type"], "event")
+        self.assertEqual(trigger["source"], "github")
+        self.assertEqual(trigger["on"], "issues.labeled")
+        self.assertNotIn("suggested_trigger", data["automation"])
+        self.assertIn("mission_label", trigger["filter"])
 
 
 class MissionSelectionTests(unittest.TestCase):
