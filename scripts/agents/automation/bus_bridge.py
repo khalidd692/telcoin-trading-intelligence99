@@ -119,6 +119,19 @@ def open_or_resume(bus: Bus, *, repository: str, issue: dict, work_branch: str) 
         resumed = bus.resume(corr)
         return {"correlation_id": corr, "action": "resumed", "state": resumed.state}
 
+    # A failed-but-resumable mission is retried: reopen a fresh record under the
+    # same deterministic id so the ledger keeps one entry per mission and the
+    # attempt is a genuine new try rather than a silent reuse of the failure.
+    if existing is not None and existing.state == "failed" and existing.resumable:
+        record = bus.open_mission(
+            title=f"GitHub mission #{issue['number']}: {issue.get('title', '')}".strip(),
+            origin=_origin(),
+            steps=_steps_for_roles(work_branch, repository, issue["number"]),
+            description=(issue.get("body") or "")[:2000],
+            correlation_id=corr,
+        )
+        return {"correlation_id": corr, "action": "retried", "state": record.state}
+
     record = bus.open_mission(
         title=f"GitHub mission #{issue['number']}: {issue.get('title', '')}".strip(),
         origin=_origin(),
@@ -131,12 +144,19 @@ def open_or_resume(bus: Bus, *, repository: str, issue: dict, work_branch: str) 
 
 def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
                    conversation_id: str = "", work_branch: str = "",
-                   status_detail: str = "") -> dict:
-    """Record the final outcome of a mission and a validated learning.
+                   status_detail: str = "", evidence: dict | None = None,
+                   verdict: dict | None = None) -> dict:
+    """Record the final outcome of a mission and, only if validated, a learning.
 
     Called once per run, on success *and* on failure, so the ledger is always
-    truthful. A success writes a result envelope and a learning; a failure
-    records the error and leaves the mission resumable.
+    truthful. ``success`` must already be the *verified* verdict computed by the
+    orchestrator from observable evidence — a conversation merely reporting
+    ``finished`` is not a success.
+
+    A validated success writes a result envelope and a learning marked
+    ``verified: True`` (verified by the orchestrator's evidence checks). A
+    non-validated outcome records a failure with the evidence and leaves the
+    mission resumable; it never writes a ``verified`` learning.
     """
     from protocol.envelope import Envelope
 
@@ -144,7 +164,11 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
     if record is None:
         raise KeyError(f"unknown bus mission {corr}")
 
-    # Mark every role complete on success; on failure mark what we know.
+    # Never accept a "success" that carries no verification verdict: that would be
+    # a false success. This is the single choke point that guards the learning.
+    if success and not (verdict and verdict.get("validated")):
+        raise ValueError("refusing to record an unverified success as a success")
+
     if success:
         for step in record.steps:
             if step["id"] not in record.completed_step_ids:
@@ -156,6 +180,8 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
             "artifacts": [{"path": work_branch}] if work_branch else [],
             "metrics": {"conversation_id": conversation_id or "",
                         "roles": len(record.steps)},
+            "evidence": evidence or {},
+            "verdict": verdict or {},
         }
     else:
         record.state = "failed"
@@ -163,9 +189,11 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
         record.result = {
             "status": "failure", "summary": summary, "artifacts": [],
             "metrics": {"conversation_id": conversation_id or ""},
+            "evidence": evidence or {},
+            "verdict": verdict or {},
         }
         record.errors.append({
-            "code": "orchestrator.mission_failed",
+            "code": "orchestrator.outcome_unvalidated",
             "message": status_detail or summary,
             "retryable": True, "attempt": 1, "max_attempts": 3, "fatal": False,
         })

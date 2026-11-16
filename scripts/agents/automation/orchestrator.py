@@ -78,6 +78,10 @@ DEFAULT_CONFIG = {
     "agent_max_budget_usd": 0.25,
     "quota_min_remaining": 2,
     "dry_run": True,
+    # A real run must be able to prove durable storage, deduplication and mission
+    # opening on the bus. When false, a missing bus degrades to a warning instead
+    # of a refusal; this is only meant for local experiments, never for cloud.
+    "require_durable_bus": True,
 }
 
 
@@ -295,6 +299,18 @@ def acquire_lock(owner: str, ttl_seconds: int = 7200) -> tuple[bool, str]:
     existing = kv_get(_LOCK_KEY)
     if isinstance(existing, dict) and not _lock_expired(existing):
         return False, f"lock held by {existing.get('owner')} until {existing.get('expires_at')}"
+
+    # An expired lock must be cleared before the conditional write: ``nx=true``
+    # fails as long as the key exists, so without this an expired lock could
+    # never be taken over. We re-read and delete only the exact expired record we
+    # saw, so we never delete a fresh lock another run just wrote. The KV API has
+    # no compare-and-delete, so a residual race remains; the ownership check
+    # below is the final arbiter.
+    if isinstance(existing, dict) and _lock_expired(existing):
+        current = kv_get(_LOCK_KEY)
+        if current == existing:
+            _request("DELETE", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}",
+                     headers={"Authorization": f"Bearer {_KV_TOKEN}"})
 
     record = {
         "owner": owner,
@@ -678,8 +694,12 @@ def run(config: dict, offline: bool = False) -> int:
                   title=mission.get("title", ""), work_branch=work_branch)
 
     # --- Bus ledger: dedup (read-only). A finished mission is never retried. ---
+    # For a real run the bus is not an enhancement: without it there is no
+    # deduplication and no durable ledger, so the mission must not start. This is
+    # a deliberate fail-closed guard, not a best-effort feature.
     bus = None
     bus_corr = None
+    require_bus = bool(config.get("require_durable_bus", True)) and not config["dry_run"]
     if bus_bridge is not None and Bus is not None:
         try:
             bus = Bus(REPO_ROOT / "bus", store=default_store(REPO_ROOT / "bus"))
@@ -689,9 +709,28 @@ def run(config: dict, offline: bool = False) -> int:
                               correlation_id=bus_corr)
                 save_state(state)
                 return 0
-        except Exception as exc:  # noqa: BLE001 - the bus must never block a run
+        except Exception as exc:  # noqa: BLE001 - never let the bus crash the run
             journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
             bus = None
+    elif require_bus:
+        journal_entry(state, "abort", reason="bus unavailable: cannot deduplicate",
+                      mission=mission["number"])
+        save_state(state)
+        return 2
+
+    if require_bus:
+        if bus is None or bus_corr is None:
+            journal_entry(state, "abort", reason="bus unavailable: refusing to start",
+                          mission=mission["number"])
+            save_state(state)
+            return 2
+        report = bus.storage_report()
+        if not report.get("durable_across_container"):
+            journal_entry(state, "abort",
+                          reason="bus storage is not durable across containers",
+                          storage=report, mission=mission["number"])
+            save_state(state)
+            return 2
 
     if config["dry_run"]:
         journal_entry(state, "dry_run", note="no conversation started",
@@ -708,6 +747,8 @@ def run(config: dict, offline: bool = False) -> int:
     journal_entry(state, "lock_acquired", detail=detail, owner=owner)
 
     # --- Open (or resume) the bus mission now that we hold the single lock. ---
+    # Fail-closed: if the mission cannot be opened on the ledger, the run must not
+    # proceed, otherwise it would work with no deduplication and no durable record.
     if bus is not None and bus_corr is not None:
         try:
             opened = bus_bridge.open_or_resume(
@@ -718,8 +759,17 @@ def run(config: dict, offline: bool = False) -> int:
                           correlation_id=opened["correlation_id"],
                           mission_state=opened["state"],
                           storage=bus.storage_report())
-        except Exception as exc:  # noqa: BLE001 - the bus must never block a run
-            journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            release_lock(owner)
+            journal_entry(state, "abort", reason="bus mission could not be opened",
+                          detail=f"{type(exc).__name__}: {exc}")
+            save_state(state)
+            return 2
+    elif require_bus:
+        release_lock(owner)
+        journal_entry(state, "abort", reason="bus unavailable: refusing to start")
+        save_state(state)
+        return 2
 
     # --- Build the coordinator payload and prove it declares 3 restricted agents. ---
     profile = os.environ.get("TEL99_LLM_PROFILE", "openhands_deepseek-v4.1-flash")
@@ -767,29 +817,166 @@ def run(config: dict, offline: bool = False) -> int:
         final = wait_for(cid, deadline)
         journal_entry(state, "conversation_finished", conversation=cid, status=final)
 
+        # --- Validation: a finished status is NOT a success by itself. ---
+        # Collect the proof the team actually ran and reported, then accept the
+        # mission only when the evidence supports it. Absence of proof is a
+        # failure, not an assumption of success.
+        evidence = collect_evidence(cid)
+        validated, verdict = verify_outcome(final, evidence)
+        journal_entry(state, "outcome_verdict", validated=validated,
+                      checks=verdict["checks"])
+
         # --- Persist the outcome on the bus (survives container destruction). ---
+        # Fail-closed on the final write: if the durable record cannot be written,
+        # the mission must NOT be declared done nor marked processed, otherwise it
+        # would be lost from the ledger and never retried.
         if bus is not None and bus_corr is not None:
             try:
                 outcome = bus_bridge.record_outcome(
-                    bus, bus_corr, success=(final == "finished"),
-                    summary=f"conversation {final} for issue #{mission['number']}",
+                    bus, bus_corr, success=validated,
+                    summary=(f"validated outcome for issue #{mission['number']}"
+                             if validated else
+                             f"unvalidated outcome ({final}) for issue #{mission['number']}"),
                     conversation_id=str(cid), work_branch=work_branch,
-                    status_detail=f"final status {final}",
+                    status_detail=f"final status {final}; validated={validated}",
+                    evidence=evidence, verdict=verdict,
                 )
                 journal_entry(state, "bus_outcome", mission_state=outcome["state"],
                               learning=(outcome.get("learning") or {}).get("id"))
             except Exception as exc:  # noqa: BLE001
-                journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
+                release_lock(owner)
+                journal_entry(state, "abort",
+                              reason="final bus record failed: mission NOT marked done",
+                              detail=f"{type(exc).__name__}: {exc}")
+                state["active"] = None
+                save_state(state)
+                return 2
+        elif require_bus:
+            release_lock(owner)
+            journal_entry(state, "abort",
+                          reason="bus unavailable at completion: mission NOT marked done")
+            state["active"] = None
+            save_state(state)
+            return 2
 
-        state["processed"] = sorted(processed | {mission["number"]})
+        # Only a validated mission is marked processed; an unvalidated one stays
+        # out of ``processed`` so the next run resumes it.
+        if validated:
+            state["processed"] = sorted(processed | {mission["number"]})
         state["active"] = None
         save_state(state)
-        return 0 if final == "finished" else 2
+        return 0 if validated else 2
     finally:
         release_lock(owner)
 
 
 TERMINAL_STATES = ("finished", "error", "stopped")
+
+# Execution statuses that mean a child conversation produced a usable result.
+_CHILD_FINISHED = ("finished",)
+
+
+def _get_json(path: str) -> dict:
+    status, body = _request("GET", f"{agent_server_base()}{path}",
+                            headers={"X-Session-API-Key": session_key()})
+    return body if status == 200 and isinstance(body, dict) else {}
+
+
+def collect_evidence(cid: str) -> dict:
+    """Gather observable proof that the team actually ran and reported.
+
+    A ``finished`` execution status only says the conversation stopped; it says
+    nothing about whether the three roles ran or produced anything. This reads
+    what the agent server actually persisted:
+
+      * the coordinator's final response text;
+      * every child conversation the coordinator started (sub-agents), with its
+        own execution status and final response.
+
+    Everything is best-effort: a missing endpoint yields an empty value, which
+    the verdict treats as *absence of proof* — never as a success.
+    """
+    final = _get_json(f"/api/conversations/{cid}/agent_final_response")
+    coordinator_response = (final.get("response") or "").strip()
+
+    children: list[dict] = []
+    seen: set[str] = set()
+    status, events = _request(
+        "GET", f"{agent_server_base()}/api/conversations/{cid}/events",
+        headers={"X-Session-API-Key": session_key()},
+    )
+    if status == 200 and isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            observation = event.get("observation")
+            if not isinstance(observation, dict):
+                continue
+            if observation.get("kind") != "StartChildConversationObservation":
+                continue
+            child_id = observation.get("conversation_id")
+            if isinstance(child_id, str) and child_id and child_id not in seen:
+                seen.add(child_id)
+                children.append(child_id)
+
+    child_reports = []
+    for child_id in children:
+        info = _get_json(f"/api/conversations/{child_id}")
+        child_final = _get_json(f"/api/conversations/{child_id}/agent_final_response")
+        child_reports.append({
+            "id": child_id,
+            "status": info.get("execution_status", ""),
+            "response_chars": len((child_final.get("response") or "").strip()),
+        })
+
+    return {
+        "conversation_id": cid,
+        "coordinator_response_chars": len(coordinator_response),
+        "children": child_reports,
+    }
+
+
+def verify_outcome(final: str, evidence: dict,
+                   min_finished_children: int = 1) -> tuple[bool, dict]:
+    """Decide whether an outcome is *validated*, from evidence alone.
+
+    The verdict is deliberately conservative: a run is validated only when the
+    conversation finished AND the coordinator produced a final response AND at
+    least ``min_finished_children`` sub-agent conversations finished with a
+    non-empty response. Any missing proof makes it unvalidated, so the mission
+    stays resumable and no ``verified`` learning is recorded.
+
+    Returns ``(validated, verdict)`` where the verdict lists each check, so the
+    journal shows exactly why an outcome was or was not accepted.
+    """
+    checks = []
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        checks.append({"check": name, "ok": bool(ok), "detail": detail})
+        return bool(ok)
+
+    finished = check("conversation_finished", final == "finished",
+                     f"final status {final!r}")
+    has_response = check(
+        "coordinator_produced_a_response",
+        int(evidence.get("coordinator_response_chars", 0)) > 0,
+        f"{evidence.get('coordinator_response_chars', 0)} chars",
+    )
+    children = evidence.get("children") or []
+    ran = check("sub_agents_ran", len(children) >= 1, f"{len(children)} child(ren)")
+    finished_children = [
+        c for c in children
+        if c.get("status") in _CHILD_FINISHED and int(c.get("response_chars", 0)) > 0
+    ]
+    reported = check(
+        "sub_agents_reported",
+        len(finished_children) >= int(min_finished_children),
+        f"{len(finished_children)} finished child(ren) with a response",
+    )
+
+    validated = all((finished, has_response, ran, reported))
+    return validated, {"validated": validated, "checks": checks,
+                       "children": children}
 
 
 def wait_for(cid: str, deadline: float, poll: float = 5.0) -> str:
