@@ -2,14 +2,14 @@
   "schema_version": 1,
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ANALYSIS",
-  "generated_at": "2026-11-16T12:16:11.768696+00:00",
-  "source_generated_at": "2026-11-16T12:16:11.606000+00:00",
+  "generated_at": "2026-11-16T12:30:04.250991+00:00",
+  "source_generated_at": "2026-11-16T12:30:04.123000+00:00",
   "snapshot_age_seconds": 0,
   "status": "SURVEILLER",
   "collection_status": "VALID",
   "reason": null,
   "cross_check": {
-    "independent_confirmation": "OUI",
+    "independent_confirmation": "NON ÉTABLIE",
     "venue_data_diagnostic": {
       "status": "NON_SIGNALÉ",
       "left_symbol": "MEXC:TELUSDT",
@@ -19,12 +19,10 @@
         "bid",
         "ask"
       ],
-      "matching_fields": [
-        "ask"
-      ],
+      "matching_fields": [],
       "note": "Aucune identité complète suspecte détectée sur les champs comparables."
     },
-    "divergence_bps": -13.874436351023576
+    "divergence_bps": -38.08864265927883
   },
   "timeframes": {
     "15m": {
@@ -33,7 +31,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-16T12:15:00+00:00",
-      "candle_age_seconds": 72,
+      "candle_age_seconds": 904,
       "close": 0.001439,
       "ema20": 0.0014397472061631045,
       "ema50": 0.0014369017497669302,
@@ -67,7 +65,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-16T12:00:00+00:00",
-      "candle_age_seconds": 972,
+      "candle_age_seconds": 1804,
       "close": 0.001444,
       "ema20": 0.001435900875536952,
       "ema50": 0.001436446775667813,
@@ -105,7 +103,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-16T12:00:00+00:00",
-      "candle_age_seconds": 972,
+      "candle_age_seconds": 1804,
       "close": 0.001444,
       "ema20": 0.001439769725498682,
       "ema50": 0.0014504804654301188,
@@ -141,7 +139,7 @@
       "candle_status": "OK",
       "candle_count": 300,
       "last_closed_at": "2026-11-16T00:00:00+00:00",
-      "candle_age_seconds": 44172,
+      "candle_age_seconds": 45004,
       "close": 0.001446,
       "ema20": 0.0014764165360719725,
       "ema50": 0.0015678409676620534,
@@ -177,7 +175,7 @@
       "candle_status": "OK",
       "candle_count": 104,
       "last_closed_at": "2026-11-16T00:00:00+00:00",
-      "candle_age_seconds": 44172,
+      "candle_age_seconds": 45004,
       "close": 0.001446,
       "ema20": 0.0017599250923182488,
       "ema50": 0.0025099664764660604,
@@ -211,7 +209,7 @@
       "candle_status": "OK",
       "candle_count": 24,
       "last_closed_at": "2026-11-01T00:00:00+00:00",
-      "candle_age_seconds": 1340172,
+      "candle_age_seconds": 1341004,
       "close": 0.001435,
       "ema20": 0.0034785708303124727,
       "ema50": null,
@@ -343,13 +341,13 @@
       "direction": "INDETERMINE",
       "notional_usdt": 300.0,
       "cost": {
-        "round_trip_pct": 1.25225175465935,
-        "measured_ex_fees_pct": 1.25225175465935,
-        "spread_pct": 0.486279958318865,
-        "slippage_pct": 0.7671512695588606,
+        "round_trip_pct": 1.0484208695073298,
+        "measured_ex_fees_pct": 1.0484208695073298,
+        "spread_pct": 0.48661800486616924,
+        "slippage_pct": 0.562983976303457,
         "fees_pct": null,
         "fees_status": "NOT_VERIFIED",
-        "method": "liquidity_cost",
+        "method": "order_book",
         "is_lower_bound": true,
         "depth_complete": true,
         "depth_failure": null
@@ -365,7 +363,7 @@
       "economic_validity": "INDETERMINE",
       "reason": "aucune direction de signal : le coût est mesuré, l'objectif n'est pas directionnel",
       "provenance": [
-        "coût: liquidity_cost (scénario 300 USDT)",
+        "coût: order_book (scénario 300 USDT)",
         "profondeur: carnet public observé",
         "frais: NOT_VERIFIED (exclus ; coût réel >= coût publié)",
         "objectif: objectives.short_term"
@@ -379,6 +377,6 @@
       ]
     }
   },
-  "collection_id": "8f325246-1d6e-4caa-a0b4-b73d76e9c5f6",
-  "snapshot_id": "da1a12dd6288d66903d6bc96ad1bbb0d22e90dc404a6a0e3b7ff8e9c4de0cf59"
+  "collection_id": "017468f7-09a1-4850-aa51-88ef241796e7",
+  "snapshot_id": "7781029f1066c2b012d0659c6f51492350da3e6a96321ce8bff37f0147df7640"
 }
