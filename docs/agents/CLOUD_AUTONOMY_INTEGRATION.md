@@ -67,13 +67,27 @@ produit un rapport. Après le run, l'orchestrateur collecte donc des **preuves**
 observables via l'API agent-server :
 
 - la réponse finale du coordinateur (`/agent_final_response`) ;
-- chaque conversation enfant réellement lancée (observations
-  `StartChildConversationObservation` dans `/events`), avec son statut et sa
-  réponse finale.
+- chaque délégation de rôle faite par le coordinateur via l'outil
+  `task_tool_set` : `TaskAction` (`subagent_type` = nom de l'agent) et
+  l'observation correspondante `TaskObservation` (`subagent`, `status`,
+  `content`) dans `/events` ;
+- toute conversation enfant lancée (observations
+  `StartChildConversationObservation`), comme signal secondaire.
 
 `verify_outcome()` n'accepte la mission que si **toutes** ces conditions sont
-vraies : conversation `finished`, réponse coordinateur non vide, ≥ 1 sous-agent
-lancé, ≥ 1 sous-agent `finished` avec réponse non vide. Sinon :
+vraies :
+
+- conversation `finished` et réponse coordinateur non vide ;
+- **chacun des trois rôles** (développeur, analyste, vérificateur) a laissé une
+  preuve **distincte** : une `TaskObservation` nommant son agent, d'état
+  `completed`, sans erreur et avec un résultat non vide. Une seule preuve ne
+  suffit plus (l'ancien seuil « ≥ 1 enfant » est rejeté) ;
+- la mission déclare un **critère d'acceptation** (section « Critère
+  d'acceptation » du corps de l'issue). Le critère est *porté* dans le verdict,
+  il n'est jamais *présumé satisfait* : un humain ou un vérificateur indépendant
+  tranche.
+
+Sinon :
 
 - la mission reste `failed`/`resumable` et **hors** `processed` (reprise) ;
 - **aucun** apprentissage `verified: true` n'est écrit ;
@@ -93,8 +107,8 @@ lancé, ≥ 1 sous-agent `finished` avec réponse non vide. Sinon :
 | Quota | OK | `remaining=10`, `daily_limit=20`, reset `2026-11-16` |
 | Coût | borné | plafond global 5 USD ; coordinateur 1 USD ; 0,25 USD/agent ; 30 itérations ; 10/agent |
 | Modèle gratuit | OK | routeur : `openhands/deepseek-v4.1-flash` choisi ; `gpt-5.6` rejeté (`cost_tier=unknown`, règle no-spend) |
-| Verrou atomique KV | **ABSENT hors sandbox** | `kv_lock_available: false` → l'orchestrateur **refuse** toute mission réelle (fail-closed) |
-| Verrou expiré repris | OK | un verrou expiré est effacé puis réacquis ; un verrou frais d'un autre run n'est jamais écrasé ; libération uniquement par le propriétaire |
+| Verrou atomique KV | **CAS** (`?nx=true` / `?if_version=N`, 409) | `GET ?meta=true` → `version` ; `PUT` conditionnel ; en cas de 409, relecture et nouvelle tentative. Fail-closed si le backend n'expose pas de version |
+| Verrou expiré repris | OK | un verrou expiré est **écrasé par CAS** (`if_version`), jamais supprimé ; un verrou frais d'un autre run n'est jamais écrasé ; la libération écrit un **tombstone conditionnel** et ne touche jamais un verrou repris sous nos pieds |
 
 ### Démonstration du fail-closed
 

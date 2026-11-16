@@ -36,6 +36,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 import urllib.error
@@ -244,6 +245,45 @@ def kv_set(key, value) -> None:
         r.read()
 
 
+class LockUnsupported(RuntimeError):
+    """The KV backend cannot support an atomic conditional write.
+
+    Raised when a lock read cannot return the record *version* the compare-and-
+    set needs. The caller then refuses to start a real mission rather than risk
+    two runs working the same mission at once.
+    """
+
+
+def kv_get_meta(key) -> tuple:
+    """Read ``key`` with its version, for a compare-and-set write.
+
+    Returns ``(value, version)``; ``(None, None)`` when the key is absent.
+
+    The automation KV store exposes the record version under ``?meta=true`` and
+    accepts a conditional write with ``?if_version=<version>`` (HTTP 409 on a
+    mismatch). This is the mechanism the shipped ``github`` /
+    ``github-pr-reviewer`` skills use for their own coordination. A backend that
+    answers without a version cannot do an atomic compare-and-set, so we raise
+    :class:`LockUnsupported` and the caller fails closed.
+    """
+    status, body = _request(
+        "GET", f"{_KV_BASE}/v1/kv/{key}?meta=true",
+        headers={"Authorization": f"Bearer {_KV_TOKEN}"},
+    )
+    if status == 404:
+        return None, None
+    if status != 200 or not isinstance(body, dict):
+        raise LockUnsupported(f"KV metadata read failed: HTTP {status}")
+    if "value" not in body:
+        return None, None
+    version = body.get("version")
+    if version is None:
+        raise LockUnsupported(
+            "KV backend does not expose a record version: no atomic compare-and-set"
+        )
+    return body.get("value"), version
+
+
 def _state_path() -> pathlib.Path:
     payload = json.loads(os.environ.get("AUTOMATION_EVENT_PAYLOAD", "{}") or "{}")
     automation_id = payload.get("automation_id", "default")
@@ -280,67 +320,113 @@ def save_state(state: dict) -> None:
 # Cross-run lock (one mission at a time, across distinct cloud runs)
 # --------------------------------------------------------------------------- #
 _LOCK_KEY = "active_mission_lock"
+_LOCK_MAX_ATTEMPTS = 5
+
+
+def _lock_held(record) -> bool:
+    """True when ``record`` is a live lock (a real owner, not expired)."""
+    return (
+        isinstance(record, dict)
+        and bool(record.get("owner"))
+        and not _lock_expired(record)
+    )
 
 
 def acquire_lock(owner: str, ttl_seconds: int = 7200) -> tuple[bool, str]:
-    """Try to take the single mission lock atomically.
+    """Take the single mission lock with an atomic compare-and-set.
 
-    Uses the KV store's conditional ``PUT ?nx=true`` (set-if-not-exists) so two
-    cloud runs racing each other cannot both start a mission. The lock carries
-    an ``expires_at`` so a crashed run cannot wedge the queue forever.
+    Two cloud runs racing for the same mission must not both start it. The KV
+    API has no "set-if-not-exists that also handles an expired record", so the
+    lock is taken with a genuine compare-and-set (CAS), the same mechanism the
+    shipped ``github`` / ``github-pr-reviewer`` skills use:
 
-    Fail-closed: without an atomic KV lock there is no way to guarantee that a
-    concurrent run is not already working on the same mission, so a real
-    mission must NOT start. Returns ``(False, reason)`` in that case.
+    * read the record **with its version** (``GET ?meta=true``);
+    * write conditionally: ``?nx=true`` when the key is absent, else
+      ``?if_version=<version>``;
+    * the backend answers **HTTP 409** when the condition fails, i.e. when
+      another run won the race. We then re-read and retry, and only one run can
+      ever win a given version.
+
+    This removes the read -> check -> write race of the previous version (which
+    re-read and DELETEd an expired record before a non-atomic ``nx`` write).
+
+    Fail-closed: without a backend that reports a record version there is no
+    atomic guarantee, so a real mission must NOT start. Returns ``(False,
+    reason)`` in that case.
     """
     if not kv_available():
         return False, "no atomic KV lock available: refusing to start a real mission"
-
-    existing = kv_get(_LOCK_KEY)
-    if isinstance(existing, dict) and not _lock_expired(existing):
-        return False, f"lock held by {existing.get('owner')} until {existing.get('expires_at')}"
-
-    # An expired lock must be cleared before the conditional write: ``nx=true``
-    # fails as long as the key exists, so without this an expired lock could
-    # never be taken over. We re-read and delete only the exact expired record we
-    # saw, so we never delete a fresh lock another run just wrote. The KV API has
-    # no compare-and-delete, so a residual race remains; the ownership check
-    # below is the final arbiter.
-    if isinstance(existing, dict) and _lock_expired(existing):
-        current = kv_get(_LOCK_KEY)
-        if current == existing:
-            _request("DELETE", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}",
-                     headers={"Authorization": f"Bearer {_KV_TOKEN}"})
 
     record = {
         "owner": owner,
         "acquired_at": policy.utcnow_iso(),
         "expires_at": _expiry_iso(ttl_seconds),
     }
-    # nx=true only writes when the key does not already exist.
-    status, body = _request(
-        "PUT", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}?nx=true", record,
-        headers={"Authorization": f"Bearer {_KV_TOKEN}"},
-    )
-    if status in (200, 201):
-        # Confirm we are the owner: a concurrent run may have written first.
-        current = kv_get(_LOCK_KEY)
-        if isinstance(current, dict) and current.get("owner") == owner:
+
+    for _ in range(_LOCK_MAX_ATTEMPTS):
+        try:
+            current, version = kv_get_meta(_LOCK_KEY)
+        except LockUnsupported as exc:
+            return False, f"no atomic compare-and-set: refusing to start a real mission ({exc})"
+
+        if _lock_held(current):
+            return False, (
+                f"lock held by {current.get('owner')} until {current.get('expires_at')}"
+            )
+
+        # The key is absent (create with nx) or holds an expired/released record
+        # (overwrite only if it is still at the version we just read).
+        condition = "nx=true" if version is None else f"if_version={version}"
+        status, _body = _request(
+            "PUT", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}?{condition}", record,
+            headers={"Authorization": f"Bearer {_KV_TOKEN}"},
+        )
+        if status in (200, 201, 204):
+            # CAS won: no other run can hold this version. No re-read needed.
             return True, "lock acquired"
-        return False, "lock taken by a concurrent run"
-    if status == 409:
-        return False, "lock already exists"
-    return False, f"lock write failed: HTTP {status}"
+        if status == 409:
+            continue  # lost the race; re-read and retry
+        return False, f"lock write failed: HTTP {status}"
+
+    return False, "lock contention: could not acquire within the retry budget"
 
 
 def release_lock(owner: str) -> None:
-    """Release the lock only if this run owns it."""
+    """Release the lock only if this run owns it, using a conditional write.
+
+    A plain read -> DELETE is unsafe: between the two, an expired lock could be
+    taken over by another run, whose fresh lock our DELETE would then remove.
+    Instead we compare-and-set the record we read (``?if_version=<version>``) to
+    a released tombstone. A 409 means someone else changed the record, so we
+    re-read and retry; we never clobber a lock we no longer own.
+    """
     if not kv_available():
         return
-    current = kv_get(_LOCK_KEY)
-    if isinstance(current, dict) and current.get("owner") == owner:
-        _request("DELETE", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}",
-                 headers={"Authorization": f"Bearer {_KV_TOKEN}"})
+    for _ in range(_LOCK_MAX_ATTEMPTS):
+        try:
+            current, version = kv_get_meta(_LOCK_KEY)
+        except LockUnsupported:
+            return
+        if not isinstance(current, dict) or current.get("owner") != owner:
+            return  # not ours (or already gone): leave it untouched
+        if version is None:
+            return
+        tombstone = {
+            "owner": "",
+            "released_at": policy.utcnow_iso(),
+            "expires_at": _expiry_iso(-1),
+            "released_by": owner,
+        }
+        status, _body = _request(
+            "PUT", f"{_KV_BASE}/v1/kv/{_LOCK_KEY}?if_version={version}", tombstone,
+            headers={"Authorization": f"Bearer {_KV_TOKEN}"},
+        )
+        if status in (200, 201, 204):
+            return
+        if status == 409:
+            continue  # changed under us; re-read
+        return
+
 
 
 def _expiry_iso(ttl_seconds: int) -> str:
@@ -396,7 +482,7 @@ def reconcile_stale_active(state: dict, dry_run: bool) -> str | None:
             "read; refusing to reconcile without proof it is not running"
         )
     lock = kv_get(_LOCK_KEY)
-    if isinstance(lock, dict) and not _lock_expired(lock):
+    if _lock_held(lock):
         return (
             f"a mission is already active (lock held by {lock.get('owner')} "
             f"until {lock.get('expires_at')})"
@@ -490,15 +576,17 @@ def quota_remaining() -> int | None:
 # --------------------------------------------------------------------------- #
 # Conversation payload — reuses the existing team, unchanged
 # --------------------------------------------------------------------------- #
-def build_payload(mission_issue: dict, work_branch: str, config: dict, llm: dict) -> dict:
+def build_payload(mission_issue: dict, work_branch: str, config: dict, llm: dict,
+                  names: dict | None = None) -> dict:
     """Assemble the coordinator payload from the existing team configuration.
 
     The three agent definitions, their prompts, the read-only contract and the
     PreToolUse guard all come from ``team_config`` — this function only wires
-    them together and adds the mission text.
+    them together and adds the mission text. ``names`` lets the caller reuse the
+    exact per-run agent names it will later verify against.
     """
-    suffix = time.strftime("%H%M%S")
-    names = cfg.unique_names(suffix)
+    if names is None:
+        names = cfg.unique_names(time.strftime("%H%M%S"))
     hooks = cfg.hook_config()
 
     definitions = []
@@ -781,7 +869,8 @@ def run(config: dict, offline: bool = False) -> int:
                                    "native_tool_calling", "usage_id",
                                    "reasoning_effort") if k in raw}
 
-    payload = build_payload(mission, work_branch, config, llm)
+    agent_names = cfg.unique_names(time.strftime("%H%M%S"))
+    payload = build_payload(mission, work_branch, config, llm, names=agent_names)
     payload_problems = preflight.check_payload(payload)
     payload_problems += preflight.check_budget(payload)
     if payload_problems:
@@ -818,12 +907,16 @@ def run(config: dict, offline: bool = False) -> int:
         journal_entry(state, "conversation_finished", conversation=cid, status=final)
 
         # --- Validation: a finished status is NOT a success by itself. ---
-        # Collect the proof the team actually ran and reported, then accept the
-        # mission only when the evidence supports it. Absence of proof is a
-        # failure, not an assumption of success.
-        evidence = collect_evidence(cid)
-        validated, verdict = verify_outcome(final, evidence)
+        # Collect the proof each required role actually ran and reported, then
+        # accept the mission only when the evidence supports it. Absence of any
+        # role's proof is a failure, not an assumption of success.
+        evidence = collect_evidence(cid, expected_roles=agent_names,
+                                    mission_body=mission.get("body") or "")
+        validated, verdict = verify_outcome(final, evidence,
+                                            expected_roles=agent_names,
+                                            mission_body=mission.get("body") or "")
         journal_entry(state, "outcome_verdict", validated=validated,
+                      roles={r: info.get("proven") for r, info in verdict["roles"].items()},
                       checks=verdict["checks"])
 
         # --- Persist the outcome on the bus (survives container destruction). ---
@@ -872,8 +965,15 @@ def run(config: dict, offline: bool = False) -> int:
 
 TERMINAL_STATES = ("finished", "error", "stopped")
 
-# Execution statuses that mean a child conversation produced a usable result.
-_CHILD_FINISHED = ("finished",)
+# ``TaskObservation.status`` value that means a delegated role ran to completion.
+_TASK_COMPLETED = ("completed",)
+# Base agent names per role (``tel99-dev`` …), used to recognise a delegation
+# even if the coordinator reports the name without its per-run suffix.
+_BASE_NAMES = {spec.role: spec.name for spec in cfg.ACTIVE_AGENTS}
+_ROLE_LABELS = {"development": "developer", "quant": "analyst", "quality": "verifier"}
+
+# A mission's declared acceptance criterion, e.g. "### Critère d'acceptation".
+_ACCEPTANCE_HEADING = re.compile(r"crit[èe]res?\s+d['’]acceptation", re.IGNORECASE)
 
 
 def _get_json(path: str) -> dict:
@@ -882,16 +982,87 @@ def _get_json(path: str) -> dict:
     return body if status == 200 and isinstance(body, dict) else {}
 
 
-def collect_evidence(cid: str) -> dict:
-    """Gather observable proof that the team actually ran and reported.
+def _observation_text(observation: dict) -> str:
+    """Concatenate the text parts of a TaskObservation's ``content``."""
+    parts = []
+    for item in observation.get("content") or []:
+        if isinstance(item, dict) and item.get("type") == "text":
+            parts.append(item.get("text") or "")
+    return "\n".join(parts).strip()
+
+
+def extract_acceptance_criteria(body: str) -> str:
+    """Return the mission's declared acceptance criterion, or ``""``.
+
+    Deterministic: it reads the section under a heading mentioning "critère
+    d'acceptation" up to the next heading. An empty result means the mission
+    declares no acceptance criterion, which makes it unvalidatable — we never
+    invent one.
+    """
+    if not body:
+        return ""
+    captured: list[str] = []
+    capturing = False
+    for raw in body.splitlines():
+        line = raw.strip()
+        is_heading = line.startswith("#") or (line.startswith("**") and line.endswith("**"))
+        if _ACCEPTANCE_HEADING.search(line):
+            capturing = True
+            rest = _ACCEPTANCE_HEADING.sub("", line).strip(" #*:–-")
+            if rest:
+                captured.append(rest)
+            continue
+        if capturing:
+            if is_heading:
+                break
+            if line:
+                captured.append(line)
+    return " ".join(captured).strip()
+
+
+def _role_evidence(observations: list, expected_name: str, base_name: str) -> dict:
+    """Find the proof a single role produced a result.
+
+    A role is proven only by a ``TaskObservation`` whose ``subagent`` matches the
+    role's agent name for this run (identity), that is not an error, whose
+    ``status`` is ``completed`` (state) and that carries non-empty text (result).
+    """
+    matches = []
+    for obs in observations:
+        subagent = obs.get("subagent") or ""
+        if subagent == expected_name or (base_name and subagent.startswith(base_name)):
+            matches.append(obs)
+    proven = [
+        o for o in matches
+        if o.get("status") in _TASK_COMPLETED
+        and not o.get("is_error")
+        and int(o.get("response_chars", 0)) > 0
+    ]
+    return {
+        "expected_name": expected_name,
+        "delegations": len(matches),
+        "proven": len(proven),
+        "status": proven[0].get("status") if proven else (
+            matches[0].get("status") if matches else ""),
+        "task_id": proven[0].get("task_id") if proven else "",
+        "response_chars": proven[0].get("response_chars") if proven else 0,
+    }
+
+
+def collect_evidence(cid: str, expected_roles: dict | None = None,
+                     mission_body: str = "") -> dict:
+    """Gather observable proof that each required role actually ran and reported.
 
     A ``finished`` execution status only says the conversation stopped; it says
     nothing about whether the three roles ran or produced anything. This reads
     what the agent server actually persisted:
 
       * the coordinator's final response text;
-      * every child conversation the coordinator started (sub-agents), with its
-        own execution status and final response.
+      * every sub-agent delegation the coordinator made, from the ``task_tool_set``
+        tool: ``TaskAction`` (the delegation, with ``subagent_type``) and the
+        matching ``TaskObservation`` (the result: ``subagent``, ``status``,
+        ``content``);
+      * any child conversations, as a secondary signal.
 
     Everything is best-effort: a missing endpoint yields an empty value, which
     the verdict treats as *absence of proof* — never as a success.
@@ -899,8 +1070,10 @@ def collect_evidence(cid: str) -> dict:
     final = _get_json(f"/api/conversations/{cid}/agent_final_response")
     coordinator_response = (final.get("response") or "").strip()
 
-    children: list[dict] = []
-    seen: set[str] = set()
+    observations: list[dict] = []
+    delegations: list[dict] = []
+    children: list[str] = []
+    seen_children: set[str] = set()
     status, events = _request(
         "GET", f"{agent_server_base()}/api/conversations/{cid}/events",
         headers={"X-Session-API-Key": session_key()},
@@ -909,15 +1082,31 @@ def collect_evidence(cid: str) -> dict:
         for event in events:
             if not isinstance(event, dict):
                 continue
+            action = event.get("action")
+            if isinstance(action, dict) and action.get("kind") in (
+                "TaskAction", "TaskActionWithRisk"
+            ):
+                delegations.append({
+                    "subagent_type": action.get("subagent_type") or "",
+                    "description": action.get("description") or "",
+                })
             observation = event.get("observation")
             if not isinstance(observation, dict):
                 continue
-            if observation.get("kind") != "StartChildConversationObservation":
-                continue
-            child_id = observation.get("conversation_id")
-            if isinstance(child_id, str) and child_id and child_id not in seen:
-                seen.add(child_id)
-                children.append(child_id)
+            kind = observation.get("kind")
+            if kind == "TaskObservation":
+                observations.append({
+                    "task_id": observation.get("task_id") or "",
+                    "subagent": observation.get("subagent") or "",
+                    "status": observation.get("status") or "",
+                    "is_error": bool(observation.get("is_error")),
+                    "response_chars": len(_observation_text(observation)),
+                })
+            elif kind == "StartChildConversationObservation":
+                child_id = observation.get("conversation_id")
+                if isinstance(child_id, str) and child_id and child_id not in seen_children:
+                    seen_children.add(child_id)
+                    children.append(child_id)
 
     child_reports = []
     for child_id in children:
@@ -929,22 +1118,42 @@ def collect_evidence(cid: str) -> dict:
             "response_chars": len((child_final.get("response") or "").strip()),
         })
 
+    roles = {}
+    for role, expected_name in (expected_roles or {}).items():
+        roles[role] = _role_evidence(
+            observations, expected_name, _BASE_NAMES.get(role, "")
+        )
+
     return {
         "conversation_id": cid,
         "coordinator_response_chars": len(coordinator_response),
+        "observations": observations,
+        "delegations": delegations,
         "children": child_reports,
+        "roles": roles,
+        "acceptance_criteria": extract_acceptance_criteria(mission_body),
     }
 
 
-def verify_outcome(final: str, evidence: dict,
-                   min_finished_children: int = 1) -> tuple[bool, dict]:
+def verify_outcome(final: str, evidence: dict, *,
+                   expected_roles: dict | None = None,
+                   mission_body: str = "") -> tuple[bool, dict]:
     """Decide whether an outcome is *validated*, from evidence alone.
 
-    The verdict is deliberately conservative: a run is validated only when the
-    conversation finished AND the coordinator produced a final response AND at
-    least ``min_finished_children`` sub-agent conversations finished with a
-    non-empty response. Any missing proof makes it unvalidated, so the mission
-    stays resumable and no ``verified`` learning is recorded.
+    The verdict is deliberately conservative. A run is validated only when:
+
+      * the conversation finished;
+      * the coordinator produced a final response;
+      * **every required role** (Analyst, Developer, Verifier by default) left a
+        distinct proof: a ``TaskObservation`` naming that role's agent, in state
+        ``completed``, with a non-empty result;
+      * the mission declares an acceptance criterion to validate against.
+
+    Any missing proof makes the outcome unvalidated: the mission stays resumable
+    and no ``verified`` learning is recorded. This never asserts that the
+    acceptance criterion is *satisfied* — it proves the required roles ran and
+    reported, and carries the declared criterion so a human or independent
+    verifier can judge it.
 
     Returns ``(validated, verdict)`` where the verdict lists each check, so the
     journal shows exactly why an outcome was or was not accepted.
@@ -962,21 +1171,47 @@ def verify_outcome(final: str, evidence: dict,
         int(evidence.get("coordinator_response_chars", 0)) > 0,
         f"{evidence.get('coordinator_response_chars', 0)} chars",
     )
-    children = evidence.get("children") or []
-    ran = check("sub_agents_ran", len(children) >= 1, f"{len(children)} child(ren)")
-    finished_children = [
-        c for c in children
-        if c.get("status") in _CHILD_FINISHED and int(c.get("response_chars", 0)) > 0
-    ]
-    reported = check(
-        "sub_agents_reported",
-        len(finished_children) >= int(min_finished_children),
-        f"{len(finished_children)} finished child(ren) with a response",
+
+    roles = evidence.get("roles")
+    if roles is None:
+        # Callers that pass a raw evidence dict get the roles recomputed from the
+        # observations, so the verdict can never silently skip the role checks.
+        roles = {}
+        for role, expected_name in (expected_roles or {}).items():
+            roles[role] = _role_evidence(
+                evidence.get("observations") or [],
+                expected_name, _BASE_NAMES.get(role, ""),
+            )
+    if not roles:
+        roles = {spec.role: _role_evidence(
+            evidence.get("observations") or [], spec.name, spec.name)
+            for spec in cfg.ACTIVE_AGENTS}
+
+    role_checks = []
+    for role, info in roles.items():
+        label = _ROLE_LABELS.get(role, role)
+        role_checks.append(check(
+            f"role_{role}_reported",
+            int(info.get("proven", 0)) > 0,
+            f"{label}: {info.get('proven', 0)} completed proof(s), "
+            f"status {info.get('status') or 'none'!r}",
+        ))
+
+    criteria = evidence.get("acceptance_criteria")
+    if criteria is None:
+        criteria = extract_acceptance_criteria(mission_body)
+    criteria_check = check(
+        "acceptance_criteria_declared",
+        bool((criteria or "").strip()),
+        f"{len((criteria or '').strip())} chars declared",
     )
 
-    validated = all((finished, has_response, ran, reported))
+    validated = all([finished, has_response, criteria_check, *role_checks])
     return validated, {"validated": validated, "checks": checks,
-                       "children": children}
+                       "roles": roles, "acceptance_criteria": criteria,
+                       "observations": evidence.get("observations") or [],
+                       "children": evidence.get("children") or []}
+
 
 
 def wait_for(cid: str, deadline: float, poll: float = 5.0) -> str:
