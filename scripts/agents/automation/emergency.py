@@ -5,21 +5,36 @@ is started, regardless of the configured cron, the queue, or a running mission.
 It is checked *first* in ``run()`` — before the environment probe, before the
 preflight, before any spend — so flipping it stops the next run immediately.
 
+Two distinct guarantees, deliberately separated:
+
+  * **Prevent the next launch** — :func:`local_stop` / :func:`stop_requested`
+    are evaluated at the very start of a run, before any network access. Setting
+    a flag makes the *next* run stop (exit 3) with no conversation and no spend.
+  * **Interrupt a mission already active** — the orchestrator's ``wait_for``
+    polls the local brake while a conversation runs and, when it is set, calls
+    the agent-server ``/interrupt`` endpoint (see ``interrupt_conversation`` in
+    the orchestrator). This only reaches a conversation the *same* run is
+    driving; a conversation started by another container must be interrupted via
+    the documented operator procedure (see ``docs/agents/ACTIVATION_RUNBOOK.md``).
+
+Setting the brake is therefore necessary but not sufficient to stop a mission
+that another pod is already running: the brake stops *this* run's next action,
+and the durable KV flag stops the next run anywhere. The runbook states this
+limit explicitly rather than promising an instant global stop.
+
 Three independent sources are consulted; any one of them being set stops the run:
 
   * ``TEL99_EMERGENCY_STOP`` — an environment flag the automation config (or an
-    operator) can set to ``1`` / ``true`` / ``yes`` / ``on``;
-  * the KV key ``emergency_stop`` — durable across containers, so it survives the
-    destruction of the pod that set it (the cloud path);
+    operator) can set to ``1`` / ``true`` / ``yes`` / ``on`` (local, no network);
   * the local sentinel file ``.tel99-automation-state/EMERGENCY_STOP`` — the
-    offline / on-host path.
+    offline / on-host path (local, no network);
+  * the KV key ``emergency_stop`` — durable across containers, so it survives the
+    destruction of the pod that set it (network; checked after the local ones).
 
-Why fail-open on a *read* error but fail-closed on a *set* flag: an unreadable
-KV must not wedge the queue forever (the local sentinel and the env flag still
-work), but a flag that *is* present always stops the run. This mirrors the
-project's rule that an unknown value is never treated as "safe to spend" only
-where a spend is at stake; here the brake is additive, so an unreadable remote
-source degrades to the two local sources instead of blocking every future run.
+Why the local sources are checked before the KV one: an operator halting a run
+must not depend on — or wait for — a network read. ``run()`` therefore evaluates
+the local brake *before* ``load_state()`` (which reads the KV store), and only
+then consults the durable KV flag.
 """
 
 from __future__ import annotations
@@ -61,6 +76,19 @@ def sentinel_stop(state_dir: str | pathlib.Path) -> bool:
         return False
 
 
+def local_stop(state_dir: str | pathlib.Path) -> tuple[bool, str]:
+    """Return ``(stopped, reason)`` for the local sources only. No network.
+
+    Used first in ``run()`` so the brake is honoured before ``load_state()``
+    reads the KV store over the network.
+    """
+    if env_stop():
+        return True, f"{ENV_FLAG} is set"
+    if sentinel_stop(state_dir):
+        return True, f"sentinel file {SENTINEL_NAME} is present"
+    return False, ""
+
+
 def kv_stop(kv_get) -> bool:
     """True when the durable KV flag is set. ``kv_get`` may raise; treat as no."""
     try:
@@ -79,10 +107,9 @@ def stop_requested(state_dir: str | pathlib.Path, kv_get) -> tuple[bool, str]:
     unavailable). The check order is local-first so a stop is recognised even
     when the durable store is unreachable.
     """
-    if env_stop():
-        return True, f"{ENV_FLAG} is set"
-    if sentinel_stop(state_dir):
-        return True, f"sentinel file {SENTINEL_NAME} is present"
+    stopped, reason = local_stop(state_dir)
+    if stopped:
+        return stopped, reason
     if kv_get is not None and kv_stop(kv_get):
         return True, f"KV key {KV_KEY!r} is set"
     return False, ""

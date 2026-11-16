@@ -5,7 +5,7 @@ Ce document décrit **ce qui est déjà prouvé**, **ce qui reste bloqué**, et 
 Aucune action de ce runbook n'est déclenchée par un agent : l'agent n'exécute
 rien tant qu'un humain n'a pas franchi l'étape correspondante.
 
-État : Mission C. Branche isolée `converge/tel99-main-20261116` (PR #76).
+État : Mission C (clôture technique). Branche isolée `converge/tel99-main-20261116` (PR #76).
 Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
 
 ---
@@ -19,8 +19,8 @@ Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
 | Garde-fou | `rm -rf` → `HookExecutionEvent.exit_code=2`, action bloquée, cible intacte |
 | Verrou KV (CAS) | `scripts/agents/automation/verify_kv.py --local` → **10/10 PASS** (CAS, verrou, dédup, reprise, persistance) |
 | Manifeste plugin | preflight serveur HTTP 200, ref résolu, trigger `0 3 * * *` UTC |
-| Arrêt d'urgence | **Nouveau** : `TEL99_EMERGENCY_STOP=1` → run `exit=3` avant tout réseau ; journalisé |
-| Tests | 679 tests OK (`skipped=6`) ; CI PR #76 = 4/4 verte |
+| Arrêt d'urgence | `TEL99_EMERGENCY_STOP=1` → run `exit=3` **avant tout accès réseau** ; journalisé (`scope=next_run`) ; interruption d'une conversation pilotée par le run (§4b) |
+| Tests | 688 tests OK (`skipped=6`) ; CI PR #76 = 4/4 verte |
 
 ## 2. Ce qui reste bloqué (cause exacte)
 
@@ -34,7 +34,7 @@ Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
 ## 3. Les cinq actions humaines indispensables
 
 ### Action 1 — Fusionner PR #76 dans `main`
-- La PR est `mergeable: clean`, **100 % additive** (+12444/-0), CI 4/4 verte, 679 tests.
+- La PR est `mergeable: clean`, **100 % additive**, CI 4/4 verte, 688 tests.
 - C'est la convergence unique : après fusion, PR #71 devient inutile.
 - Aucun agent ne fusionne.
 
@@ -65,22 +65,62 @@ Aucun merge, aucun déploiement, aucun cron, aucune automation, aucun ordre.
 
 ## 4. Arrêt d'urgence (kill-switch)
 
-Trois sources, l'une suffit ; vérifiée **en premier** dans `run()`, avant tout réseau :
+Deux garanties **distinctes**. Ne jamais annoncer « interruption immédiate
+globale » : ce n'est pas démontré.
+
+### 4a. Empêcher le prochain lancement (démontré)
+
+Évalué **en premier** dans `run()`, **avant tout accès réseau** (le frein local
+précède `load_state()`, qui lit le KV). Un run stoppé retourne `exit=3`.
 
 ```bash
-# A. Variable d'environnement (le plus rapide)
+# A. Variable d'environnement (le plus rapide, aucun réseau)
 TEL99_EMERGENCY_STOP=1
 
-# B. Fichier sentinelle local (hôte / hors ligne)
+# B. Fichier sentinelle local (hôte / hors ligne, aucun réseau)
 touch .tel99-automation-state/EMERGENCY_STOP
 
-# C. Clé KV durable (survit à la destruction du pod)
-#    écriture via l'API KV de l'automation : clé "emergency_stop" = {"stopped": true}
+# C. Clé KV durable (stoppe le prochain run de N'IMPORTE quel conteneur)
+#    écrire, via l'API KV de l'automation : clé "emergency_stop" = {"stopped": true}
+
+# D. Drapeau de configuration du plugin
+#    config.emergency_stop = true
 ```
 
-Un run stoppé retourne `exit=3` et journalise
-`{"event": "emergency_stop", "reason": ...}`. Le frein agit aussi sur un `dry_run`
-(« ne rien faire », pas seulement « ne rien dépenser »).
+Preuve : `TEL99_EMERGENCY_STOP=1 python3 scripts/agents/automation/orchestrator.py`
+→ `exit=3`, journal `{"event":"emergency_stop","scope":"next_run"}`, **aucune**
+sonde réseau, **aucune** conversation, **aucune** écriture d'état.
+
+### 4b. Interrompre une mission déjà active (portée limitée, démontrée)
+
+- Pendant qu'une conversation tourne, `wait_for` relit le frein **local** à chaque
+  cycle de scrutation et, s'il est posé, appelle l'endpoint agent-server
+  `/api/conversations/<id>/interrupt` puis retourne `stopped`.
+- **Portée réelle** : cela n'interrompt que la conversation que **ce run** pilote.
+  Un run d'un **autre** conteneur ne peut pas être interrompu à distance par ce
+  mécanisme ; il faut la procédure 4c.
+- Preuve : test `test_wait_for_interrupts_when_the_brake_is_set` (le frein posé
+  → `interrupt_conversation` appelé → statut `stopped`).
+
+### 4c. Procédure opérationnelle — interrompre puis désactiver
+
+1. **Poser le frein durable** : écrire la clé KV `emergency_stop` = `{"stopped": true}`
+   (bloque tout prochain run, y compris sur un autre pod). Poser aussi
+   `TEL99_EMERGENCY_STOP=1` sur l'automation si l'interface le permet.
+2. **Interrompre la conversation active** :
+   - depuis l'interface OpenHands : arrêter la conversation concernée ;
+   - ou via l'API agent-server : `POST /api/conversations/<id>/interrupt`
+     (nécessite la clé de session du pod concerné).
+3. **Désactiver l'automation** : dans OpenHands Cloud, passer l'automation en
+   *inactive* (ou supprimer son déclencheur cron). Tant qu'elle est inactive,
+   aucun run ne démarre, même frein absent.
+4. **Vérifier** : `python3 scripts/agents/automation/orchestrator.py --diagnose`
+   → `emergency_stop.stopped = true`, `scope = next_run_and_owned_conversation`.
+5. **Reprise** : retirer le frein (KV + env + sentinelle), réactiver l'automation,
+   puis un run reprend la mission restée `active` (elle n'est jamais perdue).
+
+Ce qui **n'est pas** garanti et ne doit pas être affirmé : une coupure instantanée
+d'une mission hébergée par un autre conteneur, sans passer par l'étape 2/3.
 
 ## 5. Quotas, journaux, PC éteint
 

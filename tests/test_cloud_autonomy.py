@@ -21,12 +21,14 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTOMATION = ROOT / "scripts" / "agents" / "automation"
 GUARD = ROOT / "scripts" / "agents" / "guard" / "guard.py"
 PLUGIN = ROOT / ".plugin" / "plugin.json"
+CONFIG = ROOT / "scripts" / "agents" / "automation" / "automation.config.json"
 
 
 def _load(module_name, path):
@@ -105,6 +107,38 @@ class PluginManifestTests(unittest.TestCase):
         data = json.loads(PLUGIN.read_text(encoding="utf-8"))
         profile = data["automation"]["runtime"]["llm_profile"]["default_name"]
         self.assertEqual(profile, "openhands_deepseek-v4.1-flash")
+
+    def test_shipped_automation_config_matches_the_plugin_schema(self):
+        """The config we hand the operator must be accepted by the plugin schema.
+
+        ``additionalProperties`` is false, so a stray key (e.g. a ``_comment``)
+        would make the platform reject the config. This test uses a real JSON
+        Schema validator when available and otherwise checks the two rules that
+        matter here: no unknown keys and all required keys present.
+        """
+        plugin = json.loads(PLUGIN.read_text(encoding="utf-8"))
+        schema = plugin["automation"]["config_schema"]
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
+
+        try:
+            import jsonschema  # noqa: PLC0415 - optional dependency
+        except ImportError:
+            jsonschema = None
+
+        if jsonschema is not None:
+            jsonschema.validate(config, schema)
+            return
+
+        properties = set(schema.get("properties", {}))
+        unknown = set(config) - properties
+        self.assertEqual(unknown, set(), f"unknown keys rejected by schema: {unknown}")
+        missing = set(schema.get("required", [])) - set(config)
+        self.assertEqual(missing, set(), f"missing required keys: {missing}")
+
+    def test_shipped_automation_config_has_no_comment_key(self):
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
+        self.assertNotIn("_comment", config)
+        self.assertTrue(config["dry_run"])
 
 
 class MissionSelectionTests(unittest.TestCase):
@@ -942,6 +976,113 @@ class EmergencyStopTests(unittest.TestCase):
             os.environ.clear()
             os.environ.update(saved)
         self.assertEqual(code, 3)
+
+    def test_local_stop_reports_env_without_network(self):
+        os.environ[emergency.ENV_FLAG] = "1"
+        stopped, reason = emergency.local_stop("/nonexistent-dir-tel99")
+        self.assertTrue(stopped)
+        self.assertIn(emergency.ENV_FLAG, reason)
+
+    def test_local_stop_ignores_kv_source(self):
+        # local_stop must not consult the KV reader at all.
+        def boom(key):
+            raise AssertionError("local_stop must not read the KV store")
+
+        stopped, _ = emergency.local_stop("/nonexistent-dir-tel99")
+        self.assertFalse(stopped)
+        # stop_requested still consults KV, and tolerates a raising reader.
+        self.assertFalse(emergency.stop_requested("/nonexistent-dir-tel99", boom)[0])
+
+    def test_stopped_path_makes_no_network_call(self):
+        """The local brake must return before load_state (a possible KV read)."""
+        saved = dict(os.environ)
+        original_load = orchestrator.load_state
+        original_save = orchestrator.save_state
+        called = {"load": False, "save": False}
+
+        def spy_load():
+            called["load"] = True
+            return {"version": 1, "processed": [], "active": None, "journal": []}
+
+        try:
+            os.environ[emergency.ENV_FLAG] = "true"
+            orchestrator.load_state = spy_load
+            orchestrator.save_state = lambda state: called.__setitem__("save", True)
+            code = orchestrator.run(dict(orchestrator.DEFAULT_CONFIG), offline=False)
+        finally:
+            orchestrator.load_state = original_load
+            orchestrator.save_state = original_save
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 3)
+        self.assertFalse(called["load"], "the brake must precede load_state")
+        self.assertFalse(called["save"], "the stopped path must not write state")
+
+    def test_kv_flag_stops_the_next_run(self):
+        """The durable KV flag is honoured once the local sources are clear."""
+        saved = dict(os.environ)
+        original_load = orchestrator.load_state
+        original_kv_avail = orchestrator.kv_available
+        original_kv_get = orchestrator.kv_get
+        original_save = orchestrator.save_state
+        try:
+            os.environ.pop(emergency.ENV_FLAG, None)
+            orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                               "active": None, "journal": []}
+            orchestrator.save_state = lambda state: None
+            orchestrator.kv_available = lambda: True
+            orchestrator.kv_get = lambda key: {"stopped": True}
+            code = orchestrator.run(dict(orchestrator.DEFAULT_CONFIG), offline=True)
+        finally:
+            orchestrator.load_state = original_load
+            orchestrator.kv_available = original_kv_avail
+            orchestrator.kv_get = original_kv_get
+            orchestrator.save_state = original_save
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 3)
+
+    def test_wait_for_interrupts_when_the_brake_is_set(self):
+        """An active conversation is interrupted and reported as ``stopped``."""
+        import tempfile
+        saved = dict(os.environ)
+        original_req = orchestrator._request
+        original_interrupt = orchestrator.interrupt_conversation
+        calls = {"interrupt": []}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                (pathlib.Path(tmp) / emergency.SENTINEL_NAME).write_text("stop")
+                os.environ.pop(emergency.ENV_FLAG, None)
+                orchestrator._request = lambda *a, **k: (200, {"execution_status": "running"})
+                orchestrator.interrupt_conversation = (
+                    lambda cid: calls["interrupt"].append(cid) or True
+                )
+                final = orchestrator.wait_for("cid-x", deadline=time.time() + 5,
+                                              poll=0, state_dir=tmp)
+        finally:
+            orchestrator._request = original_req
+            orchestrator.interrupt_conversation = original_interrupt
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(final, "stopped")
+        self.assertEqual(calls["interrupt"], ["cid-x"])
+
+    def test_wait_for_deadline_interrupts_the_child(self):
+        saved = dict(os.environ)
+        original_interrupt = orchestrator.interrupt_conversation
+        calls = {"interrupt": []}
+        try:
+            os.environ.pop(emergency.ENV_FLAG, None)
+            orchestrator.interrupt_conversation = (
+                lambda cid: calls["interrupt"].append(cid) or True
+            )
+            final = orchestrator.wait_for("cid-y", deadline=time.time() - 1, poll=0)
+        finally:
+            orchestrator.interrupt_conversation = original_interrupt
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(final, "timeout")
+        self.assertEqual(calls["interrupt"], ["cid-y"])
 
     def test_brake_is_checked_before_any_network_probe(self):
         """The stop must return before diagnose_environment is ever called."""

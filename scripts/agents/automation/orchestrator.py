@@ -589,7 +589,11 @@ def diagnose_environment() -> dict:
         "kv_lock_capability": kv_meta_probe(_LOCK_KEY),
         "session_key_present": bool(session_key()),
         "github_token_present": bool(github_token()),
-        "emergency_stop": {"stopped": stop_state, "reason": stop_reason},
+        # ``scope`` makes the limit explicit: this brake stops the NEXT run and
+        # interrupts a conversation THIS run is driving; it is not a promise of
+        # an instant global stop for a mission another container already runs.
+        "emergency_stop": {"stopped": stop_state, "reason": stop_reason,
+                           "scope": "next_run_and_owned_conversation"},
     }
 
 
@@ -749,28 +753,44 @@ def load_config(path: str | None) -> dict:
 
 
 def run(config: dict, offline: bool = False) -> int:
-    state = load_state()
     started = time.time()
-    deadline = started + int(config["max_runtime_seconds"])
     owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
+
+    # --- Emergency stop, local sources first: NO network before the brake. ----
+    # ``load_state`` may read the KV store over the network; a local stop must
+    # not wait for it. The env flag, the sentinel file and the config flag are
+    # all evaluated here, before any remote call, so an operator halting a run
+    # does not depend on network reachability. The durable KV flag is checked
+    # further down, once the KV reader is legitimately needed.
+    state_dir = _state_path().parent
+    if emergency is not None:
+        stopped, reason = emergency.local_stop(state_dir)
+        if not stopped and config.get("emergency_stop"):
+            stopped, reason = True, "config emergency_stop is true"
+        if stopped:
+            # No network at all on this path: neither ``load_state`` nor
+            # ``save_state`` is called, so the brake returns before any KV read
+            # or write. The stop is still reported on stdout via the journal.
+            state = {"version": 1, "processed": [], "active": None, "journal": []}
+            journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
+                          repository=config["repository"], offline=offline, owner=owner)
+            journal_entry(state, "emergency_stop", reason=reason, scope="next_run")
+            return 3
+
+    state = load_state()
+    deadline = started + int(config["max_runtime_seconds"])
 
     journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
                   repository=config["repository"], offline=offline, owner=owner)
 
-    # --- Emergency stop: the first brake, before any spend. -------------------
-    # Checked before the environment probe, the preflight and any conversation,
-    # so an operator can halt the next run by setting one flag. Dry runs are
-    # stopped too: the brake means "do nothing", not "do nothing expensive".
-    if emergency is not None:
-        stopped, reason = emergency.stop_requested(
-            _state_path().parent, kv_get if kv_available() else None
-        )
-        if not stopped and config.get("emergency_stop"):
-            stopped, reason = True, "config emergency_stop is true"
-        if stopped:
-            journal_entry(state, "emergency_stop", reason=reason)
-            save_state(state)
-            return 3
+    # --- Emergency stop, durable KV flag (network; after the local sources). --
+    # Reaching here means no local brake is set. The KV flag is what stops the
+    # next run started by *any* container, so it is checked before any spend.
+    if emergency is not None and kv_available() and emergency.kv_stop(kv_get):
+        journal_entry(state, "emergency_stop",
+                      reason=f"KV key {emergency.KV_KEY!r} is set", scope="next_run")
+        save_state(state)
+        return 3
 
     # --- Stop on error: refuse before any spend when a precondition fails. ---
     if not policy.repository_allowed(config["repository"]):
@@ -969,10 +989,20 @@ def run(config: dict, offline: bool = False) -> int:
         cid = body.get("id") or body.get("conversation_id")
         journal_entry(state, "conversation_started", conversation=cid, issue=mission["number"])
 
-        # --- Wait, bounded by the deadline; stop children on timeout. ---
+        # --- Wait, bounded by the deadline; stop children on timeout or stop. ---
         report_phase("running coordinator")
-        final = wait_for(cid, deadline)
+        final = wait_for(cid, deadline, state_dir=state_dir)
         journal_entry(state, "conversation_finished", conversation=cid, status=final)
+        if final == "stopped":
+            # An operator set the brake while this mission ran. The conversation
+            # was interrupted; the mission stays out of ``processed`` so the next
+            # run (once the brake is cleared) resumes it rather than losing it.
+            journal_entry(state, "emergency_interrupt", conversation=cid,
+                          scope="active_mission",
+                          note="conversation interrupted; mission left resumable")
+            state["active"] = None
+            save_state(state)
+            return 3
 
         # --- Validation: a finished status is NOT a success by itself. ---
         # Collect the proof each required role actually ran and reported, then
@@ -1324,10 +1354,39 @@ def verify_outcome(final: str, evidence: dict, *,
 
 
 
-def wait_for(cid: str, deadline: float, poll: float = 5.0) -> str:
-    """Poll a conversation until a terminal state or the deadline."""
+def interrupt_conversation(cid: str) -> bool:
+    """Ask the agent server to interrupt a running conversation.
+
+    This is the *interrupt an active mission* half of the kill-switch. It only
+    reaches a conversation the caller can address on its agent server; it does
+    not reach a conversation hosted by another container, which must be handled
+    by the operator procedure in the runbook. Returns True when the server
+    accepted the request.
+    """
     headers = {"X-Session-API-Key": session_key()}
+    status, _ = _request(
+        "POST", f"{agent_server_base()}/api/conversations/{cid}/interrupt",
+        headers=headers,
+    )
+    return status in (200, 202, 204)
+
+
+def wait_for(cid: str, deadline: float, poll: float = 5.0,
+             state_dir: str | pathlib.Path | None = None) -> str:
+    """Poll a conversation until a terminal state, the deadline or a stop.
+
+    While a conversation runs, the *local* emergency brake is re-read on every
+    poll (no network, so a stop is honoured within one poll interval). When it is
+    set, the conversation is interrupted and the function returns ``"stopped"``.
+    The deadline path also interrupts the child, so no work is left running
+    unattended. This only interrupts the conversation this run is driving.
+    """
+    headers = {"X-Session-API-Key": session_key()}
+    brake_dir = pathlib.Path(state_dir) if state_dir is not None else _state_path().parent
     while time.time() < deadline:
+        if emergency is not None and emergency.local_stop(brake_dir)[0]:
+            interrupt_conversation(cid)
+            return "stopped"
         status, body = _request(
             "GET", f"{agent_server_base()}/api/conversations/{cid}", headers=headers
         )
@@ -1337,8 +1396,7 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0) -> str:
                 return state
         time.sleep(poll)
     # Deadline reached: stop the child so no work is left running unattended.
-    _request("POST", f"{agent_server_base()}/api/conversations/{cid}/interrupt",
-             headers=headers)
+    interrupt_conversation(cid)
     return "timeout"
 
 
