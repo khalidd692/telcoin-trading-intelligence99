@@ -40,6 +40,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -1099,6 +1100,37 @@ def _get_json(path: str) -> dict:
     return body if status == 200 and isinstance(body, dict) else {}
 
 
+def _iter_events(cid: str, page_limit: int = 100, max_pages: int = 200):
+    """Yield every persisted event of a conversation, oldest first.
+
+    The agent-server exposes two different event endpoints: the batch
+    ``GET /api/conversations/{cid}/events`` takes a *list of event ids* in the
+    request body (a bare GET answers HTTP 422), while
+    ``GET .../events/search`` is the paginated reader. Reading the batch
+    endpoint here silently returned no events, so every delegation was recorded
+    as "no proof" and a real mission was marked failed. This walks
+    ``events/search`` page by page.
+    """
+    page_id = ""
+    for _ in range(max_pages):
+        query = f"?limit={page_limit}"
+        if page_id:
+            query += f"&page_id={urllib.parse.quote(page_id)}"
+        status, body = _request(
+            "GET",
+            f"{agent_server_base()}/api/conversations/{cid}/events/search{query}",
+            headers={"X-Session-API-Key": session_key()},
+        )
+        if status != 200 or not isinstance(body, dict):
+            return
+        items = body.get("items") or []
+        for item in items:
+            yield item
+        page_id = body.get("next_page_id") or ""
+        if not page_id:
+            return
+
+
 def _observation_text(observation: dict) -> str:
     """Concatenate the text parts of a TaskObservation's ``content``."""
     parts = []
@@ -1230,42 +1262,37 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
     delegations: list[dict] = []
     children: list[str] = []
     seen_children: set[str] = set()
-    status, events = _request(
-        "GET", f"{agent_server_base()}/api/conversations/{cid}/events",
-        headers={"X-Session-API-Key": session_key()},
-    )
-    if status == 200 and isinstance(events, list):
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            action = event.get("action")
-            if isinstance(action, dict) and action.get("kind") in (
-                "TaskAction", "TaskActionWithRisk"
-            ):
-                delegations.append({
-                    "subagent_type": action.get("subagent_type") or "",
-                    "description": action.get("description") or "",
-                })
-            observation = event.get("observation")
-            if not isinstance(observation, dict):
-                continue
-            kind = observation.get("kind")
-            if kind == "TaskObservation":
-                text = _observation_text(observation)
-                observations.append({
-                    "task_id": observation.get("task_id") or "",
-                    "subagent": observation.get("subagent") or "",
-                    "status": observation.get("status") or "",
-                    "is_error": bool(observation.get("is_error")),
-                    "response_chars": len(text),
-                    "result_text": text[:2000],
-                    "is_placeholder": _is_placeholder_result(text),
-                })
-            elif kind == "StartChildConversationObservation":
-                child_id = observation.get("conversation_id")
-                if isinstance(child_id, str) and child_id and child_id not in seen_children:
-                    seen_children.add(child_id)
-                    children.append(child_id)
+    for event in _iter_events(cid):
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        if isinstance(action, dict) and action.get("kind") in (
+            "TaskAction", "TaskActionWithRisk"
+        ):
+            delegations.append({
+                "subagent_type": action.get("subagent_type") or "",
+                "description": action.get("description") or "",
+            })
+        observation = event.get("observation")
+        if not isinstance(observation, dict):
+            continue
+        kind = observation.get("kind")
+        if kind == "TaskObservation":
+            text = _observation_text(observation)
+            observations.append({
+                "task_id": observation.get("task_id") or "",
+                "subagent": observation.get("subagent") or "",
+                "status": observation.get("status") or "",
+                "is_error": bool(observation.get("is_error")),
+                "response_chars": len(text),
+                "result_text": text[:2000],
+                "is_placeholder": _is_placeholder_result(text),
+            })
+        elif kind == "StartChildConversationObservation":
+            child_id = observation.get("conversation_id")
+            if isinstance(child_id, str) and child_id and child_id not in seen_children:
+                seen_children.add(child_id)
+                children.append(child_id)
 
     child_reports = []
     for child_id in children:
