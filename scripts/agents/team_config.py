@@ -30,6 +30,12 @@ DEFAULT_AGENT_MAX_BUDGET_USD = float(os.environ.get("TEL99_AGENT_MAX_BUDGET_USD"
 # Hard safety floor: never let a run start with an unbounded budget.
 MAX_BUDGET_CEILING_USD = float(os.environ.get("TEL99_MAX_BUDGET_CEILING_USD", "5.0"))
 
+# The project is under a no-spend rule: a real run may only use a model that is
+# explicitly free. The allowlist is code, not an environment value, so an env
+# override (TEL99_LLM_MODEL) cannot silently switch a mission onto a paid model;
+# validate() refuses to start if DEFAULT_MODEL is not on this list.
+FREE_MODEL_IDS = frozenset({"openhands/deepseek-v4.1-flash"})
+
 READ_ONLY_CONTRACT = (
     "CONTRAINTE DURE (non negociable): LECTURE SEULE. Interdiction de modifier un "
     "fichier du depot, de faire git commit/push/checkout/switch, de deployer, "
@@ -225,6 +231,11 @@ def hook_config() -> dict:
 
 def validate() -> None:
     """Fail loudly on an unsafe or inconsistent configuration."""
+    if DEFAULT_MODEL not in FREE_MODEL_IDS:
+        raise ValueError(
+            f"DEFAULT_MODEL {DEFAULT_MODEL!r} is not on the free-model allowlist "
+            f"{sorted(FREE_MODEL_IDS)}: the no-spend rule forbids a paid model"
+        )
     if DEFAULT_MAX_BUDGET_USD <= 0:
         raise ValueError("TEL99_MAX_BUDGET_USD must be positive")
     if DEFAULT_MAX_BUDGET_USD > MAX_BUDGET_CEILING_USD:

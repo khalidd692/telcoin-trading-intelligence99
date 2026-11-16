@@ -635,7 +635,8 @@ class ThreeRoleVerificationTests(unittest.TestCase):
 
     def _obs(self, name, status="completed", text="rapport", is_error=False):
         return {"task_id": "t", "subagent": name, "status": status,
-                "is_error": is_error, "response_chars": len(text)}
+                "is_error": is_error, "response_chars": len(text),
+                "result_text": text}
 
     def _evidence(self, observations):
         return {"coordinator_response_chars": 10,
@@ -681,6 +682,50 @@ class ThreeRoleVerificationTests(unittest.TestCase):
                self._obs(self.ROLES["quality"], text="")]
         validated, _ = orchestrator.verify_outcome("finished", self._evidence(obs))
         self.assertFalse(validated)
+
+    def test_the_sdk_placeholder_is_not_a_proof(self):
+        """A sub-agent that returned nothing yields a non-empty SDK placeholder.
+
+        The SDK's TaskExecutor substitutes "Task completed with no result." when
+        a sub-agent produces no result, so a bare length check would accept it.
+        It must never count as proof that a role reported.
+        """
+        placeholder = "Task completed with no result."
+        obs = [self._obs(self.ROLES["development"]),
+               self._obs(self.ROLES["quant"]),
+               self._obs(self.ROLES["quality"], text=placeholder)]
+        validated, verdict = orchestrator.verify_outcome("finished", self._evidence(obs))
+        self.assertFalse(validated)
+        self.assertIn("role_quality_reported",
+                      [c["check"] for c in verdict["checks"] if not c["ok"]])
+
+    def test_the_sdk_failure_placeholder_is_not_a_proof(self):
+        obs = [self._obs(self.ROLES["development"]),
+               self._obs(self.ROLES["quant"]),
+               self._obs(self.ROLES["quality"], text="Task failed.")]
+        validated, _ = orchestrator.verify_outcome("finished", self._evidence(obs))
+        self.assertFalse(validated)
+
+    def test_collect_evidence_marks_the_placeholder(self):
+        """The collected observation must flag the placeholder for the verdict."""
+        cloud = FakeCloud(roles=[
+            {"subagent": "tel99-dev-120000", "status": "completed",
+             "text": "rapport dev", "task_id": "t1"},
+            {"subagent": "tel99-analyst-120000", "status": "completed",
+             "text": "rapport analyste", "task_id": "t2"},
+            {"subagent": "tel99-verifier-120000", "status": "completed",
+             "text": "Task completed with no result.", "task_id": "t3"},
+        ])
+        self._orig_request2 = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=self.ROLES, mission_body=self.BODY)
+        finally:
+            orchestrator._request = self._orig_request2
+        by_sub = {o["subagent"]: o for o in evidence["observations"]}
+        self.assertTrue(by_sub["tel99-verifier-120000"]["is_placeholder"])
+        self.assertFalse(by_sub["tel99-dev-120000"]["is_placeholder"])
 
     def test_a_missing_acceptance_criterion_does_not_validate(self):
         obs = [self._obs(self.ROLES[r]) for r in self.ROLES]

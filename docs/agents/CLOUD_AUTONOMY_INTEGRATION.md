@@ -80,8 +80,19 @@ vraies :
 - conversation `finished` et réponse coordinateur non vide ;
 - **chacun des trois rôles** (développeur, analyste, vérificateur) a laissé une
   preuve **distincte** : une `TaskObservation` nommant son agent, d'état
-  `completed`, sans erreur et avec un résultat non vide. Une seule preuve ne
+  `completed`, sans erreur et avec un résultat **réel**. Une seule preuve ne
   suffit plus (l'ancien seuil « ≥ 1 enfant » est rejeté) ;
+
+  > **Piège vérifié dans le code du SDK** (`openhands-tools/…/task/impl.py`) :
+  > quand un sous-agent ne renvoie rien, le `TaskExecutor` substitue un texte
+  > **non vide** — `"Task completed with no result."` (ou `"Task failed."`,
+  > `"Failed to execute task: …"`). Un simple contrôle de longueur accepterait
+  > donc un rôle qui n'a rien produit. Ces placeholders sont reconnus
+  > (`_is_placeholder_result`, comparaison insensible à la casse/espaces) et
+  > **jamais** comptés comme une preuve. Preuve : tests
+  > `test_the_sdk_placeholder_is_not_a_proof`,
+  > `test_the_sdk_failure_placeholder_is_not_a_proof`,
+  > `test_collect_evidence_marks_the_placeholder`.
 - la mission déclare un **critère d'acceptation** (section « Critère
   d'acceptation » du corps de l'issue). Le critère est *porté* dans le verdict,
   il n'est jamais *présumé satisfait* : un humain ou un vérificateur indépendant
@@ -107,7 +118,9 @@ Sinon :
 | Quota | OK | `remaining=10`, `daily_limit=20`, reset `2026-11-16` |
 | Coût | borné | plafond global 5 USD ; coordinateur 1 USD ; 0,25 USD/agent ; 30 itérations ; 10/agent |
 | Modèle gratuit | OK | routeur : `openhands/deepseek-v4.1-flash` choisi ; `gpt-5.6` rejeté (`cost_tier=unknown`, règle no-spend) |
+| Modèle gratuit — verrou de charge utile | OK (fail-closed) | `preflight.check_model(payload)` refuse tout modèle hors allowlist codée en dur `FREE_MODEL_IDS` / `FREE_MODEL_ALLOWLIST` ; `team_config.validate()` échoue si `TEL99_LLM_MODEL` pointe un modèle payant. Le serveur agent de ce sandbox est configuré sur **`gpt-5.6`** (`/api/settings`, coût inconnu) : sans ce contrôle, un run réel dépenserait. Preuves : `test_a_paid_or_unknown_model_is_refused`, `test_team_config_refuses_a_paid_model_override` |
 | Verrou atomique KV | **CAS** (`?nx=true` / `?if_version=N`, 409) | `GET ?meta=true` → `version` ; `PUT` conditionnel ; en cas de 409, relecture et nouvelle tentative. Fail-closed si le backend n'expose pas de version |
+| Capacité CAS du KV | **À VÉRIFIER au 1er run** | `?meta=true`/`if_version`/`nx=true` sont documentés pour le namespace **user-scoped** (`X-Session-API-Key` + `?automation_id=`, cf. skill `github`), **pas** pour le KV per-run (`Bearer $AUTOMATION_KV_TOKEN`). Nouvelle sonde `kv_meta_probe()` (rapportée par `--diagnose`) : si le KV per-run n'expose pas `version`, le verrou **échoue fermé** et aucun run réel ne démarre |
 | Verrou expiré repris | OK | un verrou expiré est **écrasé par CAS** (`if_version`), jamais supprimé ; un verrou frais d'un autre run n'est jamais écrasé ; la libération écrit un **tombstone conditionnel** et ne touche jamais un verrou repris sous nos pieds |
 
 ### Démonstration du fail-closed
@@ -134,6 +147,22 @@ autre run ne travaille pas sur la même mission. C'est le comportement exigé.
    - déployer l'automation plugin-spec (nécessite votre accord explicite), ou
    - exécuter `orchestrator.py` dans le sandbox.
 4. **Cron permanent** — **non activé**, conformément à la consigne.
+
+### Faits cloud mesurés (2026-11-15, cette session)
+
+- **0 automation déployée** : `GET /api/automation/v1` → `{"automations":[],"total":0}`.
+- `AUTOMATION_KV_TOKEN` / `AUTOMATION_API_URL` **absents** hors exécution
+  d'automation → le KV per-run n'est pas atteignable depuis une session normale.
+- Le KV cloud joignable via `OPENHANDS_API_KEY` est **scopé par automation** :
+  `/api/automation/v1/kv/{key}?automation_id=<uuid>` → `404 Automation not found`
+  pour tout UUID inexistant (sans automation, aucun namespace n'existe).
+- Agent-server local `localhost:60000` → **HTTP 401** (clé de session requise).
+- `/api/quota/status` → `daily_limit: 20, used_today: 0, remaining: 20`
+  (le quota se lit avec `Authorization: Bearer $OPENHANDS_API_KEY`).
+- `/api/settings` → modèle configuré **`gpt-5.6`** (coût inconnu) → d'où le verrou
+  no-spend `check_model` (cf. §4).
+- **1 seul profil** LLM disponible : `default` (`agent_kind: openhands`) ; le profil
+  gratuit `openhands_deepseek-v4.1-flash` n'existe pas dans ce sandbox.
 
 ## 6. Limites de coût
 

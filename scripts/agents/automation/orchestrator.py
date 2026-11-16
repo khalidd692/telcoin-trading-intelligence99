@@ -284,6 +284,36 @@ def kv_get_meta(key) -> tuple:
     return body.get("value"), version
 
 
+def kv_meta_probe(key) -> dict:
+    """Report whether the KV backend really supports a conditional write.
+
+    ``?meta=true`` is only *assumed* to return a record version. This probe
+    records the raw answer for a key, so a run (or a ``--diagnose`` report) can
+    show whether the atomic compare-and-set the lock relies on is actually
+    available, instead of trusting the assumption. Read-only.
+    """
+    if not kv_available():
+        return {"available": False, "reason": "no AUTOMATION_KV_TOKEN/AUTOMATION_API_URL"}
+    try:
+        status, body = _request(
+            "GET", f"{_KV_BASE}/v1/kv/{key}?meta=true",
+            headers={"Authorization": f"Bearer {_KV_TOKEN}"}, timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
+        return {"available": False, "reason": f"{type(exc).__name__}"}
+    if status == 404:
+        return {"available": True, "status": 404, "key_absent": True}
+    if status != 200 or not isinstance(body, dict):
+        return {"available": True, "status": status, "supported": False}
+    return {
+        "available": True,
+        "status": status,
+        "key_absent": "value" not in body,
+        "supported": body.get("version") is not None,
+        "has_version": "version" in body,
+    }
+
+
 def _state_path() -> pathlib.Path:
     payload = json.loads(os.environ.get("AUTOMATION_EVENT_PAYLOAD", "{}") or "{}")
     automation_id = payload.get("automation_id", "default")
@@ -536,6 +566,7 @@ def diagnose_environment() -> dict:
         "agent_server_detail": detail,
         "cloud_api_base": cloud_api_base(),
         "kv_lock_available": kv_available(),
+        "kv_lock_capability": kv_meta_probe(_LOCK_KEY),
         "session_key_present": bool(session_key()),
         "github_token_present": bool(github_token()),
     }
@@ -873,6 +904,7 @@ def run(config: dict, offline: bool = False) -> int:
     payload = build_payload(mission, work_branch, config, llm, names=agent_names)
     payload_problems = preflight.check_payload(payload)
     payload_problems += preflight.check_budget(payload)
+    payload_problems += preflight.check_model(payload)
     if payload_problems:
         release_lock(owner)
         journal_entry(state, "abort", reason="payload preflight failed",
@@ -991,6 +1023,29 @@ def _observation_text(observation: dict) -> str:
     return "\n".join(parts).strip()
 
 
+# Placeholder strings the SDK's ``TaskExecutor`` substitutes when a sub-agent
+# produced no usable result. They are non-empty, so a plain length check would
+# treat "the role crashed" or "the role returned nothing" as proof the role
+# reported. They are matched (case/whitespace-insensitively) and never counted.
+_PLACEHOLDER_RESULTS = frozenset(
+    {
+        "task completed with no result.",
+        "task failed.",
+    }
+)
+_PLACEHOLDER_PREFIXES = ("failed to execute task:",)
+
+
+def _is_placeholder_result(text: str) -> bool:
+    """True when ``text`` is an SDK placeholder, not a real sub-agent result."""
+    normalized = " ".join((text or "").split()).strip().lower()
+    if not normalized:
+        return True
+    if normalized in _PLACEHOLDER_RESULTS:
+        return True
+    return normalized.startswith(_PLACEHOLDER_PREFIXES)
+
+
 def extract_acceptance_criteria(body: str) -> str:
     """Return the mission's declared acceptance criterion, or ``""``.
 
@@ -1020,24 +1075,40 @@ def extract_acceptance_criteria(body: str) -> str:
     return " ".join(captured).strip()
 
 
+def _role_proves(obs: dict) -> bool:
+    """True when one observation is a real, completed, non-empty result.
+
+    ``is_placeholder`` is precomputed by :func:`collect_evidence`; a raw dict
+    that carries only ``result_text`` (or nothing) is normalised here so the
+    verdict is identical whether roles were precomputed or recomputed.
+    """
+    if obs.get("status") not in _TASK_COMPLETED or obs.get("is_error"):
+        return False
+    if int(obs.get("response_chars", 0)) <= 0:
+        return False
+    if "is_placeholder" in obs:
+        return not obs["is_placeholder"]
+    if "result_text" in obs:
+        return not _is_placeholder_result(obs.get("result_text") or "")
+    # No text available: cannot prove a non-placeholder result.
+    return False
+
+
 def _role_evidence(observations: list, expected_name: str, base_name: str) -> dict:
     """Find the proof a single role produced a result.
 
     A role is proven only by a ``TaskObservation`` whose ``subagent`` matches the
     role's agent name for this run (identity), that is not an error, whose
-    ``status`` is ``completed`` (state) and that carries non-empty text (result).
+    ``status`` is ``completed`` (state) and that carries a *real*, non-placeholder
+    result (the SDK writes "Task completed with no result." when a sub-agent
+    returns nothing, which is not a report).
     """
     matches = []
     for obs in observations:
         subagent = obs.get("subagent") or ""
         if subagent == expected_name or (base_name and subagent.startswith(base_name)):
             matches.append(obs)
-    proven = [
-        o for o in matches
-        if o.get("status") in _TASK_COMPLETED
-        and not o.get("is_error")
-        and int(o.get("response_chars", 0)) > 0
-    ]
+    proven = [o for o in matches if _role_proves(o)]
     return {
         "expected_name": expected_name,
         "delegations": len(matches),
@@ -1095,12 +1166,15 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
                 continue
             kind = observation.get("kind")
             if kind == "TaskObservation":
+                text = _observation_text(observation)
                 observations.append({
                     "task_id": observation.get("task_id") or "",
                     "subagent": observation.get("subagent") or "",
                     "status": observation.get("status") or "",
                     "is_error": bool(observation.get("is_error")),
-                    "response_chars": len(_observation_text(observation)),
+                    "response_chars": len(text),
+                    "result_text": text[:2000],
+                    "is_placeholder": _is_placeholder_result(text),
                 })
             elif kind == "StartChildConversationObservation":
                 child_id = observation.get("conversation_id")
