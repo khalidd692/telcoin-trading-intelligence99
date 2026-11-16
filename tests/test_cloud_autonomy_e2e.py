@@ -82,6 +82,9 @@ class FakeCloud:
             self.issues = [{**dict(ISSUE), "body": mission_body}]
         self.started_conversations = []
         self.state_writes = 0
+        # When >0, ``/events/search`` returns a first page of that size and a
+        # ``next_page_id``, to exercise the pagination walk.
+        self.event_page_size = 0
         # When set, a KV PUT to this key fails, to exercise KV failures.
         # ``fail_kv_put_after`` lets a test allow the first N writes (e.g. the
         # mission opening) and fail only a later one (the final record).
@@ -116,8 +119,10 @@ class FakeCloud:
                 if child["id"] == conv:
                     return 200, {"response": child.get("response", "")}
             return 200, {"response": ""}
-        # agent server: coordinator events (delegations + child launches)
-        if url.endswith("/events") and method == "GET":
+        # agent server: coordinator events (delegations + child launches).
+        # The real reader is the *paginated* ``/events/search`` endpoint; the
+        # batch ``/events`` endpoint needs a body and answers 422 to a bare GET.
+        if "/events/search" in url and method == "GET":
             conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
             if conv == "cid-test-1":
                 events = []
@@ -137,8 +142,17 @@ class FakeCloud:
                     events.append({"observation": {
                         "kind": "StartChildConversationObservation",
                         "conversation_id": c["id"]}})
-                return 200, events
-            return 200, []
+                if self.event_page_size:
+                    if "page_id=" in url:
+                        page = events[self.event_page_size:]
+                        return 200, {"items": page, "next_page_id": None}
+                    page = events[:self.event_page_size]
+                    return 200, {"items": page, "next_page_id": "p2"}
+                return 200, {"items": events, "next_page_id": None}
+            return 200, {"items": [], "next_page_id": None}
+        # The batch endpoint must NOT be read: a bare GET is a 422.
+        if url.endswith("/events") and method == "GET":
+            return 422, "batch endpoint needs a body"
         # agent server: conversation list / single
         if url.endswith("/api/conversations") and method == "GET":
             return 200, []
@@ -747,6 +761,47 @@ class ThreeRoleVerificationTests(unittest.TestCase):
             "finished", raw, expected_roles=self.ROLES)
         self.assertTrue(validated, verdict["checks"])
         self.assertEqual(set(verdict["roles"]), set(self.ROLES))
+
+    def test_collect_evidence_reads_the_paginated_endpoint(self):
+        """Regression: reading the batch ``/events`` endpoint returned no proof.
+
+        A bare ``GET /events`` answers HTTP 422 (it needs a body), so every
+        delegation was silently lost and a real mission was marked failed. The
+        reader must walk ``/events/search``.
+        """
+        roles = {"development": "tel99-dev-000000",
+                 "quant": "tel99-analyst-000000",
+                 "quality": "tel99-verifier-000000"}
+        cloud = FakeCloud()
+        original = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=roles, mission_body=self.BODY)
+        finally:
+            orchestrator._request = original
+        self.assertEqual(len(evidence["observations"]), 3)
+        self.assertEqual({o["subagent"] for o in evidence["observations"]},
+                         set(roles.values()))
+        validated, _ = orchestrator.verify_outcome(
+            "finished", evidence, expected_roles=roles)
+        self.assertTrue(validated)
+
+    def test_collect_evidence_walks_every_page(self):
+        """A paginated reader must follow ``next_page_id`` to the last page."""
+        roles = {"development": "tel99-dev-000000",
+                 "quant": "tel99-analyst-000000",
+                 "quality": "tel99-verifier-000000"}
+        cloud = FakeCloud()
+        cloud.event_page_size = 4  # 3 delegations = 6 events -> 2 pages
+        original = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=roles, mission_body=self.BODY)
+        finally:
+            orchestrator._request = original
+        self.assertEqual(len(evidence["observations"]), 3)
 
 
 if __name__ == "__main__":
