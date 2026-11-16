@@ -32,6 +32,16 @@
   Sur une autre branche, forcer via `POST /actions/workflows/<id>/dispatches {"ref":"<branche>"}`.
 - Branche #74 avait une RÉGRESSION : `guard.py` blob `61802849` (sans #71). Référence #71 = `26579ceb`.
 - Publier une branche exige un jeton `contents: write`.
+- **KV automation = CAS** : `GET /v1/kv/{k}?meta=true` → `version` ; `PUT ?nx=true` / `PUT ?if_version=N` ;
+  **409** sur conflit. Pas de DELETE conditionnel → libérer = écrire un tombstone par CAS.
+  Mécanisme des skills `github` / `github-pr-reviewer` (`ReviewCoordination`).
+- **Enfant de conversation** : l'outil `task_tool_set` émet `TaskAction` (`subagent_type`) et
+  `TaskObservation` (`subagent`, `task_id`, `status` completed|error, `content`). PAS
+  `StartChildConversationObservation`. Doc : /sdk/guides/task-tool-set.
+- **Workflow `tel99-agent-team-audit.yml`** : ne se déclenche QUE sur `agents/hermes-simple-team-20261114`.
+  Sur une autre branche, forcer via `POST /actions/workflows/<id>/dispatches {"ref":"<branche>"}`.
+- PR #71 : draft, base `main`, CI 3/3 OK, fichiers absents de `main` (404), Worker `TEL99_ENABLED=false`,
+  `crons: []`. Blocage = décision humaine de fusion (pas technique).
 - Clone initial SHALLOW : `git bundle create <branche>` échoue au clonage (`Failed to traverse parents`).
   Correctif lecture seule : `git fetch --unshallow origin` PUIS créer le bundle. Le patch `git format-patch -1`
   appliqué via `git am` sur le parent reproduit l'arbre exact (vérifier `rev-parse HEAD^{tree}`).
