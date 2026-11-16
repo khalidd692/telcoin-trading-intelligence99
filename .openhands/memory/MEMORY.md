@@ -152,3 +152,20 @@
   branches de PR (#71, #76). L'« actif » listé par l'API Actions inclut des workflows non fusionnés.
 - Worker hybride `tel99-hybrid-scheduler` : `workers_dev:false` -> 404 (attendu) ; relais WS public
   `telcoin-public-ws-relay` -> /health 200.
+
+## Mission C — livraison autonomie (2026-11-16, PR #76, head c3b6e420)
+- AJOUT Mission C : `scripts/agents/automation/emergency.py` = kill-switch (env
+  `TEL99_EMERGENCY_STOP`, sentinelle `.tel99-automation-state/EMERGENCY_STOP`, clé KV
+  `emergency_stop`, + drapeau config `emergency_stop`). Vérifié EN PREMIER dans `run()`
+  -> `exit=3` avant toute sonde/dépense. 11 tests. Schéma `.plugin` étendu.
+- `scripts/agents/automation/verify_kv.py` : preuve du VRAI KV (CAS/verrou/dédup/reprise/
+  persistance) ; `--local` démarre un serveur KV jetable -> 10/10 PASS. Étape CI ajoutée
+  au workflow hybride (tourne en `pull_request`).
+- `scripts/agents/automation/automation.config.json` : config prête à coller (dry_run=true,
+  conforme `additionalProperties=false`).
+- `docs/agents/ACTIVATION_RUNBOOK.md` : 5 actions humaines + séquence de validation finale.
+- PIÈGE : `orchestrator` lit `AUTOMATION_API_URL`/`AUTOMATION_KV_TOKEN` à l'IMPORT (constantes
+  module). Un harnais qui les pose doit importer orchestrator APRÈS (import paresseux).
+- PIÈGE : `kv_meta_probe` renvoie `supported` seulement si la clé EXISTE ; sonder AVANT
+  acquisition -> `key_absent:true`. Sonder APRÈS acquire.
+- PR #76 : 85 fichiers, +13060/-0, mergeable=clean, CI 4/4. 680 tests OK (skipped=6).
