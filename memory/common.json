@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "project": "common",
+  "entries": [
+    {
+      "id": "read-only-contract",
+      "project": "common",
+      "kind": "procedure",
+      "title": "Contrat lecture seule de l'equipe TEL99",
+      "body": "Toute mission d'agent est en lecture seule: aucune modification de fichier, aucun git commit/push, aucun deploiement, aucune installation, aucun ordre (reel ou simule), aucun secret affiche. Le garde-fou PreToolUse bloque au runtime; les controles primaires restent l'allowlist terminal, sub_agent_scope et la politique de confirmation.",
+      "tags": ["guard", "security", "contract", "read-only"],
+      "source": "scripts/agents/team_config.py",
+      "commit": "",
+      "author": "tel99-coordination",
+      "created_at": "2026-11-15T00:00:00Z",
+      "version": 1,
+      "confidence": 0.95,
+      "verified": true,
+      "verified_by": "tel99-verifier",
+      "supersedes": "",
+      "superseded_by": ""
+    },
+    {
+      "id": "prove-before-claiming",
+      "project": "common",
+      "kind": "procedure",
+      "title": "Ne jamais declarer un composant operationnel sans preuve",
+      "body": "Un composant est 'operationnel' seulement si un run reel independant du PC l'a montre, avec horodatage et sortie brute. Distinguer proposition, test local et execution cloud prouvee. Un affichage n'est pas une livraison.",
+      "tags": ["evidence", "verification", "procedure"],
+      "source": "issue #67 garde-fous",
+      "commit": "",
+      "author": "tel99-coordination",
+      "created_at": "2026-11-15T00:00:00Z",
+      "version": 1,
+      "confidence": 0.9,
+      "verified": true,
+      "verified_by": "tel99-verifier",
+      "supersedes": "",
+      "superseded_by": ""
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-15T00:00:00Z",
+      "actor": "tel99-coordination",
+      "action": "record",
+      "id": "read-only-contract",
+      "version": 1
+    },
+    {
+      "at": "2026-11-15T00:00:00Z",
+      "actor": "tel99-coordination",
+      "action": "record",
+      "id": "prove-before-claiming",
+      "version": 1
+    }
+  ]
+}

@@ -24,3 +24,10 @@
 
 ## Avant de livrer
 Tests reproductibles et CI, sources/horodatages, vérification du site et JSON déployés, observation de runs automatiques indépendants du PC, contrôle des alertes et du journal, compte rendu des limites. Ne pas modifier Smart View.
+
+## Équipe d'agents (branche `agents/hermes-simple-team-20261114`)
+- Trois agents actifs en lecture seule : `.agents/agents/tel99-{dev,analyst,verifier}.md`. Neuf spécialisations réservées, non actives, dans `.agents/agents/reserve/` (le SDK ne charge que les `*.md` de premier niveau).
+- Configuration unique : `scripts/agents/team_config.py`. Les fichiers d'agents sont générés : `python scripts/agents/render_agents.py` puis `--check` en CI.
+- Sécurité : garde-fou `PreToolUse` (`scripts/agents/guard/guard.py`, sortie 2 = blocage), outils réduits à `terminal`, `sub_agent_scope`, noms d'agents uniques par exécution, budgets plafonnés.
+- Relance complète : `docs/agents/RELAUNCH_TEAM.md`.
+- Ces fichiers n'activent aucune planification cloud, aucune fusion, aucun ordre. Ne pas ajouter de secret au dépôt.
