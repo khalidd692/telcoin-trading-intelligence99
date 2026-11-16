@@ -183,3 +183,14 @@
   `interrupt_conversation` et retourne `stopped`. Diagnostic : `scope=next_run_and_owned_conversation`.
 - `docs/agents/ACTIVATION_DOSSIER.md` = index du dossier final d'activation.
 - 688 tests OK (skipped=6) ; CI PR #76 4/4 ; automations=0.
+
+## Autonomie OpenHands Cloud (TEL99) — faits durables
+- Automation API : `POST /api/automation/v1` (avec `plugin`), `PATCH /api/automation/v1/<id>`
+  (`enabled`, `state`, `trigger`), `GET /capabilities`, `GET /kv?automation_id=`.
+  Une automation MATERIALISEE (meme INACTIVE) est requise pour ouvrir le KV reel.
+- L'API accepte N'IMPORTE QUEL trigger sans le valider : se fier a `capabilities.eventTypes`.
+  `repository_dispatch` N'EST PAS delivre ; `issues.labeled` (source github) l'est.
+- KV cloud : `/v1/kv/{key}` = UN SEUL segment ; une cle avec `/` renvoie 404. Mapper sur le fil.
+  `?prefix=` est ignore cote serveur (filtrer cote client). `trigger:null` en PATCH -> 500.
+- Le champ `permissions.admin` du GET repo decrit le DEPOT, pas le jeton : protection de
+  branche et rulesets restent 403 avec les deux jetons disponibles (action humaine requise).
