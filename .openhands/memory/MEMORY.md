@@ -51,6 +51,20 @@
 - Voies d'écriture testées SANS résultat (ne pas répéter) : MCP GitHub (aucun outil), proxy git
   `/api/v1/webhooks/secrets` (HTTP 500), `/api/v1/integrations` et `/api/v1/me` (renvoient l'app HTML).
 - Piège : `run_pilot.py --dry-run` exigeait un profil LLM → traceback en CI (aucun profil commité). Corrigé.
+- `TEL99_GITHUB_PAT` = jeton ÉCRITURE (`contents:write`) : `git push` OK sur une branche existante,
+  mais PAS `actions:write` (dispatch workflow → 403). `GITHUB_TOKEN` = inverse (`actions:write`
+  dispatch → 204, mais push → 403). Les deux sont complémentaires ; aucun ne peut tout faire seul.
+- TOPOLOGIE (fratrie, pas chaîne) : `main` (défaut) ← PR #71 `feat/tel99-hybrid-dispatch…` (plugin
+  complet, orchestrateur ANCIEN 784 l.) ; `codex/tel99-quant-terminal` ← PR #63 `agents/hermes-simple-team…`
+  ← PR #74 `feat/agents-cloud-autonomy…` ← PR #75 `fix/pr74-security-hardening…` (durci 1338 l.).
+  #71 et #75 sont FRÈRES et touchent les mêmes fichiers additifs → fusion manuelle à conflits add/add.
+- Piège SDK (2e session) : `TaskExecutor` renvoie un texte NON VIDE quand un sous-agent ne produit
+  rien (`"Task completed with no result."` etc.) → un contrôle de longueur seul = faux succès.
+- Coût : le sandbox a `gpt-5.6` par défaut (coût inconnu) → allowlist gratuite CODÉE EN DUR
+  (`preflight.check_model`, `team_config.FREE_MODEL_IDS`), insensible à `TEL99_LLM_MODEL`.
+- CAS KV : `?meta=true`/`if_version`/`nx=true` documentés UNIQUEMENT pour le namespace user-scoped
+  (`X-Session-API-Key` + `?automation_id=`) ; le KV per-run (`Bearer $AUTOMATION_KV_TOKEN`) n'expose
+  pas forcément `version` → sonde `kv_meta_probe()`, verrou fail-closed.
 
 ## Équipe d'agents TEL99 (commit `3db48c1`, branche `agents/hermes-simple-team-20261114`)
 - 3 agents actifs `.agents/agents/tel99-{dev,analyst,verifier}.md` (terminal seul, `confirm_risky`, hook
