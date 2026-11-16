@@ -804,5 +804,54 @@ class ResumeAfterInterruptionTests(unittest.TestCase):
         )
 
 
+class DiagnoseEnvironmentTests(unittest.TestCase):
+    """diagnose_environment() must authenticate its reachability probe.
+
+    Regression: the probe used to call GET /api/conversations without the
+    session key, which the agent server rejects with HTTP 422/401, so a live
+    server was reported unreachable. It must send X-Session-API-Key and hit a
+    parameterless endpoint.
+    """
+
+    def test_probe_sends_the_session_key_and_uses_the_count_endpoint(self):
+        original_req = orchestrator._request
+        saved = dict(orchestrator.os.environ)
+        seen = {}
+        try:
+            orchestrator.os.environ["SESSION_API_KEY"] = "test-key"
+            orchestrator.os.environ["AGENT_SERVER_URL"] = "http://agent.test"
+
+            def fake_request(method, url, headers=None, **kwargs):
+                seen["url"] = url
+                seen["headers"] = headers or {}
+                return 200, 3
+
+            orchestrator._request = fake_request
+            report = orchestrator.diagnose_environment()
+        finally:
+            orchestrator._request = original_req
+            orchestrator.os.environ.clear()
+            orchestrator.os.environ.update(saved)
+
+        self.assertTrue(report["agent_server_reachable"])
+        self.assertEqual(report["agent_server_detail"], "HTTP 200 (authenticated)")
+        self.assertEqual(seen["headers"].get("X-Session-API-Key"), "test-key")
+        self.assertTrue(seen["url"].endswith("/api/conversations/count"))
+
+    def test_a_non_200_probe_is_reported_unreachable(self):
+        original_req = orchestrator._request
+        saved = dict(orchestrator.os.environ)
+        try:
+            orchestrator.os.environ["SESSION_API_KEY"] = "test-key"
+            orchestrator._request = lambda *a, **k: (401, {"detail": "no"})
+            report = orchestrator.diagnose_environment()
+        finally:
+            orchestrator._request = original_req
+            orchestrator.os.environ.clear()
+            orchestrator.os.environ.update(saved)
+        self.assertFalse(report["agent_server_reachable"])
+        self.assertEqual(report["agent_server_detail"], "HTTP 401")
+
+
 if __name__ == "__main__":
     unittest.main()

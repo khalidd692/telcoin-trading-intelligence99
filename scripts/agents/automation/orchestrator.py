@@ -555,9 +555,15 @@ def diagnose_environment() -> dict:
     reachable = False
     detail = ""
     try:
-        status, body = _request("GET", f"{server}/api/conversations", timeout=15)
-        reachable = status in (200, 401, 403)
-        detail = f"HTTP {status}"
+        headers = {}
+        key = session_key()
+        if key:
+            headers["X-Session-API-Key"] = key
+        status, body = _request(
+            "GET", f"{server}/api/conversations/count", headers=headers, timeout=15
+        )
+        reachable = status == 200
+        detail = f"HTTP {status}" + (" (authenticated)" if status == 200 else "")
     except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
         detail = f"unreachable: {type(exc).__name__}"
     return {
