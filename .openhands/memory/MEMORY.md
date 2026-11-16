@@ -21,13 +21,27 @@
 ## Dépôt khalidd692/telcoin-trading-intelligence99 (TEL99)
 - Branches clés : produit `codex/tel99-quant-terminal`, données `tel99-live-data`,
   évaluation `tel99-evaluation-data`, équipe `agents/hermes-simple-team-20261114` (PR #63, base produit).
-- `GITHUB_TOKEN` = GitHub App installation token (client Iv23lizrrwLGm04hszl7), LECTURE SEULE.
-  Écriture refusée : `git push` -> 403 ; API `PUT /contents` -> 403 « Resource not accessible by integration » ;
-  `GET /branches/<b>/protection` -> 403. Le champ `permissions` du GET repo affiche `push: true` mais décrit
-  le dépôt, PAS le jeton. `rulesets` = [] et `protected: false` : ce n'est PAS une protection de branche.
-  Le credential helper `/home/openhands/.openhands/git-credential-helper` renvoie EXACTEMENT le même jeton
-  (sha256 identique) : le surcharger ne change rien. Pas de clé SSH, pas d'agent SSH, pas de .netrc,
-  `gh` non connecté. => Publier une branche exige un jeton `contents: write` ou un push manuel de l'utilisateur.
+- `GITHUB_TOKEN` : **avait `contents: write` le 2026-11-15 au soir** (contredit l'entrée lecture seule
+  ci-dessous, plus ancienne). Preuve : `git push -u origin fix/pr74-security-hardening-20261115` OK.
+  `GET /repos/...` `permissions.push:true`. `main` reste `protected:false` ; `GET /branches/<b>/protection`
+  -> 403 (permission *Administration* non accordée). Vérifier l'état réel avant de conclure à un blocage.
+  (Historique lecture seule : App installation token `Iv23lizrrwLGm04hszl7` ; helper credential identique.)
+- `TEL99_GITHUB_PAT` : PAT fine-grained user `khalidd692`, `admin:true` sur le repo, mais
+  `/branches/*/protection` -> 403 ; `rulesets:[]` : ce n'est PAS une protection de branche.
+- Workflow `tel99-agent-team-audit.yml` : ne se déclenche QUE sur `agents/hermes-simple-team-20261114`.
+  Sur une autre branche, forcer via `POST /actions/workflows/<id>/dispatches {"ref":"<branche>"}`.
+- Branche #74 avait une RÉGRESSION : `guard.py` blob `61802849` (sans #71). Référence #71 = `26579ceb`.
+- Publier une branche exige un jeton `contents: write`.
+- **KV automation = CAS** : `GET /v1/kv/{k}?meta=true` → `version` ; `PUT ?nx=true` / `PUT ?if_version=N` ;
+  **409** sur conflit. Pas de DELETE conditionnel → libérer = écrire un tombstone par CAS.
+  Mécanisme des skills `github` / `github-pr-reviewer` (`ReviewCoordination`).
+- **Enfant de conversation** : l'outil `task_tool_set` émet `TaskAction` (`subagent_type`) et
+  `TaskObservation` (`subagent`, `task_id`, `status` completed|error, `content`). PAS
+  `StartChildConversationObservation`. Doc : /sdk/guides/task-tool-set.
+- **Workflow `tel99-agent-team-audit.yml`** : ne se déclenche QUE sur `agents/hermes-simple-team-20261114`.
+  Sur une autre branche, forcer via `POST /actions/workflows/<id>/dispatches {"ref":"<branche>"}`.
+- PR #71 : draft, base `main`, CI 3/3 OK, fichiers absents de `main` (404), Worker `TEL99_ENABLED=false`,
+  `crons: []`. Blocage = décision humaine de fusion (pas technique).
 - Clone initial SHALLOW : `git bundle create <branche>` échoue au clonage (`Failed to traverse parents`).
   Correctif lecture seule : `git fetch --unshallow origin` PUIS créer le bundle. Le patch `git format-patch -1`
   appliqué via `git am` sur le parent reproduit l'arbre exact (vérifier `rev-parse HEAD^{tree}`).
@@ -37,6 +51,20 @@
 - Voies d'écriture testées SANS résultat (ne pas répéter) : MCP GitHub (aucun outil), proxy git
   `/api/v1/webhooks/secrets` (HTTP 500), `/api/v1/integrations` et `/api/v1/me` (renvoient l'app HTML).
 - Piège : `run_pilot.py --dry-run` exigeait un profil LLM → traceback en CI (aucun profil commité). Corrigé.
+- `TEL99_GITHUB_PAT` = jeton ÉCRITURE (`contents:write`) : `git push` OK sur une branche existante,
+  mais PAS `actions:write` (dispatch workflow → 403). `GITHUB_TOKEN` = inverse (`actions:write`
+  dispatch → 204, mais push → 403). Les deux sont complémentaires ; aucun ne peut tout faire seul.
+- TOPOLOGIE (fratrie, pas chaîne) : `main` (défaut) ← PR #71 `feat/tel99-hybrid-dispatch…` (plugin
+  complet, orchestrateur ANCIEN 784 l.) ; `codex/tel99-quant-terminal` ← PR #63 `agents/hermes-simple-team…`
+  ← PR #74 `feat/agents-cloud-autonomy…` ← PR #75 `fix/pr74-security-hardening…` (durci 1338 l.).
+  #71 et #75 sont FRÈRES et touchent les mêmes fichiers additifs → fusion manuelle à conflits add/add.
+- Piège SDK (2e session) : `TaskExecutor` renvoie un texte NON VIDE quand un sous-agent ne produit
+  rien (`"Task completed with no result."` etc.) → un contrôle de longueur seul = faux succès.
+- Coût : le sandbox a `gpt-5.6` par défaut (coût inconnu) → allowlist gratuite CODÉE EN DUR
+  (`preflight.check_model`, `team_config.FREE_MODEL_IDS`), insensible à `TEL99_LLM_MODEL`.
+- CAS KV : `?meta=true`/`if_version`/`nx=true` documentés UNIQUEMENT pour le namespace user-scoped
+  (`X-Session-API-Key` + `?automation_id=`) ; le KV per-run (`Bearer $AUTOMATION_KV_TOKEN`) n'expose
+  pas forcément `version` → sonde `kv_meta_probe()`, verrou fail-closed.
 
 ## Équipe d'agents TEL99 (commit `3db48c1`, branche `agents/hermes-simple-team-20261114`)
 - 3 agents actifs `.agents/agents/tel99-{dev,analyst,verifier}.md` (terminal seul, `confirm_risky`, hook
@@ -91,3 +119,15 @@
 - Protocole d'échange v1 + bus dans `scripts/agents/protocol/` (envelope, bus, cli,
   demo, schema, adapters). Bus refuse tout acteur `connected:false` (Kilo).
 - Aucune CI sur une PR de base ≠ `main`.
+
+## Autonomie cloud (PR #74, 2026-11-15)
+- Orchestrateur cloud = `scripts/agents/automation/orchestrator.py` (venu de PR #66), réuni au
+  bus de PR #73 sur `feat/agents-cloud-autonomy-integration-20261115`. Pont = `automation/bus_bridge.py`.
+- Persistance durable = `protocol/store.py` KvStore (AUTOMATION_KV_TOKEN) ; sinon FileStore.
+- `main` NON protégée (protected:false, rulesets:[]) et le PAT n'a pas la permission Administration
+  (GET protection -> 403) => protection main = action humaine.
+- Hors sandbox cloud : pas de KV lock => orchestrator refuse toute mission réelle (fail-closed, voulu).
+- Mission autorisée réelle = issue #70 (label `tel99-mission`).
+- PIÈGE : `journal_entry(state, ..., **dict)` casse si le dict contient une clé `state`.
+- PIÈGE : tests qui dépendent de OPENHANDS_API_KEY échouent en CI (quota None -> fail-closed).
+- CI : workflow `tel99-agent-team-audit.yml` tourne sur la branche d'équipe (PR + push).

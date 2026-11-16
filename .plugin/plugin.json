@@ -85,6 +85,11 @@
           "type": "boolean",
           "default": true,
           "description": "When true, select and validate a mission but start no conversation. Activation flips this to false."
+        },
+        "require_durable_bus": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true (recommended for cloud), a real run refuses to start unless the bus has a durable KV store, deduplication and a writable ledger. Set false only for local experiments."
         }
       }
     },

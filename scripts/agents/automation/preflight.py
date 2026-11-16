@@ -108,6 +108,32 @@ def check_payload(payload: dict) -> list[str]:
     return problems
 
 
+# The only model a real run may use. Kept here (not imported from team_config)
+# so the payload check is self-contained and cannot be bypassed by an env var.
+FREE_MODEL_ALLOWLIST = frozenset({"openhands/deepseek-v4.1-flash"})
+
+
+def check_model(payload: dict, allowlist: frozenset = FREE_MODEL_ALLOWLIST) -> list[str]:
+    """Refuse a payload whose coordinator model is not provably free.
+
+    The mission runs under a no-spend rule, so a model that is not on the free
+    allowlist must never be used for a real conversation — regardless of what
+    the saved profile or an environment variable says. This is the choke point
+    that stops a paid model (e.g. the agent server's default ``gpt-5.6``, whose
+    cost is unknown) from being spent.
+    """
+    problems: list[str] = []
+    model = ((payload.get("agent") or {}).get("llm") or {}).get("model")
+    if not model:
+        problems.append("payload declares no coordinator model")
+    elif model not in allowlist:
+        problems.append(
+            f"coordinator model {model!r} is not on the free allowlist "
+            f"{sorted(allowlist)}: no-spend rule"
+        )
+    return problems
+
+
 # Hard ceiling for the *whole* conversation (coordinator + every sub-agent).
 # Declared budgets are only a promise: the runtime enforces the
 # conversation-level ``max_budget_per_run`` and stops the run with

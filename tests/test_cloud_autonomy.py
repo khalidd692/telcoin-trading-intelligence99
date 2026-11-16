@@ -41,6 +41,7 @@ policy = _load("tel99_automation_policy", AUTOMATION / "policy.py")
 verify_runtime = _load("tel99_verify_runtime", AUTOMATION / "verify_runtime.py")
 preflight = _load("tel99_preflight", AUTOMATION / "preflight.py")
 orchestrator = _load("tel99_orchestrator", AUTOMATION / "orchestrator.py")
+team_config = _load("tel99_team_config", ROOT / "scripts" / "agents" / "team_config.py")
 
 
 def run_guard(command, tool_name="terminal"):
@@ -486,32 +487,63 @@ class PreflightTests(unittest.TestCase):
         )
         self.assertEqual(preflight.check_payload(payload), [])
 
+    def test_free_model_is_accepted(self):
+        payload = {"agent": {"llm": {"model": "openhands/deepseek-v4.1-flash"}}}
+        self.assertEqual(preflight.check_model(payload), [])
+
+    def test_a_paid_or_unknown_model_is_refused(self):
+        """No-spend: the server default gpt-5.6 (unknown cost) must be refused."""
+        payload = {"agent": {"llm": {"model": "gpt-5.6"}}}
+        problems = preflight.check_model(payload)
+        self.assertTrue(any("not on the free allowlist" in p for p in problems))
+
+    def test_a_payload_without_a_model_is_refused(self):
+        self.assertTrue(preflight.check_model({"agent": {}}))
+
+    def test_team_config_refuses_a_paid_model_override(self):
+        """An env override to a paid model must make validate() fail loudly."""
+        original = team_config.DEFAULT_MODEL
+        try:
+            team_config.DEFAULT_MODEL = "gpt-5.6"
+            with self.assertRaises(ValueError):
+                team_config.validate()
+        finally:
+            team_config.DEFAULT_MODEL = original
+
+    def test_real_payload_from_team_config_uses_the_free_model(self):
+        mission = {"number": 1, "title": "t", "body": "b"}
+        payload = orchestrator.build_payload(
+            mission, "agent/mission-1", orchestrator.DEFAULT_CONFIG,
+            {"model": team_config.DEFAULT_MODEL},
+        )
+        self.assertEqual(preflight.check_model(payload), [])
+
 
 class LockTests(unittest.TestCase):
     """The single-mission lock must be atomic across distinct cloud runs."""
 
-    def test_lock_uses_set_if_not_exists(self):
+    def test_lock_uses_a_conditional_create(self):
+        """From an empty key the lock is taken with a conditional (nx) write."""
         calls = []
         store = {}
 
         def fake_request(method, url, payload=None, headers=None, timeout=60):
             calls.append((method, url, payload))
+            if method == "GET":
+                return 404, "missing"
             if method == "PUT":
                 store["lock"] = payload
                 return 201, {}
-            return 200, {"value": store.get("lock")}
+            return 200, {}
 
         original_req = orchestrator._request
-        original_kv_get = orchestrator.kv_get
         original_avail = orchestrator.kv_available
         try:
             orchestrator._request = fake_request
             orchestrator.kv_available = lambda: True
-            orchestrator.kv_get = lambda key: store.get("lock")
             acquired, detail = orchestrator.acquire_lock("run-a")
         finally:
             orchestrator._request = original_req
-            orchestrator.kv_get = original_kv_get
             orchestrator.kv_available = original_avail
         self.assertTrue(acquired, detail)
         puts = [c for c in calls if c[0] == "PUT"]
@@ -520,16 +552,15 @@ class LockTests(unittest.TestCase):
         self.assertEqual(store["lock"]["owner"], "run-a")
 
     def test_second_run_cannot_take_a_held_lock(self):
-        original_kv_get = orchestrator.kv_get
+        original_meta = orchestrator.kv_get_meta
         original_avail = orchestrator.kv_available
         try:
             orchestrator.kv_available = lambda: True
-            orchestrator.kv_get = lambda key: {
-                "owner": "run-a", "expires_at": "2999-01-01T00:00:00Z"
-            }
+            orchestrator.kv_get_meta = lambda key: (
+                {"owner": "run-a", "expires_at": "2999-01-01T00:00:00Z"}, 1)
             acquired, detail = orchestrator.acquire_lock("run-b")
         finally:
-            orchestrator.kv_get = original_kv_get
+            orchestrator.kv_get_meta = original_meta
             orchestrator.kv_available = original_avail
         self.assertFalse(acquired)
         self.assertIn("run-a", detail)
@@ -546,22 +577,29 @@ class LockTests(unittest.TestCase):
         self.assertIn("atomic KV", detail)
 
     def test_an_expired_lock_can_be_retaken(self):
-        original_kv_get = orchestrator.kv_get
-        original_avail = orchestrator.kv_available
+        """An expired record is overwritten with a versioned (CAS) write."""
+        puts = []
+
+        def fake_request(method, url, payload=None, headers=None, timeout=60):
+            if method == "GET":
+                return 200, {"value": {"owner": "run-a",
+                                       "expires_at": "2000-01-01T00:00:00Z"},
+                             "version": 7}
+            puts.append(url)
+            return 201, {}
+
         original_req = orchestrator._request
+        original_avail = orchestrator.kv_available
         try:
             orchestrator.kv_available = lambda: True
-            orchestrator.kv_get = lambda key: {
-                "owner": "run-a", "expires_at": "2000-01-01T00:00:00Z"
-            }
-            orchestrator._request = lambda *a, **k: (201, {})
+            orchestrator._request = fake_request
             acquired, detail = orchestrator.acquire_lock("run-b")
         finally:
-            orchestrator.kv_get = original_kv_get
             orchestrator.kv_available = original_avail
             orchestrator._request = original_req
-        # Expired lock: the run attempts to take it and then confirms ownership.
-        self.assertIsInstance(acquired, bool)
+        self.assertTrue(acquired, detail)
+        self.assertTrue(puts)
+        self.assertIn("if_version=7", puts[0])
 
 
 class QuotaTests(unittest.TestCase):
