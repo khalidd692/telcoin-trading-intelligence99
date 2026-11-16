@@ -51,6 +51,11 @@ import policy  # noqa: E402
 import preflight  # noqa: E402
 import team_config as cfg  # noqa: E402
 
+try:
+    import emergency  # noqa: E402
+except Exception:  # noqa: BLE001 - the brake is additive; its absence must not crash
+    emergency = None
+
 # Optional: the bus bridge adds a durable ledger (KV in the cloud) on top of the
 # orchestrator's own state. It is imported defensively so the orchestrator keeps
 # working even if the protocol package is absent.
@@ -83,6 +88,9 @@ DEFAULT_CONFIG = {
     # opening on the bus. When false, a missing bus degrades to a warning instead
     # of a refusal; this is only meant for local experiments, never for cloud.
     "require_durable_bus": True,
+    # Kill-switch, mirrored from the plugin schema. When true the run stops
+    # immediately (exit 3) before any probe, spend or conversation.
+    "emergency_stop": False,
 }
 
 
@@ -566,6 +574,12 @@ def diagnose_environment() -> dict:
         detail = f"HTTP {status}" + (" (authenticated)" if status == 200 else "")
     except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
         detail = f"unreachable: {type(exc).__name__}"
+    if emergency is not None:
+        stop_state, stop_reason = emergency.stop_requested(
+            _state_path().parent, kv_get if kv_available() else None
+        )
+    else:
+        stop_state, stop_reason = False, "module absent"
     return {
         "agent_server_base": server,
         "agent_server_reachable": reachable,
@@ -575,6 +589,7 @@ def diagnose_environment() -> dict:
         "kv_lock_capability": kv_meta_probe(_LOCK_KEY),
         "session_key_present": bool(session_key()),
         "github_token_present": bool(github_token()),
+        "emergency_stop": {"stopped": stop_state, "reason": stop_reason},
     }
 
 
@@ -741,6 +756,21 @@ def run(config: dict, offline: bool = False) -> int:
 
     journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
                   repository=config["repository"], offline=offline, owner=owner)
+
+    # --- Emergency stop: the first brake, before any spend. -------------------
+    # Checked before the environment probe, the preflight and any conversation,
+    # so an operator can halt the next run by setting one flag. Dry runs are
+    # stopped too: the brake means "do nothing", not "do nothing expensive".
+    if emergency is not None:
+        stopped, reason = emergency.stop_requested(
+            _state_path().parent, kv_get if kv_available() else None
+        )
+        if not stopped and config.get("emergency_stop"):
+            stopped, reason = True, "config emergency_stop is true"
+        if stopped:
+            journal_entry(state, "emergency_stop", reason=reason)
+            save_state(state)
+            return 3
 
     # --- Stop on error: refuse before any spend when a precondition fails. ---
     if not policy.repository_allowed(config["repository"]):

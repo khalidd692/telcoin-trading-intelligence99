@@ -53,6 +53,9 @@ jobs:
           python -m unittest discover -s tests -p 'test_agent_team.py' -v
           python -m unittest discover -s tests -p 'test_cloud_autonomy.py' -v
 
+      - name: Verify the KV lock contract against a real backend (self-check)
+        run: python scripts/agents/automation/verify_kv.py --local
+
       - name: Produce report
         run: |
           mkdir -p /tmp/tel99-hybrid

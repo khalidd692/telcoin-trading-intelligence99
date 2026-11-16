@@ -42,6 +42,7 @@ verify_runtime = _load("tel99_verify_runtime", AUTOMATION / "verify_runtime.py")
 preflight = _load("tel99_preflight", AUTOMATION / "preflight.py")
 orchestrator = _load("tel99_orchestrator", AUTOMATION / "orchestrator.py")
 team_config = _load("tel99_team_config", ROOT / "scripts" / "agents" / "team_config.py")
+emergency = _load("tel99_emergency", AUTOMATION / "emergency.py")
 
 
 def run_guard(command, tool_name="terminal"):
@@ -851,6 +852,124 @@ class DiagnoseEnvironmentTests(unittest.TestCase):
             orchestrator.os.environ.update(saved)
         self.assertFalse(report["agent_server_reachable"])
         self.assertEqual(report["agent_server_detail"], "HTTP 401")
+
+
+class EmergencyStopTests(unittest.TestCase):
+    """The kill-switch must halt a run from any of its three sources."""
+
+    def setUp(self):
+        self.saved = dict(os.environ)
+        os.environ.pop(emergency.ENV_FLAG, None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+
+    def test_no_source_set_means_no_stop(self):
+        stopped, reason = emergency.stop_requested("/nonexistent-dir-tel99", None)
+        self.assertFalse(stopped)
+        self.assertEqual(reason, "")
+
+    def test_env_flag_stops_the_run(self):
+        os.environ[emergency.ENV_FLAG] = "true"
+        stopped, reason = emergency.stop_requested("/nonexistent-dir-tel99", None)
+        self.assertTrue(stopped)
+        self.assertIn(emergency.ENV_FLAG, reason)
+
+    def test_env_flag_accepts_one_and_on(self):
+        for value in ("1", "on", "yes", "TRUE"):
+            os.environ[emergency.ENV_FLAG] = value
+            self.assertTrue(emergency.env_stop(), value)
+
+    def test_env_flag_is_not_triggered_by_a_false_like_value(self):
+        os.environ[emergency.ENV_FLAG] = "false"
+        self.assertFalse(emergency.env_stop())
+
+    def test_sentinel_file_stops_the_run(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / emergency.SENTINEL_NAME).write_text("stop")
+            stopped, reason = emergency.stop_requested(tmp, None)
+        self.assertTrue(stopped)
+        self.assertIn(emergency.SENTINEL_NAME, reason)
+
+    def test_kv_flag_stops_the_run(self):
+        stopped, reason = emergency.stop_requested(
+            "/nonexistent-dir-tel99", lambda key: {"stopped": True}
+        )
+        self.assertTrue(stopped)
+        self.assertIn(emergency.KV_KEY, reason)
+
+    def test_unreadable_kv_does_not_stop_the_run(self):
+        def boom(key):
+            raise RuntimeError("KV down")
+
+        stopped, reason = emergency.stop_requested("/nonexistent-dir-tel99", boom)
+        self.assertFalse(stopped)
+
+    def test_run_returns_three_when_the_brake_is_set(self):
+        saved = dict(os.environ)
+        original_state = orchestrator.load_state
+        original_save = orchestrator.save_state
+        try:
+            os.environ[emergency.ENV_FLAG] = "true"
+            orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                               "active": None, "journal": []}
+            orchestrator.save_state = lambda state: None
+            code = orchestrator.run(dict(orchestrator.DEFAULT_CONFIG), offline=True)
+        finally:
+            orchestrator.load_state = original_state
+            orchestrator.save_state = original_save
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 3)
+
+    def test_config_flag_stops_the_run(self):
+        saved = dict(os.environ)
+        original_state = orchestrator.load_state
+        original_save = orchestrator.save_state
+        try:
+            os.environ.pop(emergency.ENV_FLAG, None)
+            orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                               "active": None, "journal": []}
+            orchestrator.save_state = lambda state: None
+            config = dict(orchestrator.DEFAULT_CONFIG)
+            config["emergency_stop"] = True
+            code = orchestrator.run(config, offline=True)
+        finally:
+            orchestrator.load_state = original_state
+            orchestrator.save_state = original_save
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 3)
+
+    def test_brake_is_checked_before_any_network_probe(self):
+        """The stop must return before diagnose_environment is ever called."""
+        saved = dict(os.environ)
+        original_state = orchestrator.load_state
+        original_save = orchestrator.save_state
+        original_diag = orchestrator.diagnose_environment
+        called = {"diag": False}
+
+        def spy_diag():
+            called["diag"] = True
+            return {}
+
+        try:
+            os.environ[emergency.ENV_FLAG] = "true"
+            orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                               "active": None, "journal": []}
+            orchestrator.save_state = lambda state: None
+            orchestrator.diagnose_environment = spy_diag
+            code = orchestrator.run(dict(orchestrator.DEFAULT_CONFIG), offline=False)
+        finally:
+            orchestrator.load_state = original_state
+            orchestrator.save_state = original_save
+            orchestrator.diagnose_environment = original_diag
+            os.environ.clear()
+            os.environ.update(saved)
+        self.assertEqual(code, 3)
+        self.assertFalse(called["diag"], "the brake must precede any probe")
 
 
 if __name__ == "__main__":

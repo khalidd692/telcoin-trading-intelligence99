@@ -90,6 +90,11 @@
           "type": "boolean",
           "default": true,
           "description": "When true (recommended for cloud), a real run refuses to start unless the bus has a durable KV store, deduplication and a writable ledger. Set false only for local experiments."
+        },
+        "emergency_stop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Kill-switch. When true, the run stops immediately (exit 3) before any probe, spend or conversation. Also settable without redeploy via the env var TEL99_EMERGENCY_STOP, the sentinel file .tel99-automation-state/EMERGENCY_STOP, or the KV key emergency_stop."
         }
       }
     },
