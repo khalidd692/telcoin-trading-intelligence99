@@ -687,10 +687,19 @@ def build_payload(mission_issue: dict, work_branch: str, config: dict, llm: dict
     return {
         "workspace": {"kind": "LocalWorkspace", "working_dir": str(REPO_ROOT)},
         "worktree": False,
+        # ``confirm_unknown`` must stay False for an unattended cloud run. The
+        # security analyzer classifies the coordination actions the mission
+        # depends on (``task_tool_set`` delegation, ``task_tracker``) as UNKNOWN
+        # risk, and no human is present to answer a confirmation. With
+        # ``confirm_unknown: True`` the coordinator stalls in
+        # ``waiting_for_confirmation`` until the platform timeout kills the run
+        # — a guaranteed failure. HIGH-risk actions still require confirmation
+        # (``threshold: HIGH``); the deterministic PreToolUse guard remains the
+        # primary control on terminal commands.
         "confirmation_policy": {
             "kind": "ConfirmRisky",
             "threshold": "HIGH",
-            "confirm_unknown": True,
+            "confirm_unknown": False,
         },
         "security_analyzer": {"kind": "LLMSecurityAnalyzer"},
         "max_iterations": config["max_iterations"],
@@ -993,6 +1002,16 @@ def run(config: dict, offline: bool = False) -> int:
         report_phase("running coordinator")
         final = wait_for(cid, deadline, state_dir=state_dir)
         journal_entry(state, "conversation_finished", conversation=cid, status=final)
+        if final == "confirmation_required":
+            # An unattended run has no one to answer a confirmation. Fail fast
+            # and loudly rather than let the platform timeout kill the run; the
+            # mission stays out of ``processed`` so it is resumable.
+            journal_entry(state, "abort", conversation=cid,
+                          reason="conversation stalled waiting for a confirmation "
+                                 "that no operator can answer in an unattended run")
+            state["active"] = None
+            save_state(state)
+            return 2
         if final == "stopped":
             # An operator set the brake while this mission ran. The conversation
             # was interrupted; the mission stays out of ``processed`` so the next
@@ -1372,7 +1391,8 @@ def interrupt_conversation(cid: str) -> bool:
 
 
 def wait_for(cid: str, deadline: float, poll: float = 5.0,
-             state_dir: str | pathlib.Path | None = None) -> str:
+             state_dir: str | pathlib.Path | None = None,
+             confirm_grace_polls: int = 3) -> str:
     """Poll a conversation until a terminal state, the deadline or a stop.
 
     While a conversation runs, the *local* emergency brake is re-read on every
@@ -1380,9 +1400,16 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
     set, the conversation is interrupted and the function returns ``"stopped"``.
     The deadline path also interrupts the child, so no work is left running
     unattended. This only interrupts the conversation this run is driving.
+
+    ``waiting_for_confirmation`` is not terminal: an unattended run has no one to
+    answer it. Left alone it burns the whole deadline and is then killed by the
+    platform timeout. After ``confirm_grace_polls`` consecutive polls in that
+    state the conversation is interrupted and ``"confirmation_required"`` is
+    returned, so the run fails fast, on purpose, and the mission stays resumable.
     """
     headers = {"X-Session-API-Key": session_key()}
     brake_dir = pathlib.Path(state_dir) if state_dir is not None else _state_path().parent
+    waiting_polls = 0
     while time.time() < deadline:
         if emergency is not None and emergency.local_stop(brake_dir)[0]:
             interrupt_conversation(cid)
@@ -1394,6 +1421,13 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
             state = body.get("execution_status")
             if state in TERMINAL_STATES:
                 return state
+            if state == "waiting_for_confirmation":
+                waiting_polls += 1
+                if waiting_polls >= confirm_grace_polls:
+                    interrupt_conversation(cid)
+                    return "confirmation_required"
+            else:
+                waiting_polls = 0
         time.sleep(poll)
     # Deadline reached: stop the child so no work is left running unattended.
     interrupt_conversation(cid)
