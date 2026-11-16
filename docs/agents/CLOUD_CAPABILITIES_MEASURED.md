@@ -41,5 +41,7 @@ TEL99_LIVE_PROBES=1 python -m unittest tests.test_agent_protocol.OpenHandsAdapte
 - **Planification d'une mission d'agents sans le PC** : pas d'automation
   OpenHands active ; ce serait la prochaine étape (créer une automation qui
   appelle le bus), non faite ici.
-- **Modèles gratuits** : le routeur refuse tout run réel car aucune disponibilité
-  n'est `verified` (fail-closed).
+- **Modèles gratuits** : **CORRIGÉ le 16/11/2026** — cette ligne affirmait que
+  « le routeur refuse tout run réel ». C'est faux : `openhands/deepseek-v4.1-flash`
+  est le défaut du compte cloud et un run réel a abouti (quota inchangé).
+  Preuves détaillées : `docs/agents/CLOUD_AUTONOMY_PROVEN_2026-11-16.md`.
