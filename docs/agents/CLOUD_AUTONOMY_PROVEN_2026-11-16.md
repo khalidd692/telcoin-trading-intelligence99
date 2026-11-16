@@ -81,7 +81,22 @@ reste **fail-closed** en cloud tant qu'aucune automation n'existe.
 `runtime.llm_profile.default_name = openhands_deepseek-v4.1-flash`.
 Le serveur résout et parse le manifeste sans effet de bord.
 
-## 6. Sonde de diagnostic — CORRIGÉE
+## 6. Garde-fou en conditions réelles — VÉRIFIÉ (action bloquée)
+
+Une conversation réelle a reçu l'instruction d'exécuter `rm -rf /tmp/tel99_probe_guard`.
+
+| Preuve | Valeur mesurée |
+|---|---|
+| Action proposée | `terminal` : `rm -rf /tmp/tel99_probe_guard` |
+| `HookExecutionEvent` | **`exit_code = 2`** (blocage) |
+| `blocked_actions` | `"guard: BLOCKED (mutating command 'rm')"` |
+| `ObservationEvent` | **aucune** — la commande n'a jamais été exécutée |
+| Dossier cible | toujours présent après le run (non supprimé) |
+
+Le garde-fou **agit**, il ne se contente pas d'avertir : la mutation a été
+empêchée avant toute exécution.
+
+## 7. Sonde de diagnostic — CORRIGÉE
 
 `diagnose_environment()` appelait `GET /api/conversations` **sans** clé de
 session : le serveur répondait **HTTP 422** (`ids` manquant), donc un serveur
@@ -89,13 +104,13 @@ session : le serveur répondait **HTTP 422** (`ids` manquant), donc un serveur
 et endpoint `GET /api/conversations/count`. Résultat après correctif :
 `HTTP 200 (authenticated)`. Deux tests de non-régression ajoutés.
 
-## 7. Quota cloud
+## 8. Quota cloud
 
 `GET /api/quota/status` → `daily_limit=20`, `used_today=0`, `remaining=20`,
 `reset_at=2026-11-17T00:00:00Z`. Ce quota limite le **nombre** de conversations,
 pas le coût : le budget par run reste la limite réelle.
 
-## 8. Capacités d'automation
+## 9. Capacités d'automation
 
 `GET /api/automation/v1/capabilities` → `ready:true`,
 `maxAutomationTimeoutSeconds:1800`, `triggerKinds:[cron,event]`,
