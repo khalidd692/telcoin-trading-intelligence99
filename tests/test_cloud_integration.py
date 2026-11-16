@@ -174,7 +174,8 @@ class BusBridgeTests(unittest.TestCase):
             work_branch="agent/mission-71-x")
         corr = opened["correlation_id"]
         bus_bridge.record_outcome(self.bus, corr, success=True, summary="ok",
-                                  conversation_id="cid-1")
+                                  conversation_id="cid-1",
+                                  verdict={"validated": True, "checks": []})
         self.assertTrue(bus_bridge.is_already_finished(self.bus, corr))
         again = bus_bridge.open_or_resume(
             self.bus, repository=self.repo, issue=self.issue,
@@ -202,7 +203,8 @@ class BusBridgeTests(unittest.TestCase):
         corr = opened["correlation_id"]
         outcome = bus_bridge.record_outcome(
             self.bus, corr, success=True, summary="3 roles ok",
-            conversation_id="cid-9", work_branch="agent/mission-71-x")
+            conversation_id="cid-9", work_branch="agent/mission-71-x",
+            verdict={"validated": True, "checks": []})
         self.assertEqual(outcome["state"], "done")
         self.assertIsNotNone(outcome["learning"])
         record = self.bus.load_mission(corr)
@@ -220,7 +222,7 @@ class BusBridgeTests(unittest.TestCase):
         self.assertEqual(outcome["state"], "failed")
         record = self.bus.load_mission(corr)
         self.assertTrue(record.resumable)
-        self.assertEqual(record.errors[-1]["code"], "orchestrator.mission_failed")
+        self.assertEqual(record.errors[-1]["code"], "orchestrator.outcome_unvalidated")
 
     def test_ledger_reports_the_storage_backend(self):
         bus_bridge.open_or_resume(self.bus, repository=self.repo,
@@ -235,7 +237,8 @@ class BusBridgeTests(unittest.TestCase):
             self.bus, repository=self.repo, issue=self.issue,
             work_branch="agent/mission-71-x")
         corr = opened["correlation_id"]
-        bus_bridge.record_outcome(self.bus, corr, success=True, summary="ok")
+        bus_bridge.record_outcome(self.bus, corr, success=True, summary="ok",
+                                  verdict={"validated": True, "checks": []})
 
         fresh = Bus(self.tmp.name, store=FileStore(self.tmp.name))
         self.assertTrue(bus_bridge.is_already_finished(fresh, corr))

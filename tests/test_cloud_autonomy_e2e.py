@@ -25,6 +25,7 @@ import json
 import os
 import pathlib
 import sys
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -51,12 +52,25 @@ ISSUE = {
 class FakeCloud:
     """An in-memory stand-in for the KV store, GitHub and the agent server."""
 
-    def __init__(self, *, conversation_final="finished", issues=None):
+    def __init__(self, *, conversation_final="finished", issues=None,
+                 coordinator_response="Rapport final du coordinateur.",
+                 children=None):
         self.kv: dict = {}
         self.issues = issues if issues is not None else [dict(ISSUE)]
         self.conversation_final = conversation_final
+        self.coordinator_response = coordinator_response
+        # Each child: {"id", "status", "response"}. Default: one finished verifier.
+        self.children = children if children is not None else [
+            {"id": "child-verifier", "status": "finished", "response": "verifie"},
+        ]
         self.started_conversations = []
         self.state_writes = 0
+        # When set, a KV PUT to this key fails, to exercise KV failures.
+        # ``fail_kv_put_after`` lets a test allow the first N writes (e.g. the
+        # mission opening) and fail only a later one (the final record).
+        self.fail_kv_put_key = None
+        self.fail_kv_put_after = 0
+        self.kv_put_calls = []
 
     # -- HTTP surface -------------------------------------------------------
     def request(self, method, url, payload=None, headers=None, timeout=60):
@@ -72,14 +86,40 @@ class FakeCloud:
         # GitHub issues
         if "api.github.com" in url and "/issues" in url:
             return 200, self.issues
-        # agent server
+        # agent server: coordinator final response
+        if url.endswith("/agent_final_response"):
+            conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
+            if conv == "cid-test-1":
+                return 200, {"response": self.coordinator_response}
+            for child in self.children:
+                if child["id"] == conv:
+                    return 200, {"response": child.get("response", "")}
+            return 200, {"response": ""}
+        # agent server: coordinator events (child launches)
+        if url.endswith("/events") and method == "GET":
+            conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
+            if conv == "cid-test-1":
+                events = [
+                    {"observation": {"kind": "StartChildConversationObservation",
+                                     "conversation_id": c["id"]}}
+                    for c in self.children
+                ]
+                return 200, events
+            return 200, []
+        # agent server: conversation list / single
         if url.endswith("/api/conversations") and method == "GET":
             return 200, []
         if url.endswith("/api/conversations") and method == "POST":
             self.started_conversations.append(payload)
             return 201, {"id": "cid-test-1"}
         if "/api/conversations/" in url and method == "GET":
-            return 200, {"execution_status": self.conversation_final}
+            conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
+            if conv == "cid-test-1":
+                return 200, {"execution_status": self.conversation_final}
+            for child in self.children:
+                if child["id"] == conv:
+                    return 200, {"execution_status": child.get("status", "finished")}
+            return 200, {"execution_status": "finished"}
         if url.endswith("/interrupt"):
             return 200, {}
         return 404, "unhandled"
@@ -95,6 +135,11 @@ class FakeCloud:
                 return 200, {"value": self.kv[key]}
             return 404, "missing"
         if method == "PUT":
+            self.kv_put_calls.append(key)
+            matches = self.kv_put_calls.count(key)
+            if self.fail_kv_put_key and key == self.fail_kv_put_key \
+                    and matches > self.fail_kv_put_after:
+                return 500, "kv write failed"
             if nx and key in self.kv:
                 return 409, "exists"
             self.kv[key] = payload
@@ -116,10 +161,17 @@ class EndToEndTests(unittest.TestCase):
         orchestrator._request = self.cloud.request
 
         def fake_kv_get(key):
-            return self.cloud.kv.get(key)
+            status, body = self.cloud._kv("GET", f"https://kv.example/v1/kv/{key}", None)
+            if status == 200 and isinstance(body, dict):
+                return body.get("value")
+            return None
 
         def fake_kv_set(key, value):
-            self.cloud.kv[key] = value
+            status, _ = self.cloud._kv("PUT", f"https://kv.example/v1/kv/{key}", value)
+            if status not in (200, 201, 204):
+                raise orchestrator.urllib.error.HTTPError(
+                    f"https://kv.example/v1/kv/{key}", status, "kv write failed",
+                    {}, None)
 
         orchestrator.kv_get = fake_kv_get
         orchestrator.kv_set = fake_kv_set
@@ -146,6 +198,12 @@ class EndToEndTests(unittest.TestCase):
         os.environ["OPENHANDS_API_KEY"] = "test-key"
         self._cwd = os.getcwd()
         os.chdir(ROOT)
+        # Isolate every file write (bus ledger, state) in a temp dir: otherwise a
+        # file-store run would write to the repository's ``bus/`` and a later test
+        # would read it back as "already finished".
+        self._orig_repo_root = orchestrator.REPO_ROOT
+        self._tmp_root = tempfile.TemporaryDirectory()
+        orchestrator.REPO_ROOT = pathlib.Path(self._tmp_root.name)
 
     def tearDown(self):
         orchestrator._request = self._orig_request
@@ -153,6 +211,8 @@ class EndToEndTests(unittest.TestCase):
         orchestrator.kv_set = self._orig_kv_set
         store_mod.KvStore._request = self._orig_store_request
         orchestrator._KV_BASE, orchestrator._KV_TOKEN = self._orig_kv
+        orchestrator.REPO_ROOT = self._orig_repo_root
+        self._tmp_root.cleanup()
         for k, v in self._env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -233,6 +293,107 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(len(self.cloud.started_conversations), 0)
         bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
         self.assertIsNone(bus.load_mission(bus_bridge.correlation_id(REPO, 70)))
+
+    # -- Point 2: the bus must be mandatory, not best-effort -----------------
+    def test_real_run_refuses_when_bus_storage_is_not_durable(self):
+        """A real run with only file storage must refuse before any spend."""
+        self._env_restore = os.environ.pop("AUTOMATION_KV_TOKEN", None)
+        try:
+            code, out = self._run(self._config())
+            self.assertEqual(code, 2, out)
+            self.assertIn("not durable", out)
+            self.assertEqual(len(self.cloud.started_conversations), 0)
+        finally:
+            if self._env_restore is not None:
+                os.environ["AUTOMATION_KV_TOKEN"] = self._env_restore
+
+    def test_real_run_aborts_when_final_record_fails(self):
+        """If the durable final write fails, the mission is NOT marked done."""
+        # Opening writes the mission record twice (create, then envelope link);
+        # fail the first write of the final record (write #3).
+        self.cloud.fail_kv_put_key = "tel99-bus/missions/msn-gh-70-f2dd9a84926f"
+        self.cloud.fail_kv_put_after = 2
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertIn("NOT marked done", out)
+        # The mission must not be in processed, so a later run retries it.
+        state = self.cloud.kv.get("state", {})
+        self.assertNotIn(70, state.get("processed", []))
+
+    def test_require_durable_bus_can_be_relaxed_for_local_use(self):
+        """require_durable_bus=false keeps the old, non-blocking behaviour."""
+        self._env_restore = os.environ.pop("AUTOMATION_KV_TOKEN", None)
+        try:
+            code, out = self._run(self._config(require_durable_bus=False))
+            # No durable store: the bus is skipped, but the run may proceed.
+            self.assertIn("conversation_started", out)
+        finally:
+            if self._env_restore is not None:
+                os.environ["AUTOMATION_KV_TOKEN"] = self._env_restore
+
+    # -- Point 3: a finished status is not a validated success ---------------
+    def test_finished_without_evidence_is_not_a_validated_success(self):
+        self.cloud.coordinator_response = ""
+        self.cloud.children = []
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertIn('"validated": false', out)
+        bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+        record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+        self.assertEqual(record.state, "failed")
+        self.assertEqual(record.learnings, [])  # no verified learning
+
+    def test_finished_with_child_evidence_is_validated(self):
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertIn('"validated": true', out)
+        bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+        record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+        self.assertEqual(record.state, "done")
+        self.assertEqual(len(record.learnings), 1)
+        self.assertTrue(record.learnings[0]["verified"])
+        self.assertIn("verdict", record.result)
+
+    def test_child_that_did_not_finish_does_not_validate(self):
+        self.cloud.children = [{"id": "child-x", "status": "error", "response": ""}]
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertIn('"validated": false', out)
+
+    # -- Point 4: lock lifecycle under KV failure ---------------------------
+    def test_lock_is_released_even_when_the_run_fails(self):
+        self.cloud.coordinator_response = ""
+        self.cloud.children = []
+        self._run(self._config())
+        self.assertNotIn("active_mission_lock", self.cloud.kv)
+
+    def test_an_expired_lock_can_be_taken_over(self):
+        orchestrator.kv_set("active_mission_lock", {
+            "owner": "dead-run", "acquired_at": "2000-01-01T00:00:00Z",
+            "expires_at": "2000-01-01T00:00:01Z",
+        })
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+
+    def test_release_only_by_owner(self):
+        """A foreign owner must not be able to delete someone else's lock."""
+        orchestrator.kv_set("active_mission_lock", {
+            "owner": "someone-else", "acquired_at": "2026-11-15T00:00:00Z",
+            "expires_at": "2099-01-01T00:00:00Z",
+        })
+        orchestrator.release_lock("me")
+        self.assertIn("active_mission_lock", self.cloud.kv)
+
+    def test_a_failed_resumable_mission_is_retried_not_deduped(self):
+        self.cloud.coordinator_response = ""
+        self.cloud.children = []
+        self._run(self._config())            # fails, stays resumable
+        self.cloud.coordinator_response = "Rapport final."
+        self.cloud.children = [{"id": "c", "status": "finished", "response": "ok"}]
+        code, out = self._run(self._config())  # retried, now validated
+        self.assertEqual(code, 0, out)
+        self.assertIn('"action": "retried"', out)
 
 
 if __name__ == "__main__":

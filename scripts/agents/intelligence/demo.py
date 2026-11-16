@@ -13,11 +13,12 @@ and offline run, that an agent can
 Nothing here is fabricated. The measured quantity is the accuracy of two real
 classifiers over a fixed set of real shell commands:
 
-  * the **baseline (before)** is the guard actually shipped in this branch,
-    run for real through its ``decide()``;
-  * the **candidate (after)** is a proposal that adds the three hardening rules
-    (git value options, wrapper arguments, destructive ``find``) — the same
-    rules validated in PR #71 commit ``62f0c00``.
+  * the **baseline (before)** is the *legacy* matcher — the guard exactly as it
+    behaved before the PR #71 hardening: wrappers are skipped without their own
+    value arguments, ``git`` finds its sub-command with a naive first-non-dash
+    scan, and ``find`` has no destructive-action rule;
+  * the **candidate (after)** is the hardened guard actually shipped in this
+    branch (SHA ``26579ceb``), run for real through its ``decide()``.
 
 Both are scored on the same labelled commands, so the delta is a real
 measurement on a real TEL99 artifact. The proposal reuses the guard's own
@@ -67,12 +68,6 @@ LABELLED_COMMANDS: list[tuple[str, bool]] = [
     ("kraken order buy TELUSD", True),
 ]
 
-_WRAPPER_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
-_FIND_DESTRUCTIVE_RE = re.compile(
-    r"(^|\s)-(delete|exec|execdir|ok|okdir|fls|fprint\w*)\b"
-)
-
-
 def _load_guard():
     spec = importlib.util.spec_from_file_location("tel99_guard", GUARD_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -81,19 +76,14 @@ def _load_guard():
 
 
 # --------------------------------------------------------------------------- #
-# Baseline: the guard as shipped in this branch.
+# Baseline: the guard exactly as it behaved BEFORE the PR #71 hardening.
+#
+# It reuses the shipped guard's own vocabularies (mutating heads, patterns) but
+# keeps the two legacy defects: wrappers are skipped without consuming their own
+# value arguments, ``git`` takes the first dash-free token as its sub-command,
+# and ``find`` has no destructive-action rule.
 # --------------------------------------------------------------------------- #
-def _baseline_blocked(guard, command: str) -> bool:
-    code, _ = guard.decide({"tool_name": "terminal",
-                            "tool_input": {"command": command}})
-    return code == 2
-
-
-# --------------------------------------------------------------------------- #
-# Proposal: the three hardening rules under test.
-# --------------------------------------------------------------------------- #
-def _head_words_fixed(guard, segment: str) -> list[str]:
-    """Head words, additionally skipping a wrapper's own value arguments."""
+def _legacy_head_words(guard, segment: str) -> list[str]:
     segment = re.sub(r"\$\{IFS\}|\$IFS", " ", segment)
     tokens = segment.split()
     i = 0
@@ -105,46 +95,37 @@ def _head_words_fixed(guard, segment: str) -> list[str]:
         base = token.rsplit("/", 1)[-1].lstrip("\\")
         if base in guard.WRAPPERS:
             i += 1
-            while i < len(tokens) and (tokens[i].startswith("-")
-                                       or _WRAPPER_VALUE_RE.match(tokens[i])):
-                i += 1
             continue
         return [t.lstrip("\\") for t in tokens[i:]]
     return []
 
 
-def _git_subcommand(guard, words: list[str]) -> str:
-    """Find the git sub-command, skipping value-taking global options."""
-    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
-                     "--exec-path", "--config-env", "--super-prefix"}
-    i = 1
-    while i < len(words):
-        if words[i] in value_options:
-            i += 2
-            continue
-        if words[i].startswith("-"):
-            i += 1
-            continue
-        return words[i]
-    return ""
+def _legacy_git_subcommand(guard, words: list[str]) -> str:
+    return next((w for w in words[1:] if not w.startswith("-")), "")
 
 
-def _proposal_blocked(guard, command: str) -> bool:
+def _legacy_blocked(guard, command: str) -> bool:
     if guard.pipes_into_executor(command):
         return True
-    for segment in guard.split_segments(command):
-        words = _head_words_fixed(guard, segment)
+    segments = guard.split_segments(command)
+    for segment in list(segments):
+        words = _legacy_head_words(guard, segment)
+        if words and words[0].rsplit("/", 1)[-1] in guard.SHELLS and "-c" in words[1:3]:
+            idx = words.index("-c")
+            if idx + 1 < len(words):
+                inner = " ".join(words[idx + 1:]).strip().strip("'\"")
+                segments.extend(guard.split_segments(inner))
+    for segment in segments:
+        words = _legacy_head_words(guard, segment)
         if not words:
             continue
         base = words[0].rsplit("/", 1)[-1].lower()
         if guard.is_mutating_head(base):
             return True
         if base == "git":
-            sub = _git_subcommand(guard, words)
+            sub = _legacy_git_subcommand(guard, words)
             if guard.is_git_mutation(sub, words, segment):
                 return True
-        if base == "find" and _FIND_DESTRUCTIVE_RE.search(segment):
-            return True
         if base in guard.INTERPRETERS:
             for pattern in guard.ESCAPE_PATTERNS:
                 if re.search(pattern, segment, re.I):
@@ -159,6 +140,15 @@ def _proposal_blocked(guard, command: str) -> bool:
         if guard.has_write_redirection(segment):
             return True
     return False
+
+
+# --------------------------------------------------------------------------- #
+# Candidate: the hardened guard actually shipped in this branch, run for real.
+# --------------------------------------------------------------------------- #
+def _proposal_blocked(guard, command: str) -> bool:
+    code, _ = guard.decide({"tool_name": "terminal",
+                            "tool_input": {"command": command}})
+    return code == 2
 
 
 def _accuracy(predict, commands) -> tuple[float, list[dict]]:
@@ -229,13 +219,13 @@ def run(dry_run: bool = False, memory_root: str | None = None) -> int:
     print("=" * 72)
     print("STEP 4 — measure whether the proposal is better (before/after)")
     print("=" * 72)
-    base_rate, base_rows = _accuracy(lambda c: _baseline_blocked(guard, c),
+    base_rate, base_rows = _accuracy(lambda c: _legacy_blocked(guard, c),
                                      LABELLED_COMMANDS)
     cand_rate, cand_rows = _accuracy(lambda c: _proposal_blocked(guard, c),
                                      LABELLED_COMMANDS)
-    print(f"BEFORE (guard shipped in this branch) : {base_rate:.0%} "
+    print(f"BEFORE (legacy matcher, pre-#71)      : {base_rate:.0%} "
           f"({sum(r['correct'] for r in base_rows)}/{len(base_rows)})")
-    print(f"AFTER  (proposal with the 3 rules)    : {cand_rate:.0%} "
+    print(f"AFTER  (hardened guard shipped)       : {cand_rate:.0%} "
           f"({sum(r['correct'] for r in cand_rows)}/{len(cand_rows)})")
     missed = [r["command"] for r in base_rows
               if r["expected_blocked"] and not r["predicted_blocked"]]
@@ -248,13 +238,13 @@ def run(dry_run: bool = False, memory_root: str | None = None) -> int:
     for command, expected in LABELLED_COMMANDS:
         outcomes.append(improvement.Outcome(
             task_id=command, model_id="guard-before",
-            success=(_baseline_blocked(guard, command) == expected),
-            evidence="scripts/agents/guard/guard.py (this branch)",
+            success=(_legacy_blocked(guard, command) == expected),
+            evidence="legacy matcher (pre-#71 guard behaviour)",
         ))
         outcomes.append(improvement.Outcome(
             task_id=command, model_id="guard-after",
             success=(_proposal_blocked(guard, command) == expected),
-            evidence="proposal: 3 hardening rules",
+            evidence="scripts/agents/guard/guard.py (26579ceb)",
         ))
     comparison = improvement.compare(
         outcomes, baseline_id="guard-before", candidate_id="guard-after"
