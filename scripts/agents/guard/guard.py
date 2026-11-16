@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""TEL99 PreToolUse guard.
+
+Reads a HookEvent JSON document on stdin and decides whether the pending tool
+call may proceed.
+
+Contract (OpenHands SDK 1.62.0): exit code 2 BLOCKS the action before it runs;
+exit code 0 allows it. Exit code 1 does NOT block, so this guard never uses it.
+
+Only ``terminal`` commands are policed. Other tools are allowed so the guard
+cannot accidentally freeze the agent on a tool it does not understand.
+
+Design: the command is split on shell separators (``;``, ``&&``, ``||``, ``|``,
+newlines) and each segment is judged by its HEAD word, not by a substring
+search. A substring approach wrongly blocks read-only commands such as
+``find deploy -type f`` or ``grep -n deploy-pages file``; head analysis does not.
+
+Fail-closed: an unparseable or incomplete event (bad JSON, missing
+``tool_name``, missing/empty ``tool_input.command``) BLOCKS. An event the guard
+cannot interpret must not be allowed through silently.
+
+Pipelines that feed a network fetch into a shell or interpreter
+(``curl … | sh``, ``wget … | bash``, ``… | python3``) are blocked even though
+neither side is mutating on its own. Quoted text is ignored for that scan, so
+``echo "a | sh"`` is not a false positive.
+
+This is a defence-in-depth heuristic. The primary controls remain the per-agent
+``tools=["terminal"]`` allowlist, ``sub_agent_scope`` and the confirmation
+policy.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+
+# Commands that mutate state and must never run in a read-only pilot. Matched
+# against the head word of a segment (and the effective head after xargs).
+MUTATING_HEADS = {
+    "rm", "mv", "cp", "dd", "mkfs", "truncate", "tee", "chmod", "chown", "chgrp",
+    "kill", "pkill", "killall", "sudo", "su", "doas", "touch", "mkdir", "rmdir",
+    "ln", "install", "mount", "umount", "systemctl", "service", "shutdown",
+    "reboot", "iptables", "crontab", "at", "docker", "kubectl", "terraform",
+    "ansible", "scp", "rsync", "ssh", "brew", "snap", "apt", "apt-get", "yum",
+    "dnf", "apk", "wrangler", "git-lfs",
+    # Disk / filesystem tools: destroying a device is never a read-only action.
+    "mke2fs", "mkswap", "shred", "wipefs", "fdisk", "sfdisk", "parted", "sgdisk",
+    "gdisk", "blkdiscard", "hdparm", "losetup", "cryptsetup", "swapon", "swapoff",
+    "e2fsck", "resize2fs", "debugfs",
+}
+
+# Heads that must also match their dotted variants (``mkfs.ext4``, ``deploy.sh``).
+MUTATING_PREFIXES = {"mkfs", "deploy"}
+
+# Prefix words that wrap another command; the guard looks past them.
+WRAPPERS = {"env", "command", "builtin", "nohup", "time", "nice", "stdbuf",
+            "ionice", "setsid", "timeout", "xargs"}
+
+# Shells that can run a nested command via -c.
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "csh", "tcsh"}
+
+# Interpreters that can run a nested command via -c / -e.
+INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "nodejs",
+                "php", "lua", "tclsh", "osascript", "rscript"}
+
+# Inside an interpreter segment, shelling out escapes the read-only contract.
+ESCAPE_PATTERNS = [
+    r"\bos\.system\b", r"\bos\.popen\b", r"\bos\.exec[lv]\w*\b",
+    r"\bos\.spawn\w*\b", r"\bsubprocess\.", r"\bpty\.spawn\b",
+    r"\bcommands\.getoutput\b", r"\bsystem\s*\(", r"\bexec\s*\(",
+    r"\bchild_process\b", r"\bexecSync\b", r"\bspawnSync\b", r"\bexecFile\w*\b",
+]
+
+# Package / dependency installation, matched inside a segment.
+INSTALL_PATTERNS = [
+    r"\bpip3?\s+install\b", r"\bnpm\s+(i|install|ci|add)\b",
+    r"\byarn\s+(add|install)\b", r"\bpnpm\s+(add|install)\b",
+    r"\bpoetry\s+(add|install)\b", r"\buv\s+(pip\s+install|add)\b",
+    r"\bconda\s+install\b", r"\bgem\s+install\b", r"\bcargo\s+install\b",
+    r"\bgo\s+install\b", r"\bapt(-get)?\s+install\b",
+]
+
+# ``git`` global options that consume the FOLLOWING token as their value. Without
+# this, ``git -C <dir> push`` hides ``push`` behind ``<dir>`` and slips past the
+# guard, which only inspects the first dash-free token.
+GIT_VALUE_OPTIONS = {
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+    "--config-env", "--super-prefix", "--attr-source",
+}
+
+# Git subcommands that write to the repository or its refs.
+GIT_MUTATING = {
+    "commit", "push", "checkout", "switch", "reset", "clean", "add", "merge",
+    "rebase", "fetch", "pull", "tag", "stash", "cherry-pick", "revert", "init",
+    "remote", "apply", "am", "config", "gc", "prune", "worktree", "submodule",
+}
+
+# Scripted file writes (Python, Node, sed in place).
+WRITE_PATTERNS = [
+    r"open\([^)]*,\s*['\"][wax]",          # open(path, 'w'|'a'|'x'|...)
+    r"\.write_text\(", r"\.write_bytes\(",
+    r"Path\([^)]*\)\.(write|touch|unlink|mkdir|rename|replace)\b",
+    r"\bshutil\.(copy|copyfile|move|rmtree|make_archive)\b",
+    r"\bos\.(remove|unlink|rename|replace|mkdir|makedirs|rmdir|removedirs|"
+    r"chmod|chown|symlink|link|truncate)\b",
+    r"\.unlink\(",
+    r"\bfs\.(write|rm|unlink|mkdir|rename|appendFile)\w*\(",
+    r"\bwriteFileSync?\(",
+    r"\bsed\b[^\n]*-i",                     # sed -i (in-place edit)
+    r"\bperl\b[^\n]*-i",
+]
+
+# Network mutations and downloads.
+NETWORK_PATTERNS = [
+    r"\bcurl\b[^\n]*(-X\s*(POST|PUT|DELETE|PATCH)|--data|-d\s|--upload-file|-F\s)",
+    r"\bwget\b",
+    r"\bgh\s+pr\s+create\b",
+    r"\bgh\s+release\s+create\b",
+    r"\bgh\s+api\b[^\n]*-X\s*(POST|PUT|PATCH|DELETE)",
+]
+
+# No real and no simulated order.
+TRADING_PATTERN = (
+    r"\b(kraken|binance|coinbase|mexc|kucoin|tel99)\b[^\n]*"
+    r"\b(order|buy|sell|trade)\b"
+)
+PAPER_PATTERN = r"\bpaper\s+(order|trade|account)\b"
+
+# Commands that fetch remote content. Feeding one of these into a shell or an
+# interpreter runs code that was not reviewed, so the pipeline is blocked even
+# though each side looks harmless alone.
+NETWORK_FETCHERS = {
+    "curl", "wget", "fetch", "httpie", "http", "aria2c",
+}
+# Right-hand sides of a pipe that execute the piped bytes.
+PIPE_EXECUTORS = SHELLS | {
+    "python", "python3", "perl", "ruby", "node", "php", "lua", "tclsh", "osascript",
+}
+
+
+def strip_quoted(text: str) -> str:
+    """Return ``text`` with the contents of quoted spans removed.
+
+    Used for scans (redirection, pipe-to-shell) where a character inside a
+    string literal is not shell syntax: ``echo "a > b"`` writes nothing to a
+    file, and ``echo "x | sh"`` runs no shell.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+                out.append(ch)
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def pipes_into_executor(segment: str) -> bool:
+    """True if a network fetch is piped into a shell or interpreter.
+
+    ``curl … | sh``, ``wget -qO- … | bash``, ``curl … | python3`` are blocked.
+    Quoted spans are removed first, so ``echo "curl x | sh"`` is not matched.
+    """
+    code = strip_quoted(segment)
+    parts = [p.strip() for p in code.split("|")]
+    if len(parts) < 2:
+        return False
+    fetches = False
+    for part in parts[:-1]:
+        words = head_words(part)
+        if words and words[0].rsplit("/", 1)[-1] in NETWORK_FETCHERS:
+            fetches = True
+            break
+    if not fetches:
+        return False
+    for part in parts[1:]:
+        words = head_words(part)
+        if words and words[0].rsplit("/", 1)[-1] in PIPE_EXECUTORS:
+            return True
+    return False
+
+
+def split_segments(command: str) -> list[str]:
+    """Split a shell command on separators, keeping quoted parts intact."""
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            current.append(ch)
+            i += 1
+            continue
+        if command.startswith("&&", i) or command.startswith("||", i):
+            segments.append("".join(current))
+            current = []
+            i += 2
+            continue
+        if ch in ";|\n":
+            segments.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    segments.append("".join(current))
+    return [s.strip() for s in segments if s.strip()]
+
+
+# A bare value passed to a wrapper (the duration of ``timeout``, the priority of
+# ``nice``): never a command name, so it must not become the head word.
+_WRAPPER_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+
+
+def head_words(segment: str) -> list[str]:
+    """Return the effective command tokens, skipping assignments and wrappers.
+
+    Leading backslashes (``\\rm``) and the ``${IFS}`` / ``$IFS`` expansion are
+    neutralised first, because they are common ways to hide a command from a
+    naive head matcher.
+    """
+    segment = re.sub(r"\$\{IFS\}|\$IFS", " ", segment)
+    try:
+        tokens = segment.split()
+    except ValueError:
+        return []
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", token):
+            i += 1
+            continue
+        base = token.rsplit("/", 1)[-1].lstrip("\\")
+        if base in WRAPPERS:
+            i += 1
+            # Skip the wrapper's own arguments (``timeout 5``, ``nice -n 10``,
+            # ``xargs -I{}``) so the wrapped command becomes the head word.
+            while i < len(tokens) and (
+                tokens[i].startswith("-") or _WRAPPER_VALUE_RE.match(tokens[i])
+            ):
+                i += 1
+            continue
+        out = [t.lstrip("\\") for t in tokens[i:]]
+        break
+    return out
+
+
+def _strip_quotes(text: str) -> str:
+    return text.strip().strip("'\"")
+
+
+def decide(event: dict) -> tuple[int, str]:
+    """Return (exit_code, reason). 2 blocks, 0 allows.
+
+    Fails closed: an event this function cannot interpret is blocked, not
+    allowed. Only a well-formed event for a non-``terminal`` tool passes
+    without inspection.
+    """
+    tool = event.get("tool_name")
+    if not isinstance(tool, str) or not tool:
+        return 2, "guard: BLOCKED (event without tool_name)"
+    if tool != "terminal":
+        return 0, ""
+
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 2, "guard: BLOCKED (terminal event without tool_input)"
+    command = tool_input.get("command") or tool_input.get("cmd") or ""
+    if not isinstance(command, str) or not command.strip():
+        return 2, "guard: BLOCKED (terminal event without a command)"
+
+    # A network fetch piped into a shell or interpreter runs unreviewed code.
+    # Checked on the whole command because split_segments() splits on "|".
+    if pipes_into_executor(command):
+        return 2, "guard: BLOCKED (network fetch piped into a shell/interpreter)"
+
+    segments = split_segments(command)
+    # Expand nested shell invocations (bash -c '...') one level deep.
+    for segment in list(segments):
+        words = head_words(segment)
+        if words and words[0].rsplit("/", 1)[-1] in SHELLS and "-c" in words[1:3]:
+            idx = words.index("-c")
+            if idx + 1 < len(words):
+                segments.extend(split_segments(_strip_quotes(" ".join(words[idx + 1:]))))
+
+    for segment in segments:
+        words = head_words(segment)
+        if not words:
+            continue
+        base = words[0].rsplit("/", 1)[-1].lower()
+
+        if is_mutating_head(base):
+            return 2, f"guard: BLOCKED (mutating command {base!r})"
+
+        if base == "git":
+            sub, sub_idx = _git_subcommand(words)
+            if is_git_mutation(sub, words, segment, sub_idx):
+                return 2, f"guard: BLOCKED (git {sub or 'mutating'})"
+
+        # A destructive ``find`` action (delete, exec, output to file) writes or
+        # runs commands, which is not a read-only inspection.
+        if base == "find" and re.search(
+            r"(^|\s)-(delete|exec|execdir|ok|okdir|fls|fprint\w*)\b", segment
+        ):
+            return 2, "guard: BLOCKED (find with a destructive action)"
+
+        # Inside an interpreter, shelling out escapes the read-only contract.
+        if base in INTERPRETERS:
+            for pattern in ESCAPE_PATTERNS:
+                if re.search(pattern, segment, re.I):
+                    return 2, "guard: BLOCKED (interpreter escape to a subprocess)"
+
+        for pattern in INSTALL_PATTERNS + WRITE_PATTERNS + NETWORK_PATTERNS:
+            if re.search(pattern, segment, re.I):
+                return 2, f"guard: BLOCKED (pattern {pattern!r})"
+
+        if re.search(TRADING_PATTERN, segment, re.I) or \
+                re.search(PAPER_PATTERN, segment, re.I):
+            return 2, "guard: BLOCKED (trading order)"
+
+        if has_write_redirection(segment):
+            return 2, "guard: BLOCKED (output redirection to a file)"
+
+    return 0, ""
+
+
+def is_mutating_head(base: str) -> bool:
+    """True if the head word names a mutating command.
+
+    Handles dotted variants (``mkfs.ext4``) and the ``deploy*`` prefix.
+    """
+    if base in MUTATING_HEADS:
+        return True
+    stem = base.split(".", 1)[0]
+    if stem in MUTATING_PREFIXES or base in MUTATING_PREFIXES:
+        return True
+    return base.startswith("deploy")
+
+
+# ``git remote`` and ``git config`` are read-only in their listing forms.
+GIT_REMOTE_READONLY = {"", "-v", "--verbose", "show", "get-url"}
+GIT_CONFIG_READONLY_FLAGS = ("--get", "--get-all", "--get-regexp", "--list", "-l",
+                             "--get-urlmatch")
+
+
+def _git_subcommand(words: list[str]) -> tuple[str, int]:
+    """Return (sub-command, index) for a ``git`` invocation.
+
+    Skips leading global options, including the value-taking ones
+    (``git -C <dir> push``), so the real sub-command is found.
+    """
+    i = 1
+    while i < len(words):
+        token = words[i]
+        if token in GIT_VALUE_OPTIONS:
+            i += 2
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        return token, i
+    return "", i
+
+
+def is_git_mutation(sub: str, words: list[str], segment: str,
+                    sub_idx: int | None = None) -> bool:
+    """True if a ``git <sub>`` invocation writes to the repo, its refs or config.
+
+    Read-only forms are allowed: ``git remote -v``, ``git remote show``,
+    ``git remote get-url``, ``git config --get …``. Global flags such as
+    ``--no-pager`` before the sub-command are handled.
+    """
+    if sub == "branch":
+        return bool(re.search(r"-[dD]\b", segment))
+    # Tokens after the sub-command itself (skip global flags like --no-pager).
+    if sub_idx is None:
+        try:
+            sub_idx = words.index(sub)
+        except ValueError:
+            sub_idx = 1
+    after = words[sub_idx + 1:]
+    if sub == "remote":
+        verb = next((w for w in after if not w.startswith("-")), "")
+        return verb not in GIT_REMOTE_READONLY
+    if sub == "config":
+        return not any(f in after for f in GIT_CONFIG_READONLY_FLAGS)
+    return sub in GIT_MUTATING
+
+
+def has_write_redirection(segment: str) -> bool:
+    """True if the segment redirects output to a real file.
+
+    Quoted spans are ignored, so ``echo "a > b"`` and ``python3 -c "print(1 > 0)"``
+    are not false positives. Allowed: ``>/dev/null`` and ``2>&1`` descriptor
+    duplication.
+    """
+    code = strip_quoted(segment)
+    for match in re.finditer(r">>?", code):
+        rest = code[match.end():]
+        if match.group() == ">" and rest.startswith("&"):
+            continue
+        stripped = rest.lstrip()
+        if stripped.startswith("&") or re.match(r"^/dev/null(\b|$)", stripped):
+            continue
+        return True
+    return False
+
+
+def main() -> int:
+    raw = sys.stdin.read()
+    try:
+        event = json.loads(raw)
+    except Exception:
+        sys.stderr.write("guard: BLOCKED (unparseable event)\n")
+        return 2
+    if not isinstance(event, dict):
+        sys.stderr.write("guard: BLOCKED (event is not an object)\n")
+        return 2
+    code, reason = decide(event)
+    if code != 0:
+        sys.stderr.write(reason + "\n")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

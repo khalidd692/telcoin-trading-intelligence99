@@ -1,0 +1,57 @@
+name: TEL99 agent team read-only audit
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - agents/hermes-simple-team-20261114
+  push:
+    branches:
+      - agents/hermes-simple-team-20261114
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate audit tests
+        run: python -m unittest discover -s tests -p test_team_audit.py -v
+      - name: Validate agent team tests (security, config, delegation)
+        run: python -m unittest discover -s tests -p test_agent_team.py -v
+      - name: Validate the intelligence layer (router, shared memory, improvement)
+        run: python -m unittest discover -s tests -p test_agent_intelligence.py -v
+      - name: Validate the v1 exchange protocol and the OpenHands/Hermes/Kilo bus
+        run: python -m unittest discover -s tests -p test_agent_protocol.py -v
+      - name: Validate cloud-autonomy plugin tests (policy, guard, runtime proof)
+        run: python -m unittest discover -s tests -p test_cloud_autonomy.py -v
+      - name: Validate the bus<->orchestrator integration (store, bridge, wiring)
+        run: python -m unittest discover -s tests -p test_cloud_integration.py -v
+      - name: Prove the end-to-end autonomy path (deterministic, no spend)
+        run: python -m unittest discover -s tests -p test_cloud_autonomy_e2e.py -v
+      - name: Cloudflare Worker unit tests (no deploy, no network)
+        run: node --test cloudflare/tel99-hybrid/test/worker.test.mjs
+      - name: Worker syntax and config are valid (disabled, no cron, no workers.dev)
+        run: |
+          node --check cloudflare/tel99-hybrid/src/index.js
+          node cloudflare/tel99-hybrid/scripts/check-config.mjs
+      - name: Check agent definitions match team_config
+        run: python scripts/agents/render_agents.py --check
+      - name: Validate the cloud-autonomy plugin manifest
+        run: python scripts/agents/automation/orchestrator.py --offline
+      - name: Inventory twelve specialized roles
+        run: python scripts/agents/team_audit.py --output /tmp/tel99-team-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tel99-agent-team-audit
+          path: /tmp/tel99-team-audit.json
+          retention-days: 7
