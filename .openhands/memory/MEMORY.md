@@ -21,13 +21,17 @@
 ## Dépôt khalidd692/telcoin-trading-intelligence99 (TEL99)
 - Branches clés : produit `codex/tel99-quant-terminal`, données `tel99-live-data`,
   évaluation `tel99-evaluation-data`, équipe `agents/hermes-simple-team-20261114` (PR #63, base produit).
-- `GITHUB_TOKEN` = GitHub App installation token (client Iv23lizrrwLGm04hszl7), LECTURE SEULE.
-  Écriture refusée : `git push` -> 403 ; API `PUT /contents` -> 403 « Resource not accessible by integration » ;
-  `GET /branches/<b>/protection` -> 403. Le champ `permissions` du GET repo affiche `push: true` mais décrit
-  le dépôt, PAS le jeton. `rulesets` = [] et `protected: false` : ce n'est PAS une protection de branche.
-  Le credential helper `/home/openhands/.openhands/git-credential-helper` renvoie EXACTEMENT le même jeton
-  (sha256 identique) : le surcharger ne change rien. Pas de clé SSH, pas d'agent SSH, pas de .netrc,
-  `gh` non connecté. => Publier une branche exige un jeton `contents: write` ou un push manuel de l'utilisateur.
+- `GITHUB_TOKEN` : **avait `contents: write` le 2026-11-15 au soir** (contredit l'entrée lecture seule
+  ci-dessous, plus ancienne). Preuve : `git push -u origin fix/pr74-security-hardening-20261115` OK.
+  `GET /repos/...` `permissions.push:true`. `main` reste `protected:false` ; `GET /branches/<b>/protection`
+  -> 403 (permission *Administration* non accordée). Vérifier l'état réel avant de conclure à un blocage.
+  (Historique lecture seule : App installation token `Iv23lizrrwLGm04hszl7` ; helper credential identique.)
+- `TEL99_GITHUB_PAT` : PAT fine-grained user `khalidd692`, `admin:true` sur le repo, mais
+  `/branches/*/protection` -> 403 ; `rulesets:[]` : ce n'est PAS une protection de branche.
+- Workflow `tel99-agent-team-audit.yml` : ne se déclenche QUE sur `agents/hermes-simple-team-20261114`.
+  Sur une autre branche, forcer via `POST /actions/workflows/<id>/dispatches {"ref":"<branche>"}`.
+- Branche #74 avait une RÉGRESSION : `guard.py` blob `61802849` (sans #71). Référence #71 = `26579ceb`.
+- Publier une branche exige un jeton `contents: write`.
 - Clone initial SHALLOW : `git bundle create <branche>` échoue au clonage (`Failed to traverse parents`).
   Correctif lecture seule : `git fetch --unshallow origin` PUIS créer le bundle. Le patch `git format-patch -1`
   appliqué via `git am` sur le parent reproduit l'arbre exact (vérifier `rev-parse HEAD^{tree}`).
