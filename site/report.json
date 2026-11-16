@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-16T09:31:02.252659+00:00",
+  "generated_at": "2026-11-16T09:44:47.571252+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.00143,
-      "bid": 0.001429,
-      "ask": 0.001433,
-      "spread_pct": 0.2795248078267014,
-      "quote_volume_24h": 70817.715929,
-      "change_pct_24h": -0.0083,
+      "last": 0.001434,
+      "bid": 0.00143,
+      "ask": 0.001435,
+      "spread_pct": 0.34904013961605673,
+      "quote_volume_24h": 71215.506517,
+      "change_pct_24h": -0.0006,
       "source": "MEXC public ticker",
-      "observed_at": "2026-11-16T09:31:02.668446+00:00"
+      "observed_at": "2026-11-16T09:44:48.046626+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -26,8 +26,8 @@
       "status": "OK",
       "last": 0.001429,
       "bid": 0.001426,
-      "ask": 0.001429,
-      "observed_at": "2026-11-16T09:31:03.099186+00:00"
+      "ask": 0.00143,
+      "observed_at": "2026-11-16T09:44:48.444635+00:00"
     }
   },
   "checks": [
@@ -38,20 +38,20 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.2795,
+      "value_pct": 0.349,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.07,
+      "divergence_pct": 0.3493,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
     "last_closed_candle_at": "2026-11-16T09:30:00+00:00",
-    "candle_age_seconds": 62,
+    "candle_age_seconds": 888,
     "close": 0.001432,
     "ema12": 0.0014300329218189852,
     "ema26": 0.0014310157049660448,
@@ -257,10 +257,10 @@
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "01e71c43-428e-4c76-86f2-4b5e9ddc3144",
+  "collection_id": "acbc5368-13d1-4144-bd83-9521946e1408",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.07,
-    "mid_price_divergence_pct": 0.2449,
+    "last_price_divergence_pct": 0.3493,
+    "mid_price_divergence_pct": 0.3146,
     "check_basis": "last_price",
     "limit_pct": 1.0,
     "definitions": {
