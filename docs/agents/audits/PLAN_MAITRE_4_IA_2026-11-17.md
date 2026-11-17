@@ -142,3 +142,16 @@ Pas de réponse « 100% terminé » sans démonstration. Pas de nouveau routeur,
 - Dossiers audits : docs/agents/audits/CLAUDE_AUDIT_FINAL_2026-11-17.md ; GROK_AUDIT_2026-11-17.md ; GEMINI_AUDIT_2026-11-17.md ; DEEPSEEK_AUDIT_2026-11-17.md.
 
 **Règle finale :** transformer les recommandations des modèles en corrections testables, ne pas confondre rapports et exécution. Aucun de ces documents n'active les agents. Les chefs doivent accepter explicitement la mission dans leurs environnements pour la réaliser.
+
+
+---
+## ADDENDUM PRIORITAIRE — 18 novembre 2026 : LA LIBERTÉ DU PROPRIÉTAIRE PRIME
+Le propriétaire confirme : **« Hermes, Kilo et OpenHands m'aident à construire mes agents. C'est ça le but. Je veux être libre. »**
+
+**Référence complète et critères de sortie :** [DIRECTIVE_SOUVERAINETE_AGENTS_2026-11-18.md](DIRECTIVE_SOUVERAINETE_AGENTS_2026-11-18.md).
+
+**Changement d'interprétation obligatoire pour les chefs :** Hermes, Kilo Crew et OpenHands sont des ATELIERS ET ADAPTATEURS FACULTATIFS qui aident à développer et tester le **moteur d'agents personnel possédé par l'utilisateur**. Ils ne doivent pas devenir des dépendances obligatoires du noyau. Le travail sur le bus GitHub reste demandé pour collaborer entre ateliers, mais le système natif doit également pouvoir exécuter des missions locales avec FileStore sans GitHub, dans les limites de ses modèles et ressources.
+
+**Ajout au gate P1 :** démontrer au moins une mission réellement exécutée depuis notre propre entrée native (CLI/application) sans aucune des trois applications ouvertes : modèle interchangeable réellement accessible et gratuit, exécution contrôlée, fichiers, tests déterministes, mémoire, reprise et preuves ; et tester l'absence de chaque plateforme. Les tests purement offline/démonstration existants ne suffisent PAS.
+
+Conserver la priorité P0 sécurité/validation/reprise. Ne pas reconstruire bus.py/router.py/memory.py. Pas de nouveau framework ni de nouveau service payant. Le moteur IA a toujours besoin d'un modèle et de calcul ; « indépendance » signifie PORTABILITÉ ET CONTRÔLE, pas une ressource cloud infinie.
