@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794899543,
-  "observations": 375,
-  "valid_observations": 368,
+  "generated_at": 1794900388,
+  "observations": 376,
+  "valid_observations": 369,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 337,
-              "mean_pct": 0.16324
+              "count": 338,
+              "mean_pct": 0.16148
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 325,
-              "mean_pct": 0.51075
+              "count": 326,
+              "mean_pct": 0.5211
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 248,
-              "mean_pct": 1.62077
+              "count": 249,
+              "mean_pct": 1.66278
             }
           }
         }
@@ -127,16 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794883889,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 reclaim"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794886366,
       "previous_decision": "ATTENDRE",
@@ -306,6 +296,16 @@
         "+ volume"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1794900388,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 volume"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -357,8 +357,8 @@
     },
     "false_positives": {
       "count": 11,
-      "evaluable": 17,
-      "pending": 11,
+      "evaluable": 18,
+      "pending": 10,
       "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
