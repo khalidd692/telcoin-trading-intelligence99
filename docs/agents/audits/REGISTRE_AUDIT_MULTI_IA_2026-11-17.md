@@ -55,3 +55,47 @@ P1 PRODUIT : cockpit #87 clairement lecture des dernières preuves, automate #89
 ## Règle de consolidation ultérieure
 Pour chaque idée DeepSeek/Gemini/Claude/Grok : source, affirmation, preuve fichier+commit/CI ou log de run, statut CONFIRMÉ/REPRODUIRE/HYPOTHÈSE/ERREUR, propriétaire, priorité, dépendances, test négatif, preuve d'acceptation.
 Ne jamais supprimer une ancienne observation : l'annoter par correction datée. Aucun de ces avis n'autorise l'automatisation dangereuse.
+
+
+---
+## ADDENDUM — 17 NOVEMBRE 2026 — GEMINI + DEEPSEEK + PLAN FINAL
+Les deux nouvelles analyses sont archivées distinctement :
+- docs/agents/audits/GEMINI_AUDIT_2026-11-17.md (avis externe Gemini, sans accès GitHub direct)
+- docs/agents/audits/DEEPSEEK_AUDIT_2026-11-17.md (avis externe DeepSeek, pages PR consultées mais code non exécuté)
+- docs/agents/audits/PLAN_MAITRE_4_IA_2026-11-17.md (**consolidation et portes de validation**)
+Règle : préserver les conclusions antérieures, appliquer les correctifs de vérification sans effacer l'historique.
+
+### Nouveaux points utiles
+N1. Gemini : prévention de boucles webhook/cron, bornes d'événements et hop_count, context pruning et tests déterministes avant dépense LLM ; économie annoncée NON mesurée.
+N2. Gemini : scénarios de saturation RAM Windows lorsque plusieurs outils lancés, mais **les modèles locaux sont mis de côté**, donc ne pas les relancer.
+N3. Gemini/DeepSeek : isoler noyau/TEL99, projets et secrets ; l'extraction vers un nouveau repo ne doit PAS être automatique.
+N4. DeepSeek : plan de sauvegarde/restauration privée et chiffrée du KV ; aucun export de mémoire sensible dans un dépôt public.
+N5. DeepSeek : alertes hors modèle, kill-switch fournisseur, et gestion de l'état inconnu ; la révocation n'interrompt pas instantanément toutes conversations.
+N6. Tous : banc de tests comportementaux indépendant des agents candidats et vérificateur jugeant critères réellement exécutés.
+
+### Réfutations / restrictions vérifiées
+R8. bus.py contient déjà une machine à états, et store.py FileStore/KvStore : **ne pas recréer un bus entier**.
+R9. memory.py expose déjà schéma versionné et isolation par projet/common : **tester la persistance inter-runs plutôt que recoder ces deux principes**.
+R10. Les labels GitHub ne sont pas un claim atomique/CAS ; aucune garantie exactly-once native. Proposition Gemini de changement atomique par label à REJETER comme mécanisme de verrou.
+R11. Un PAT fine-grained GitHub donne des droits au dépôt et à une catégorie, pas un scope natif « seulement bus/ ». Éviter Contents write si issues suffisent.
+R12. DeepSeek annonce 10 conversations/jour, d'anciens rapports mentionnent 20 : **quota actuel inconnu**, lire API propre au compte.
+R13. Les chiffres de performance (-20/-60% de tokens, 20 tâches, 24–72h, délais en jours) sont des hypothèses de planification, pas des faits établis.
+R14. Le correctif PR #79 change une politique de confirmation : revue de sécurité obligatoire avant fusion. Aucune fusion demandée ni réalisée dans cet archivage.
+R15. PR #90 et #91 ne sont pas preuve que Hermes/Kilo/OpenHands CHARGENT cette charte automatiquement ; il faut test fresh session réel.
+
+### Plan validable retenu
+0) Clé exposée / branch rulesets et sécurité
+1) Revoir #79, tests garde et vraie API, intégrer SEULEMENT sur accord
+2) Solidifier état CAS / conversation_id / journal / anti-boucles
+3) Vérification déterministe par critère et mémoire seulement sur mission acceptée
+4) Approbation mission hash / contrôle identité / injections
+5) Mémoire inter-session et sauvegarde sûre
+6) Modèles gratuits, quotas et routeur mesuré
+7) Kilo pull GitHub et preuve e2e OFFLINE/reconnexion
+8) Auto-amélioration held-out et rollback
+9) Cockpit sourcé, alertes et deuxième projet isolé
+10) Endurance graduelle et rapport PASS/FAIL/BLOCKED
+Les owners précis, tests négatifs et portes d'acceptation sont dans PLAN_MAITRE_4_IA_2026-11-17.md.
+
+### Statut d'archivage
+Les quatre analyses externes sont enregistrées sous forme de **retranscriptions structurées détaillées**, et non comme copies littérales garanties mot pour mot. Les messages originaux demeurent dans cette conversation. Le plan est un document DRAFT sur une branche isolée, aucune activation, fusion ou modification production.
