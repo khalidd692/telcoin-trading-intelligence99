@@ -565,7 +565,13 @@ def _reconcile_decision(state: dict) -> tuple[str, str]:
             "a mission is recorded as active but the atomic KV lock cannot be "
             "read; refusing to reconcile without proof it is not running"
         )
-    lock = kv_get(_LOCK_KEY)
+    try:
+        lock = kv_get(_LOCK_KEY)
+    except Exception as exc:  # noqa: BLE001 - a KV read error is "cannot prove"
+        return "abort", (
+            "a mission is recorded as active but the atomic KV lock could not be "
+            f"read ({type(exc).__name__}: {exc}); refusing to reconcile without proof"
+        )
     if _lock_held(lock):
         return "abort", (
             f"a mission is already active (lock held by {lock.get('owner')} "
@@ -581,7 +587,12 @@ def _reconcile_decision(state: dict) -> tuple[str, str]:
                 f"a mission is recorded as active with conversation {cid} but the "
                 "agent server is unreachable; refusing to reconcile without proof"
             )
-        # outcome == "gone": the conversation is definitively not running.
+        # outcome == "gone": the conversation is not running. Note the residual
+        # assumption: a 404 is trusted as proof of absence. In this architecture
+        # the conversation is created on the same agent server the resume probes,
+        # and the KV lock above already covered the window (its TTL is
+        # max_runtime_seconds + 600) during which a run could still be alive, so a
+        # 404 after the lock expired means the conversation is really gone.
     return "proceed", ""
 
 

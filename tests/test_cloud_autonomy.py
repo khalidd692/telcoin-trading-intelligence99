@@ -935,6 +935,24 @@ class ReconcileDecisionTests(unittest.TestCase):
             self._restore()
         self.assertEqual(action, "proceed")
 
+    def test_kv_read_error_is_an_abort(self):
+        # A KV read that raises must not escape the documented abort contract.
+        self._orig = (orchestrator.kv_available, orchestrator.kv_get,
+                      orchestrator.conversation_status)
+
+        def boom(key):
+            raise OSError("kv down")
+
+        orchestrator.kv_available = lambda: True
+        orchestrator.kv_get = boom
+        try:
+            action, detail = orchestrator._reconcile_decision(self._state("cid-x"))
+        finally:
+            (orchestrator.kv_available, orchestrator.kv_get,
+             orchestrator.conversation_status) = self._orig
+        self.assertEqual(action, "abort")
+        self.assertIn("KV lock could not be read", detail)
+
     def test_reconcile_wrapper_clears_state_only_on_proceed(self):
         self._patch(lock=None, outcome="gone", status="error")
         saved = orchestrator.save_state
