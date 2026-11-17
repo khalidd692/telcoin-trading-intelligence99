@@ -82,6 +82,9 @@ class FakeCloud:
             self.issues = [{**dict(ISSUE), "body": mission_body}]
         self.started_conversations = []
         self.state_writes = 0
+        # When >0, ``/events/search`` returns a first page of that size and a
+        # ``next_page_id``, to exercise the pagination walk.
+        self.event_page_size = 0
         # When set, a KV PUT to this key fails, to exercise KV failures.
         # ``fail_kv_put_after`` lets a test allow the first N writes (e.g. the
         # mission opening) and fail only a later one (the final record).
@@ -92,6 +95,13 @@ class FakeCloud:
         # though the CAS would otherwise win, to force the retry path.
         self.inject_409_on_put = 0
         self._put_count = 0
+        # Conversation ids the server no longer knows (404): a conversation a
+        # prior run started and that has since been removed. Used by the resume
+        # tests to prove a dead conversation is safely re-queued.
+        self.dead_conversations: set[str] = set()
+        # A per-conversation list of execution statuses consumed on each GET, so
+        # a test can simulate a conversation that is "running" then "finished".
+        self.status_sequence: list[str] = []
 
     # -- HTTP surface -------------------------------------------------------
     def request(self, method, url, payload=None, headers=None, timeout=60):
@@ -116,8 +126,10 @@ class FakeCloud:
                 if child["id"] == conv:
                     return 200, {"response": child.get("response", "")}
             return 200, {"response": ""}
-        # agent server: coordinator events (delegations + child launches)
-        if url.endswith("/events") and method == "GET":
+        # agent server: coordinator events (delegations + child launches).
+        # The real reader is the *paginated* ``/events/search`` endpoint; the
+        # batch ``/events`` endpoint needs a body and answers 422 to a bare GET.
+        if "/events/search" in url and method == "GET":
             conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
             if conv == "cid-test-1":
                 events = []
@@ -137,8 +149,17 @@ class FakeCloud:
                     events.append({"observation": {
                         "kind": "StartChildConversationObservation",
                         "conversation_id": c["id"]}})
-                return 200, events
-            return 200, []
+                if self.event_page_size:
+                    if "page_id=" in url:
+                        page = events[self.event_page_size:]
+                        return 200, {"items": page, "next_page_id": None}
+                    page = events[:self.event_page_size]
+                    return 200, {"items": page, "next_page_id": "p2"}
+                return 200, {"items": events, "next_page_id": None}
+            return 200, {"items": [], "next_page_id": None}
+        # The batch endpoint must NOT be read: a bare GET is a 422.
+        if url.endswith("/events") and method == "GET":
+            return 422, "batch endpoint needs a body"
         # agent server: conversation list / single
         if url.endswith("/api/conversations") and method == "GET":
             return 200, []
@@ -147,7 +168,12 @@ class FakeCloud:
             return 201, {"id": "cid-test-1"}
         if "/api/conversations/" in url and method == "GET":
             conv = url.split("/api/conversations/", 1)[1].split("/", 1)[0]
+            if conv in self.dead_conversations:
+                return 404, "conversation not found"
             if conv == "cid-test-1":
+                if self.status_sequence:
+                    status = self.status_sequence.pop(0)
+                    return 200, {"execution_status": status}
                 return 200, {"execution_status": self.conversation_final}
             for child in self.children:
                 if child["id"] == conv:
@@ -299,6 +325,65 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(record.state, "done")
         self.assertEqual(record.result["status"], "success")
         self.assertEqual(len(record.learnings), 1)
+
+    # -- crash / resume: no duplicate conversation --------------------------
+    def _seed_active(self, conversation_id):
+        """Simulate a run killed after it recorded an active mission."""
+        orchestrator.kv_set("state", {
+            "version": 1, "processed": [], "journal": [],
+            "active": {"issue": 70, "work_branch": "agent/mission-70-x",
+                       "started_at": "2026-11-15T00:00:00Z", "owner": "run-killed",
+                       "conversation_id": conversation_id},
+        })
+
+    def test_crash_after_post_reattaches_and_does_not_duplicate(self):
+        # A run was killed after creating the conversation but before clearing
+        # ``active``: the state records the conversation id, the lock is gone.
+        # The next run must re-attach to the SAME conversation, never start a
+        # second one.
+        self._seed_active("cid-test-1")
+        # The resumed conversation is still running, then finishes.
+        self.cloud.status_sequence = ["running", "running", "finished"]
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 0, out)
+        self.assertIn("conversation_resumed", out)
+        self.assertIn("conversation_finished", out)
+
+    def test_crash_with_a_dead_conversation_is_safely_requeued(self):
+        # The recorded conversation no longer exists on the server (404). Nothing
+        # is running, so the mission is re-queued and a fresh conversation is
+        # started exactly once -- the orphan is recovered, not duplicated.
+        self._seed_active("cid-gone")
+        self.cloud.dead_conversations.add("cid-gone")
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1, out)
+        self.assertIn("stale_active_reconciled", out)
+
+    def test_crash_before_post_is_safely_requeued(self):
+        # A kill before the POST leaves an active record with no conversation id.
+        # Only the lock can prove safety; it is gone, so the mission is re-queued
+        # and started once.
+        orchestrator.kv_set("state", {
+            "version": 1, "processed": [], "journal": [],
+            "active": {"issue": 70, "work_branch": "agent/mission-70-x",
+                       "started_at": "2026-11-15T00:00:00Z", "owner": "run-killed",
+                       "conversation_id": None},
+        })
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1, out)
+
+    def test_live_conversation_with_no_lock_never_starts_a_duplicate(self):
+        # The strongest no-duplicate proof: even with the lock absent, a live
+        # conversation recorded in state is re-attached, so the mission is not
+        # started again.
+        self._seed_active("cid-test-1")
+        self.cloud.status_sequence = ["running", "finished"]
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 0, out)
 
     def test_lock_is_released_after_a_successful_run(self):
         self._run(self._config())
@@ -747,6 +832,47 @@ class ThreeRoleVerificationTests(unittest.TestCase):
             "finished", raw, expected_roles=self.ROLES)
         self.assertTrue(validated, verdict["checks"])
         self.assertEqual(set(verdict["roles"]), set(self.ROLES))
+
+    def test_collect_evidence_reads_the_paginated_endpoint(self):
+        """Regression: reading the batch ``/events`` endpoint returned no proof.
+
+        A bare ``GET /events`` answers HTTP 422 (it needs a body), so every
+        delegation was silently lost and a real mission was marked failed. The
+        reader must walk ``/events/search``.
+        """
+        roles = {"development": "tel99-dev-000000",
+                 "quant": "tel99-analyst-000000",
+                 "quality": "tel99-verifier-000000"}
+        cloud = FakeCloud()
+        original = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=roles, mission_body=self.BODY)
+        finally:
+            orchestrator._request = original
+        self.assertEqual(len(evidence["observations"]), 3)
+        self.assertEqual({o["subagent"] for o in evidence["observations"]},
+                         set(roles.values()))
+        validated, _ = orchestrator.verify_outcome(
+            "finished", evidence, expected_roles=roles)
+        self.assertTrue(validated)
+
+    def test_collect_evidence_walks_every_page(self):
+        """A paginated reader must follow ``next_page_id`` to the last page."""
+        roles = {"development": "tel99-dev-000000",
+                 "quant": "tel99-analyst-000000",
+                 "quality": "tel99-verifier-000000"}
+        cloud = FakeCloud()
+        cloud.event_page_size = 4  # 3 delegations = 6 events -> 2 pages
+        original = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=roles, mission_body=self.BODY)
+        finally:
+            orchestrator._request = original
+        self.assertEqual(len(evidence["observations"]), 3)
 
 
 if __name__ == "__main__":
