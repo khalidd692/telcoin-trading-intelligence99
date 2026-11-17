@@ -18,6 +18,8 @@ L'objectif final est **notre moteur d'agents IA personnel**, portable et exploit
 2. **BACKLOG.json :** liste stable d'objectifs, propriétaires, dépendances et tests. Ce n'est pas un état live : comparer aux PR/CI/runs avant d'agir.
 3. **EXECUTION_CONTINUE.md :** boucle obligatoire « prendre → exécuter → vérifier → publier → reprendre », limites d'autonomie et traitement des blocages.
 4. **CRITERES_DE_FIN.md :** conditions qui permettent de dire réellement « projet terminé ».
+- **RECETTE_LIVE_ET_MODE_SECOURS_OPENHANDS.md :** preuve de l'enchaînement A→B avec un seul déclenchement, différence intra/inter-session, et mode de secours cloud si Kilo/Hermes ne se connectent pas.
+
 5. **ETAT_ET_PR_EXISTANTES.md :** acquis, PR ouvertes, problèmes à ne pas recoder.
 6. **INTERFACES_ET_PASSATIONS.md :** responsabilités et format unique de handoff.
 
