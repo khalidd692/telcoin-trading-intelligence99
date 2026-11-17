@@ -31,3 +31,16 @@ Tests reproductibles et CI, sources/horodatages, vérification du site et JSON d
 - Sécurité : garde-fou `PreToolUse` (`scripts/agents/guard/guard.py`, sortie 2 = blocage), outils réduits à `terminal`, `sub_agent_scope`, noms d'agents uniques par exécution, budgets plafonnés.
 - Relance complète : `docs/agents/RELAUNCH_TEAM.md`.
 - Ces fichiers n'activent aucune planification cloud, aucune fusion, aucun ordre. Ne pas ajouter de secret au dépôt.
+
+
+## Mission prioritaire des AGENTS PERSONNELS — zéro copier-coller (18 novembre 2026)
+
+**Ceci ne remplace pas les contraintes TEL99 ci-dessus.** Pour toute mission sur le noyau généraliste des agents, consulter d'abord le [dossier GitHub de conduite autonome](docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/README.md), le [backlog 20 tâches](docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/BACKLOG.json), le [protocole de reprise](docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/EXECUTION_CONTINUE.md), et l'[issue maître #94](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94).
+
+**But impératif de l'utilisateur :** ne plus lui demander de copier-coller les réponses entre ChatGPT, Hermes, Kilo et OpenHands. Les trois chefs doivent utiliser GitHub comme registre de travail, produire les preuves, se transmettre les tâches, puis continuer la tâche suivante admissible sans solliciter le propriétaire pour des passations.
+
+Les applications Hermes, Kilo, OpenHands sont des ateliers temporaires ; le **moteur d'agents appartient au propriétaire** et doit rester indépendant des trois interfaces. Réutiliser bus.py, store.py, memory.py, router.py, les guards et adapters déjà présents. Ne pas recréer l'existant.
+
+Ce dossier est une **prescription de travail**, pas une preuve que les applications locales ont déjà un service GitHub automatique. Le transport Kilo est encore déclaré disconnected ; Hermes et Kilo nécessitent chacun une prise en charge runtime réelle. La PR #92 reprend déjà des travaux #79 et #89 : consulter son diff avant toute duplication.
+
+**Ne pas s'arrêter après une PR ou une réponse :** valider les critères, enregistrer l'état et avancer à la tâche suivante, sauf quota/permissions/sécurité ou besoin humain réel. Aucun merge/déploiement/cron permanent/service payant/ordre financier sans autorisation.
