@@ -1,7 +1,7 @@
 {
-  "generated_at": 1794921898,
-  "observations": 400,
-  "valid_observations": 393,
+  "generated_at": 1794922676,
+  "observations": 401,
+  "valid_observations": 394,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 361,
-              "mean_pct": 0.1822
+              "count": 363,
+              "mean_pct": 0.18671
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 350,
-              "mean_pct": 0.58699
+              "count": 351,
+              "mean_pct": 0.59305
             }
           }
         }
@@ -127,16 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794911085,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 convergence"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794911922,
       "previous_decision": "ATTENDRE",
@@ -400,6 +390,16 @@
         "\u2212 zone"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1794922676,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ volume"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -451,8 +451,8 @@
     },
     "false_positives": {
       "count": 11,
-      "evaluable": 24,
-      "pending": 9,
+      "evaluable": 25,
+      "pending": 8,
       "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
