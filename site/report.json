@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-17T07:53:01.362601+00:00",
+  "generated_at": "2026-11-17T08:06:43.400964+00:00",
   "symbol": "TELUSDT",
   "mode": "READ_ONLY_ALERTS",
   "status": "SURVEILLER",
@@ -8,14 +8,14 @@
   "sources": {
     "mexc_ticker": {
       "status": "OK",
-      "last": 0.001615,
-      "bid": 0.00161,
-      "ask": 0.001618,
-      "spread_pct": 0.49566294919454634,
-      "quote_volume_24h": 90225.461757,
-      "change_pct_24h": 0.1262,
+      "last": 0.001612,
+      "bid": 0.001609,
+      "ask": 0.001614,
+      "spread_pct": 0.3102699348433145,
+      "quote_volume_24h": 90411.844672,
+      "change_pct_24h": 0.1249,
       "source": "MEXC public ticker",
-      "observed_at": "2026-11-17T07:53:01.703866+00:00"
+      "observed_at": "2026-11-17T08:06:43.554055+00:00"
     },
     "mexc_candles": {
       "status": "OK",
@@ -27,7 +27,7 @@
       "last": 0.001619,
       "bid": 0.001614,
       "ask": 0.001619,
-      "observed_at": "2026-11-17T07:53:01.986500+00:00"
+      "observed_at": "2026-11-17T08:06:43.852794+00:00"
     }
   },
   "checks": [
@@ -38,34 +38,30 @@
     {
       "name": "MEXC spread",
       "status": "PASS",
-      "value_pct": 0.4957,
+      "value_pct": 0.3103,
       "limit_pct": 0.5
     },
     {
       "name": "Cross-exchange price consistency",
       "status": "PASS",
-      "divergence_pct": 0.2474,
+      "divergence_pct": 0.4333,
       "limit_pct": 1.0
     }
   ],
   "indicators": {
     "timeframe": "15m",
-    "last_closed_candle_at": "2026-11-17T07:45:00+00:00",
-    "candle_age_seconds": 481,
-    "close": 0.001614,
-    "ema12": 0.001605842104373192,
-    "ema26": 0.0015861816335073608,
-    "ema50": 0.0015579195996568492,
-    "rsi14": 61.392405063291164,
-    "atr14": 2.185714285714286e-05,
-    "atr_pct": 1.3542219861922467,
-    "volume_last_closed": 387222.85,
-    "volume_mean20": 426820.18700000003,
+    "last_closed_candle_at": "2026-11-17T08:00:00+00:00",
+    "candle_age_seconds": 403,
+    "close": 0.001611,
+    "ema12": 0.00160663562642097,
+    "ema26": 0.0015880190533592677,
+    "ema50": 0.0015599821316491162,
+    "rsi14": 58.974358974359006,
+    "atr14": 2.1071428571428565e-05,
+    "atr_pct": 1.3079719783630392,
+    "volume_last_closed": 475821.47,
+    "volume_mean20": 433497.745,
     "close_series": [
-      {
-        "time": "2026-11-16T20:00:00+00:00",
-        "close": 0.001504
-      },
       {
         "time": "2026-11-16T20:15:00+00:00",
         "close": 0.001509
@@ -253,14 +249,18 @@
       {
         "time": "2026-11-17T07:45:00+00:00",
         "close": 0.001614
+      },
+      {
+        "time": "2026-11-17T08:00:00+00:00",
+        "close": 0.001611
       }
     ]
   },
   "disclaimer": "No orders are placed. Monitoring is not a proven trading edge or financial advice.",
-  "collection_id": "8e95ba0f-3836-4792-8813-81d531938f35",
+  "collection_id": "57be6b90-6e8e-44ab-9d9c-3793a232f44c",
   "cross_exchange": {
-    "last_price_divergence_pct": 0.2474,
-    "mid_price_divergence_pct": 0.1548,
+    "last_price_divergence_pct": 0.4333,
+    "mid_price_divergence_pct": 0.3098,
     "check_basis": "last_price",
     "limit_pct": 1.0,
     "definitions": {
