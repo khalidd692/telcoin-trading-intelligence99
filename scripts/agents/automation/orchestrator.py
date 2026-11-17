@@ -40,6 +40,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -496,42 +497,92 @@ def reconcile_stale_active(state: dict, dry_run: bool) -> str | None:
     reconciliation the next run would abort forever with "a mission is already
     active" — the queue would be wedged by a mission that no longer runs.
 
-    The single source of truth for "is a mission really running" is the atomic
-    KV lock. So:
+    Two independent sources of truth are consulted, and the run only proceeds
+    when BOTH say nothing is running:
+
+    * the atomic KV lock (covers a second *run* racing for the mission);
+    * the recorded conversation id, probed on the agent server (covers a run
+      killed after it created a conversation but before it cleared ``active``).
+
+    So:
 
     * If the KV lock is still held and unexpired, another run owns the mission:
       return a reason string and let the caller abort.
-    * Otherwise nothing is running. Clear ``active`` and return ``None`` so the
-      mission becomes eligible again and is resumed (never lost, never
-      duplicated: it is not in ``processed`` yet).
+    * Else, if ``active`` carries a ``conversation_id`` and that conversation is
+      still alive on the agent server, the mission is genuinely running: return
+      a reason string (the caller then re-attaches to it instead of starting a
+      duplicate).
+    * Else clear ``active`` and return ``None`` so the mission becomes eligible
+      again and is resumed (never lost, never duplicated: it is not in
+      ``processed`` yet).
 
-    Never clears ``active`` when the lock cannot be read (KV unavailable), so a
-    real run can never silently run two missions at once.
+    Never clears ``active`` when the lock cannot be read (KV unavailable) or
+    when the liveness probe cannot reach the agent server, so a real run can
+    never silently run two missions at once (fail-closed).
     """
-    active = state.get("active")
-    if not active:
-        return None
     if dry_run:
         # A dry run does not touch persistent state; it only reports.
         return None
-    if not kv_available():
+    if not state.get("active"):
+        return None
+    action, detail = _reconcile_decision(state)
+    if action == "abort":
+        return detail
+    if action == "reattach":
         return (
+            f"a mission is recorded as active with a live conversation {detail}; "
+            "re-attaching rather than duplicating"
+        )
+    # "proceed": nothing is running; the mission is re-queued for a fresh attempt.
+    journal_entry(
+        state, "stale_active_reconciled", previous=state.get("active"),
+        note="lock expired or absent; mission re-queued for resume",
+    )
+    state["active"] = None
+    save_state(state)
+    return None
+
+
+def _reconcile_decision(state: dict) -> tuple[str, str]:
+    """Decide what to do with an ``active`` record, from two independent proofs.
+
+    Returns ``(action, detail)`` where ``action`` is one of:
+
+    * ``"proceed"`` — nothing is running; the mission may be re-queued.
+    * ``"reattach"`` — a live conversation exists; ``detail`` is its id.
+    * ``"abort"`` — the state cannot be proven safe; ``detail`` is the reason.
+
+    The decision is fail-closed: any uncertainty (unreadable lock, unreachable
+    agent server) is an ``abort``, never a silent re-queue that could start a
+    second conversation for a mission that is actually still running. This
+    function never mutates ``state``.
+    """
+    active = state.get("active")
+    if not active:
+        return "proceed", ""
+    if not kv_available():
+        return "abort", (
             "a mission is recorded as active but the atomic KV lock cannot be "
             "read; refusing to reconcile without proof it is not running"
         )
     lock = kv_get(_LOCK_KEY)
     if _lock_held(lock):
-        return (
+        return "abort", (
             f"a mission is already active (lock held by {lock.get('owner')} "
             f"until {lock.get('expires_at')})"
         )
-    journal_entry(
-        state, "stale_active_reconciled",
-        previous=active, note="lock expired or absent; mission re-queued for resume",
-    )
-    state["active"] = None
-    save_state(state)
-    return None
+    cid = active.get("conversation_id")
+    if cid:
+        outcome, status = conversation_status(cid)
+        if outcome == "alive":
+            return "reattach", cid
+        if outcome == "unknown":
+            return "abort", (
+                f"a mission is recorded as active with conversation {cid} but the "
+                "agent server is unreachable; refusing to reconcile without proof"
+            )
+        # outcome == "gone": the conversation is definitively not running.
+    return "proceed", ""
 
 
 # --------------------------------------------------------------------------- #
@@ -687,10 +738,19 @@ def build_payload(mission_issue: dict, work_branch: str, config: dict, llm: dict
     return {
         "workspace": {"kind": "LocalWorkspace", "working_dir": str(REPO_ROOT)},
         "worktree": False,
+        # ``confirm_unknown`` must stay False for an unattended cloud run. The
+        # security analyzer classifies the coordination actions the mission
+        # depends on (``task_tool_set`` delegation, ``task_tracker``) as UNKNOWN
+        # risk, and no human is present to answer a confirmation. With
+        # ``confirm_unknown: True`` the coordinator stalls in
+        # ``waiting_for_confirmation`` until the platform timeout kills the run
+        # — a guaranteed failure. HIGH-risk actions still require confirmation
+        # (``threshold: HIGH``); the deterministic PreToolUse guard remains the
+        # primary control on terminal commands.
         "confirmation_policy": {
             "kind": "ConfirmRisky",
             "threshold": "HIGH",
-            "confirm_unknown": True,
+            "confirm_unknown": False,
         },
         "security_analyzer": {"kind": "LLMSecurityAnalyzer"},
         "max_iterations": config["max_iterations"],
@@ -752,6 +812,90 @@ def load_config(path: str | None) -> dict:
     return config
 
 
+def _finish_mission(*, state, mission, work_branch, cid, final,
+                    agent_names, bus, bus_corr, require_bus, owner,
+                    processed) -> int:
+    """Verify, persist and close out a mission conversation.
+
+    Shared by a fresh start and a re-attach, so both paths apply exactly the same
+    evidence gate: a mission is only ever marked processed (done) when
+    ``verify_outcome`` proves every required role reported. On any failure the
+    mission stays out of ``processed`` and remains resumable. The caller holds
+    the KV lock and releases it in its ``finally``.
+    """
+    journal_entry(state, "conversation_finished", conversation=cid, status=final)
+
+    if final == "confirmation_required":
+        # An unattended run has no one to answer a confirmation. Fail fast and
+        # loudly rather than let the platform timeout kill the run; the mission
+        # stays out of ``processed`` so it is resumable.
+        journal_entry(state, "abort", conversation=cid,
+                      reason="conversation stalled waiting for a confirmation "
+                             "that no operator can answer in an unattended run")
+        state["active"] = None
+        save_state(state)
+        return 2
+
+    if final == "stopped":
+        # An operator set the brake while this mission ran. The conversation was
+        # interrupted; the mission stays resumable.
+        journal_entry(state, "emergency_interrupt", conversation=cid,
+                      scope="active_mission",
+                      note="conversation interrupted; mission left resumable")
+        state["active"] = None
+        save_state(state)
+        return 3
+
+    # --- Validation: a finished status is NOT a success by itself. ---
+    evidence = collect_evidence(cid, expected_roles=agent_names,
+                                mission_body=mission.get("body") or "")
+    validated, verdict = verify_outcome(final, evidence,
+                                        expected_roles=agent_names,
+                                        mission_body=mission.get("body") or "")
+    journal_entry(state, "outcome_verdict", validated=validated,
+                  roles={r: info.get("proven") for r, info in verdict["roles"].items()},
+                  checks=verdict["checks"])
+
+    # --- Persist the outcome on the bus (survives container destruction). ---
+    # Fail-closed: if the durable record cannot be written, the mission must NOT
+    # be declared done nor marked processed, otherwise it would be lost from the
+    # ledger and never retried.
+    if bus is not None and bus_corr is not None:
+        try:
+            outcome = bus_bridge.record_outcome(
+                bus, bus_corr, success=validated,
+                summary=(f"validated outcome for issue #{mission['number']}"
+                         if validated else
+                         f"unvalidated outcome ({final}) for issue #{mission['number']}"),
+                conversation_id=str(cid), work_branch=work_branch,
+                status_detail=f"final status {final}; validated={validated}",
+                evidence=evidence, verdict=verdict,
+            )
+            journal_entry(state, "bus_outcome", mission_state=outcome["state"],
+                          learning=(outcome.get("learning") or {}).get("id"))
+        except Exception as exc:  # noqa: BLE001
+            journal_entry(state, "abort",
+                          reason="final bus record failed: mission NOT marked done",
+                          detail=f"{type(exc).__name__}: {exc}")
+            state["active"] = None
+            save_state(state)
+            return 2
+    elif require_bus:
+        journal_entry(state, "abort",
+                      reason="bus unavailable at completion: mission NOT marked done")
+        state["active"] = None
+        save_state(state)
+        return 2
+
+    # Only a validated mission is marked processed; an unvalidated one stays out
+    # of ``processed`` so the next run resumes it.
+    if validated:
+        state["processed"] = sorted(processed | {mission["number"]})
+    state["active"] = None
+    save_state(state)
+    return 0 if validated else 2
+
+
 def run(config: dict, offline: bool = False) -> int:
     started = time.time()
     owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
@@ -799,16 +943,31 @@ def run(config: dict, offline: bool = False) -> int:
         return 2
 
     # One mission at a time, with automatic recovery from interruption.
+    # A prior run killed mid-mission may have left an active record. Decide, from
+    # two independent proofs (the KV lock and the recorded conversation's real
+    # status), whether to abort, re-attach, or re-queue -- never to duplicate.
     active = state.get("active")
+    resume_cid = None
+    resume_issue = None
     if active and not config["dry_run"]:
-        reason = reconcile_stale_active(state, config["dry_run"])
-        if reason:
-            journal_entry(state, "abort", reason=reason, active=active)
+        action, detail = _reconcile_decision(state)
+        if action == "abort":
+            journal_entry(state, "abort", reason=detail, active=active)
             save_state(state)
             return 2
-        active = state.get("active")
-        if not active:
-            journal_entry(state, "resume", note="interrupted mission re-queued for resume")
+        if action == "reattach":
+            resume_cid = detail
+            resume_issue = active.get("issue")
+            journal_entry(state, "resume_reattach", conversation=resume_cid,
+                          issue=resume_issue,
+                          note="a live conversation exists; re-attaching instead "
+                               "of starting a duplicate")
+        else:
+            journal_entry(state, "stale_active_reconciled", previous=active,
+                          note="lock expired or absent; mission re-queued for resume")
+            state["active"] = None
+            save_state(state)
+            active = None
 
     if offline:
         journal_entry(state, "offline", note="no network calls; selection logic only")
@@ -841,7 +1000,27 @@ def run(config: dict, offline: bool = False) -> int:
         return 2
 
     processed = set(state.get("processed", []))
-    mission = policy.select_mission(issues, config["mission_label"], processed)
+    resuming = resume_cid is not None
+
+    if resuming:
+        # Re-attaching to a mission that a prior run already started: bind this
+        # run to the SAME mission (its stable id is the issue number), so the
+        # conversation we resume is never confused with a different mission.
+        mission = next(
+            (i for i in issues if i.get("number") == resume_issue), None
+        )
+        if mission is None:
+            journal_entry(
+                state, "abort",
+                reason=f"conversation {resume_cid} is still running for issue "
+                       f"#{resume_issue}, which is no longer an eligible mission; "
+                       "refusing to start a different one while it runs",
+                conversation=resume_cid, issue=resume_issue,
+            )
+            save_state(state)
+            return 2
+    else:
+        mission = policy.select_mission(issues, config["mission_label"], processed)
     if mission is None:
         journal_entry(state, "idle", note="no eligible mission")
         save_state(state)
@@ -850,13 +1029,16 @@ def run(config: dict, offline: bool = False) -> int:
     work_branch = policy.work_branch_name(
         config["work_branch_prefix"], mission["number"], mission.get("title", "")
     )
+    # When re-attaching, the one active mission IS this mission: it must not be
+    # counted as an *extra* concurrent mission, and no new conversation (thus no
+    # new quota spend) is started, so those two preconditions do not apply.
     reasons = policy.evaluate_preconditions(
         repository=config["repository"],
         base_branch=config["base_branch"],
         work_branch=work_branch,
-        quota_remaining=remaining,
+        quota_remaining=(config["quota_min_remaining"] if resuming else remaining),
         quota_min_remaining=config["quota_min_remaining"],
-        active_missions=1 if active else 0,
+        active_missions=(0 if resuming else (1 if active else 0)),
         max_concurrent_missions=config["max_concurrent_missions"],
         dry_run=config["dry_run"],
     )
@@ -946,6 +1128,26 @@ def run(config: dict, offline: bool = False) -> int:
         save_state(state)
         return 2
 
+    # --- Resume: re-attach to a live conversation instead of duplicating it. ---
+    # A prior run may have created a conversation and then been killed before it
+    # could record the outcome. ``_reconcile_decision`` proved (via the KV lock
+    # and a live status probe) that this conversation is still running; adopt it.
+    if resume_cid:
+        journal_entry(state, "conversation_resumed", conversation=resume_cid,
+                      issue=resume_issue)
+        report_phase("resuming coordinator")
+        agent_names = cfg.unique_names(time.strftime("%H%M%S"))
+        try:
+            final = wait_for(resume_cid, deadline, state_dir=state_dir)
+            return _finish_mission(
+                state=state, mission=mission, work_branch=work_branch,
+                cid=resume_cid, final=final, agent_names=agent_names, bus=bus,
+                bus_corr=bus_corr, require_bus=require_bus, owner=owner,
+                processed=processed,
+            )
+        finally:
+            release_lock(owner)
+
     # --- Build the coordinator payload and prove it declares 3 restricted agents. ---
     profile = os.environ.get("TEL99_LLM_PROFILE", "openhands_deepseek-v4.1-flash")
     llm = {"model": cfg.DEFAULT_MODEL, "usage_id": "default"}
@@ -970,8 +1172,13 @@ def run(config: dict, offline: bool = False) -> int:
     journal_entry(state, "payload_ok",
                   sub_agents=[d.get("name") for d in payload.get("agent_definitions", [])])
 
+    # Record the active mission BEFORE the conversation exists so a kill in the
+    # next instant is still visible to the next run. The real conversation id is
+    # added the moment the server returns it (below), so an interrupted run can
+    # always be re-attached rather than duplicated.
     state["active"] = {"issue": mission["number"], "work_branch": work_branch,
-                       "started_at": policy.utcnow_iso(), "owner": owner}
+                       "started_at": policy.utcnow_iso(), "owner": owner,
+                       "conversation_id": None}
     save_state(state)
     report_phase("starting coordinator")
 
@@ -987,77 +1194,26 @@ def run(config: dict, offline: bool = False) -> int:
             return 2
 
         cid = body.get("id") or body.get("conversation_id")
-        journal_entry(state, "conversation_started", conversation=cid, issue=mission["number"])
+        # Persist the real conversation id at once: a hard kill after this point
+        # leaves a recoverable record, and the next run re-attaches to it.
+        state["active"] = {"issue": mission["number"], "work_branch": work_branch,
+                           "started_at": state["active"]["started_at"], "owner": owner,
+                           "conversation_id": cid}
+        save_state(state)
+        journal_entry(state, "conversation_started", conversation=cid,
+                      issue=mission["number"])
 
         # --- Wait, bounded by the deadline; stop children on timeout or stop. ---
         report_phase("running coordinator")
         final = wait_for(cid, deadline, state_dir=state_dir)
-        journal_entry(state, "conversation_finished", conversation=cid, status=final)
-        if final == "stopped":
-            # An operator set the brake while this mission ran. The conversation
-            # was interrupted; the mission stays out of ``processed`` so the next
-            # run (once the brake is cleared) resumes it rather than losing it.
-            journal_entry(state, "emergency_interrupt", conversation=cid,
-                          scope="active_mission",
-                          note="conversation interrupted; mission left resumable")
-            state["active"] = None
-            save_state(state)
-            return 3
-
-        # --- Validation: a finished status is NOT a success by itself. ---
-        # Collect the proof each required role actually ran and reported, then
-        # accept the mission only when the evidence supports it. Absence of any
-        # role's proof is a failure, not an assumption of success.
-        evidence = collect_evidence(cid, expected_roles=agent_names,
-                                    mission_body=mission.get("body") or "")
-        validated, verdict = verify_outcome(final, evidence,
-                                            expected_roles=agent_names,
-                                            mission_body=mission.get("body") or "")
-        journal_entry(state, "outcome_verdict", validated=validated,
-                      roles={r: info.get("proven") for r, info in verdict["roles"].items()},
-                      checks=verdict["checks"])
-
-        # --- Persist the outcome on the bus (survives container destruction). ---
-        # Fail-closed on the final write: if the durable record cannot be written,
-        # the mission must NOT be declared done nor marked processed, otherwise it
-        # would be lost from the ledger and never retried.
-        if bus is not None and bus_corr is not None:
-            try:
-                outcome = bus_bridge.record_outcome(
-                    bus, bus_corr, success=validated,
-                    summary=(f"validated outcome for issue #{mission['number']}"
-                             if validated else
-                             f"unvalidated outcome ({final}) for issue #{mission['number']}"),
-                    conversation_id=str(cid), work_branch=work_branch,
-                    status_detail=f"final status {final}; validated={validated}",
-                    evidence=evidence, verdict=verdict,
-                )
-                journal_entry(state, "bus_outcome", mission_state=outcome["state"],
-                              learning=(outcome.get("learning") or {}).get("id"))
-            except Exception as exc:  # noqa: BLE001
-                release_lock(owner)
-                journal_entry(state, "abort",
-                              reason="final bus record failed: mission NOT marked done",
-                              detail=f"{type(exc).__name__}: {exc}")
-                state["active"] = None
-                save_state(state)
-                return 2
-        elif require_bus:
-            release_lock(owner)
-            journal_entry(state, "abort",
-                          reason="bus unavailable at completion: mission NOT marked done")
-            state["active"] = None
-            save_state(state)
-            return 2
-
-        # Only a validated mission is marked processed; an unvalidated one stays
-        # out of ``processed`` so the next run resumes it.
-        if validated:
-            state["processed"] = sorted(processed | {mission["number"]})
-        state["active"] = None
-        save_state(state)
-        return 0 if validated else 2
+        return _finish_mission(
+            state=state, mission=mission, work_branch=work_branch,
+            cid=cid, final=final, agent_names=agent_names, bus=bus,
+            bus_corr=bus_corr, require_bus=require_bus, owner=owner,
+            processed=processed,
+        )
     finally:
+        release_lock(owner)
         release_lock(owner)
 
 
@@ -1078,6 +1234,37 @@ def _get_json(path: str) -> dict:
     status, body = _request("GET", f"{agent_server_base()}{path}",
                             headers={"X-Session-API-Key": session_key()})
     return body if status == 200 and isinstance(body, dict) else {}
+
+
+def _iter_events(cid: str, page_limit: int = 100, max_pages: int = 200):
+    """Yield every persisted event of a conversation, oldest first.
+
+    The agent-server exposes two different event endpoints: the batch
+    ``GET /api/conversations/{cid}/events`` takes a *list of event ids* in the
+    request body (a bare GET answers HTTP 422), while
+    ``GET .../events/search`` is the paginated reader. Reading the batch
+    endpoint here silently returned no events, so every delegation was recorded
+    as "no proof" and a real mission was marked failed. This walks
+    ``events/search`` page by page.
+    """
+    page_id = ""
+    for _ in range(max_pages):
+        query = f"?limit={page_limit}"
+        if page_id:
+            query += f"&page_id={urllib.parse.quote(page_id)}"
+        status, body = _request(
+            "GET",
+            f"{agent_server_base()}/api/conversations/{cid}/events/search{query}",
+            headers={"X-Session-API-Key": session_key()},
+        )
+        if status != 200 or not isinstance(body, dict):
+            return
+        items = body.get("items") or []
+        for item in items:
+            yield item
+        page_id = body.get("next_page_id") or ""
+        if not page_id:
+            return
 
 
 def _observation_text(observation: dict) -> str:
@@ -1211,42 +1398,37 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
     delegations: list[dict] = []
     children: list[str] = []
     seen_children: set[str] = set()
-    status, events = _request(
-        "GET", f"{agent_server_base()}/api/conversations/{cid}/events",
-        headers={"X-Session-API-Key": session_key()},
-    )
-    if status == 200 and isinstance(events, list):
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            action = event.get("action")
-            if isinstance(action, dict) and action.get("kind") in (
-                "TaskAction", "TaskActionWithRisk"
-            ):
-                delegations.append({
-                    "subagent_type": action.get("subagent_type") or "",
-                    "description": action.get("description") or "",
-                })
-            observation = event.get("observation")
-            if not isinstance(observation, dict):
-                continue
-            kind = observation.get("kind")
-            if kind == "TaskObservation":
-                text = _observation_text(observation)
-                observations.append({
-                    "task_id": observation.get("task_id") or "",
-                    "subagent": observation.get("subagent") or "",
-                    "status": observation.get("status") or "",
-                    "is_error": bool(observation.get("is_error")),
-                    "response_chars": len(text),
-                    "result_text": text[:2000],
-                    "is_placeholder": _is_placeholder_result(text),
-                })
-            elif kind == "StartChildConversationObservation":
-                child_id = observation.get("conversation_id")
-                if isinstance(child_id, str) and child_id and child_id not in seen_children:
-                    seen_children.add(child_id)
-                    children.append(child_id)
+    for event in _iter_events(cid):
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        if isinstance(action, dict) and action.get("kind") in (
+            "TaskAction", "TaskActionWithRisk"
+        ):
+            delegations.append({
+                "subagent_type": action.get("subagent_type") or "",
+                "description": action.get("description") or "",
+            })
+        observation = event.get("observation")
+        if not isinstance(observation, dict):
+            continue
+        kind = observation.get("kind")
+        if kind == "TaskObservation":
+            text = _observation_text(observation)
+            observations.append({
+                "task_id": observation.get("task_id") or "",
+                "subagent": observation.get("subagent") or "",
+                "status": observation.get("status") or "",
+                "is_error": bool(observation.get("is_error")),
+                "response_chars": len(text),
+                "result_text": text[:2000],
+                "is_placeholder": _is_placeholder_result(text),
+            })
+        elif kind == "StartChildConversationObservation":
+            child_id = observation.get("conversation_id")
+            if isinstance(child_id, str) and child_id and child_id not in seen_children:
+                seen_children.add(child_id)
+                children.append(child_id)
 
     child_reports = []
     for child_id in children:
@@ -1354,6 +1536,42 @@ def verify_outcome(final: str, evidence: dict, *,
 
 
 
+def conversation_status(cid: str) -> tuple[str, str]:
+    """Classify a conversation as ``alive``, ``gone`` or ``unknown``.
+
+    Returns ``(outcome, status)`` where ``outcome`` is one of:
+
+    * ``"alive"`` — the server answered 200 and the execution status is not
+      terminal: the conversation is still running. ``status`` is that status.
+    * ``"gone"`` — the server answered 200 with a terminal status, or answered
+      404: the conversation is not running (finished, errored, or removed).
+    * ``"unknown"`` — the server could not be reached or answered anything else.
+      The caller must fail closed: it cannot prove the conversation is dead.
+
+    A 404 is treated as ``gone`` (a positive proof of absence), while a transport
+    error is ``unknown`` — the distinction is what lets the resume path re-queue
+    a genuinely dead conversation yet still refuse to duplicate an unreachable
+    one.
+    """
+    if not cid:
+        return "gone", ""
+    try:
+        code, body = _request(
+            "GET", f"{agent_server_base()}/api/conversations/{cid}",
+            headers={"X-Session-API-Key": session_key()},
+        )
+    except Exception:  # noqa: BLE001 - a transport error is "cannot tell"
+        return "unknown", ""
+    if code == 404:
+        return "gone", ""
+    if code == 200 and isinstance(body, dict):
+        status = str(body.get("execution_status") or "")
+        if status in TERMINAL_STATES:
+            return "gone", status
+        return "alive", status
+    return "unknown", ""
+
+
 def interrupt_conversation(cid: str) -> bool:
     """Ask the agent server to interrupt a running conversation.
 
@@ -1372,7 +1590,8 @@ def interrupt_conversation(cid: str) -> bool:
 
 
 def wait_for(cid: str, deadline: float, poll: float = 5.0,
-             state_dir: str | pathlib.Path | None = None) -> str:
+             state_dir: str | pathlib.Path | None = None,
+             confirm_grace_polls: int = 3) -> str:
     """Poll a conversation until a terminal state, the deadline or a stop.
 
     While a conversation runs, the *local* emergency brake is re-read on every
@@ -1380,9 +1599,16 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
     set, the conversation is interrupted and the function returns ``"stopped"``.
     The deadline path also interrupts the child, so no work is left running
     unattended. This only interrupts the conversation this run is driving.
+
+    ``waiting_for_confirmation`` is not terminal: an unattended run has no one to
+    answer it. Left alone it burns the whole deadline and is then killed by the
+    platform timeout. After ``confirm_grace_polls`` consecutive polls in that
+    state the conversation is interrupted and ``"confirmation_required"`` is
+    returned, so the run fails fast, on purpose, and the mission stays resumable.
     """
     headers = {"X-Session-API-Key": session_key()}
     brake_dir = pathlib.Path(state_dir) if state_dir is not None else _state_path().parent
+    waiting_polls = 0
     while time.time() < deadline:
         if emergency is not None and emergency.local_stop(brake_dir)[0]:
             interrupt_conversation(cid)
@@ -1394,6 +1620,13 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
             state = body.get("execution_status")
             if state in TERMINAL_STATES:
                 return state
+            if state == "waiting_for_confirmation":
+                waiting_polls += 1
+                if waiting_polls >= confirm_grace_polls:
+                    interrupt_conversation(cid)
+                    return "confirmation_required"
+            else:
+                waiting_polls = 0
         time.sleep(poll)
     # Deadline reached: stop the child so no work is left running unattended.
     interrupt_conversation(cid)
