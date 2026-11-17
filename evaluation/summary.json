@@ -1,8 +1,8 @@
 {
-  "generated_at": 1794924324,
-  "observations": 403,
-  "valid_observations": 396,
-  "latest_decision": "ALERTE PR\u00c9COCE",
+  "generated_at": 1794925156,
+  "observations": 404,
+  "valid_observations": 397,
+  "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 365,
-              "mean_pct": 0.19135
+              "count": 366,
+              "mean_pct": 0.19249
             }
           }
         }
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 353,
-              "mean_pct": 0.60135
+              "count": 354,
+              "mean_pct": 0.60505
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 273,
-              "mean_pct": 2.64348
+              "count": 274,
+              "mean_pct": 2.68094
             }
           }
         }
@@ -127,16 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794913580,
-      "previous_decision": "INVALIDATION",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794914420,
       "previous_decision": "ATTENDRE",
@@ -373,6 +363,17 @@
           "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
         ]
       }
+    },
+    {
+      "observed_at": 1794925156,
+      "previous_decision": "ALERTE PR\u00c9COCE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 volume",
+        "\u2212 zone"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
