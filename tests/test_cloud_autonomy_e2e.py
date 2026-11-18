@@ -833,6 +833,79 @@ class ThreeRoleVerificationTests(unittest.TestCase):
         self.assertTrue(validated, verdict["checks"])
         self.assertEqual(set(verdict["roles"]), set(self.ROLES))
 
+    # --- S-05 / gate G3: the acceptance criterion must be *satisfied*, not just
+    # declared. Three lying PASS reports plus a RED acceptance test must never be
+    # accepted as a success. ---
+
+    def _all_roles_pass(self):
+        return [self._obs(self.ROLES[r]) for r in self.ROLES]
+
+    def test_a_red_acceptance_check_rejects_despite_three_pass_reports(self):
+        """Gate G3: 3 PASS reports + a red test => validated is False.
+
+        This is the regression test for the S-05 defect: before the fix,
+        ``verify_outcome`` accepted the mission on the declared criterion text
+        alone and never looked at the check result.
+        """
+        evidence = self._evidence(self._all_roles_pass())
+        red = [{"id": "business-test", "command": "python -m unittest x",
+                "exit_code": 1, "reproducible": True,
+                "output_digest": "sha256:deadbeef"}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=red)
+        self.assertFalse(validated, verdict["checks"])
+        self.assertIn("criterion_business-test",
+                      [c["check"] for c in verdict["checks"] if not c["ok"]])
+        self.assertEqual(verdict["failed"], ["business-test"])
+
+    def test_a_green_acceptance_check_still_validates(self):
+        """The same three PASS reports WITH a reproducible green check validate."""
+        evidence = self._evidence(self._all_roles_pass())
+        green = [{"id": "business-test", "command": "python -m unittest x",
+                  "exit_code": 0, "reproducible": True,
+                  "output_digest": "sha256:cafe"}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=green)
+        self.assertTrue(validated, verdict["checks"])
+        self.assertEqual(verdict["satisfied"], ["business-test"])
+
+    def test_a_non_automatable_criterion_is_needs_human_not_a_pass(self):
+        """A criterion with no runnable command is NEEDS_HUMAN, never a silent PASS."""
+        evidence = self._evidence(self._all_roles_pass())
+        manual = [{"id": "ux-review", "automatable": False}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=manual)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["needs_human"], ["ux-review"])
+
+    def test_a_check_without_reproducible_evidence_does_not_satisfy(self):
+        """exit_code 0 alone is not proof: reproducible + output_digest are required."""
+        evidence = self._evidence(self._all_roles_pass())
+        weak = [{"id": "business-test", "command": "python -m unittest x",
+                 "exit_code": 0, "reproducible": False,
+                 "output_digest": None}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=weak)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["failed"], ["business-test"])
+
+    def test_no_checks_keeps_the_historical_behaviour(self):
+        """Without acceptance checks the previous behaviour is unchanged."""
+        evidence = self._evidence(self._all_roles_pass())
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertTrue(validated, verdict["checks"])
+        self.assertEqual(verdict["acceptance_checks"], [])
+        self.assertEqual(verdict["failed"], [])
+
+    def test_checks_read_from_evidence_when_not_passed_explicitly(self):
+        """``collect_evidence`` can carry the checks; verify_outcome reads them."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "business-test", "command": "python -m unittest x",
+             "exit_code": 1, "reproducible": True, "output_digest": "sha256:x"}]
+        validated, _ = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+
     def test_collect_evidence_reads_the_paginated_endpoint(self):
         """Regression: reading the batch ``/events`` endpoint returned no proof.
 
