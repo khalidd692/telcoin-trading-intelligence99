@@ -908,9 +908,9 @@ class ReconcileDecisionTests(unittest.TestCase):
         self.assertEqual(detail, "cid-x")
 
     def test_dead_conversation_is_requeued(self):
-        # The conversation is gone (server answered but it is terminal) -> safe
-        # to re-queue: nothing is running.
-        self._patch(lock=None, outcome="gone", status="finished")
+        # The server can no longer find the conversation. A finished
+        # conversation still exists and can be reopened to collect evidence.
+        self._patch(lock=None, outcome="gone", status="")
         try:
             action, _ = orchestrator._reconcile_decision(self._state("cid-x"))
         finally:

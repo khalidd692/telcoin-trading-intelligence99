@@ -487,7 +487,6 @@ def release_lock(owner: str) -> None:
 
 
 def _expiry_iso(ttl_seconds: int) -> str:
-
     return (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).replace(
         microsecond=0
     ).isoformat().replace("+00:00", "Z")
@@ -565,7 +564,7 @@ def _reconcile_decision(state: dict) -> tuple[str, str]:
     Returns ``(action, detail)`` where ``action`` is one of:
 
     * ``"proceed"`` — nothing is running; the mission may be re-queued.
-    * ``"reattach"`` — a live conversation exists; ``detail`` is its id.
+    * ``"reattach"`` — a live or finished conversation exists; ``detail`` is its id.
     * ``"abort"`` — the state cannot be proven safe; ``detail`` is the reason.
 
     The decision is fail-closed: any uncertainty (unreadable lock, unreachable
@@ -594,9 +593,14 @@ def _reconcile_decision(state: dict) -> tuple[str, str]:
             f"until {lock.get('expires_at')})"
         )
     cid = active.get("conversation_id")
+    if not cid and active.get("start_requested"):
+        return "abort", (
+            "conversation start outcome is unknown; refusing a second request "
+            "until the existing conversation is reconciled"
+        )
     if cid:
         outcome, status = conversation_status(cid)
-        if outcome == "alive":
+        if outcome == "alive" or status == "finished":
             return "reattach", cid
         if outcome == "unknown":
             return "abort", (
@@ -1126,13 +1130,11 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
             journal_entry(state, "abort",
                           reason="final bus record failed: mission NOT marked done",
                           detail=f"{type(exc).__name__}: {exc}")
-            state["active"] = None
             save_state(state)
             return 2
     elif require_bus:
         journal_entry(state, "abort",
                       reason="bus unavailable at completion: mission NOT marked done")
-        state["active"] = None
         save_state(state)
         return 2
 
@@ -1140,7 +1142,8 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
     # of ``processed`` so the next run resumes it.
     if validated:
         state["processed"] = sorted(processed | {mission["number"]})
-    state["active"] = None
+    if verification != "NEEDS_HUMAN":
+        state["active"] = None
     save_state(state)
     return 0 if validated else 2
 
@@ -1249,7 +1252,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             resume_issue = active.get("issue")
             journal_entry(state, "resume_reattach", conversation=resume_cid,
                           issue=resume_issue,
-                          note="a live conversation exists; re-attaching instead "
+                          note="an existing conversation will be re-attached instead "
                                "of starting a duplicate")
         else:
             journal_entry(state, "stale_active_reconciled", previous=active,
@@ -1301,9 +1304,9 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         if mission is None:
             journal_entry(
                 state, "abort",
-                reason=f"conversation {resume_cid} is still running for issue "
-                       f"#{resume_issue}, which is no longer an eligible mission; "
-                       "refusing to start a different one while it runs",
+                reason=f"conversation {resume_cid} was already started for issue "
+                       f"#{resume_issue}, which is no longer in the mission queue; "
+                       "refusing to start another conversation before reconciliation",
                 conversation=resume_cid, issue=resume_issue,
             )
             save_state(state)
@@ -1488,13 +1491,11 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     journal_entry(state, "payload_ok",
                   sub_agents=[d.get("name") for d in payload.get("agent_definitions", [])])
 
-    # Record the active mission BEFORE the conversation exists so a kill in the
-    # next instant is still visible to the next run. The real conversation id is
-    # added the moment the server returns it (below), so an interrupted run can
-    # always be re-attached rather than duplicated.
+    # Persist the intent before POST. A gap between this write and receiving
+    # the conversation ID is ambiguous, so recovery refuses a second POST.
     state["active"] = {"issue": mission["number"], "work_branch": work_branch,
                        "started_at": policy.utcnow_iso(), "owner": owner,
-                       "conversation_id": None}
+                       "conversation_id": None, "start_requested": True}
     save_state(state)
     report_phase("starting coordinator")
 
@@ -1504,12 +1505,16 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             headers={"X-Session-API-Key": session_key()},
         )
         if status not in (200, 201) or not isinstance(body, dict):
-            journal_entry(state, "abort", reason=f"conversation start failed: HTTP {status}")
-            state["active"] = None
+            journal_entry(state, "abort", reason=f"conversation start unconfirmed: HTTP {status}")
             save_state(state)
             return 2
 
         cid = body.get("id") or body.get("conversation_id")
+        if not isinstance(cid, str) or not cid.strip():
+            journal_entry(state, "abort", reason="conversation start returned no identifier")
+            save_state(state)
+            return 2
+
         # Persist the real conversation id at once: a hard kill after this point
         # leaves a recoverable record, and the next run re-attaches to it.
         state["active"] = {"issue": mission["number"], "work_branch": work_branch,

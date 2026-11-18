@@ -399,6 +399,33 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("conversation_resumed", out)
         self.assertIn("conversation_finished", out)
 
+    def test_lost_start_response_never_retries_an_ambiguous_post(self):
+        def lose_response(method, url, *args, **kwargs):
+            response = self.cloud.request(method, url, *args, **kwargs)
+            if method == "POST" and url.endswith("/api/conversations"):
+                raise ConnectionError("start response lost")
+            return response
+
+        with patch.object(orchestrator, "_request", side_effect=lose_response):
+            with self.assertRaises(ConnectionError):
+                self._run(self._config())
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+        self.assertIn("conversation start outcome is unknown", out)
+
+    def test_crash_after_conversation_finishes_reuses_existing_evidence(self):
+        self._seed_active("cid-test-1")
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("conversation_resumed", out)
+
     def test_crash_with_a_dead_conversation_is_safely_requeued(self):
         # The recorded conversation no longer exists on the server (404). Nothing
         # is running, so the mission is re-queued and a fresh conversation is
@@ -1359,6 +1386,16 @@ class DurableRunReportTests(unittest.TestCase):
         record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
         self.assertFalse(record.result["verdict"]["validated"])
         self.assertEqual(record.learnings, [])
+
+    def test_waiting_for_proof_does_not_start_another_conversation(self):
+        self.independent_proof = []
+        self.assertEqual(self._run(self._config())[0], 2)
+
+        self.assertEqual(self._run(self._config())[0], 2)
+
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+        report = self.cloud.kv["run_report"]
+        self.assertEqual(report["outcome_verification"], "NEEDS_HUMAN")
 
     def test_idle_run_does_not_inherit_the_previous_mission_verdict(self):
         self.assertEqual(self._run(self._config())[0], 0)
