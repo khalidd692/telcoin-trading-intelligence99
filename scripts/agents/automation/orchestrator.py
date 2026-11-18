@@ -923,7 +923,8 @@ def build_run_report(state: dict, config: dict, code: int, *,
     if validated is None:
         outcome_verification = "NOT_ATTEMPTED"
     else:
-        outcome_verification = "ACCEPTED" if validated else "REJECTED"
+        outcome_verification = (_last_journal_value(state, "outcome_verdict", "verification")
+                                or ("ACCEPTED" if validated else "REJECTED"))
     error_reason = _last_journal_value(state, "abort", "reason")
     if error_reason is None and code == 3:
         error_reason = _last_journal_value(state, "emergency_stop", "reason")
@@ -1087,10 +1088,20 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
     # --- Validation: a finished status is NOT a success by itself. ---
     evidence = collect_evidence(cid, expected_roles=agent_names,
                                 mission_body=mission.get("body") or "")
+    if not evidence.get("acceptance_checks"):
+        evidence["acceptance_checks"] = [
+            {"id": "independent-evidence", "automatable": False},
+        ]
     validated, verdict = verify_outcome(final, evidence,
                                         expected_roles=agent_names,
                                         mission_body=mission.get("body") or "")
+    verification = "ACCEPTED" if validated else "REJECTED"
+    if (verdict["needs_human"] and not verdict["failed"]
+            and all(check["ok"] for check in verdict["checks"]
+                    if not check["check"].startswith("criterion_"))):
+        verification = "NEEDS_HUMAN"
     journal_entry(state, "outcome_verdict", validated=validated,
+                  verification=verification,
                   roles={r: info.get("proven") for r, info in verdict["roles"].items()},
                   checks=verdict["checks"])
 

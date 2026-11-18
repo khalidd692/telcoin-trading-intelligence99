@@ -19,6 +19,8 @@ durable store gives across distinct cloud pods.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import contextlib
 import io
 import json
@@ -63,6 +65,26 @@ ISSUE["body"] = (
                              approver=AUTHORIZED_APPROVER)
     + "\n"
 )
+
+
+def mock_independent_result(test_case):
+    """Give run fixtures an explicit proof from outside the model events."""
+    collect = orchestrator.collect_evidence
+
+    def collect_with_proof(*args, **kwargs):
+        evidence = collect(*args, **kwargs)
+        if test_case.independent_proof:
+            evidence["acceptance_checks"] = test_case.independent_proof
+        return evidence
+
+    test_case.independent_proof = [{
+        "id": "fixture-check", "command": "fixture verifier",
+        "exit_code": 0, "reproducible": True,
+        "output_digest": "sha256:staged-fixture-proof",
+    }]
+    patcher = patch.object(orchestrator, "collect_evidence", collect_with_proof)
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
 
 
 class FakeCloud:
@@ -254,6 +276,7 @@ class FakeCloud:
 class EndToEndTests(unittest.TestCase):
     def setUp(self):
         self.cloud = FakeCloud()
+        mock_independent_result(self)
         self._orig_request = orchestrator._request
         self._orig_kv_get = orchestrator.kv_get
         self._orig_kv_set = orchestrator.kv_set
@@ -1187,6 +1210,7 @@ class DurableRunReportTests(unittest.TestCase):
 
     def setUp(self):
         self.cloud = FakeCloud()
+        mock_independent_result(self)
         self._orig_request = orchestrator._request
         self._orig_kv_get = orchestrator.kv_get
         self._orig_kv_set = orchestrator.kv_set
@@ -1308,6 +1332,33 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertFalse(report["mission_accepted"])
         self.assertEqual(report["outcome_verification"], "REJECTED")
         self.assertEqual(report["status"], "FAILED")
+
+    def test_failing_business_check_rejects_a_completed_three_role_run(self):
+        self.independent_proof[0]["exit_code"] = 1
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        report = self.cloud.kv["run_report"]
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "REJECTED")
+        bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+        record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+        self.assertEqual(record.result["verdict"]["failed"], ["fixture-check"])
+        self.assertEqual(record.learnings, [])
+
+    def test_plain_criterion_without_independent_evidence_needs_human(self):
+        self.independent_proof = []
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        report = self.cloud.kv["run_report"]
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "NEEDS_HUMAN")
+        bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+        record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+        self.assertFalse(record.result["verdict"]["validated"])
+        self.assertEqual(record.learnings, [])
 
     def test_idle_run_does_not_inherit_the_previous_mission_verdict(self):
         self.assertEqual(self._run(self._config())[0], 0)
