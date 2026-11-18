@@ -44,3 +44,7 @@ Les applications Hermes, Kilo, OpenHands sont des ateliers temporaires ; le **mo
 Ce dossier est une **prescription de travail**, pas une preuve que les applications locales ont déjà un service GitHub automatique. Le transport Kilo est encore déclaré disconnected ; Hermes et Kilo nécessitent chacun une prise en charge runtime réelle. La PR #92 reprend déjà des travaux #79 et #89 : consulter son diff avant toute duplication.
 
 **Ne pas s'arrêter après une PR ou une réponse :** valider les critères, enregistrer l'état et avancer à la tâche suivante, sauf quota/permissions/sécurité ou besoin humain réel. Aucun merge/déploiement/cron permanent/service payant/ordre financier sans autorisation.
+
+## Codex — autonomie agents, issue #94
+
+Pour toute mission Codex de finition du noyau d'agents (issue #94), consulter `docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/CODEX_AUTONOMIE_EXECUTION.md` et les critères G0–G7 avant d'écrire. Respecter le rôle indépendant de Codex, les claims/leases, les PR existantes et l'interdiction de modifier en parallèle les mêmes fichiers qu'OpenHands, Kilo ou Hermes. Commencer par audit et tests reproductibles, puis PR draft isolée ; passer à la prochaine tâche admissible dans la limite du quota. Ni ce fichier ni `AGENTS.md` ne lancent Codex automatiquement ; aucune fusion, dépense, permission, mise en production, planification permanente ni ordre financier ne sont autorisés.
