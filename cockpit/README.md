@@ -57,3 +57,21 @@ Regenerer avec `python3 cockpit/capture.py` (necessite `chromium`).
 - Les etats d'agents viennent des **commentaires publies** ; il n'y a pas de flux
   d'evenements OpenHands temps reel branche ici.
 - L'apercu est **local** ; tout hebergement public demande un accord separe.
+
+
+## Afficher le dernier rapport durable
+
+Le fichier de rapport `*_run_report.json` de l’orchestrateur peut alimenter
+l’aperçu sans accès réseau. Générer les données dans un dossier d’aperçu local.
+
+```bash
+python -m cockpit.build_data --offline --run-report /chemin/prive/run_report.json \
+  --out /chemin/apercu/data.json
+python -m cockpit.serve --data /chemin/apercu/data.json
+```
+
+Le cockpit affiche le verdict, l’horodatage du rapport et, lorsqu’une
+mission est acceptée avec une preuve liée, le commit et le lien vers la
+tentative GitHub Actions. Un rapport terminé ne prouve pas une activité
+en cours. En mode hors ligne, le quota reste inconnu. Le rapport source
+reste privé et seuls les champs d’affichage nécessaires sont exportés.

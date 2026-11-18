@@ -61,11 +61,14 @@ function renderMission(d) {
   addMeta('Projet', 'telcoin-trading-intelligence99');
   addMeta('Horodatage', fmtTime(m.timestamp));
   addMeta('Issue', '#' + (m.number || '?'));
+  if (m.source) addMeta('Source', m.source);
+  if (m.commit_sha) addMeta('Commit vérifié', m.commit_sha.slice(0, 12));
   box.appendChild(meta);
 
   const links = el('div', 'links');
   if (m.issue_url) links.appendChild(link(m.issue_url, 'Issue GitHub #' + (m.number || '')));
   if (m.openhands_url) links.appendChild(link(m.openhands_url, 'Conversation OpenHands'));
+  if (m.proof_url) links.appendChild(link(m.proof_url, 'Preuve GitHub Actions'));
   box.appendChild(links);
 }
 

@@ -16,6 +16,8 @@ Design invariants enforced here and covered by ``tests/test_cockpit.py``:
 
 from __future__ import annotations
 
+from datetime import datetime
+import re
 from typing import Any
 
 # The three active roles of the TEL99 team (see .agents/agents/*.md).
@@ -216,6 +218,56 @@ def controls_view(controls: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def report_mission_view(report: dict, repository: str) -> dict:
+    """Display the last completed report without exposing its raw payload."""
+    if (not isinstance(report, dict) or report.get("record_type") != "tel99_run_report"
+            or report.get("schema_version") != 1):
+        raise ValueError("unsupported durable run report")
+    timestamp = report.get("ts")
+    if not isinstance(timestamp, str):
+        raise ValueError("run report requires a timestamp")
+    when = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    if when.tzinfo is None:
+        raise ValueError("run report timestamp requires a timezone")
+
+    number = str(report.get("mission_id", ""))
+    status = report.get("status")
+    verdict = report.get("outcome_verification")
+    phase, label = "en_attente", "En attente"
+    repo = f"https://github.com/{repository}"
+    mission = {"title": "Dernier rapport de mission", "timestamp": when.isoformat()
+               .replace("+00:00", "Z"), "source": "Rapport durable de l’orchestrateur"}
+    if re.fullmatch(r"[1-9][0-9]{0,11}", number):
+        mission.update(number=int(number), title=f"Mission #{number}",
+                       issue_url=f"{repo}/issues/{number}")
+        proof = report.get("verification_proof")
+        proof = proof if isinstance(proof, dict) else {}
+        sha = proof.get("commit_sha")
+        digest = proof.get("artifact_sha256")
+        action_run, attempt = proof.get("run_id"), proof.get("run_attempt")
+        bound = (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+                 and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                 and type(action_run) is int and action_run > 0
+                 and type(attempt) is int and attempt > 0)
+        if (status == "MISSION_ACCEPTED" and verdict == "ACCEPTED"
+                and report.get("mission_accepted") is True and report.get("dry_run") is False
+                and bound):
+            phase, label = "terminee", "Acceptée"
+            mission.update(commit_sha=sha,
+                           proof_url=f"{repo}/actions/runs/{action_run}/attempts/{attempt}")
+        elif verdict == "REJECTED":
+            phase, label = "bloquee", "Rejetée"
+        elif status == "STOPPED":
+            phase, label = "bloquee", "Arrêtée"
+        elif verdict in ("ACCEPTED", "NEEDS_HUMAN") or status == "MISSION_ACCEPTED":
+            phase, label = "bloquee", "Preuve à vérifier"
+        elif status == "FAILED":
+            phase, label = "bloquee", "Bloquée"
+    elif number != "NO_MISSION":
+        raise ValueError("invalid mission identifier in run report")
+    return {**mission, "phase": phase, "phase_label": label}
+
+
 def build_dataset(raw: dict[str, Any]) -> dict[str, Any]:
     """Assemble the full cockpit dataset from already-fetched raw inputs.
 
@@ -231,6 +283,13 @@ def build_dataset(raw: dict[str, Any]) -> dict[str, Any]:
     mission["phase_label"] = PHASE_LABELS.get(phase, "Inconnue")
 
     live = any(a["state"] == "running" for a in agents)
+    if "run_report" in raw:
+        mission = report_mission_view(raw["run_report"], raw["repository"])
+        events = [event for event in events if event.get("issue") == mission.get("number")]
+        # A durable run report is a point-in-time result. Historical comments
+        # cannot prove any of its agents is running right now.
+        agents = [agent_view(role, []) for role in ROLES]
+        live = False
     return {
         "generated_at": raw.get("generated_at"),
         "live": live,

@@ -23,7 +23,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from cockpit import model  # noqa: E402
+from cockpit import build_data, model  # noqa: E402
 
 COCKPIT = ROOT / "cockpit"
 
@@ -153,6 +153,44 @@ class TestDataset(unittest.TestCase):
         d = model.build_dataset(self._raw(events=events))
         edges = {e["to"] for e in d["delegation_graph"]["edges"]}
         self.assertIn("developer", edges)
+
+
+class TestDurableRunReport(unittest.TestCase):
+    def _report(self, **changes):
+        report = {
+            "record_type": "tel99_run_report", "schema_version": 1,
+            "mission_id": "94", "ts": "2026-11-18T16:00:00Z",
+            "status": "MISSION_ACCEPTED", "mission_accepted": True,
+            "outcome_verification": "ACCEPTED", "dry_run": False,
+            "verification_proof": {"commit_sha": "a" * 40, "run_id": 42,
+                                   "run_attempt": 1, "artifact_sha256": "b" * 64},
+        }
+        return {**report, **changes}
+
+    def test_local_report_supplies_the_status_timestamp_and_ci_link(self):
+        dataset = build_data.build_live(offline=True, run_report=self._report())
+        mission = dataset["mission"]
+        self.assertEqual(mission["number"], 94)
+        self.assertEqual(mission["phase_label"], "Acceptée")
+        self.assertEqual(mission["timestamp"], "2026-11-18T16:00:00Z")
+        self.assertTrue(mission["proof_url"].endswith("/actions/runs/42/attempts/1"))
+        self.assertFalse(dataset["live"])
+        self.assertIsNone(dataset["quota"]["remaining"])
+
+    def test_unbound_acceptance_and_waiting_proof_are_not_green(self):
+        for report in (
+            self._report(verification_proof=None),
+            self._report(outcome_verification="NEEDS_HUMAN", mission_accepted=False),
+        ):
+            with self.subTest(report=report):
+                dataset = build_data.build_live(offline=True, run_report=report)
+                self.assertEqual(dataset["mission"]["phase"], "bloquee")
+                self.assertNotIn("proof_url", dataset["mission"])
+
+    def test_red_report_stays_rejected(self):
+        dataset = build_data.build_live(offline=True, run_report=self._report(
+            status="FAILED", outcome_verification="REJECTED", mission_accepted=False))
+        self.assertEqual(dataset["mission"]["phase_label"], "Rejetée")
 
 
 class TestShippedArtifacts(unittest.TestCase):

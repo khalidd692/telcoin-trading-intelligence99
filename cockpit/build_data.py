@@ -220,7 +220,7 @@ def build_events(issues: dict[int, dict], comments: dict[int, list[dict]]) -> li
     return unique
 
 
-def build_live(offline: bool) -> dict:
+def build_live(offline: bool, *, run_report: dict | None = None) -> dict:
     """Assemble the raw dataset from live sources (or offline stubs)."""
     issues_meta: dict[int, dict] = {}
     comments: dict[int, list[dict]] = {}
@@ -296,6 +296,8 @@ def build_live(offline: bool) -> dict:
         "controls": controls,
         "provenance": provenance,
     }
+    if run_report is not None:
+        raw.update(run_report=run_report, repository=REPO)
     return model.build_dataset(raw)
 
 
@@ -303,14 +305,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the TEL99 cockpit dataset.")
     parser.add_argument("--offline", action="store_true",
                         help="No network calls; quota becomes INCONNU.")
-    parser.add_argument("--out", default=str(HERE / "data.json"))
+    parser.add_argument("--run-report", type=pathlib.Path,
+                        help="read a local durable orchestrator report")
+    parser.add_argument("--out")
     args = parser.parse_args(argv)
 
-    dataset = build_live(offline=args.offline)
-    pathlib.Path(args.out).write_text(
-        json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.run_report and not args.out:
+        parser.error("--run-report requires an explicit --out path")
+    output = pathlib.Path(args.out) if args.out else HERE / "data.json"
+    try:
+        report = json.loads(args.run_report.read_text(encoding="utf-8")) if args.run_report else None
+        if args.run_report and not isinstance(report, dict):
+            raise ValueError("run report must be a JSON object")
+        dataset = build_live(offline=args.offline, run_report=report)
+        output.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        parser.exit(2, f"cockpit: build failed ({type(exc).__name__})\n")
     q = dataset["quota"]
-    print(f"[cockpit] wrote {args.out}")
+    print(f"[cockpit] wrote {output}")
     print(f"[cockpit] quota: {q['label']} ({q['verdict']}) source={q['source']}")
     print(f"[cockpit] agents: " + ", ".join(
         f"{a['label']}={a['state']}" for a in dataset["agents"]))
