@@ -49,6 +49,45 @@ En cas d’échec, il peut demander deux réparations au maximum, dans la limite
 du quota et de la durée. Le journal donne chaque verdict, le modèle
 effectivement appelé et l’empreinte des fichiers.
 
+### Essai synthétique avec Kilo Auto Free
+
+Kilo réserve `kilo-auto/free` aux modèles gratuits du moment. Le catalogue
+annonce `mayTrainOnYourPrompts=true`. Les fournisseurs en amont peuvent
+conserver les prompts et s’en servir pour améliorer leurs services. Utiliser
+seulement une consigne fictive et des données fabriquées à cet effet.
+`--synthetic-data` est l’attestation explicite de l’opérateur. Le moteur
+transmet la consigne, le contrat du profil et, si une réparation est autorisée,
+la réponse précédente et les critères en échec. N’inclure aucun code privé,
+secret, journal, donnée de production ou donnée personnelle.
+[Documentation Kilo](https://kilo.ai/docs/gateway/models-and-providers)
+
+Dans une session PowerShell dédiée, réutiliser le dossier privé et l’image
+épinglée ci-dessus. Choisir un identifiant neuf à chaque nouvel essai.
+
+```powershell
+$env:TEL99_NATIVE_BASE_URL = 'https://ai-gateway.kilo.ai/api/v1'
+$env:TEL99_NATIVE_MODEL = 'kilo-auto/free'
+Remove-Item Env:TEL99_NATIVE_API_KEY -ErrorAction SilentlyContinue
+python -m scripts.agents.native.cli --state $Etat --memory $Memoire --quota 12 run `
+  --project kilo-synthetic --mission-id kilo-taches-01 --synthetic-data `
+  --profile tasks --sandbox-image $Image --max-repairs 0 `
+  --mission 'Crée un gestionnaire de tâches jouet. Dans README.md, donne cinq exemples fictifs de commandes python tasks.py --db demo.json, en texte simple sans blocs Markdown imbriqués.'
+```
+
+Cette commande autorise un appel dans le budget local, avec la réserve par
+défaut de 12 et zéro réparation. Kilo documente une limite anonyme de 200
+requêtes par heure et par IP. Le budget CLI est une borne locale. Le solde
+restant du créneau IP n’est pas exposé par la route de catalogue. Le moteur
+s’arrête si Kilo renvoie une erreur, y compris HTTP 429.
+[Limites et coûts Kilo](https://kilo.ai/docs/getting-started/rate-limits-and-costs)
+
+Avant chaque complétion, l’adaptateur contrôle le drapeau de gratuité, tous
+les prix publiés ainsi que l’indicateur de confidentialité du modèle. Après
+la réponse, il exige `usage.cost=0` avant de remettre le texte au moteur.
+`attempts[].provider_evidence` expose le statut HTTP, le champ `model`
+renvoyé par Kilo, le coût déclaré et les SHA-256 du catalogue et du corps HTTP.
+Le champ `model` peut être l’alias du routeur.
+
 ## Retrouver et vérifier un résultat
 
 La commande `status` indique le dossier exact des fichiers et le journal
@@ -77,6 +116,5 @@ $env:TEL99_TEST_SANDBOX_IMAGE = $Image
 python -m unittest discover -s tests -p test_agent_native.py -k task_app_mission
 ```
 
-L’environnement de livraison cloud valide cette recette sous Linux.
-L’accès à un modèle réellement inclus et l’exécution sur le PC Windows
-du propriétaire restent à vérifier.
+Voir la [passation au superviseur #106](NATIVE_KILO_HANDOFF.md) pour le contrat
+d’appel, les preuves de la mission réelle et les conditions de raccordement.

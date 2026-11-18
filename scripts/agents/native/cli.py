@@ -126,7 +126,7 @@ def cmd_run(args) -> int:
         provider = provider_mod.ScriptedProvider([], name="dry-run")
     else:
         try:
-            provider = provider_mod.provider_from_env()
+            provider = provider_mod.provider_from_env(synthetic_data=args.synthetic_data)
         except provider_mod.ProviderConfigError as exc:
             print(f"refused: {exc}", file=sys.stderr)
             return 2
@@ -315,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--artifact", action="append", default=[])
     run.add_argument("--profile", choices=("tasks",), help="built-in acceptance profile")
     run.add_argument("--max-repairs", type=int, help="bounded retries after failing checks")
+    run.add_argument("--synthetic-data", action="store_true",
+                     help="attest that Kilo Auto Free receives only synthetic, non-sensitive inputs")
     run.add_argument("--sandbox-image", help="locally installed Python image pinned by digest")
     run.add_argument("--sandbox-script", help="Python artifact to run in the sandbox")
     run.add_argument("--expected-stdout", help="expected output, excluding the final newline")

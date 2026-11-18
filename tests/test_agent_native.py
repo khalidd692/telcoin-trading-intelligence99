@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -106,6 +106,132 @@ class ProviderContractTests(unittest.TestCase):
         with self.assertRaises(provider.ProviderError) as ctx:
             p.complete(system="s", prompt="p")
         self.assertNotIn("SECRET-KEY", str(ctx.exception))
+
+
+class KiloGatewayTests(unittest.TestCase):
+    endpoint = "https://ai-gateway.kilo.ai/api/v1"
+    model = "kilo-auto/free"
+
+    def _provider(self, **overrides):
+        config = {"base_url": self.endpoint, "model": self.model, "synthetic_data": True}
+        return provider.OpenAICompatibleProvider(**(config | overrides))
+
+    def _catalog(self, **overrides):
+        return {"data": [{"id": self.model, "isFree": True, "mayTrainOnYourPrompts": True,
+                          "pricing": {"prompt": "0", "completion": "0", "request": "0"}}
+                         | overrides]}
+
+    def _http_response(self, payload):
+        response = MagicMock()
+        http = response.__enter__.return_value
+        http.status = 200
+        http.read.return_value = json.dumps(payload).encode()
+        return response
+
+    def _completion(self, usage):
+        return {"model": "example/synthetic:free", "usage": usage,
+                "choices": [{"message": {"content": MATH_OK}}]}
+
+    def test_requires_synthetic_opt_in_exact_endpoint_and_no_credentials(self):
+        self.assertTrue(self._provider().requires_explicit_quota)
+        self.assertIn(self.model, provider.free_model_ids())
+        self.assertNotIn(self.model, provider.cfg.FREE_MODEL_IDS)
+        for overrides in (
+            {"synthetic_data": False}, {"api_key": "fixture"},
+            {"base_url": "http://127.0.0.1/v1", "included_local_model": self.model},
+            {"base_url": "https://ai-gateway.kilo.ai.evil.test/api/v1"},
+            {"base_url": self.endpoint.replace(".ai/", ".ai:8443/")},
+            {"base_url": self.endpoint + "/alternate"},
+            {"model": "openhands/deepseek-v4.1-flash", "api_key": "fixture"},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(provider.ProviderConfigError):
+                self._provider(**overrides)
+
+    def test_catalog_refusals_send_no_prompt(self):
+        for catalog in (
+            self._catalog(isFree=False), self._catalog(mayTrainOnYourPrompts=None),
+            self._catalog(pricing={"prompt": 0}),
+            self._catalog(pricing={"prompt": 0, "completion": 0, "request": "0.001"}),
+            {"data": []}, {"data": self._catalog()["data"] * 2},
+        ):
+            with self.subTest(catalog=catalog):
+                configured = self._provider()
+                with patch.object(configured._opener, "open", return_value=self._http_response(catalog)) as http:
+                    with self.assertRaises(provider.ProviderError):
+                        configured.complete(system="s", prompt="synthetic fixture")
+                self.assertEqual(http.call_count, 1)
+                req = http.call_args.args[0]
+                self.assertEqual(req.get_method(), "GET")
+                self.assertIsNone(req.data)
+
+    def test_zero_cost_completion_records_only_selected_http_metadata(self):
+        configured = self._provider()
+        completion = self._completion({"cost": 0})
+        with patch.object(configured._opener, "open", side_effect=[
+            self._http_response(self._catalog()), self._http_response(completion),
+        ]) as http:
+            with tempfile.TemporaryDirectory() as tmp:
+                engine = _engine(tmp, [])
+                engine.provider = configured
+                spec = mission.MissionSpec("kilo-fixture", "synthetic fixture", ["mathutils.py"],
+                                           [mission.Check("fixture", [sys.executable, "-c", "pass"])])
+                result = engine.run(spec)
+                self.assertEqual(result.verdict, mission.PASS)
+                evidence = engine.record_for(spec)["attempts"][0]["provider_evidence"]
+        get, post = [call.args[0] for call in http.call_args_list]
+        self.assertEqual((get.full_url, post.full_url),
+                         (self.endpoint + "/models", self.endpoint + "/chat/completions"))
+        self.assertEqual((get.get_method(), post.get_method()), ("GET", "POST"))
+        self.assertFalse(get.has_header("Authorization") or post.has_header("Authorization"))
+        self.assertEqual(json.loads(post.data)["model"], self.model)
+        self.assertEqual(evidence["http_status"], 200)
+        self.assertEqual(evidence["response_model"], completion["model"])
+        self.assertEqual(evidence["cost_usd"], "0")
+        self.assertTrue(evidence["may_train_on_prompts"])
+        self.assertNotIn("synthetic fixture", json.dumps(evidence))
+
+    def test_missing_or_nonzero_cost_rejects_completion(self):
+        for usage in ({}, {"cost": False}, {"cost": "1e-500"}):
+            with self.subTest(usage=usage):
+                configured = self._provider()
+                with patch.object(configured._opener, "open", side_effect=[
+                    self._http_response(self._catalog()), self._http_response(self._completion(usage)),
+                ]):
+                    with self.assertRaises(provider.ProviderError):
+                        configured.complete(system="s", prompt="synthetic fixture")
+
+    def test_http_refusals_do_not_retry_or_fall_back(self):
+        from urllib.error import HTTPError
+
+        for status in (302, 401, 402, 403, 429):
+            with self.subTest(status=status):
+                configured = self._provider()
+                refusal = HTTPError(self.endpoint, status, "fixture", None, None)
+                with patch.object(configured._opener, "open", side_effect=[
+                    self._http_response(self._catalog()), refusal,
+                ]) as http:
+                    with self.assertRaisesRegex(provider.ProviderError, f"HTTP {status}"):
+                        configured.complete(system="s", prompt="synthetic fixture")
+                self.assertEqual(http.call_count, 2)
+                self.assertIsNone(configured.last_completion_evidence)
+
+    def test_cli_requires_opt_in_and_explicit_budget_before_any_network(self):
+        import contextlib
+        import io
+        from native import cli
+
+        env = {"TEL99_NATIVE_MODEL": self.model, "TEL99_NATIVE_BASE_URL": self.endpoint}
+        argv = ["run", "--mission-id", "kilo-fixture", "--mission", "synthetic fixture"]
+        with patch.dict(os.environ, env, clear=True), \
+                patch.object(cli, "read_quota") as fallback_quota, \
+                patch("urllib.request.OpenerDirector.open") as http, \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(cli.main(["--quota", "12", *argv]), 2)
+            self.assertIn("explicit synthetic data", errors.getvalue())
+            self.assertEqual(cli.main([*argv, "--synthetic-data"]), 2)
+            self.assertIn("quota unknown", errors.getvalue())
+        fallback_quota.assert_not_called()
+        http.assert_not_called()
 
 
 class VerdictTests(unittest.TestCase):

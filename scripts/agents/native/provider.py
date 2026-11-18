@@ -18,16 +18,20 @@ Two implementations share one tiny contract (``ModelProvider``):
 
 Fail-closed rules, enforced in code and not by convention:
 
-  * only models on ``team_config.FREE_MODEL_IDS`` may be used (no-spend rule);
-  * an endpoint must be an ``http(s)`` URL; a non-local endpoint requires a key;
+  * models must be allowlisted or explicitly approved for a loopback runtime;
+  * a remote endpoint requires an HTTPS URL and a key, with one exception
+    for the pinned Kilo Auto Free gateway and synthetic data;
   * an error never echoes the API key or the request headers.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -40,9 +44,11 @@ if str(_AGENTS_DIR) not in sys.path:
 
 import team_config as cfg  # noqa: E402
 
-# Hosts for which an empty API key is acceptable (a local model server).
 _MAX_REPLY_BYTES = 1024 * 1024
+_MAX_CATALOG_BYTES = 4 * 1024 * 1024
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+KILO_HOST = "ai-gateway.kilo.ai"
+KILO_BASE_URL = f"https://{KILO_HOST}/api/v1"
 
 
 class ProviderError(RuntimeError):
@@ -92,12 +98,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _is_zero_price(value) -> bool:
+    if type(value) not in (str, int, Decimal):
+        return False
+    try:
+        return Decimal(value).is_zero()
+    except InvalidOperation:
+        return False
+
+
 class OpenAICompatibleProvider:
     """Adapter for an OpenAI-compatible chat-completions endpoint."""
 
     def __init__(self, *, model: str, base_url: str, api_key: str = "",
                  timeout: int = 60, name: str = "openai-compatible",
-                 included_local_model: str = "") -> None:
+                 included_local_model: str = "", synthetic_data: bool = False) -> None:
         if not isinstance(base_url, str):
             raise ProviderConfigError("base_url must be an http(s) URL")
         try:
@@ -110,20 +125,62 @@ class OpenAICompatibleProvider:
         if (not host or endpoint.scheme not in ("http", "https") or endpoint.username is not None
                 or endpoint.query or endpoint.fragment or (not local and endpoint.scheme != "https")):
             raise ProviderConfigError("provider requires HTTPS or an explicit loopback URL")
-        self.requires_explicit_quota = model not in cfg.FREE_MODEL_IDS
-        if self.requires_explicit_quota and not (model and local and model == included_local_model):
+        self._kilo_free = model == cfg.KILO_FREE_MODEL_ID
+        if self._kilo_free or host == KILO_HOST:
+            if not self._kilo_free or base_url.rstrip("/") != KILO_BASE_URL:
+                raise ProviderConfigError("Kilo Auto Free requires the exact official HTTPS gateway and model")
+            if api_key or synthetic_data is not True:
+                raise ProviderConfigError("Kilo Auto Free requires anonymous use and explicit synthetic data")
+        listed = model in cfg.NATIVE_FREE_MODEL_IDS
+        if not listed and not (model and local and model == included_local_model):
             raise ProviderConfigError("model is outside the free allowlist or approved loopback runtime")
-        if not api_key and not local:
+        if not api_key and not (local or self._kilo_free):
             raise ProviderConfigError("api_key is required for a non-local endpoint")
+        self.requires_explicit_quota = self._kilo_free or not listed
         self.model = model
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self.timeout = int(timeout)
-        self.name = name
-        handlers = [urllib.request.ProxyHandler({})] if local else []
+        self.name = "kilo-auto-free" if self._kilo_free else name
+        self.last_completion_evidence: dict | None = None
+        handlers = [urllib.request.ProxyHandler({})] if local or self._kilo_free else []
         self._opener = urllib.request.build_opener(_NoRedirect(), *handlers)
 
+    def _read_json(self, request, limit: int) -> tuple[int, dict, bytes]:
+        try:
+            with self._opener.open(request, timeout=self.timeout) as response:
+                raw = response.read(limit + 1)
+                if len(raw) > limit:
+                    raise ProviderError("provider reply exceeds the byte limit")
+                return response.status, json.loads(raw, parse_float=Decimal), raw
+        except urllib.error.HTTPError as exc:
+            raise ProviderError(f"provider HTTP {exc.code}") from None
+        except ProviderError:
+            raise
+        except Exception as exc:  # A provider exception may contain credentials.
+            raise ProviderError(f"provider response unavailable: {type(exc).__name__}") from None
+
+    def _verify_kilo_catalog(self) -> dict:
+        request = urllib.request.Request(f"{KILO_BASE_URL}/models")
+        status, catalog, raw = self._read_json(request, _MAX_CATALOG_BYTES)
+        models = catalog.get("data") if isinstance(catalog, dict) else None
+        matches = [entry for entry in models if isinstance(entry, dict)
+                   and entry.get("id") == cfg.KILO_FREE_MODEL_ID] if isinstance(models, list) else []
+        if status != 200 or len(matches) != 1:
+            raise ProviderError("Kilo Auto Free is unavailable in the catalog")
+        model = matches[0]
+        pricing = model.get("pricing")
+        may_train = model.get("mayTrainOnYourPrompts")
+        if (model.get("isFree") is not True or type(may_train) is not bool
+                or not isinstance(pricing, dict) or not {"prompt", "completion"} <= pricing.keys()
+                or not all(_is_zero_price(value) for value in pricing.values())):
+            raise ProviderError("Kilo Auto Free catalog does not attest zero price and privacy metadata")
+        return {"catalog_sha256": hashlib.sha256(raw).hexdigest(),
+                "may_train_on_prompts": may_train}
+
     def complete(self, *, system: str, prompt: str) -> str:
+        self.last_completion_evidence = None
+        catalog = self._verify_kilo_catalog() if self._kilo_free else None
         payload = {
             "model": self.model,
             "messages": [
@@ -132,6 +189,8 @@ class OpenAICompatibleProvider:
             ],
             "stream": False,
         }
+        if self._kilo_free:
+            payload["max_tokens"] = 8192
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode(),
@@ -140,28 +199,29 @@ class OpenAICompatibleProvider:
         req.add_header("Content-Type", "application/json")
         if self._api_key:
             req.add_header("Authorization", f"Bearer {self._api_key}")
+        status, body, raw = self._read_json(req, _MAX_REPLY_BYTES)
         try:
-            with self._opener.open(req, timeout=self.timeout) as resp:
-                raw = resp.read(_MAX_REPLY_BYTES + 1)
-                if len(raw) > _MAX_REPLY_BYTES:
-                    raise ProviderError("provider reply exceeds the byte limit")
-                body = json.loads(raw.decode())
-        except urllib.error.HTTPError as exc:
-            # Never include headers (they carry the key).
-            raise ProviderError(f"provider HTTP {exc.code}") from None
-        except ProviderError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - a provider must never leak detail
-            raise ProviderError(f"provider unreachable: {type(exc).__name__}") from None
-        try:
-            return body["choices"][0]["message"]["content"]
+            content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
             raise ProviderError("provider returned an unexpected payload") from None
+        if catalog is not None:
+            usage = body.get("usage")
+            response_model = body.get("model")
+            if (status != 200 or not isinstance(usage, dict) or not _is_zero_price(usage.get("cost"))
+                    or not isinstance(response_model, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", response_model)
+                    or not isinstance(content, str) or not content.strip()):
+                raise ProviderError("Kilo Auto Free completion has no valid zero-cost proof")
+            self.last_completion_evidence = {
+                **catalog, "http_status": status, "response_model": response_model,
+                "cost_usd": "0", "response_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        return content
 
 
 def free_model_ids() -> list[str]:
-    """The free, no-spend model allowlist (single source: team_config)."""
-    return sorted(cfg.FREE_MODEL_IDS)
+    """The native runner's free model allowlist (single source: team_config)."""
+    return sorted(cfg.NATIVE_FREE_MODEL_IDS)
 
 
 def get_provider(name: str, **config) -> ModelProvider:
@@ -177,17 +237,18 @@ def get_provider(name: str, **config) -> ModelProvider:
             api_key=config.get("api_key", ""),
             timeout=int(config.get("timeout", 60)),
             included_local_model=config.get("included_local_model", ""),
+            synthetic_data=config.get("synthetic_data", False),
         )
     raise ProviderConfigError(f"unknown provider {name!r}")
 
 
-def provider_from_env() -> ModelProvider:
+def provider_from_env(*, synthetic_data: bool = False) -> ModelProvider:
     """Build the real provider from environment variables.
 
     Variables (none committed to the repository):
         TEL99_NATIVE_MODEL     must be on the free allowlist
         TEL99_NATIVE_BASE_URL  OpenAI-compatible base URL
-        TEL99_NATIVE_API_KEY   key (optional for localhost)
+        TEL99_NATIVE_API_KEY   key (empty for anonymous Kilo Auto Free)
         TEL99_NATIVE_INCLUDED_MODEL  operator-approved model for a loopback endpoint
     """
     model = os.environ.get("TEL99_NATIVE_MODEL", "")
@@ -199,6 +260,6 @@ def provider_from_env() -> ModelProvider:
             "the real provider (none committed to the repository)"
         )
     return OpenAICompatibleProvider(
-        model=model, base_url=base_url, api_key=api_key,
+        model=model, base_url=base_url, api_key=api_key, synthetic_data=synthetic_data,
         included_local_model=os.environ.get("TEL99_NATIVE_INCLUDED_MODEL", ""),
     )
