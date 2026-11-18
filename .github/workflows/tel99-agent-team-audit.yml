@@ -38,6 +38,8 @@ jobs:
         run: python -m unittest discover -s tests -p test_cloud_integration.py -v
       - name: Prove the end-to-end autonomy path (deterministic, no spend)
         run: python -m unittest discover -s tests -p test_cloud_autonomy_e2e.py -v
+      - name: Validate the MCP / capabilities inventory (read-only, issue #86)
+        run: python -m unittest discover -s tests -p test_agent_mcp_inventory.py -v
       - name: Cloudflare Worker unit tests (no deploy, no network)
         run: node --test cloudflare/tel99-hybrid/test/worker.test.mjs
       - name: Worker syntax and config are valid (disabled, no cron, no workers.dev)
