@@ -24,8 +24,10 @@ keeps it reviewable and diff-friendly in git.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -117,6 +119,45 @@ class Entry:
             supersedes=str(data.get("supersedes", "")),
             superseded_by=str(data.get("superseded_by", "")),
         )
+
+
+def _read_project_snapshot(path: pathlib.Path, project: str) -> dict:
+    if not project or project != slug(project):
+        raise ValueError("invalid snapshot project")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, dict) or type(data.get("schema")) is not int
+            or data["schema"] != SCHEMA_VERSION or data.get("project") != project
+            or not isinstance(data.get("entries"), list)
+            or not isinstance(data.get("history"), list)
+            or not all(isinstance(event, dict) for event in data["history"])):
+        raise ValueError("invalid memory snapshot or different project")
+    seen = set()
+    for entry in data["entries"]:
+        if (not isinstance(entry, dict) or entry.get("project") != project
+                or not isinstance(entry.get("id"), str) or entry["id"] in seen
+                or type(entry.get("verified")) is not bool
+                or type(entry.get("version")) is not int or entry["version"] < 1):
+            raise ValueError("invalid or duplicate entry in memory snapshot")
+        Entry.from_dict(entry)
+        seen.add(entry["id"])
+    return data
+
+
+def _write_new_private(path: pathlib.Path, data: dict) -> None:
+    """Publish a complete, owner-only local file without replacing a target."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".memory-", delete=False) as output:
+            tmp_path = pathlib.Path(output.name)
+            json.dump(data, output, indent=2, ensure_ascii=False, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(tmp_path, path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink()
 
 
 class MemoryStore:
@@ -278,6 +319,19 @@ class MemoryStore:
                 scored.append((score, entry))
         scored.sort(key=lambda pair: (-pair[0], pair[1].id))
         return [entry for _, entry in scored[:limit]]
+
+    def export_project(self, project: str, destination: str | pathlib.Path) -> None:
+        """Write one existing project document, including its provenance and history."""
+        path = pathlib.Path(destination)
+        snapshot = _read_project_snapshot(self._path(project), project)
+        _write_new_private(path, snapshot)
+
+    def restore_project(self, project: str, source: str | pathlib.Path) -> None:
+        """Restore an operator-provided snapshot into an empty project slot."""
+        data = _read_project_snapshot(pathlib.Path(source), project)
+        destination = self._path(project)
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _write_new_private(destination, data)
 
     def history(self, project: str) -> list[dict]:
         return self._load(project)["history"]

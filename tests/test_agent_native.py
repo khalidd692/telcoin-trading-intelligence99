@@ -17,6 +17,7 @@ the safety invariants the owner asked for:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -501,6 +502,50 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(json.loads(default), [])
         self.assertEqual(json.loads(scoped)[0]["project"], "project-b")
+
+    def test_private_memory_round_trip_across_separate_cli_processes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source, fresh, backup = root / "source", root / "fresh", root / "snapshot.json"
+            memory = mission.memory.MemoryStore(source)
+            memory.record(mission.memory.Entry(
+                id="verified-fact", project="project-b", kind="fact", title="Unique fact",
+                body="A synthetic fact for restoration", verified=True, verified_by="audit"))
+            memory.record(mission.memory.Entry(
+                id="different-fact", project="tel99", kind="fact", title="Other project",
+                body="Independently scoped fixture"))
+            command = [sys.executable, "-m", "scripts.agents.native.cli"]
+            import subprocess
+
+            def call(*args):
+                return subprocess.run([*command, *map(str, args)], cwd=ROOT,
+                                      capture_output=True, text=True, check=False, timeout=15)
+
+            exported = call("--memory", source, "export-memory", "--project", "project-b",
+                            "--file", backup)
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            if os.name == "posix":
+                self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            data = json.loads(backup.read_text())
+            self.assertEqual([e["id"] for e in data["entries"]], ["verified-fact"])
+            wrong = call("--memory", fresh, "restore-memory", "--project", "tel99",
+                         "--file", backup)
+            self.assertEqual(wrong.returncode, 2)
+            restored = call("--memory", fresh, "restore-memory", "--project", "project-b",
+                            "--file", backup)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            recall = call("--memory", fresh, "recall", "--project", "project-b",
+                          "--query", "unique")
+            self.assertEqual(recall.returncode, 0, recall.stderr)
+            fact = json.loads(recall.stdout)[0]
+            self.assertEqual(fact["verified_by"], "audit")
+            self.assertEqual(mission.memory.MemoryStore(fresh).history("project-b"),
+                             memory.history("project-b"))
+            self.assertEqual(call("--memory", fresh, "restore-memory", "--project",
+                                  "project-b", "--file", backup).returncode, 2)
+            self.assertEqual(call("--memory", source, "export-memory", "--project",
+                                  "project-b", "--file", backup).returncode, 2)
+            self.assertEqual(json.loads(backup.read_text()), data)
 
     def test_dry_run_needs_no_provider_and_spends_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

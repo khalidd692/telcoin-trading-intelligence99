@@ -124,6 +124,23 @@ def cmd_recall(args) -> int:
     return 0
 
 
+def cmd_memory_snapshot(args) -> int:
+    store = mission_mod.memory.MemoryStore(args.memory or DEFAULT_MEMORY)
+    restore = args.command == "restore-memory"
+    try:
+        operation = store.restore_project if restore else store.export_project
+        operation(args.project, args.file)
+    except FileExistsError:
+        print("refused: destination already exists", file=sys.stderr)
+        return 2
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        print(f"refused: memory snapshot failed ({type(exc).__name__})", file=sys.stderr)
+        return 2
+    print(json.dumps({"project": args.project,
+                      "status": "restored" if restore else "exported"}))
+    return 0
+
+
 def cmd_demo(args) -> int:
     """Offline, deterministic evidence: a real Python artifact + real tests.
 
@@ -231,6 +248,15 @@ def main(argv: list[str] | None = None) -> int:
     recall.add_argument("--project", default=mission_mod.DEFAULT_PROJECT)
     recall.add_argument("--limit", type=int, default=5)
     recall.set_defaults(func=cmd_recall)
+
+    for command, description in (
+        ("export-memory", "write a private project snapshot to a new file"),
+        ("restore-memory", "restore a project snapshot into an empty slot"),
+    ):
+        snapshot = sub.add_parser(command, help=description)
+        snapshot.add_argument("--project", required=True)
+        snapshot.add_argument("--file", required=True, type=pathlib.Path)
+        snapshot.set_defaults(func=cmd_memory_snapshot)
 
     demo = sub.add_parser("demo", help="offline deterministic demonstration")
     demo.set_defaults(func=cmd_demo)

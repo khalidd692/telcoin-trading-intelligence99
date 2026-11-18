@@ -113,3 +113,27 @@ Une mission relue conserve le code de sortie de son verdict.
 - Le noyau exécute des contrôles déterministes ; il **ne juge pas** la qualité
   métier d'un livrable. `NEEDS_HUMAN` reste le verdict quand rien n'est
   démontrable.
+
+
+## Sauvegarder puis restaurer la mémoire locale
+
+Choisir un emplacement privé hors du dépôt. Le fichier est un JSON lisible
+qui conserve les entrées, leur provenance, leur statut de vérification et
+l’historique du projet.
+
+```bash
+python -m scripts.agents.native.cli --memory ./memory export-memory \
+  --project projet-b --file /chemin/prive/projet-b.json
+python -m scripts.agents.native.cli --memory /chemin/prive/memoire-neuve restore-memory \
+  --project projet-b --file /chemin/prive/projet-b.json
+python -m scripts.agents.native.cli --memory /chemin/prive/memoire-neuve recall \
+  --project projet-b --query "provenance"
+```
+
+Utiliser `--project common` séparément pour la mémoire partagée. La restauration
+refuse un projet différent, une version de schéma inconnue et une destination
+déjà créée. Les fichiers sont créés en mode `0600` sur POSIX. Sous Windows,
+utiliser un dossier accessible uniquement au compte de l’opérateur. La
+publication atomique utilise un lien physique dans le même dossier et requiert
+un système de fichiers qui le prend en charge. Importer uniquement une
+sauvegarde de confiance.
