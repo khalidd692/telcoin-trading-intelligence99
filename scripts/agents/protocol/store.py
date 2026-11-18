@@ -27,11 +27,25 @@ import pathlib
 import urllib.error
 import urllib.request
 
+try:  # POSIX advisory locking; absent on Windows, where we fall back to the
+    import fcntl      # same directory + atomic-rename discipline.
+except ImportError:   # pragma: no cover - exercised only on Windows
+    fcntl = None
+
 DEFAULT_ROOT = pathlib.Path("bus")
 
 
 class StoreError(RuntimeError):
     """Raised when a durable write cannot be confirmed."""
+
+
+class CASConflict(RuntimeError):
+    """Raised when a compare-and-set finds the stored value changed.
+
+    This is the *lost-update* signal: the caller read version *V*, another
+    writer committed first, so our conditional write did not apply. The caller
+    re-reads and retries; nothing is silently overwritten.
+    """
 
 
 class FileStore:
@@ -70,6 +84,37 @@ class FileStore:
         for path in sorted(base.rglob("*.json")):
             out.append(str(path.relative_to(self.root)).removesuffix(".json"))
         return out
+
+    def put_cas(self, key: str, value, expected) -> bool:
+        """Write ``value`` only if the stored value equals ``expected``.
+
+        Atomic within one host: a POSIX advisory lock (``flock``) serialises
+        concurrent writers to the same key, and the actual file write stays
+        atomic (temp file + rename). Two processes performing a read-modify-
+        write on the same key therefore cannot lose an update — the second one
+        sees the first one's committed value and is told the CAS failed.
+
+        Returns ``True`` when written, ``False`` on a compare-and-set conflict.
+        """
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = path.with_suffix(".lock")
+        with open(lock_path, "w", encoding="utf-8") as lock:
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                current = self.get(key)
+                if current != expected:
+                    return False
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(
+                    json.dumps(value, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+                tmp.replace(path)
+                return True
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def durable(self) -> bool:
         """File storage is durable only on a host, not across a cloud pod."""
@@ -145,6 +190,43 @@ class KvStore:
                 if internal.startswith(prefix):
                     out.append(internal)
         return sorted(out)
+
+    def put_cas(self, key: str, value, expected) -> bool:
+        """Conditional write using the KV record version (``if_version``).
+
+        The cloud KV exposes the record version via ``?meta=true`` and accepts a
+        conditional write with ``?if_version=<version>`` (HTTP 409 on mismatch),
+        the same mechanism the cloud orchestrator's lock uses. We read the
+        version, verify the current value still equals ``expected``, then write
+        conditionally; a 409 means another writer won and the CAS is refused
+        (no lost update). Returns ``True`` when written, ``False`` on conflict.
+
+        A backend that does not expose a version cannot do an atomic CAS, so it
+        raises :class:`StoreError` and the caller fails closed.
+        """
+        wire = self._wire(key)
+        status, body = self._request("GET", f"{self.base}/v1/kv/{wire}?meta=true")
+        if status == 404:
+            current, version = None, None
+        elif status == 200 and isinstance(body, dict) and "value" in body:
+            current, version = body.get("value"), body.get("version")
+            if version is None:
+                raise StoreError(
+                    f"KV backend exposes no record version for {key!r}: "
+                    "cannot perform an atomic compare-and-set")
+        else:
+            raise StoreError(f"KV metadata read failed for {key!r}: HTTP {status}")
+
+        if current != expected:
+            return False
+
+        condition = "nx=true" if version is None else f"if_version={version}"
+        status, _ = self._request("PUT", f"{self.base}/v1/kv/{wire}?{condition}", value)
+        if status in (200, 201, 204):
+            return True
+        if status == 409:
+            return False
+        raise StoreError(f"KV conditional write failed for {key!r}: HTTP {status}")
 
     def durable(self) -> bool:
         return True
