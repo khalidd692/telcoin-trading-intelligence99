@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "max_attempts": 3,
+  "quota_reserve_percent": 10,
+  "routes": {
+    "small": [{"model": "gpt-6-luna", "effort": "low"}, {"model": "gpt-6.2-sol", "effort": "medium"}, {"model": "gpt-6.1-sol", "effort": "medium"}],
+    "normal": [{"model": "gpt-6.2-sol", "effort": "medium"}, {"model": "gpt-6.1-sol", "effort": "medium"}],
+    "hard": [{"model": "gpt-6.2-sol", "effort": "high"}, {"model": "gpt-6.1-sol", "effort": "high"}, {"model": "gpt-6.2-astra", "effort": "high"}],
+    "critical": [{"model": "gpt-6.2-astra", "effort": "high"}, {"model": "gpt-6-astra", "effort": "high"}, {"model": "gpt-6.2-sol", "effort": "high"}],
+    "escalated": [{"model": "gpt-6.2-astra", "effort": "high"}, {"model": "gpt-6-astra", "effort": "high"}, {"model": "gpt-6.2-sol", "effort": "high"}],
+    "last_resort": [{"model": "gpt-6.2-astra", "effort": "xhigh"}, {"model": "gpt-6-astra", "effort": "xhigh"}]
+  }
+}
