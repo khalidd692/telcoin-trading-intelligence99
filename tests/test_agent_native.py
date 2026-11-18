@@ -147,6 +147,43 @@ class KernelTests(unittest.TestCase):
             # The model's text claimed PASS; the kernel ignored it.
             self.assertTrue(result.checks[0]["ok"] is False)
 
+    def test_engine_repairs_a_red_check_within_a_bounded_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_BAD, MATH_OK])
+            spec = mission.MissionSpec(
+                mission_id="repair", prompt="make double", artifacts=["mathutils.py"],
+                max_repairs=1, checks=[mission.Check(
+                    "behaviour", [sys.executable, "-c",
+                                  "import mathutils; assert mathutils.double(21) == 42"])])
+            result = engine.run(spec)
+            self.assertEqual(result.verdict, mission.PASS)
+            self.assertEqual(result.provider_calls, 2)
+            self.assertEqual([attempt["verdict"] for attempt in result.attempts],
+                             [mission.FAIL, mission.PASS])
+
+    def test_incomplete_artifact_set_never_passes_even_with_a_green_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_OK] * 4)
+            spec = mission.MissionSpec(
+                mission_id="missing", prompt="two files",
+                artifacts=["mathutils.py", "README.md"],
+                checks=[mission.Check("green", [sys.executable, "-c", "pass"])])
+            result = engine.run(spec)
+            self.assertEqual(result.verdict, mission.FAIL)
+            self.assertIn("README.md", result.attempts[-1]["missing_artifacts"])
+
+    def test_repair_preserves_the_quota_floor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_BAD, MATH_OK], quota_remaining=12)
+            spec = mission.MissionSpec(
+                mission_id="repair-quota", prompt="make double", artifacts=["mathutils.py"],
+                max_repairs=1, checks=[mission.Check(
+                    "behaviour", [sys.executable, "-c",
+                                  "import mathutils; assert mathutils.double(21) == 42"])])
+            result = engine.run(spec)
+            self.assertEqual(result.verdict, mission.FAIL)
+            self.assertEqual(result.provider_calls, 1)
+
     def test_idempotency_no_double_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = _engine(tmp, [MATH_OK])
@@ -226,7 +263,8 @@ class KernelTests(unittest.TestCase):
     def test_unsafe_mission_id_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = _engine(tmp, [MATH_OK])
-            for bad in ("../../etc/passwd", "/abs", "a/b", "", "UPPER", "a" * 65):
+            for bad in ("../../etc/passwd", "/abs", "a/b", "", "UPPER", "a" * 65,
+                        "con", "lpt1.txt", "trailing.", "newline\n"):
                 with self.subTest(bad=bad):
                     with self.assertRaises(mission.MissionError):
                         engine.run(mission.MissionSpec(mission_id=bad, prompt="x"))
