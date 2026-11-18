@@ -93,6 +93,11 @@ DEFAULT_CONFIG = {
     # Kill-switch, mirrored from the plugin schema. When true the run stops
     # immediately (exit 3) before any probe, spend or conversation.
     "emergency_stop": False,
+    # S-06: only these GitHub logins may authorise a mission through a
+    # content-bound approval marker in the issue body. Empty by default,
+    # so with no authorised approver named no mission can start
+    # (fail-closed). The owner sets this to their own login to enable it.
+    "authorized_approvers": [],
 }
 
 
@@ -1278,6 +1283,23 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         journal_entry(state, "idle", note="no eligible mission")
         save_state(state)
         return 0
+
+    # --- Approval gate (S-06): no mission starts without a current, content-
+    # bound approval by an explicitly authorised actor. A label alone is not
+    # an authorisation, and an issue edited after approval is refused (its
+    # hash no longer matches). Fail-closed: a missing/unknown/mismatched
+    # approval, or a configuration that forgot to name the authorised
+    # approvers, refuses the run before any spend. A dry run starts no
+    # conversation, so it only reports the decision.
+    authorized = frozenset(config.get("authorized_approvers") or ())
+    approved, approval_reason = policy.approval_is_authorized(mission, authorized)
+    if not approved and not config["dry_run"]:
+        journal_entry(state, "abort", reason=approval_reason,
+                      mission=mission["number"])
+        save_state(state)
+        return 2
+    journal_entry(state, "approval_checked", approved=approved,
+                  detail=approval_reason, mission=mission["number"])
 
     work_branch = policy.work_branch_name(
         config["work_branch_prefix"], mission["number"], mission.get("title", "")

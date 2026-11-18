@@ -37,6 +37,7 @@ import protocol.store as store_mod  # noqa: E402
 from protocol.bus import Bus  # noqa: E402
 from protocol.store import KvStore  # noqa: E402
 from automation import bus_bridge  # noqa: E402
+from automation import policy  # noqa: E402
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
 ISSUE = {
@@ -51,6 +52,17 @@ ISSUE = {
     "labels": [{"name": "tel99-mission"}],
     "created_at": "2026-11-15T00:00:00Z",
 }
+
+# S-06: a mission may start only with a current, content-bound approval by an
+# explicitly authorised actor. The fixture is approved by this login, and the
+# config below names it, so the end-to-end tests exercise the approved path.
+AUTHORIZED_APPROVER = "khalidd692"
+ISSUE["body"] = (
+    ISSUE["body"]
+    + policy.approval_marker(policy.mission_content(ISSUE),
+                             approver=AUTHORIZED_APPROVER)
+    + "\n"
+)
 
 
 class FakeCloud:
@@ -298,7 +310,8 @@ class EndToEndTests(unittest.TestCase):
     def _config(self, **over):
         cfg = dict(orchestrator.DEFAULT_CONFIG)
         cfg.update({"dry_run": False, "repository": REPO,
-                    "mission_label": "tel99-mission", "max_runtime_seconds": 60})
+                    "mission_label": "tel99-mission", "max_runtime_seconds": 60,
+                    "authorized_approvers": [AUTHORIZED_APPROVER]})
         cfg.update(over)
         return cfg
 
@@ -538,6 +551,68 @@ class EndToEndTests(unittest.TestCase):
         code, out = self._run(self._config())  # retried, now validated
         self.assertEqual(code, 0, out)
         self.assertIn('"action": "retried"', out)
+
+
+class MissionApprovalTests(EndToEndTests):
+    """S-06 gate on the real ``orchestrator.run()`` path.
+
+    A mission label is not an authorisation: the run must refuse to start a
+    conversation unless the issue carries a current, content-bound approval by
+    an actor named in ``authorized_approvers``.
+    """
+
+    def _issue_with_body(self, body):
+        self.cloud.issues = [{**dict(ISSUE), "body": body}]
+
+    def _approved_body(self, *, approver=AUTHORIZED_APPROVER, base=None):
+        base = base if base is not None else {
+            "title": ISSUE["title"], "body": "Corps initial.\n"}
+        return base["body"] + policy.approval_marker(
+            policy.mission_content(base), approver=approver) + "\n"
+
+    def test_an_authorized_current_approval_lets_the_mission_start(self):
+        code, out = self._run(self._config())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+        self.assertIn('"approval_checked"', out)
+        self.assertIn('"approved": true', out)
+
+    def test_a_mission_without_an_approval_is_refused(self):
+        self._issue_with_body("Aucune approbation ici.\n")
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("no content-bound approval", out)
+
+    def test_an_unauthorized_approver_is_refused(self):
+        self._issue_with_body(self._approved_body(approver="intrus"))
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("not an authorized approver", out)
+
+    def test_a_mission_edited_after_approval_is_refused(self):
+        # Approve the body, then edit it: the digest no longer matches.
+        approved = self._approved_body()
+        edited = approved.replace("Corps initial.", "Corps modifie apres approbation.")
+        self._issue_with_body(edited)
+        code, out = self._run(self._config())
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("content changed after approval", out)
+
+    def test_an_empty_approver_allowlist_refuses_every_mission(self):
+        code, out = self._run(self._config(authorized_approvers=[]))
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("no authorized approvers configured", out)
+
+    def test_a_dry_run_reports_the_decision_without_starting(self):
+        self._issue_with_body("Aucune approbation ici.\n")
+        code, out = self._run(self._config(dry_run=True))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn('"approved": false', out)
 
 
 class ControllableKv:
