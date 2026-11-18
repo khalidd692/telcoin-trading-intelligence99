@@ -1,6 +1,6 @@
 # MISSION PERMANENTE — FINIR NOS AGENTS SANS COPIER-COLLER
 
-**Ordre du propriétaire, 18 novembre 2026. Statut : dossier de conduite, pas un automate déjà activé.**
+**Ordre du propriétaire, 18 novembre 2026. Statut : dossier de conduite, pas un automate déjà activé. MANDAT ACTUALISÉ : Codex dirige désormais la LIVRAISON GLOBALE, voir CODEX_AUTONOMIE_EXECUTION.md sur la branche PR #101.**
 
 > « Je ne veux plus copier les réponses entre ChatGPT, mes trois conversations, Hermes, Kilo et OpenHands. Je veux que les chefs prennent eux-mêmes la suite et TERMINENT mon système personnel d'agents. »
 
@@ -18,7 +18,7 @@ L'objectif final est **notre moteur d'agents IA personnel**, portable et exploit
 2. **BACKLOG.json :** liste stable d'objectifs, propriétaires, dépendances et tests. Ce n'est pas un état live : comparer aux PR/CI/runs avant d'agir.
 3. **EXECUTION_CONTINUE.md :** boucle obligatoire « prendre → exécuter → vérifier → publier → reprendre », limites d'autonomie et traitement des blocages.
 4. **CRITERES_DE_FIN.md :** conditions qui permettent de dire réellement « projet terminé ».
-- **CODEX_ROUTAGE_ET_QUOTA_2026-11-18.md :** Codex en renfort, choix adaptatif des modèles et du raisonnement, quotas protégés, rôles des quatre chefs et premier audit P0.
+- **CODEX_AUTONOMIE_EXECUTION.md (PR #101) :** mandat prioritaire de direction et finition par Codex des 20 tâches/G0–G7. **CODEX_ROUTAGE_ET_QUOTA_2026-11-18.md :** réglages des modèles et réserves de quotas ; son ancien rôle « réserve » est dépassé.
 
 - **RECETTE_LIVE_ET_MODE_SECOURS_OPENHANDS.md :** preuve de l'enchaînement A→B avec un seul déclenchement, différence intra/inter-session, et mode de secours cloud si Kilo/Hermes ne se connectent pas.
 
@@ -45,6 +45,8 @@ https://github.com/khalidd692/telcoin-trading-intelligence99/issues/67
 **P3 recette finale :** création d'une application neuve sans message manuel intermédiaire, preuve d'une tâche TEL99 protégée, reprise après interruption, deux projets isolés, fonctionnement du noyau quand un des trois ateliers est indisponible.
 
 ## Qui fait quoi
+
+- **Codex, DIRECTEUR DE LIVRAISON** : responsable de TOUTE la finition G0–G7, des tâches non terminées, de la compatibilité des PR, des correctifs transverses, des tests et du produit final. Il coordonne et vérifie les trois autres chefs sans violer leurs claims/leases. Réf. PR #101 et issue #94.
 
 - **OpenHands** : chef exécution cloud / sécurité des runs / état CAS / continuité et intégration ; ne devient pas indispensable au noyau.
 - **Kilo** : chef atelier Windows / lanceur natif / pont sortant GitHub / vérification de livrables ; ne prend pas un second verrou central.

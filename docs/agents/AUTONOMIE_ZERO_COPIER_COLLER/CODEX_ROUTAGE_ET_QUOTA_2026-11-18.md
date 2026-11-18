@@ -4,7 +4,7 @@
 
 ## Stratégie
 
-**Codex est notre architecte / ingénieur senior de réserve pour les corrections à risque et la revue indépendante** ; OpenHands assure continuité cloud et tâches codables sur serveur ; Kilo couvre la réalité Windows/IDE et réception GitHub ; Hermes assure routeur, mémoire, Skills et apprentissage vérifié. Ils construisent le **noyau d'agents IA du propriétaire**, indépendant des trois plateformes.
+**MISE À JOUR DU MANDAT : Codex est DIRECTEUR TECHNIQUE DE LIVRAISON DE L'ENSEMBLE DU PROJET, pas simple ingénieur senior de réserve.** Le présent document précise encore l'allocation prudente de son quota et ses premiers audits, mais ne limite PAS son périmètre : il prend en charge les 20 objectifs de #94, G0–G7, l'intégration et le produit final, selon `CODEX_AUTONOMIE_EXECUTION.md` de PR #101 ; OpenHands assure continuité cloud et tâches codables sur serveur ; Kilo couvre la réalité Windows/IDE et réception GitHub ; Hermes assure routeur, mémoire, Skills et apprentissage vérifié. Ils construisent le **noyau d'agents IA du propriétaire**, indépendant des trois plateformes.
 
 **Un seul auteur principal par fichier/lot.** Ne pas lancer OpenHands, Codex et Kilo en parallèle pour implémenter le même bug. Une équipe implémente et une autre vérifie.
 
@@ -12,7 +12,7 @@
 
 | Chef | Écrire / tester | Ne PAS dupliquer |
 |---|---|---|
-| **Codex** | Revue P0 sécurité, faux succès / acceptance verifier, CAS/lock/race, audit du moteur natif, tests adversariaux, correctifs complexes ciblés | UI de Kilo ; tâches cloud répétitives déjà livrées par OpenHands |
+| **Codex** | Direction et livraison globale du système d'agents : planifier/traiter les 20 tâches, corriger les manques non revendiqués, revue P0, CAS, faux PASS, assembler les PR et prouver les gates G0–G7 | Ne pas écraser les fichiers pris par les autres, ne pas refaire une correction déjà testée |
 | **OpenHands** | Orchestration cloud, jobs, progression #94, bugfix sur ses branches, tests CI, reprise, préparation du mode secours | Ne pas concurrencer Codex sur la même correction ni créer des sessions à chaque commentaire |
 | **Kilo** | Pont GitHub sortant sur PC Windows, test réel du runtime natif et de l'Agent Manager, compatibilité sur Windows, validation indépendante des livrables | Ne pas reconstruire une deuxième mémoire, un deuxième bus ou le moteur natif déjà livré en PR #95 |
 | **Hermes** | Mémoire inter-sessions et exportable, routage multi-modèles gratuits, Skills validés, tests de rappel, contrat de communication GitHub | Ne pas remplacer notre noyau par une dépendance Hermes Desktop |
@@ -39,7 +39,7 @@ Codex et OpenHands ont des jauges indépendantes ; ne pas additionner les pource
 ### Économiser les contextes
 Le chef lit le README et le BACKLOG, mais à Codex on transmet **le ticket ciblé, la SHA/base, les fichiers concernés, les tests, les critères** ; pas l'historique de toutes les conversations. Éviter plusieurs MCP inutiles, réutiliser les logs, faire un préflight git/CI déterministe avant l'appel coûteux, créer de petites PR testables.
 
-## Première mission Codex — audit S-03, S-04, S-05, Z-01
+## Premier lot de Codex — audits S-03, S-04, S-05, Z-01 (puis continuer jusqu'à la livraison)
 
 Priorité **P0**, prise en charge uniquement si aucun autre chef n'est en train de modifier les mêmes fichiers :
 1. Examiner l'existant sur `main`, les PR **#92** (reprise anti-duplication, correctifs #79) et **#95** (noyau natif, tests offline). Identifier les véritables changements avant/après, les tests exécutables et les impacts de conflits. **La PR #95 a eu une clé potentiellement sensible dans sa description ; le texte a été masqué le 18/11 mais la rotation reste obligatoire.** Ne jamais recopier sa valeur dans tests, logs, commentaires ou prompts.
