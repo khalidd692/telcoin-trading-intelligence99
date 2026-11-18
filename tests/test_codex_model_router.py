@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest.mock import patch
@@ -105,6 +106,14 @@ class RouterTests(unittest.TestCase):
         self.assert_blocked("BLOCKED_MODEL", self.start, "debug", live=snapshot(LUNA))
         self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(dict(LUNA, model="gpt-6-luna-fast")))
 
+    def test_catalog_uses_exposed_model_field_and_rejects_conflicting_entries(self):
+        variant = dict(LUNA, model="account-visible-2026-11-18", id="catalog-card")
+        self.assertIn(variant["model"], self.start(live=snapshot(variant)).exec_args)
+        self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(LUNA, variant))
+        self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(variant, dict(variant, hidden=True)))
+        self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(dict(variant, model="-override")))
+        self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(dict(variant, availabilityNux={"message": "no access"})))
+
     def test_confirmed_debug_failure_escalates_to_astra_then_extra_high(self):
         first = self.start("debug")
         self.assertRaises(ValueError, self.finish, first, "tests_failed")
@@ -150,6 +159,25 @@ class RouterTests(unittest.TestCase):
         self.assert_blocked("WAITING_QUOTA", self.start, live=snapshot(LUNA, SOL, limits=limits))
         self.assertEqual(self.start("coding", live=snapshot(SOL, limits=limits)).attempt["model"], SOL["model"])
 
+    def test_unknown_quota_bucket_cannot_hide_an_exhausted_limit(self):
+        limits = quota()
+        limits["rateLimitsByLimitId"] = {
+            "codex": dict(limits["rateLimits"], limitName="Cosmetic name"),
+            "unmapped": dict(quota(weekly=99)["rateLimits"], limitId="unmapped"),
+        }
+        self.assert_blocked("WAITING_QUOTA", self.start, live=snapshot(LUNA, limits=limits))
+        limits["rateLimitsByLimitId"]["unmapped"]["secondary"]["usedPercent"] = 25
+        self.assertEqual(self.start(live=snapshot(LUNA, limits=limits)).attempt["model"], LUNA["model"])
+        limits["rateLimitsByLimitId"]["codex"]["spendControlReached"] = True
+        self.assert_blocked("WAITING_QUOTA", self.start, live=snapshot(LUNA, limits=limits))
+
+    def test_malformed_account_quota_and_checkpoint_are_classified(self):
+        self.assert_blocked("BLOCKED_AUTH", self.start, live=snapshot(LUNA, plan=[]))
+        self.assert_blocked("WAITING_QUOTA", self.start, live=snapshot(LUNA, observed_at="now"))
+        plan = self.start()
+        del plan.attempt["quota_before"]
+        self.assert_blocked("BLOCKED_CHECKPOINT", self.finish, plan, "worker_error")
+
     def test_checkpoint_binding_and_serialized_evidence(self):
         plan = self.start()
         self.assert_blocked("BLOCKED_CHECKPOINT", router.prepare_attempt,
@@ -183,6 +211,17 @@ class RouterTests(unittest.TestCase):
         self.assertIsNone(evidence["quota_after"])
         self.assertIsNone(evidence["cli_usage"]["tokens"])
 
+    def test_conflicting_terminal_events_do_not_supply_usage(self):
+        plan = self.start()
+        output = "\n".join((
+            '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":3}}',
+            '{"type":"turn.failed","error":{"message":"secret"}}',
+        ))
+        attempt = self.finish(plan, "worker_error", exec_jsonl=output)["attempts"][0]
+        self.assertIsNone(attempt["cli_usage"]["tokens"])
+        self.assertIsNone(attempt["cli_usage"]["terminal_event"])
+        self.assertNotIn("secret", json.dumps(attempt))
+
     def test_reported_effective_model_mismatch_stops_escalation(self):
         attempt = self.start("debug")
         state = self.finish(attempt, "tests_failed", test_evidence_sha256=VERDICT,
@@ -191,6 +230,68 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(result["status"], "worker_error")
         self.assertEqual(result["cli_usage"]["effective_settings"]["model"], "other-model")
         self.assert_blocked("ROUTE_FINISHED", self.start, state=state)
+
+    def test_spliced_exec_is_released_only_after_checkpoint_and_resumes_without_relaunch(self):
+        from local_codex import call as worker_call
+
+        args = ["codex.exe", "-a", "never", "exec", "--ignore-user-config", "--ephemeral",
+                "--sandbox", "workspace-write", "-c", "windows.sandbox=mxc", "-"]
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            def persist(state):
+                temporary = saved.with_suffix(".tmp")
+                temporary.write_text(json.dumps(state), encoding="utf-8")
+                temporary.replace(saved)
+                events.append("persist")
+
+            def fake_exec(argv, **kwargs):
+                self.assertEqual(argv[:len(args)-1], args[:-1])
+                self.assertEqual(argv[-1], "-")
+                current = json.loads(saved.read_text(encoding="utf-8"))["attempts"][-1]
+                self.assertEqual(current["status"], "running")
+                self.assertEqual(argv[argv.index("--model") + 1], current["model"])
+                self.assertIn(f'model_reasoning_effort="{current["effort"]}"', argv)
+                events.append((current["model"], current["effort"]))
+                if kwargs["input"] == "interrupted":
+                    raise subprocess.TimeoutExpired(argv, 1)
+                return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}', "")
+
+            with patch("local_codex.subprocess.run", side_effect=fake_exec) as calls:
+                for task, profile, prompt in (("ONE", "routine", "answer"), ("TWO", "coding", "interrupted")):
+                    saved = Path(directory) / f"{task}.json"
+                    state = router.new_checkpoint(task, APPROVAL, profile)
+                    plan, command = router.prepare_exec(args, state, APPROVAL, BASE,
+                                                        snapshot(LUNA, SOL), persist)
+                    if task == "ONE":
+                        result = worker_call(command, input_text=prompt)
+                        persist(self.finish(plan, "tests_passed", test_evidence_sha256=VERDICT,
+                                            exec_jsonl=result.stdout))
+                    else:
+                        with self.assertRaises(subprocess.TimeoutExpired):
+                            worker_call(command, input_text=prompt)
+                        pending = json.loads(saved.read_text(encoding="utf-8"))
+                        self.assert_blocked("RECONCILE_ATTEMPT", router.prepare_exec, args, pending,
+                                            APPROVAL, BASE, snapshot(LUNA, SOL), persist)
+                        persist(router.record_result(pending, APPROVAL, 1, "worker_error", duration_ms=1000))
+                self.assertEqual(calls.call_count, 2)
+            for task, status in (("ONE", "tests_passed"), ("TWO", "worker_error")):
+                completed = json.loads((Path(directory) / f"{task}.json").read_text(encoding="utf-8"))
+                self.assertEqual(completed["attempts"][0]["status"], status)
+        self.assertEqual(events, ["persist", (LUNA["model"], "low"), "persist",
+                                  "persist", (SOL["model"], "medium"), "persist"])
+
+    def test_prepare_exec_refuses_competing_overrides_and_cannot_return_on_store_failure(self):
+        state = router.new_checkpoint("ONE", APPROVAL, "routine")
+        args = ["codex.exe", "exec", "--ignore-user-config"]
+        persist = unittest.mock.Mock(side_effect=OSError("store unavailable"))
+        for overrides in (["--model=alternate"], ["-c", 'service_tier="fast"'], ["--"], ["-pother"]):
+            with self.subTest(overrides=overrides):
+                self.assertRaises(ValueError, router.prepare_exec, [*args, *overrides, "-"],
+                                  state, APPROVAL, BASE, snapshot(LUNA), persist)
+        persist.assert_not_called()
+        self.assertRaises(OSError, router.prepare_exec, [*args, "-"], state, APPROVAL, BASE,
+                          snapshot(LUNA), persist)
+        persist.assert_called_once()
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -240,6 +341,20 @@ for line in sys.stdin:
             "account/read", "model/list", "model/list", "account/rateLimits/read",
         ])
         self.assertEqual(request.call_args_list[2].args[1]["cursor"], "page-2")
+        self.assertEqual(request.call_args_list[2].args[1]["modelProvider"], "openai")
+
+    @patch.object(router, "_app_server")
+    def test_discovery_rejects_a_repeated_catalog_cursor_before_quota(self, mock_server):
+        request = mock_server.return_value.__enter__.return_value
+        request.side_effect = (
+            {"account": {"type": "chatgpt", "planType": "plus"}},
+            {"data": [LUNA], "nextCursor": "page-2"},
+            {"data": [SOL], "nextCursor": "page-2"},
+        )
+        with self.assertRaises(router.RouteBlocked) as exc:
+            router.read_snapshot("codex.exe", ".", {})
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+        self.assertEqual(request.call_count, 3)
 
     @patch.object(router, "_app_server")
     def test_discovery_stops_before_catalog_when_account_is_api_key(self, mock_server):
