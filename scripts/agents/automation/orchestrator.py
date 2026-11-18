@@ -33,6 +33,7 @@ Local dry-run (no network, no spend):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -172,12 +173,18 @@ def get_secret(name: str) -> str:
         return r.read().decode().strip()
 
 
-def fire_callback(status: str = "COMPLETED", error: str | None = None) -> None:
+def fire_callback(status: str = "COMPLETED", error: str | None = None,
+                  outcome: dict | None = None) -> None:
     """Signal run completion to the automation service.
 
     The script runner does not mark a run complete on its own, so this must be
     called on every exit path — success and error alike. Without it the run
     stays RUNNING until the platform timeout.
+
+    ``outcome`` carries the run report's business fields (``mission_id``,
+    ``mission_accepted``, ``outcome_verification``, ``config_digest``) so the
+    platform sees a mission verdict, not only "COMPLETED"/"FAILED". It is a
+    summary, never the full journal, and contains no secret.
     """
     url = os.environ.get("AUTOMATION_CALLBACK_URL", "")
     if not url:
@@ -185,6 +192,11 @@ def fire_callback(status: str = "COMPLETED", error: str | None = None) -> None:
     body = {"status": status, "run_id": os.environ.get("AUTOMATION_RUN_ID", "")}
     if error:
         body["error"] = error
+    if outcome:
+        body["mission_id"] = outcome.get("mission_id")
+        body["mission_accepted"] = outcome.get("mission_accepted")
+        body["outcome_verification"] = outcome.get("outcome_verification")
+        body["config_digest"] = outcome.get("config_digest")
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -801,6 +813,196 @@ def journal_entry(state: dict, event: str, **fields) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Durable run report (survives sandbox destruction)
+# --------------------------------------------------------------------------- #
+# The platform deletes the sandbox after a run, so a report that only lives in
+# the workspace file or on stdout is lost ("Sandbox has been deleted - logs are
+# no longer available"). This section writes ONE structured report per run to the
+# durable KV store (the same namespace/mechanism as ``state``) and, best-effort,
+# to the local workspace file, so a cockpit can always read what a run did.
+#
+# It deliberately separates two things that were previously conflated:
+#   * SCRIPT SUCCESS   - the process exit code (``0`` == the script ran fine);
+#   * MISSION_ACCEPTED - the business verdict (``outcome_verdict.validated``).
+# A run can exit ``0`` having accepted NO mission (idle / dry-run / offline), and
+# a mission can be attempted and rejected (exit ``2``) while the script itself
+# succeeded. ``status`` and ``mission_accepted`` make that explicit instead of
+# hiding it behind a single integer.
+_RUN_REPORT_KEY = "run_report"
+# Per-run copies (history) so a later run never silently erases the only
+# durable trace of an earlier one. Single path segment: the KV namespace is
+# flat, so the separator is a dot, not a slash.
+_RUN_REPORT_PREFIX = "run_report."
+# Only these keys are hashed into ``config_digest``. The config carries no secret
+# today, but hashing a whitelist (never the raw merged dict) keeps a future config
+# field from leaking into a durable, broadly readable record.
+_REPORT_CONFIG_KEYS = (
+    "repository", "mission_label", "base_branch", "work_branch_prefix",
+    "max_concurrent_missions", "max_runtime_seconds", "max_iterations",
+    "max_budget_usd", "agent_max_iterations", "agent_max_budget_usd",
+    "quota_min_remaining", "dry_run", "require_durable_bus", "emergency_stop",
+)
+
+
+def config_digest(config: dict) -> str:
+    """Stable short digest of the whitelisted configuration. Never a secret."""
+    projection = {k: config.get(k) for k in _REPORT_CONFIG_KEYS if k in config}
+    blob = json.dumps(projection, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _report_key(run_id: str) -> str:
+    """Stable per-run KV key. Sanitised so it stays a single flat segment."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "-", run_id or "") or "unknown"
+    return f"{_RUN_REPORT_PREFIX}{safe}"
+
+
+def _journal_entries(state: dict) -> list:
+    """Return only the well-formed (dict) journal entries.
+
+    ``load_state`` returns a dict read back from the KV store or a local file,
+    which is not schema-checked: a corrupted or hand-edited ``state`` could hold
+    ``journal: None`` or non-dict entries. The report builder must survive that
+    rather than raise (a missing report is preferable to a crashed run).
+    """
+    journal = state.get("journal") if isinstance(state, dict) else None
+    if not isinstance(journal, list):
+        return []
+    return [e for e in journal if isinstance(e, dict)]
+
+
+def _last_journal_value(state: dict, event: str, key: str):
+    """Return ``key`` from the last journal entry named ``event``, or ``None``."""
+    for entry in reversed(_journal_entries(state)):
+        if entry.get("event") == event and key in entry:
+            return entry[key]
+    return None
+
+
+def build_run_report(state: dict, config: dict, code: int, *,
+                     quota_after=None) -> dict:
+    """Build the durable run report from the run's own state (pure function).
+
+    Reads the run's journal so the report reflects what actually happened
+    (mission selected, quota reading, outcome verdict) rather than a guess.
+    """
+    mission_number = _last_journal_value(state, "mission_selected", "issue")
+    if mission_number is None:
+        mission_number = _last_journal_value(state, "mission_resume", "issue")
+    started = [
+        e for e in _journal_entries(state)
+        if e.get("event") in ("conversation_started", "conversation_resumed")
+    ]
+    mission_id = str(mission_number) if mission_number is not None else "NO_MISSION"
+    validated = _last_journal_value(state, "outcome_verdict", "validated")
+    if validated is None:
+        outcome_verification = "NOT_ATTEMPTED"
+    else:
+        outcome_verification = "ACCEPTED" if validated else "REJECTED"
+    error_reason = _last_journal_value(state, "abort", "reason")
+    if error_reason is None and code == 3:
+        error_reason = _last_journal_value(state, "emergency_stop", "reason")
+    # The business verdict is separate from the script exit code.
+    mission_accepted = bool(validated is True and code == 0)
+    if mission_accepted:
+        status = "MISSION_ACCEPTED"
+    elif code == 3:
+        status = "STOPPED"
+    elif code != 0:
+        status = "FAILED"
+    elif mission_id == "NO_MISSION":
+        status = "SUCCESS_SCRIPT_NO_MISSION"
+    else:
+        status = "SUCCESS_SCRIPT_MISSION_NOT_ACCEPTED"
+    run_id = (os.environ.get("AUTOMATION_RUN_ID", "")
+              or _last_journal_value(state, "run_start", "owner") or "")
+    return {
+        "schema_version": 1,
+        "record_type": "tel99_run_report",
+        "run_id": run_id,
+        "ts": policy.utcnow_iso(),
+        "config_digest": config_digest(config),
+        "dry_run": bool(config.get("dry_run")),
+        "quota_before": _last_journal_value(state, "quota", "remaining"),
+        "quota_after": quota_after,
+        "mission_id": mission_id,
+        "started_children": len(started),
+        "status": status,
+        "mission_accepted": mission_accepted,
+        "outcome_verification": outcome_verification,
+        "error_reason": error_reason,
+        "evidence_uri": f"kv://{_report_key(run_id)}",
+    }
+
+
+def write_run_report(state: dict, config: dict, code: int, *,
+                     quota_after=None, write_kv: bool = True) -> dict:
+    """Persist the run report durably (KV), then to the local file; best-effort.
+
+    Never raises: a failure to write a report must not turn a completed run into
+    a crash. The report is always returned so the caller can print it too.
+
+    ``write_kv=False`` skips the durable-store write and keeps only the local
+    workspace file. The emergency-brake path uses it so that halting a run never
+    touches the network (the brake must not depend on a remote store).
+    """
+    try:
+        report = build_run_report(state, config, code, quota_after=quota_after)
+    except Exception as exc:  # noqa: BLE001 - a report must never break the run
+        print(f"[journal] run_report_build_error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return {}
+    # Durable store first (survives container destruction), local file second.
+    # Two keys: ``run_report`` (the latest, for the cockpit/callback) and a
+    # per-run ``run_report.<run_id>`` (history, so a later run cannot erase the
+    # only durable trace of an earlier one).
+    if write_kv and kv_available():
+        for key in (_RUN_REPORT_KEY, _report_key(report.get("run_id", ""))):
+            try:
+                kv_set(key, report)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[journal] run_report_kv_error[{key}]: "
+                      f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    try:
+        path = _state_path()
+        report_path = path.with_name(path.stem + "_run_report.json")
+        tmp = report_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(report, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(report_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[journal] run_report_file_error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+    print(f"[journal] run_report {json.dumps(report, ensure_ascii=False)}")
+    return report
+
+
+def read_run_report() -> dict:
+    """Read the last run report: the local file first, then the durable store.
+
+    Best-effort and read-only: returns ``{}`` when no report is readable, so a
+    caller can always use it without guarding. The local file is tried first
+    because the same process just wrote it (no network call in the common case);
+    the KV store is the fallback that still works after the sandbox is deleted.
+    Used by ``main`` to attach the business verdict to the completion callback.
+    """
+    try:
+        path = _state_path()
+        report_path = path.with_name(path.stem + "_run_report.json")
+        return json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - a missing report is not an error
+        pass
+    if kv_available():
+        try:
+            data = kv_get(_RUN_REPORT_KEY)
+            if isinstance(data, dict):
+                return data
+        except Exception:  # noqa: BLE001
+            pass
+    return {}
+
+
+# --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def load_config(path: str | None) -> dict:
@@ -908,6 +1110,43 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
 
 
 def run(config: dict, offline: bool = False) -> int:
+    """Run one orchestrator cycle and persist a durable report for it.
+
+    Thin wrapper around :func:`_run_impl` so that every exit code (0, 2, 3, and
+    the crash path that ``main`` turns into 1) is covered by a single durable
+    report write, without threading a return value through the ~20 exit paths of
+    the body. The report is best-effort: a failure to write it never changes the
+    run's exit code and never raises.
+    """
+    holder: dict = {}
+    try:
+        code = _run_impl(config, offline, holder)
+    except BaseException:  # noqa: BLE001 - report the crash, then re-raise
+        # A crash is exit code 1 (``main`` maps it). Persist a report so the run
+        # is not invisible after the sandbox is deleted, then re-raise unchanged.
+        state = holder.get("state")
+        if not isinstance(state, dict):
+            state = {"version": 1, "processed": [], "active": None, "journal": []}
+        write_run_report(state, config, 1, quota_after=None, write_kv=True)
+        raise
+    state = holder.get("state")
+    if isinstance(state, dict):
+        brake = bool(holder.get("brake"))
+        quota_after = None
+        # Never probe quota on the emergency-brake path: the halt must not depend
+        # on the network. On other paths it is a best-effort second reading and
+        # ``quota_remaining`` returns ``None`` when no API key is configured.
+        if not offline and not brake:
+            try:
+                quota_after = quota_remaining()
+            except Exception:  # noqa: BLE001 - the report must never break the run
+                quota_after = None
+        write_run_report(state, config, code, quota_after=quota_after,
+                         write_kv=not brake)
+    return code
+
+
+def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     started = time.time()
     owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
 
@@ -927,12 +1166,15 @@ def run(config: dict, offline: bool = False) -> int:
             # ``save_state`` is called, so the brake returns before any KV read
             # or write. The stop is still reported on stdout via the journal.
             state = {"version": 1, "processed": [], "active": None, "journal": []}
+            holder["state"] = state
+            holder["brake"] = True
             journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
                           repository=config["repository"], offline=offline, owner=owner)
             journal_entry(state, "emergency_stop", reason=reason, scope="next_run")
             return 3
 
     state = load_state()
+    holder["state"] = state
     deadline = started + int(config["max_runtime_seconds"])
 
     journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
@@ -1666,9 +1908,13 @@ def main() -> int:
         fire_callback("FAILED", str(exc))
         return 1
     # The script runner does not complete a run on its own: signal it on every
-    # exit path so the run never stays RUNNING until the platform timeout.
+    # exit path so the run never stays RUNNING until the platform timeout. The
+    # callback carries the durable report's business verdict when one is readable,
+    # so the platform sees MISSION_ACCEPTED vs SCRIPT-OK, not just COMPLETED.
+    outcome = None if args.offline else read_run_report()
     fire_callback("COMPLETED" if code == 0 else "FAILED",
-                  None if code == 0 else f"orchestrator exit {code}")
+                  None if code == 0 else f"orchestrator exit {code}",
+                  outcome=outcome)
     return code
 
 
