@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
 import pathlib
@@ -27,12 +28,32 @@ with subprocess.Popen([sys.executable, "-I", "-B", "/work/program.py"],
 """
 
 
-def _run_container(image: str, program: pathlib.Path, timeout: int):
-    name = "tel99-native-" + uuid.uuid4().hex
+def valid_image(image: str) -> bool:
+    return isinstance(image, str) and bool(_IMAGE.fullmatch(image))
+
+
+def _local_docker(config: pathlib.Path) -> tuple[list[str], dict]:
     host = ("npipe:////./pipe/docker_engine" if os.name == "nt"
             else "unix:///var/run/docker.sock")
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
            if key in os.environ}
+    return ["docker", "--config", str(config), "--host", host], env
+
+
+def require_local_image(image: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="tel99-docker-") as config:
+        docker, env = _local_docker(pathlib.Path(config))
+        try:
+            check = subprocess.run([*docker, "image", "inspect", image], env=env, timeout=10,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired):
+            raise MissionError("local Docker is unavailable") from None
+        if check.returncode:
+            raise MissionError("the pinned Python image is not available in local Docker")
+
+
+def _run_container(image: str, program: pathlib.Path, timeout: int, *, runner: str = _CAPTURE):
+    name = "tel99-native-" + uuid.uuid4().hex
     with tempfile.TemporaryDirectory(prefix="tel99-sandbox-") as tmp:
         root = pathlib.Path(tmp)
         config = root / "config"
@@ -43,28 +64,40 @@ def _run_container(image: str, program: pathlib.Path, timeout: int):
         source.chmod(0o644)
         if "," in str(source):
             raise MissionError("sandbox staging path contains a comma")
-        docker = ["docker", "--config", str(config), "--host", host]
+        docker, env = _local_docker(config)
         command = [*docker, "run", "--name", name, "--rm", "--pull", "never",
                    "--network", "none", "--read-only", "--log-driver", "none",
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                    "--user", "65534:65534", "--pids-limit", "32",
                    "--memory", "256m", "--cpus", "1",
+                   "--tmpfs", "/scratch:rw,nosuid,nodev,noexec,size=16m,mode=1777",
                    "--mount", f"type=bind,source={source},target=/work/program.py,readonly",
-                   "--entrypoint", "python", image, "-I", "-B", "-c", _CAPTURE]
-        try:
-            return subprocess.run(command, env=env, capture_output=True, timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            # Killing the Docker client alone does not guarantee the container stopped.
-            subprocess.run([*docker, "rm", "-f", name], env=env, check=False,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-            raise
+                   "--entrypoint", "python", image, "-I", "-B", "-c", runner]
+        with subprocess.Popen(command, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL) as client, ThreadPoolExecutor(1) as reader:
+            output = reader.submit(client.stdout.read, _OUTPUT_LIMIT + 1)
+            try:
+                data = output.result(timeout=timeout)
+                if len(data) > _OUTPUT_LIMIT:
+                    raise MissionError("sandbox output exceeds the host limit")
+                return subprocess.CompletedProcess(command, client.wait(timeout=1), data)
+            except (TimeoutError, subprocess.TimeoutExpired, KeyboardInterrupt, MissionError):
+                # A killed Docker client does not necessarily stop its container.
+                client.kill()
+                client.wait()
+                subprocess.run([*docker, "rm", "-f", name], env=env, check=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=5)
+                if not output.done():
+                    raise subprocess.TimeoutExpired(command, timeout) from None
+                raise
 
 
 class ScriptCheck(Check):
     """Check the program's observed exit status and exact output outside the sandbox."""
 
     def __init__(self, image: str, script: str, expected_stdout: str):
-        if not _IMAGE.fullmatch(image):
+        if not valid_image(image):
             raise MissionError("sandbox image must be pinned by a sha256 digest")
         if not valid_artifact_name(script) or not script.endswith(".py"):
             raise MissionError("sandbox script must be a Python artifact")
@@ -83,7 +116,7 @@ class ScriptCheck(Check):
             if script.is_symlink() or not script.is_file():
                 raise MissionError("missing sandbox script")
             result = _run_container(self.image, script, timeout)
-        except (MissionError, OSError, subprocess.TimeoutExpired) as exc:
+        except (MissionError, OSError, subprocess.TimeoutExpired, TimeoutError) as exc:
             return {**evidence, "ok": False, "exit": None,
                     "detail": f"sandbox execution unavailable ({type(exc).__name__})"}
         ok = result.returncode == 0 and result.stdout == self.expected_stdout

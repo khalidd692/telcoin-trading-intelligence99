@@ -38,7 +38,7 @@ if str(_AGENTS_DIR) not in sys.path:
 
 from native import mission as mission_mod  # noqa: E402
 from native import provider as provider_mod  # noqa: E402
-from native import sandbox  # noqa: E402
+from native import sandbox, task_app  # noqa: E402
 
 REPO_ROOT = _HERE.parents[3]
 DEFAULT_STATE = REPO_ROOT / ".tel99-native-state"
@@ -70,7 +70,8 @@ def _engine(args, provider) -> mission_mod.MissionEngine:
     store_root = pathlib.Path(args.state) if args.state else DEFAULT_STATE
     memory_root = pathlib.Path(args.memory) if args.memory else DEFAULT_MEMORY
     quota = args.quota
-    if quota is None and args.command == "run" and not args.dry_run:
+    if (quota is None and args.command == "run" and not args.dry_run
+            and not getattr(provider, "requires_explicit_quota", False)):
         quota = read_quota()
     return mission_mod.MissionEngine(
         provider=provider,
@@ -85,18 +86,37 @@ def _engine(args, provider) -> mission_mod.MissionEngine:
 
 def cmd_run(args) -> int:
     artifacts = args.artifact or []
-    checks = ([mission_mod.Check(name="syntax", command=[sys.executable, "-I", "-m",
-                                                         "py_compile", *artifacts])]
-              if artifacts else [])
+    prompt = args.mission
     sandbox_check = None
-    sandbox_args = (args.sandbox_image, args.sandbox_script, args.expected_stdout)
-    if any(value is not None for value in sandbox_args):
+    max_repairs = args.max_repairs
+    try:
+        if args.profile == "tasks":
+            if artifacts or args.sandbox_script is not None or args.expected_stdout is not None:
+                raise mission_mod.MissionError("the task profile supplies its own artifacts and checks")
+            artifacts = list(task_app.ARTIFACTS)
+            prompt += "\n\n" + task_app.CONTRACT
+            sandbox_check = task_app.TaskAppCheck(args.sandbox_image)
+            if args.max_repairs is None:
+                max_repairs = 2
+        else:
+            sandbox_args = (args.sandbox_image, args.sandbox_script, args.expected_stdout)
+            if any(value is not None for value in sandbox_args):
+                if None in sandbox_args or args.sandbox_script not in artifacts:
+                    raise mission_mod.MissionError(
+                        "sandbox requires a pinned image, a declared script artifact and expected stdout")
+                sandbox_check = sandbox.ScriptCheck(*sandbox_args)
+    except mission_mod.MissionError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    python_artifacts = [name for name in artifacts if name.endswith(".py")]
+    checks = ([mission_mod.Check(name="syntax", command=[sys.executable, "-I", "-m",
+                                                         "py_compile", *python_artifacts])]
+              if python_artifacts else [])
+    if sandbox_check:
+        checks.append(sandbox_check)
+    if args.profile == "tasks" and not args.dry_run:
         try:
-            if None in sandbox_args or args.sandbox_script not in artifacts:
-                raise mission_mod.MissionError(
-                    "sandbox requires a pinned image, a declared script artifact and expected stdout")
-            sandbox_check = sandbox.ScriptCheck(*sandbox_args)
-            checks.append(sandbox_check)
+            sandbox.require_local_image(args.sandbox_image)
         except mission_mod.MissionError as exc:
             print(f"refused: {exc}", file=sys.stderr)
             return 2
@@ -113,8 +133,9 @@ def cmd_run(args) -> int:
     engine = _engine(args, provider)
     spec = mission_mod.MissionSpec(
         mission_id=args.mission_id,
-        prompt=args.mission,
+        prompt=prompt,
         project=args.project,
+        max_repairs=max_repairs,
         artifacts=artifacts,
         checks=checks,
     )
@@ -128,10 +149,43 @@ def cmd_run(args) -> int:
             for check in result.checks):
         print("refused: cached mission did not run this sandbox check", file=sys.stderr)
         return 2
-    print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    report = result.to_dict()
+    if not args.dry_run:
+        report["artifact_directory"] = str(engine.artifact_directory(spec).resolve())
+    print(json.dumps(report, indent=2, ensure_ascii=False))
     if args.dry_run:
         return 0
     return 0 if result.verdict == mission_mod.PASS else 3
+
+
+def cmd_status(args) -> int:
+    engine = _engine(args, provider_mod.ScriptedProvider([]))
+    spec = mission_mod.MissionSpec(args.mission_id, "", project=args.project)
+    try:
+        record = engine.record_for(spec)
+    except mission_mod.MissionError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    if record is None:
+        print("refused: no recorded mission", file=sys.stderr)
+        return 2
+    record["artifact_directory"] = str(engine.artifact_directory(spec).absolute())
+    digests = record.get("artifact_digests", {})
+    record["artifact_integrity"] = ("matched" if engine.artifacts_match(spec, digests)
+                                    else "changed") if digests else "not_recorded"
+    print(json.dumps(record, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_verify_task_app(args) -> int:
+    try:
+        check = task_app.TaskAppCheck(args.sandbox_image)
+    except mission_mod.MissionError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    result = check.verify_file(args.file)
+    print(json.dumps(result, indent=2))
+    return 0 if result["ok"] else 3
 
 
 def cmd_recall(args) -> int:
@@ -259,6 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--mission-id", required=True)
     run.add_argument("--mission", required=True)
     run.add_argument("--artifact", action="append", default=[])
+    run.add_argument("--profile", choices=("tasks",), help="built-in acceptance profile")
+    run.add_argument("--max-repairs", type=int, help="bounded retries after failing checks")
     run.add_argument("--sandbox-image", help="locally installed Python image pinned by digest")
     run.add_argument("--sandbox-script", help="Python artifact to run in the sandbox")
     run.add_argument("--expected-stdout", help="expected output, excluding the final newline")
@@ -266,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--dry-run", dest="run_dry_run", action="store_true",
                      help="decide and route without calling the provider")
     run.set_defaults(func=cmd_run)
+
+    status = sub.add_parser("status", help="read a stored mission journal")
+    status.add_argument("--mission-id", required=True)
+    status.add_argument("--project", default=mission_mod.DEFAULT_PROJECT)
+    status.set_defaults(func=cmd_status)
+
+    verify = sub.add_parser("verify-task-app", help="replay task-app tests without a model")
+    verify.add_argument("--file", type=pathlib.Path, required=True)
+    verify.add_argument("--sandbox-image", required=True)
+    verify.set_defaults(func=cmd_verify_task_app)
 
     recall = sub.add_parser("recall", help="search the shared memory")
     recall.add_argument("--query", required=True)

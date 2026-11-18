@@ -41,6 +41,7 @@ if str(_AGENTS_DIR) not in sys.path:
 import team_config as cfg  # noqa: E402
 
 # Hosts for which an empty API key is acceptable (a local model server).
+_MAX_REPLY_BYTES = 1024 * 1024
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
@@ -86,29 +87,41 @@ class ScriptedProvider:
         return self._responses.pop(0)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class OpenAICompatibleProvider:
-    """Real adapter for any OpenAI-compatible chat-completions endpoint."""
+    """Adapter for an OpenAI-compatible chat-completions endpoint."""
 
     def __init__(self, *, model: str, base_url: str, api_key: str = "",
-                 timeout: int = 60, name: str = "openai-compatible") -> None:
-        if model not in cfg.FREE_MODEL_IDS:
-            raise ProviderConfigError(
-                f"model {model!r} is not on the free allowlist "
-                f"({sorted(cfg.FREE_MODEL_IDS)})"
-            )
-        if not isinstance(base_url, str) or not base_url.startswith(
-                ("http://", "https://")):
+                 timeout: int = 60, name: str = "openai-compatible",
+                 included_local_model: str = "") -> None:
+        if not isinstance(base_url, str):
             raise ProviderConfigError("base_url must be an http(s) URL")
-        host = urllib.parse.urlsplit(base_url).hostname or ""
-        if not api_key and host not in LOCAL_HOSTS:
-            raise ProviderConfigError(
-                "api_key is required for a non-local endpoint (fail-closed)"
-            )
+        try:
+            endpoint = urllib.parse.urlsplit(base_url)
+            host = endpoint.hostname
+            endpoint.port  # Validate the host's port, if supplied.
+        except ValueError:
+            raise ProviderConfigError("invalid compatible provider URL") from None
+        local = host in LOCAL_HOSTS
+        if (not host or endpoint.scheme not in ("http", "https") or endpoint.username is not None
+                or endpoint.query or endpoint.fragment or (not local and endpoint.scheme != "https")):
+            raise ProviderConfigError("provider requires HTTPS or an explicit loopback URL")
+        self.requires_explicit_quota = model not in cfg.FREE_MODEL_IDS
+        if self.requires_explicit_quota and not (model and local and model == included_local_model):
+            raise ProviderConfigError("model is outside the free allowlist or approved loopback runtime")
+        if not api_key and not local:
+            raise ProviderConfigError("api_key is required for a non-local endpoint")
         self.model = model
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self.timeout = int(timeout)
         self.name = name
+        handlers = [urllib.request.ProxyHandler({})] if local else []
+        self._opener = urllib.request.build_opener(_NoRedirect(), *handlers)
 
     def complete(self, *, system: str, prompt: str) -> str:
         payload = {
@@ -128,11 +141,16 @@ class OpenAICompatibleProvider:
         if self._api_key:
             req.add_header("Authorization", f"Bearer {self._api_key}")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = json.loads(resp.read().decode())
+            with self._opener.open(req, timeout=self.timeout) as resp:
+                raw = resp.read(_MAX_REPLY_BYTES + 1)
+                if len(raw) > _MAX_REPLY_BYTES:
+                    raise ProviderError("provider reply exceeds the byte limit")
+                body = json.loads(raw.decode())
         except urllib.error.HTTPError as exc:
             # Never include headers (they carry the key).
             raise ProviderError(f"provider HTTP {exc.code}") from None
+        except ProviderError:
+            raise
         except Exception as exc:  # noqa: BLE001 - a provider must never leak detail
             raise ProviderError(f"provider unreachable: {type(exc).__name__}") from None
         try:
@@ -158,6 +176,7 @@ def get_provider(name: str, **config) -> ModelProvider:
             base_url=config["base_url"],
             api_key=config.get("api_key", ""),
             timeout=int(config.get("timeout", 60)),
+            included_local_model=config.get("included_local_model", ""),
         )
     raise ProviderConfigError(f"unknown provider {name!r}")
 
@@ -169,6 +188,7 @@ def provider_from_env() -> ModelProvider:
         TEL99_NATIVE_MODEL     must be on the free allowlist
         TEL99_NATIVE_BASE_URL  OpenAI-compatible base URL
         TEL99_NATIVE_API_KEY   key (optional for localhost)
+        TEL99_NATIVE_INCLUDED_MODEL  operator-approved model for a loopback endpoint
     """
     model = os.environ.get("TEL99_NATIVE_MODEL", "")
     base_url = os.environ.get("TEL99_NATIVE_BASE_URL", "")
@@ -178,4 +198,7 @@ def provider_from_env() -> ModelProvider:
             "TEL99_NATIVE_MODEL and TEL99_NATIVE_BASE_URL are required to build "
             "the real provider (none committed to the repository)"
         )
-    return OpenAICompatibleProvider(model=model, base_url=base_url, api_key=api_key)
+    return OpenAICompatibleProvider(
+        model=model, base_url=base_url, api_key=api_key,
+        included_local_model=os.environ.get("TEL99_NATIVE_INCLUDED_MODEL", ""),
+    )

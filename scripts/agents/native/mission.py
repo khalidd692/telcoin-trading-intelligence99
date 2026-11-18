@@ -34,12 +34,14 @@ It reuses, and never re-implements:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -61,7 +63,8 @@ MIN_QUOTA_REQUIRED = 12
 
 # A mission id is a path segment: restrict it to a safe, bounded charset.
 MISSION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+ARTIFACT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_WINDOWS_DEVICE = re.compile(r"con|prn|aux|nul|com[1-9]|lpt[1-9]", re.IGNORECASE)
 
 DEFAULT_PROJECT = "tel99"
 PROJECT_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -73,8 +76,8 @@ SYSTEM_PROMPT = (
     "Tu es un ouvrier logiciel TEL99 en environnement borne et en lecture seule "
     "vis-a-vis du depot. Produis uniquement les fichiers demandes, dans le "
     "dossier d'artefacts fourni. Ne propose aucun ordre financier, aucun "
-    "deploiement, aucune fusion. Termine par une ligne 'VERDICT: PASS' ou "
-    "'VERDICT: FAIL'."
+    "deploiement, aucune fusion. Retourne un bloc de code clôturé pour chaque "
+    "fichier, avec son nom exact après les trois accents graves."
 )
 
 
@@ -89,16 +92,18 @@ class MissionError(RuntimeError):
 
 
 def valid_mission_id(mission_id: str) -> bool:
-    return bool(mission_id) and bool(MISSION_ID_RE.match(mission_id))
+    return bool(MISSION_ID_RE.fullmatch(mission_id)) and valid_artifact_name(mission_id)
 
 
 def valid_artifact_name(name: str) -> bool:
-    return bool(name) and bool(ARTIFACT_NAME_RE.match(name))
+    return (bool(ARTIFACT_NAME_RE.fullmatch(name)) and not name.endswith(".")
+            and not _WINDOWS_DEVICE.fullmatch(name.split(".", 1)[0]))
 
 
 def validate_project(project: str) -> None:
     if (not isinstance(project, str) or len(project) > 64
-            or not PROJECT_RE.fullmatch(project) or project == memory.COMMON_PROJECT):
+            or not PROJECT_RE.fullmatch(project) or not valid_artifact_name(project)
+            or project == memory.COMMON_PROJECT):
         raise MissionError(f"invalid project name: {project!r}")
 
 
@@ -138,13 +143,19 @@ class MissionSpec:
     checks: list[Check] = field(default_factory=list)
     project: str = DEFAULT_PROJECT
     deadline_s: int = DEFAULT_DEADLINE_S
+    max_repairs: int | None = None
 
     def validate(self) -> None:
         validate_project(self.project)
+        if (self.max_repairs is not None and
+                (type(self.max_repairs) is not int or not 0 <= self.max_repairs < MAX_PROVIDER_CALLS)):
+            raise MissionError("invalid repair budget")
+        if len({name.lower() for name in self.artifacts}) != len(self.artifacts):
+            raise MissionError("artifact names must be unique")
         if not valid_mission_id(self.mission_id):
             raise MissionError(f"unsafe mission_id: {self.mission_id!r}")
         for name in self.artifacts:
-            if not valid_artifact_name(name):
+            if not valid_artifact_name(name) or name.lower() == "journal.json":
                 raise MissionError(f"unsafe artifact name: {name!r}")
         for check in self.checks:
             if not check.command or not isinstance(check.command, list):
@@ -168,6 +179,9 @@ class MissionResult:
     duration_s: float
     reasons: list[str]
     reused: bool = False
+    attempts: list[dict] = field(default_factory=list)
+    artifact_digests: dict[str, str] = field(default_factory=dict)
+    provider: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -180,6 +194,9 @@ class MissionResult:
             "duration_s": round(self.duration_s, 3),
             "reasons": self.reasons,
             "reused": self.reused,
+            "attempts": self.attempts,
+            "artifact_digests": self.artifact_digests,
+            "provider": self.provider,
         }
 
 
@@ -254,6 +271,40 @@ class MissionEngine:
             dry_run=True, measured_quality=measured,
         )
 
+    def artifact_directory(self, spec: MissionSpec) -> pathlib.Path:
+        return self.workspace_root / _mission_path(spec)
+
+    def record_for(self, spec: MissionSpec) -> dict | None:
+        spec.validate()
+        record = self.store.get(f"missions/{_mission_path(spec).as_posix()}")
+        if record is not None:
+            return record
+        directory = self.artifact_directory(spec)
+        journal = directory / "journal.json"
+        if (directory.resolve() != self.workspace_root.resolve() / _mission_path(spec)
+                or journal.is_symlink() or not journal.is_file()):
+            return None
+        try:
+            record = json.loads(journal.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if (isinstance(record, dict) and record.get("mission_id") == spec.mission_id
+                and record.get("project") == spec.project):
+            return record
+        return None
+
+    def artifacts_match(self, spec: MissionSpec, digests: dict) -> bool:
+        out_dir = self.artifact_directory(spec)
+        if out_dir.resolve() != self.workspace_root.resolve() / _mission_path(spec):
+            return False
+        for name, digest in digests.items():
+            artifact = out_dir / name
+            if (not valid_artifact_name(name) or artifact.is_symlink()
+                    or not artifact.is_file()
+                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest):
+                return False
+        return True
+
     def recall(self, query: str, limit: int = 3, *,
                project: str = DEFAULT_PROJECT) -> list[dict]:
         validate_project(project)
@@ -266,13 +317,17 @@ class MissionEngine:
 
         # Idempotency: a recorded mission is a no-op. Preconditions are checked
         # BEFORE the atomic claim so a refused run never leaks a claim file.
-        previous = self.store.get(f"missions/{_mission_path(spec).as_posix()}")
+        previous = self.record_for(spec)
         if previous is not None:
+            digests = previous.get("artifact_digests", {})
+            if previous.get("verdict") == PASS and digests and not self.artifacts_match(spec, digests):
+                raise MissionError("cached artifacts differ from the verified run")
             return MissionResult(
                 mission_id=spec.mission_id, verdict=previous.get("verdict", NEEDS_HUMAN),
                 chosen_model=previous.get("chosen_model"), artifacts=previous.get("artifacts", []),
                 checks=previous.get("checks", []), provider_calls=0,
-                duration_s=0.0, reused=True,
+                duration_s=0.0, reused=True, attempts=previous.get("attempts", []),
+                artifact_digests=digests, provider=previous.get("provider"),
                 reasons=["mission already recorded: idempotent no-op (no double run)"],
             )
 
@@ -295,53 +350,104 @@ class MissionEngine:
         # lock, which an operator may remove after inspecting the state.
         self._claim(spec)
         try:
-            return self._execute(spec, decision, chosen, started)
+            return self._execute(spec, decision, getattr(self.provider, "model", None), started)
         finally:
             self._release_claim(spec)
 
     def _execute(self, spec: MissionSpec, decision, chosen, started) -> MissionResult:
-        out_dir = self.workspace_root / _mission_path(spec)
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = self.artifact_directory(spec)
+        if out_dir.resolve() != self.workspace_root.resolve() / _mission_path(spec):
+            raise MissionError("mission workspace is linked outside its declared path")
+        if out_dir.exists():
+            raise MissionError("mission artifact directory already exists without a journal record")
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        calls = 0
-        prompt = spec.prompt
+        request = spec.prompt
         if spec.artifacts:
-            prompt += ("\n\nProduis exactement ces fichiers dans le dossier courant: "
-                       + ", ".join(spec.artifacts))
-        while calls < MAX_PROVIDER_CALLS:
-            if self._now() - started > spec.deadline_s:
-                break
-            try:
-                text = self.provider.complete(system=SYSTEM_PROMPT, prompt=prompt)
-            except Exception as exc:  # noqa: BLE001 - a provider failure is FAIL, not a crash
-                calls += 1
-                result = MissionResult(
-                    mission_id=spec.mission_id, verdict=FAIL, chosen_model=chosen,
-                    artifacts=[], checks=[], provider_calls=calls,
-                    duration_s=self._now() - started, reused=False,
-                    reasons=[f"provider error: {type(exc).__name__}"],
-                )
-                self._persist(spec, result, decision)
-                return result
-            calls += 1
-            written = self._extract_artifacts(text, out_dir, spec.artifacts)
-            if written or not spec.artifacts:
-                break
-            prompt += "\n\nIl manque des fichiers. Re-emets UNIQUEMENT les blocs demandes."
+            request += "\n\nProduis exactement ces fichiers: " + ", ".join(spec.artifacts)
+        feedback = ""
+        attempts = []
+        reasons = list(decision.reasons)
+        allowed_attempts = (MAX_PROVIDER_CALLS if spec.max_repairs is None
+                            else spec.max_repairs + 1)
+        call_limit = min(allowed_attempts, self.quota_remaining - self.min_quota + 1)
 
-        # Deterministic verdict: re-run the acceptance checks on disk.
-        check_results = [c.run(out_dir) for c in spec.checks]
-        verdict = decide_verdict(check_results)
-        result = MissionResult(
-            mission_id=spec.mission_id, verdict=verdict, chosen_model=chosen,
-            artifacts=[n for n in spec.artifacts
-                       if (out_dir / n).is_file()],
-            checks=check_results, provider_calls=calls,
-            duration_s=self._now() - started, reused=False,
-            reasons=decision.reasons,
-        )
-        self._persist(spec, result, decision, out_dir)
-        return result
+        with tempfile.TemporaryDirectory(prefix=".attempts-", dir=out_dir.parent) as staging:
+            stage = pathlib.Path(staging)
+            last = None
+            written = []
+            check_results = []
+            verdict = FAIL
+            for index in range(call_limit):
+                if self._now() - started >= spec.deadline_s:
+                    reasons.append("mission deadline reached")
+                    break
+
+                try:
+                    reply = self.provider.complete(system=SYSTEM_PROMPT, prompt=request + feedback)
+                    if not isinstance(reply, str):
+                        raise TypeError("provider completion must be text")
+                except Exception as exc:  # A provider exception may contain credentials.
+                    reasons.insert(0, f"provider error: {type(exc).__name__}")
+                    attempts.append({"attempt": index + 1, "verdict": FAIL,
+                                     "error": type(exc).__name__})
+                    verdict = FAIL
+                    break
+
+                last = stage / str(index + 1)
+                last.mkdir()
+                written = self._extract_artifacts(reply, last, spec.artifacts)
+                missing = [name for name in spec.artifacts if name not in written]
+                check_results = []
+                if not missing:
+                    for check in spec.checks:
+                        remaining = spec.deadline_s - (self._now() - started)
+                        if remaining <= 0:
+                            check_results.append({"name": check.name, "ok": False,
+                                                  "detail": "mission deadline reached"})
+                            break
+                        check_results.append(check.run(last, timeout=min(60, max(1, int(remaining)))))
+                expired = self._now() - started >= spec.deadline_s
+                if expired:
+                    reasons.append("mission deadline reached")
+                verdict = FAIL if missing or expired else decide_verdict(check_results)
+                attempts.append({"attempt": index + 1, "verdict": verdict,
+                                 "missing_artifacts": missing,
+                                 "checks": [{"name": check["name"], "ok": check["ok"],
+                                             **({"criterion": check["repair_hint"]}
+                                                if check.get("repair_hint") else {})}
+                                            for check in check_results]})
+                if (verdict != FAIL or expired or any(c.get("infrastructure_error")
+                                                       for c in check_results)
+                        or (not missing and spec.max_repairs is None)):
+                    break
+
+                failures = [check.get("repair_hint") or check["name"]
+                            for check in check_results if not check["ok"]]
+                feedback = ("\n\nRépare la dernière tentative. Fichiers manquants: "
+                            + ", ".join(missing) + ". Contrôles en échec: "
+                            + ", ".join(failures) + ". Renvoie à nouveau tous les fichiers."
+                            + "\nDernière réponse:\n" + reply[:12000])
+
+            bundle = stage / "result"
+            bundle.mkdir()
+            digests = {}
+            for name in written:
+                source = last / name
+                if source.is_file() and not source.is_symlink():
+                    data = source.read_bytes()
+                    (bundle / name).write_bytes(data)
+                    digests[name] = hashlib.sha256(data).hexdigest()
+            if set(spec.artifacts) - set(digests):
+                verdict = FAIL
+            result = MissionResult(
+                mission_id=spec.mission_id, verdict=verdict, chosen_model=chosen,
+                artifacts=list(digests), checks=check_results, provider_calls=len(attempts),
+                duration_s=self._now() - started, reasons=reasons, attempts=attempts,
+                artifact_digests=digests, provider=self.provider.name,
+            )
+            self._persist(spec, result, decision, bundle, out_dir)
+            return result
 
     def _release_claim(self, spec: MissionSpec) -> None:
         """Release the exclusive claim (idempotent; never raises).
@@ -359,9 +465,10 @@ class MissionEngine:
                            names: list[str]) -> list[str]:
         """Extract fenced ```name ...``` blocks into safe files under out_dir."""
         written: list[str] = []
-        for match in re.finditer(r"```([A-Za-z0-9._-]+)\n(.*?)```", text, re.DOTALL):
-            name, body = match.group(1), match.group(2)
-            if names and name not in names:
+        pattern = r"^(?P<fence>```+)(?P<name>[A-Za-z0-9._-]+)[ \t]*\r?\n(?P<body>.*?)^(?P=fence)[ \t]*\r?$"
+        for match in re.finditer(pattern, text, re.DOTALL | re.MULTILINE):
+            name, body = match.group("name", "body")
+            if name not in names or name in written:
                 continue
             if not valid_artifact_name(name):
                 continue
@@ -373,18 +480,16 @@ class MissionEngine:
         return written
 
     def _persist(self, spec: MissionSpec, result: MissionResult,
-                 decision: router.Decision, out_dir: pathlib.Path | None = None) -> None:
+                 decision: router.Decision, bundle: pathlib.Path, out_dir: pathlib.Path) -> None:
         record = result.to_dict()
+        record["project"] = spec.project
         record["recorded_at"] = utcnow_iso()
         record["decision"] = decision.to_dict()
-        record["provider"] = getattr(self.provider, "name", "unknown")
-        # Only the model id is stored -- never the endpoint, key or headers.
-        self.store.put(f"missions/{_mission_path(spec).as_posix()}", record)
-        if out_dir is not None:
-            (out_dir / "journal.json").write_text(
-                json.dumps(record, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
+        # Publish the files and their journal together. The journal can recover
+        # status if updating the separate index is interrupted.
+        (bundle / "journal.json").write_text(
+            json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        bundle.rename(out_dir)
         entry = memory.Entry(
             id=f"mission-{spec.mission_id}",
             project=spec.project,
@@ -399,3 +504,4 @@ class MissionEngine:
             confidence=0.9 if result.verdict == PASS else 0.5,
         )
         self.memory.record(entry)
+        self.store.put(f"missions/{_mission_path(spec).as_posix()}", record)
