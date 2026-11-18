@@ -460,7 +460,7 @@ class Supervisor:
             approval=digest(json.dumps(mission, sort_keys=True)),
         )
         fence()
-        result = call(native.args_for(workspace, mission["issue"], "run"), cwd=workspace,
+        result = call(native.args_for(workspace, mission["issue"], "run", objective=mission["objective"]), cwd=workspace,
                       env=env, timeout=240)
         if result.returncode:
             raise Blocked(f"Le moteur natif #110 a quitté avec {result.returncode}.")
@@ -878,6 +878,17 @@ def report_prepared(supervisor, missions):
         if supervisor.store.get(report_key):
             continue
         try:
+            # A local checkpoint can survive a ticket edit or an ID collision.
+            # Publish only the result still bound to this exact shared claim.
+            shared = coordination_backend().read(f"codex-windows/{mission['id']}")
+            approval = digest(json.dumps(mission, sort_keys=True))
+            if (
+                not isinstance(shared, dict) or shared.get("status") != "PREPARED"
+                or shared.get("issue") != mission["issue"] or shared.get("commit") != sha
+                or shared.get("approval") != approval
+            ):
+                print(f"Rapport GitHub bloqué pour #{mission['issue']}: réservation différente.", flush=True)
+                continue
             if not any(marker in comment.get("body", "") and comment.get("user", {}).get("login") == "khalidd692"
                        for comment in issue_comments(94)):
                 checked([
@@ -887,7 +898,7 @@ def report_prepared(supervisor, missions):
                     "Le verdict externe reste à établir.",
                 ])
             supervisor.store.put(report_key, {"status": "PUBLISHED"})
-        except (Blocked, OSError, ValueError, subprocess.TimeoutExpired):
+        except (Blocked, CoordinationUnavailable, OSError, ValueError, subprocess.TimeoutExpired):
             print(f"Rapport GitHub en attente pour #{mission['issue']}.", flush=True)
 
 
@@ -976,6 +987,13 @@ def main():
                         return 2
                     if not demo:
                         report_prepared(supervisor, missions)
+                    if args.await_issue and missions:
+                        # An unavailable lease before any worker ran is safe
+                        # to retry. Checkpoints with possible work are held.
+                        saved = supervisor.state(missions[0])
+                        if saved.get("status") in {"WAITING_COORDINATION", "WAITING_DEPENDENCY"}:
+                            time.sleep(60)
+                            continue
                     if demo:
                         return 0 if all(
                             supervisor.state(m).get("status") == "ACCEPTED" for m in missions

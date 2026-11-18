@@ -12,6 +12,13 @@ OBJECTIVE = (
     "Créer un gestionnaire de tâches jouet. Dans README.md, donner cinq exemples fictifs "
     "avec tasks.py --db demo.json en texte simple, sans blocs Markdown imbriqués."
 )
+STRUCTURED_OBJECTIVE = (
+    OBJECTIVE + " Répondre uniquement avec deux blocs complets, au début des lignes. "
+    "Ouvrir le premier par une ligne exactement ```tasks.py puis le code Python, "
+    "et le fermer par une ligne exactement ```. Ouvrir le second par une ligne exactement "
+    "```README.md puis la documentation en texte simple et le fermer par une ligne exactement ```. "
+    "Ne pas utiliser les étiquettes python ou markdown, ni ajouter de commentaire hors des deux blocs."
+)
 FILES = ("README.md", "tasks.py")
 
 
@@ -19,7 +26,7 @@ def native_scope(mission):
     return (
         re.fullmatch(r"CODEX110-[A-Z0-9-]+", mission["id"])
         and mission.get("base_sha") == NATIVE_SHA
-        and mission.get("objective") == OBJECTIVE
+        and mission.get("objective") in (OBJECTIVE, STRUCTURED_OBJECTIVE)
         and mission.get("synthetic_data") is True
         and type(mission.get("call_budget")) is int and mission["call_budget"] == 1
     )
@@ -34,7 +41,7 @@ def native_digest(mission):
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
-def args_for(workspace, issue, command):
+def args_for(workspace, issue, command, *, objective=OBJECTIVE):
     argv = [sys.executable, "-B", "-m", "scripts.agents.native.cli",
             "--state", str(workspace / "_native_state"),
             "--memory", str(workspace / "_native_memory")]
@@ -43,6 +50,8 @@ def args_for(workspace, issue, command):
         argv += ["--quota", "12"]
     argv += [command, "--project", "tel99-windows", "--mission-id", f"github-{issue}"]
     if command == "run":
+        if objective not in (OBJECTIVE, STRUCTURED_OBJECTIVE):
+            raise ValueError("Consigne native non autorisée.")
         argv += ["--synthetic-data", "--profile", "tasks", "--sandbox-image", IMAGE,
-                 "--max-repairs", "0", "--mission", OBJECTIVE]
+                 "--max-repairs", "0", "--mission", objective]
     return argv

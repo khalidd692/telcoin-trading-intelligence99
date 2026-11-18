@@ -17,6 +17,28 @@ import local_native as native
 
 @unittest.skipUnless(sys.platform == "win32", "Windows supervisor")
 class LocalCodexTests(unittest.TestCase):
+    def test_prepared_report_requires_the_same_issue_commit_and_approval_in_cas(self):
+        mission = {"id": "CODEX110-EXAMPLE", "issue": 112}
+        sha = "a" * 40
+        self.supervisor.checkpoint(mission, "PREPARED", commit=sha, test_count=6)
+        backend = Mock()
+        record = {"status": "PREPARED", "issue": 112, "commit": sha,
+                  "approval": runner.digest(json.dumps(mission, sort_keys=True))}
+        with (
+            patch.object(runner, "coordination_backend", return_value=backend),
+            patch.object(runner, "issue_comments", return_value=[]),
+            patch.object(runner, "checked") as gh,
+        ):
+            for change in ({"issue": 109}, {"commit": "b" * 40}, {"approval": "different"}):
+                backend.read.return_value = dict(record, **change)
+                runner.report_prepared(self.supervisor, [mission])
+            gh.assert_not_called()
+            backend.read.return_value = record
+            runner.report_prepared(self.supervisor, [mission])
+            runner.report_prepared(self.supervisor, [mission])
+            gh.assert_called_once()
+            self.assertIn(f"tel99-windows-prepared:112:{sha}", gh.call_args.args[0][-1])
+
     def test_discovery_ignores_historical_ticket_and_leaves_unauthenticated_one_pending(self):
         first = {"number": 109, "state": "open", "user": {"login": "khalidd692"},
                  "labels": [{"name": "codex-local/mission"}], "body": "historical"}
@@ -42,6 +64,12 @@ class LocalCodexTests(unittest.TestCase):
         self.assertEqual(args[args.index("--max-repairs") + 1], "0")
         self.assertEqual(args[args.index("--mission-id") + 1], "github-112")
         self.assertNotIn("--synthetic-data", native.args_for(Path("isolated"), 112, "status"))
+        next_spec = dict(spec, objective=native.STRUCTURED_OBJECTIVE)
+        self.assertTrue(native.native_scope(next_spec))
+        argv = native.args_for(Path("isolated"), 113, "run", objective=next_spec["objective"])
+        self.assertEqual(argv[-1], native.STRUCTURED_OBJECTIVE)
+        with self.assertRaises(ValueError):
+            native.args_for(Path("isolated"), 113, "run", objective="sensitive inputs")
 
     def test_native_restart_recovers_status_instead_of_launching_again(self):
         mission = {"id": "CODEX110-FIRST", "kind": "native", "issue": 112}
