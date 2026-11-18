@@ -1012,7 +1012,8 @@ def run(config: dict, offline: bool = False) -> int:
                                     mission_body=mission.get("body") or "")
         validated, verdict = verify_outcome(final, evidence,
                                             expected_roles=agent_names,
-                                            mission_body=mission.get("body") or "")
+                                            mission_body=mission.get("body") or "",
+                                            acceptance_checks=evidence.get("acceptance_checks"))
         journal_entry(state, "outcome_verdict", validated=validated,
                       roles={r: info.get("proven") for r, info in verdict["roles"].items()},
                       checks=verdict["checks"])
@@ -1187,7 +1188,8 @@ def _role_evidence(observations: list, expected_name: str, base_name: str) -> di
 
 
 def collect_evidence(cid: str, expected_roles: dict | None = None,
-                     mission_body: str = "") -> dict:
+                     mission_body: str = "",
+                     acceptance_checks: list | None = None) -> dict:
     """Gather observable proof that each required role actually ran and reported.
 
     A ``finished`` execution status only says the conversation stopped; it says
@@ -1272,12 +1274,17 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
         "children": child_reports,
         "roles": roles,
         "acceptance_criteria": extract_acceptance_criteria(mission_body),
+        # Structured acceptance-check results, when the caller supplies them.
+        # Absent (None) means "no executable criterion was produced", which keeps
+        # the historical behaviour: only the declared criterion *text* is checked.
+        "acceptance_checks": acceptance_checks,
     }
 
 
 def verify_outcome(final: str, evidence: dict, *,
                    expected_roles: dict | None = None,
-                   mission_body: str = "") -> tuple[bool, dict]:
+                   mission_body: str = "",
+                   acceptance_checks: list | None = None) -> tuple[bool, dict]:
     """Decide whether an outcome is *validated*, from evidence alone.
 
     The verdict is deliberately conservative. A run is validated only when:
@@ -1346,9 +1353,51 @@ def verify_outcome(final: str, evidence: dict, *,
         f"{len((criteria or '').strip())} chars declared",
     )
 
-    validated = all([finished, has_response, criteria_check, *role_checks])
+    # --- Acceptance checks: the criterion must be *satisfied*, not just declared.
+    # A criterion is satisfied only by reproducible external evidence: a recorded
+    # command exit code 0, marked reproducible, with an output digest. A red
+    # check makes the mission REJECTED even when every role reported PASS (this is
+    # gate G3/S-05: "trois rapports PASS mensongers + test echoue => false").
+    # A criterion that cannot be automated is NEEDS_HUMAN, never a silent PASS.
+    if acceptance_checks is None:
+        acceptance_checks = evidence.get("acceptance_checks")
+    check_results = []
+    satisfied: list[str] = []
+    failed: list[str] = []
+    needs_human: list[str] = []
+    for raw in (acceptance_checks or []):
+        if isinstance(raw, dict):
+            cid = str(raw.get("id") or raw.get("command") or "check")
+            automatable = (bool(raw.get("command")) if raw.get("automatable") is None
+                           else bool(raw.get("automatable")))
+            exit_code = raw.get("exit_code")
+            reproducible = bool(raw.get("reproducible"))
+            digest = raw.get("output_digest")
+        else:  # an Evidence object or similar: read the attributes defensively
+            cid = str(getattr(raw, "claim", None) or getattr(raw, "kind", "check"))
+            automatable = bool(getattr(raw, "command", None))
+            exit_code = getattr(raw, "exit_code", None)
+            reproducible = bool(getattr(raw, "reproducible", False))
+            digest = getattr(raw, "output_digest", None)
+        if not automatable:
+            needs_human.append(cid)
+            check_results.append(check(
+                f"criterion_{cid}", False,
+                "not automatable -> NEEDS_HUMAN"))
+            continue
+        ok = (exit_code == 0 and reproducible and bool(digest))
+        check_results.append(check(
+            f"criterion_{cid}", ok,
+            f"exit_code={exit_code!r} reproducible={reproducible}"))
+        (satisfied if ok else failed).append(cid)
+
+    validated = all([finished, has_response, criteria_check, *role_checks,
+                     *check_results])
     return validated, {"validated": validated, "checks": checks,
                        "roles": roles, "acceptance_criteria": criteria,
+                       "acceptance_checks": list(acceptance_checks or []),
+                       "satisfied": satisfied, "failed": failed,
+                       "needs_human": needs_human,
                        "observations": evidence.get("observations") or [],
                        "children": evidence.get("children") or []}
 
