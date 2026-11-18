@@ -21,6 +21,15 @@ class SharedCoordination:
             raise CoordinationUnavailable("Le service KV partagé de #94 est indisponible.")
         self.store = KvStore(base, token)
 
+    def probe(self):
+        try:
+            orchestrator.kv_get_meta(orchestrator._LOCK_KEY)
+            state = orchestrator.kv_get(orchestrator._STATE_KEY)
+        except Exception as exc:
+            raise CoordinationUnavailable("Lecture des métadonnées CAS partagées impossible.") from exc
+        if not isinstance(state, dict) or "active" not in state:
+            raise CoordinationUnavailable("Le registre partagé de #94 est absent.")
+
     def owns(self, owner):
         try:
             lock = orchestrator.kv_get(orchestrator._LOCK_KEY)
@@ -56,8 +65,11 @@ class SharedCoordination:
         safe_to_release = True
         try:
             self.owns(owner)
-            cloud = orchestrator.kv_get(orchestrator._STATE_KEY)
-            if not isinstance(cloud, dict) or cloud.get("active") is not None:
+            try:
+                cloud = orchestrator.kv_get(orchestrator._STATE_KEY)
+            except (OSError, ValueError, KeyError) as exc:
+                raise CoordinationUnavailable("Lecture de l’état partagé impossible.") from exc
+            if not isinstance(cloud, dict) or "active" not in cloud or cloud["active"] is not None:
                 raise CoordinationUnavailable("L’état partagé de #94 est absent ou une mission est active.")
             key = f"codex-windows/{task_id}"
             claim = {"id": task_id, "issue": issue_number, "approval": approval,

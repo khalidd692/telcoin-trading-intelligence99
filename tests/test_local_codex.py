@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,7 @@ AUTOMATION = Path(__file__).resolve().parents[1] / "scripts" / "agents" / "autom
 sys.path.insert(0, str(AUTOMATION))
 import local_codex as runner
 import local_coordination as coordination
+from local_code import contract_digest, status_paths, synthetic_missions, valid_scope
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows supervisor")
@@ -189,6 +191,65 @@ class LocalCodexTests(unittest.TestCase):
                 self.assertEqual(coordination.accepted_proof(
                     spec, repository=runner.REPO, mission_body="body", fetch=Mock(), comments=[],
                 ), expected)
+
+    def test_code_approval_pins_scope_and_separates_the_test(self):
+        mission = {
+            "id": "CODEX105-EXAMPLE", "issue": 110, "role": "codex", "assignee": "codex",
+            "base_sha": "0" * 40, "files": ["scripts/agents/native/cli.py"],
+            "test_file": "test_native.py", "objective": "Change output",
+            "priority": "P1", "dependencies": [], "expires_at": "2100-01-01T00:00:00Z",
+        }
+        self.assertTrue(valid_scope(mission))
+        for path in ("scripts/agents/native/provider.py", "tests/test_native.py",
+                     "../outside.py", ".github/workflows/work.py"):
+            self.assertFalse(valid_scope(dict(mission, files=[path])))
+        self.assertNotEqual(contract_digest(mission), contract_digest(dict(mission, objective="edited")))
+        self.assertEqual(status_paths(" M example.py\n?? other.py"), ["example.py", "other.py"])
+        with self.assertRaises(ValueError):
+            status_paths(" D example.py")
+
+    def test_two_synthetic_code_commits_use_independent_tests_in_order(self):
+        missions = synthetic_missions()
+        artifacts = [
+            "def add(a, b):\n    return a + b\n",
+            "def multiply(a, b):\n    return a * b\n",
+        ]
+        self.supervisor.cli = "fixture"
+        real_call = runner.call
+
+        def process(args, **kwargs):
+            if args[0] != "fixture":
+                return real_call(args, **kwargs)
+            workspace = kwargs["cwd"]
+            if "exec" in args:
+                index = 0 if workspace.name == missions[0]["id"] else 1
+                public = "add" if index == 0 else "multiply"
+                (workspace / "operation.py").write_text(artifacts[index], encoding="utf-8")
+                (workspace / "arithmetic.py").write_text(f"from operation import {public}\n", encoding="utf-8")
+                return subprocess.CompletedProcess(args, 0, "", "")
+            sandbox_cli = os.environ.get("TEL99_TEST_SANDBOX_CLI")
+            if sandbox_cli:
+                return real_call([sandbox_cli, *args[1:]], **kwargs)
+            return real_call(args[args.index("--") + 1:], cwd=workspace)
+
+        with (
+            patch.object(runner, "rate_snapshot", return_value={}),
+            patch.object(runner, "allowance", return_value=[5]),
+            patch.object(runner, "call", side_effect=process),
+        ):
+            self.assertTrue(self.supervisor.run(missions))
+        for mission in missions:
+            saved = self.supervisor.state(mission)
+            self.assertEqual(saved["status"], "ACCEPTED")
+            self.assertRegex(saved["commit"], r"^[0-9a-f]{40}$")
+            self.assertEqual(saved["files"], ["arithmetic.py", "operation.py"])
+            self.assertEqual(saved["test_count"], 1)
+        events = (self.root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(
+            [(item["id"], item["status"]) for item in map(json.loads, events)],
+            [(mission["id"], status) for mission in missions
+             for status in ("RUNNING", "WORKER_EXITED", "ACCEPTED")],
+        )
 
 
 if __name__ == "__main__":

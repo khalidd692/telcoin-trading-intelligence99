@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$Demo,
+    [switch]$CodeDemo,
+    [switch]$Preflight,
     [ValidateRange(1, 9)]
     [int]$DemoAttempt = 1,
     [switch]$Once,
@@ -37,7 +39,9 @@ if (-not $Codex) {
 }
 $runnerArgs = @('-B', (Join-Path $PSScriptRoot 'agents\automation\local_codex.py'))
 if ($Demo) { $runnerArgs += @('--demo', '--demo-attempt', $DemoAttempt) }
+if ($CodeDemo) { $runnerArgs += @('--code-demo', '--demo-attempt', $DemoAttempt) }
 if ($Once) { $runnerArgs += '--once' }
+if ($Preflight) { $runnerArgs += '--preflight' }
 if ($Approvals) { $runnerArgs += @('--approvals', $Approvals) }
 if ($Codex) { $runnerArgs += @('--codex', $Codex) }
 & $Python @runnerArgs
