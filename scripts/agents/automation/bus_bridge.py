@@ -162,6 +162,10 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
         raise ValueError("refusing to record an unverified success as a success")
 
     learning_id = f"mission-{corr}"
+    proof = (evidence or {}).get("independent_verification") or {}
+    artifact = ({"path": proof["artifact"], "commit_sha": proof["commit_sha"],
+                 "sha256": proof["artifact_sha256"]} if proof.get("verifier")
+                else {"path": work_branch} if work_branch else None)
 
     def complete(record):
         if record.state == "done":
@@ -170,7 +174,7 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
         record.result = {
             "status": "success" if success else "failure",
             "summary": summary,
-            "artifacts": [{"path": work_branch}] if success and work_branch else [],
+            "artifacts": [artifact] if success and artifact else [],
             "metrics": {"conversation_id": conversation_id or ""},
             "evidence": evidence or {},
             "verdict": verdict or {},
@@ -186,7 +190,7 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
                 "text": f"Mission {corr} reussie en lecture seule: {summary}",
                 "kind": "procedure",
                 "verified": True,
-                "verified_by": "openhands",
+                "verified_by": proof.get("verifier", "openhands"),
                 "source_envelope_id": record.envelopes[-1] if record.envelopes else None,
             })
         else:

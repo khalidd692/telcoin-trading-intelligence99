@@ -21,7 +21,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import base64
 import contextlib
+import hashlib
 from copy import deepcopy
 import io
 import json
@@ -49,7 +51,8 @@ ISSUE = {
     "body": (
         "Afficher l'age des donnees Kraken.\n\n"
         "### Critere d'acceptation\n"
-        "Un rapport de lecture seule, avec preuves, pret a etre valide par un humain.\n"
+        "- acceptance-artifact: reports/kraken.txt\n"
+        "- check [fixture-check]: verify fixture\n"
     ),
     "state": "open",
     "labels": [{"name": "tel99-mission"}],
@@ -68,24 +71,14 @@ ISSUE["body"] = (
 )
 
 
-def mock_independent_result(test_case):
-    """Give run fixtures an explicit proof from outside the model events."""
-    collect = orchestrator.collect_evidence
-
-    def collect_with_proof(*args, **kwargs):
-        evidence = collect(*args, **kwargs)
-        if test_case.independent_proof:
-            evidence["acceptance_checks"] = test_case.independent_proof
-        return evidence
-
-    test_case.independent_proof = [{
-        "id": "fixture-check", "command": "fixture verifier",
-        "exit_code": 0, "reproducible": True,
-        "output_digest": "sha256:staged-fixture-proof",
-    }]
-    patcher = patch.object(orchestrator, "collect_evidence", collect_with_proof)
-    patcher.start()
-    test_case.addCleanup(patcher.stop)
+VERIFIER = "independent-test-verifier"
+WORK_SHA = "a" * 40
+ARTIFACT_PATH = "reports/kraken.txt"
+ARTIFACT_BYTES = b"Read-only report, fixture only."
+WORKFLOW_PATH = ".github/workflows/independent.yml"
+WORKFLOW_BYTES = b"name: Independent verification fixture"
+WORKFLOW_DIGEST = hashlib.sha256(WORKFLOW_BYTES).hexdigest()
+WORK_BRANCH = policy.work_branch_name("agent/mission-", ISSUE["number"], ISSUE["title"])
 
 
 class FakeCloud:
@@ -116,6 +109,15 @@ class FakeCloud:
         if mission_body is not None:
             self.issues = [{**dict(ISSUE), "body": mission_body}]
         self.approval_comment_author = AUTHORIZED_APPROVER
+        self.verifier = VERIFIER
+        self.proof_conclusion = "success"
+        self.proof_event = "workflow_dispatch"
+        self.proof = {"conversation_id": "cid-test-1",
+                      "mission_digest": policy.mission_digest(policy.mission_content(ISSUE)),
+                      "sha": WORK_SHA, "artifact": ARTIFACT_PATH,
+                      "artifact_sha256": hashlib.sha256(ARTIFACT_BYTES).hexdigest(),
+                      "run_id": 42, "run_attempt": 1,
+                      "jobs": {"fixture-check": "Independent check"}}
         self.started_conversations = []
         self.state_writes = 0
         # When >0, ``/events/search`` returns a first page of that size and a
@@ -155,13 +157,43 @@ class FakeCloud:
             if approval is None:
                 return 200, []
             now = policy.utcnow_iso()
-            return 200, [{
+            comments = [{
                 "body": policy.approval_marker(
                     policy.mission_content(self.issues[0]), approver=approval["approved_by"]),
                 "user": {"login": self.approval_comment_author},
                 "created_at": now,
                 "updated_at": now,
             }]
+            if self.proof is not None:
+                comments.append({
+                    "id": 12345, "body": "tel99-evidence:v1 " + json.dumps(self.proof),
+                    "user": {"login": self.verifier}, "created_at": now, "updated_at": now,
+                })
+            return 200, comments
+        if "api.github.com" in url:
+            if "/git/ref/heads/" in url:
+                return 200, {"ref": f"refs/heads/{WORK_BRANCH}",
+                             "object": {"type": "commit", "sha": WORK_SHA}}
+            if f"/contents/{WORKFLOW_PATH}" in url:
+                return 200, {"type": "file", "path": WORKFLOW_PATH, "encoding": "base64",
+                             "size": len(WORKFLOW_BYTES),
+                             "content": base64.b64encode(WORKFLOW_BYTES).decode()}
+            if "/contents/" in url:
+                return 200, {"type": "file", "path": ARTIFACT_PATH, "encoding": "base64",
+                             "size": len(ARTIFACT_BYTES),
+                             "content": base64.b64encode(ARTIFACT_BYTES).decode()}
+            if "/attempts/1/jobs?" in url:
+                return 200, {"total_count": 1, "jobs": [{
+                    "id": 88, "run_id": 42, "run_attempt": 1,
+                    "name": "Independent check", "head_sha": WORK_SHA,
+                    "status": "completed", "conclusion": self.proof_conclusion,
+                }]}
+            if "/actions/runs/42" in url:
+                return 200, {"id": 42, "run_attempt": 1, "head_sha": WORK_SHA,
+                             "head_branch": WORK_BRANCH, "event": self.proof_event,
+                             "workflow_id": 99, "path": WORKFLOW_PATH,
+                             "head_repository": {"full_name": REPO},
+                             "status": "completed", "conclusion": self.proof_conclusion}
         # GitHub issues
         if "api.github.com" in url and "/issues" in url:
             return 200, self.issues
@@ -277,7 +309,6 @@ class FakeCloud:
 class EndToEndTests(unittest.TestCase):
     def setUp(self):
         self.cloud = FakeCloud()
-        mock_independent_result(self)
         self._orig_request = orchestrator._request
         self._orig_kv_get = orchestrator.kv_get
         self._orig_kv_set = orchestrator.kv_set
@@ -348,7 +379,9 @@ class EndToEndTests(unittest.TestCase):
         cfg = dict(orchestrator.DEFAULT_CONFIG)
         cfg.update({"dry_run": False, "repository": REPO,
                     "mission_label": "tel99-mission", "max_runtime_seconds": 60,
-                    "authorized_approvers": [AUTHORIZED_APPROVER]})
+                    "authorized_approvers": [AUTHORIZED_APPROVER],
+                    "authorized_verifiers": [VERIFIER],
+                    "trusted_verification_workflows": {"99": WORKFLOW_DIGEST}})
         cfg.update(over)
         return cfg
 
@@ -381,9 +414,11 @@ class EndToEndTests(unittest.TestCase):
         """Simulate a run killed after it recorded an active mission."""
         orchestrator.kv_set("state", {
             "version": 1, "processed": [], "journal": [],
-            "active": {"issue": 70, "work_branch": "agent/mission-70-x",
+            "active": {"issue": 70, "work_branch": WORK_BRANCH,
                        "started_at": "2026-11-15T00:00:00Z", "owner": "run-killed",
-                       "conversation_id": conversation_id},
+                       "conversation_id": conversation_id,
+                       "approved_content_hash": self.cloud.proof["mission_digest"],
+                       "approved_by": AUTHORIZED_APPROVER},
         })
 
     def test_crash_after_post_reattaches_and_does_not_duplicate(self):
@@ -627,11 +662,9 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("active_mission_lock", self.cloud.kv)
 
     def test_a_failed_resumable_mission_is_retried_not_deduped(self):
-        self.cloud.coordinator_response = ""
-        self.cloud.children = []
-        self._run(self._config())            # fails, stays resumable
-        self.cloud.coordinator_response = "Rapport final."
-        self.cloud.children = [{"id": "c", "status": "finished", "response": "ok"}]
+        self.cloud.conversation_final = "error"
+        self.assertEqual(self._run(self._config())[0], 2)
+        self.cloud.conversation_final = "finished"
         code, out = self._run(self._config())  # retried, now validated
         self.assertEqual(code, 0, out)
         self.assertIn('"action": "retried"', out)
@@ -1258,7 +1291,6 @@ class DurableRunReportTests(unittest.TestCase):
 
     def setUp(self):
         self.cloud = FakeCloud()
-        mock_independent_result(self)
         self._orig_request = orchestrator._request
         self._orig_kv_get = orchestrator.kv_get
         self._orig_kv_set = orchestrator.kv_set
@@ -1317,7 +1349,9 @@ class DurableRunReportTests(unittest.TestCase):
         cfg = dict(orchestrator.DEFAULT_CONFIG)
         cfg.update({"dry_run": False, "repository": REPO,
                     "mission_label": "tel99-mission", "max_runtime_seconds": 60,
-                    "authorized_approvers": [AUTHORIZED_APPROVER]})
+                    "authorized_approvers": [AUTHORIZED_APPROVER],
+                    "authorized_verifiers": [VERIFIER],
+                    "trusted_verification_workflows": {"99": WORKFLOW_DIGEST}})
         cfg.update(over)
         return cfg
 
@@ -1347,6 +1381,63 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertEqual(report["outcome_verification"], "ACCEPTED")
         self.assertEqual(report["mission_id"], "70")
         self.assertEqual(report["started_children"], 1)
+        bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+        record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+        self.assertEqual(record.result["artifacts"][0]["commit_sha"], WORK_SHA)
+        self.assertEqual(record.result["artifacts"][0]["path"], ARTIFACT_PATH)
+        self.assertEqual(record.learnings[0]["verified_by"], VERIFIER)
+
+    def test_mismatched_proof_keeps_the_conversation_for_review(self):
+        for field, value in (("sha", "b" * 40),
+                             ("artifact", "reports/other.txt"),
+                             ("artifact_sha256", "0" * 64)):
+            with self.subTest(field=field):
+                self.cloud.kv.clear()
+                self.cloud.started_conversations.clear()
+                original, self.cloud.proof[field] = self.cloud.proof[field], value
+                try:
+                    self.assertEqual(self._run(self._config())[0], 2)
+                    self.assertEqual(self._run(self._config())[0], 2)
+                    self.assertEqual(len(self.cloud.started_conversations), 1)
+                    report = self.cloud.kv["run_report"]
+                    self.assertEqual(report["outcome_verification"], "REJECTED")
+                    bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
+                    record = bus.load_mission(bus_bridge.correlation_id(REPO, 70))
+                    self.assertEqual(record.learnings, [])
+                finally:
+                    self.cloud.proof[field] = original
+
+    def test_modified_workflow_cannot_supply_a_pass(self):
+        code, _ = self._run(self._config(trusted_verification_workflows={"99": "0" * 64}))
+        self.assertEqual(code, 2)
+        report = self.cloud.kv["run_report"]
+        self.assertEqual(report["outcome_verification"], "REJECTED")
+        self.assertIn("workflow definition differs", report["verification_proof"]["reason"])
+
+    def test_a_green_job_does_not_satisfy_an_unmapped_prose_criterion(self):
+        body = ISSUE["body"].rsplit("<!-- tel99-approval", 1)[0] + "- Another criterion.\n"
+        issue = {**ISSUE, "body": body}
+        issue["body"] += policy.approval_marker(policy.mission_content(issue),
+                                                approver=AUTHORIZED_APPROVER)
+        self.cloud.issues = [issue]
+        self.cloud.proof["mission_digest"] = policy.mission_digest(policy.mission_content(issue))
+
+        code, _ = self._run(self._config())
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.cloud.kv["run_report"]["outcome_verification"], "NEEDS_HUMAN")
+
+    def test_merge_preview_workflow_is_not_exact_head_evidence(self):
+        self.cloud.proof_event = "pull_request"
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 2)
+        self.assertEqual(self.cloud.kv["run_report"]["outcome_verification"], "REJECTED")
+
+    def test_proof_from_approver_does_not_count_as_independent(self):
+        self.cloud.verifier = AUTHORIZED_APPROVER.upper()
+        code, _ = self._run(self._config(authorized_verifiers=[AUTHORIZED_APPROVER]))
+        self.assertEqual(code, 2)
+        self.assertEqual(self.cloud.kv["run_report"]["outcome_verification"], "NEEDS_HUMAN")
 
     def test_dry_run_reports_a_selected_mission_but_no_acceptance(self):
         """A dry run exits 0 without accepting: the report must not claim it."""
@@ -1382,7 +1473,7 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertEqual(report["status"], "FAILED")
 
     def test_failing_business_check_rejects_a_completed_three_role_run(self):
-        self.independent_proof[0]["exit_code"] = 1
+        self.cloud.proof_conclusion = "failure"
 
         code, out = self._run(self._config())
 
@@ -1396,7 +1487,7 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertEqual(record.learnings, [])
 
     def test_plain_criterion_without_independent_evidence_needs_human(self):
-        self.independent_proof = []
+        self.cloud.proof = None
         code, out = self._run(self._config())
 
         self.assertEqual(code, 2, out)
@@ -1409,7 +1500,7 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertEqual(record.learnings, [])
 
     def test_waiting_for_proof_does_not_start_another_conversation(self):
-        self.independent_proof = []
+        self.cloud.proof = None
         self.assertEqual(self._run(self._config())[0], 2)
 
         self.assertEqual(self._run(self._config())[0], 2)
@@ -1417,6 +1508,80 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertEqual(len(self.cloud.started_conversations), 1)
         report = self.cloud.kv["run_report"]
         self.assertEqual(report["outcome_verification"], "NEEDS_HUMAN")
+
+    def test_verified_proof_can_arrive_after_the_original_agent_server_is_gone(self):
+        proof, self.cloud.proof = self.cloud.proof, None
+        self.assertEqual(self._run(self._config())[0], 2)
+        self.cloud.dead_conversations.add("cid-test-1")
+        self.cloud.proof = proof
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+        report = self.cloud.kv["run_report"]
+        self.assertEqual(report["verification_proof"]["commit_sha"], WORK_SHA)
+        self.assertEqual(report["started_children"], 0)
+        self.assertEqual(report["resumed_conversations"], 1)
+
+    def test_failed_role_evidence_request_cannot_reopen_a_finished_conversation(self):
+        with patch.object(orchestrator, "collect_evidence", side_effect=OSError("gone")):
+            with self.assertRaises(OSError):
+                self._run(self._config())
+        self.cloud.dead_conversations.add("cid-test-1")
+        self.cloud.coordinator_response = ""
+
+        code, _ = self._run(self._config())
+
+        self.assertEqual(code, 2)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+
+    def test_transient_missing_role_evidence_is_read_again_without_a_second_start(self):
+        response, self.cloud.coordinator_response = self.cloud.coordinator_response, ""
+        self.assertEqual(self._run(self._config())[0], 2)
+        self.cloud.coordinator_response = response
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+
+    def test_resume_reconciles_a_ledger_commit_after_state_write_loss(self):
+        save_state = orchestrator.save_state
+
+        def lose_completion(state):
+            if not state["active"] and 70 in state["processed"]:
+                raise OSError("state write lost")
+            save_state(state)
+
+        with patch.object(orchestrator, "save_state", side_effect=lose_completion):
+            with self.assertRaises(OSError):
+                self._run(self._config())
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.cloud.kv["state"]["processed"], [70])
+        self.assertIsNone(self.cloud.kv["state"]["active"])
+        self.assertEqual(len(self.cloud.started_conversations), 1)
+        self.assertTrue(self.cloud.kv["run_report"]["mission_accepted"])
+
+    def test_edited_approved_mission_cannot_reuse_a_finished_conversation(self):
+        proof, self.cloud.proof = self.cloud.proof, None
+        self.assertEqual(self._run(self._config())[0], 2)
+        edited = dict(ISSUE, body=ISSUE["body"].rsplit("<!-- tel99-approval", 1)[0]
+                      + "Un nouveau critere.\n")
+        edited["body"] += policy.approval_marker(policy.mission_content(edited),
+                                                  approver=AUTHORIZED_APPROVER)
+        self.cloud.issues = [edited]
+        self.cloud.proof = {**proof,
+                            "mission_digest": policy.mission_digest(policy.mission_content(edited))}
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        self.assertIn("approved mission changed since", out)
+        self.assertEqual(len(self.cloud.started_conversations), 1)
 
     def test_idle_run_does_not_inherit_the_previous_mission_verdict(self):
         self.assertEqual(self._run(self._config())[0], 0)

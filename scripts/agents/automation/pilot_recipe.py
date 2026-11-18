@@ -97,6 +97,8 @@ def pilot_recipe() -> dict[str, Any]:
         "require_durable_bus": True,
         "emergency_stop": False,
         "authorized_approvers": [],
+        "authorized_verifiers": [],
+        "trusted_verification_workflows": {},
     }
 
 

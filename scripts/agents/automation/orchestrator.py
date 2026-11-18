@@ -51,6 +51,7 @@ SCRIPTS = HERE.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(HERE))
 
+import acceptance  # noqa: E402
 import policy  # noqa: E402
 import preflight  # noqa: E402
 import team_config as cfg  # noqa: E402
@@ -100,6 +101,8 @@ DEFAULT_CONFIG = {
     # so with no authorised approver named no mission can start
     # (fail-closed). The owner sets this to their own login to enable it.
     "authorized_approvers": [],
+    "authorized_verifiers": [],
+    "trusted_verification_workflows": {},
 }
 
 
@@ -594,6 +597,8 @@ def _reconcile_decision(state: dict) -> tuple[str, str]:
             f"until {lock.get('expires_at')})"
         )
     cid = active.get("conversation_id")
+    if cid and active.get("conversation_finished"):
+        return "reattach", cid
     if not cid and active.get("start_requested"):
         return "abort", (
             "conversation start outcome is unknown; refusing a second request "
@@ -710,6 +715,40 @@ def recent_mission_comments(repository: str, number: int) -> list:
     status, body = _request("GET", url, headers=headers)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub approval lookup failed: HTTP {status}")
+    return body
+
+
+def _verification_comments(repository: str, number: int, since: str) -> list:
+    """Read the bounded timeline since this conversation began."""
+    headers = {"Accept": "application/vnd.github+json"}
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    comments = []
+    for page in range(1, 7):
+        query = urllib.parse.urlencode({"since": since, "per_page": 100, "page": page})
+        status, body = _request(
+            "GET", f"https://api.github.com/repos/{repository}/issues/{number}/comments?{query}",
+            headers=headers, timeout=15)
+        if status != 200 or not isinstance(body, list):
+            raise RuntimeError(f"GitHub verification comments failed: HTTP {status}")
+        comments.extend(body)
+        if len(comments) > 500:
+            break
+        if len(body) < 100:
+            return comments
+    raise RuntimeError("GitHub verification timeline exceeds the page limit")
+
+
+def _github_repository_json(repository: str, path: str) -> dict:
+    headers = {"Accept": "application/vnd.github+json"}
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    status, body = _request("GET", f"https://api.github.com/repos/{repository}/{path}",
+                            headers=headers, timeout=15)
+    if status != 200 or not isinstance(body, dict):
+        raise RuntimeError(f"GitHub evidence lookup failed: HTTP {status}")
     return body
 
 
@@ -865,6 +904,7 @@ _REPORT_CONFIG_KEYS = (
     "max_concurrent_missions", "max_runtime_seconds", "max_iterations",
     "max_budget_usd", "agent_max_iterations", "agent_max_budget_usd",
     "quota_min_remaining", "dry_run", "require_durable_bus", "emergency_stop",
+    "authorized_approvers", "authorized_verifiers", "trusted_verification_workflows",
 )
 
 
@@ -921,8 +961,9 @@ def build_run_report(state: dict, config: dict, code: int, *,
         mission_number = _last_journal_value(state, "mission_resume", "issue")
     started = [
         e for e in _journal_entries(state)
-        if e.get("event") in ("conversation_started", "conversation_resumed")
+        if e.get("event") == "conversation_started"
     ]
+    resumed = [e for e in _journal_entries(state) if e.get("event") == "conversation_resumed"]
     mission_id = str(mission_number) if mission_number is not None else "NO_MISSION"
     validated = _last_journal_value(state, "outcome_verdict", "validated")
     if validated is None:
@@ -958,9 +999,11 @@ def build_run_report(state: dict, config: dict, code: int, *,
         "quota_after": quota_after,
         "mission_id": mission_id,
         "started_children": len(started),
+        "resumed_conversations": len(resumed),
         "status": status,
         "mission_accepted": mission_accepted,
         "outcome_verification": outcome_verification,
+        "verification_proof": _last_journal_value(state, "outcome_verdict", "proof"),
         "error_reason": error_reason,
         "evidence_uri": f"kv://{_report_key(run_id)}",
     }
@@ -1057,7 +1100,7 @@ def load_config(path: str | None) -> dict:
 
 
 def _finish_mission(*, state, mission, work_branch, cid, final,
-                    agent_names, bus, bus_corr, require_bus, owner,
+                    agent_names, bus, bus_corr, require_bus, config,
                     processed) -> int:
     """Verify, persist and close out a mission conversation.
 
@@ -1090,13 +1133,51 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
         save_state(state)
         return 3
 
-    # --- Validation: a finished status is NOT a success by itself. ---
-    evidence = collect_evidence(cid, expected_roles=agent_names,
-                                mission_body=mission.get("body") or "")
-    if not evidence.get("acceptance_checks"):
-        evidence["acceptance_checks"] = [
-            {"id": "independent-evidence", "automatable": False},
-        ]
+    # Persist the role observations needed to verify a finished conversation
+    # even when a later run cannot reach the same agent server.
+    active = state["active"]
+    mission_body = mission.get("body") or ""
+    if final == "finished" and not active.get("conversation_finished"):
+        active["conversation_finished"] = True
+        save_state(state)
+    evidence = active.get("completed_roles") or collect_evidence(
+        cid, expected_roles=agent_names, mission_body=mission_body)
+    evidence = dict(evidence)
+    if final == "finished" and not active.get("completed_roles"):
+        roles = evidence["roles"]
+        if (evidence["coordinator_response_chars"] > 0 and roles
+                and all(role.get("proven") for role in roles.values())):
+            active["completed_roles"] = {
+                key: evidence[key] for key in ("conversation_id", "coordinator_response_chars",
+                                               "roles", "acceptance_criteria")
+            }
+            save_state(state)
+    evidence["acceptance_checks"] = [{"id": "independent-evidence", "automatable": False}]
+    verification_proof = None
+    if final == "finished" and config.get("authorized_verifiers"):
+        approver = active.get("approved_by")
+        issue_author = (mission.get("user") or {}).get("login")
+        excluded = {login.lower() for login in (approver, issue_author)
+                    if isinstance(login, str)}
+        verifiers = {login.lower() for login in config["authorized_verifiers"]
+                     if isinstance(login, str)} - excluded
+        repository = config["repository"]
+        try:
+            comments = (_verification_comments(repository, mission["number"], active["started_at"])
+                        if verifiers and active.get("approved_content_hash") else [])
+            evidence["acceptance_checks"], verification_proof = acceptance.verify(
+                comments=comments, verifiers=verifiers, conversation_id=cid,
+                mission_digest=active.get("approved_content_hash"), mission_body=mission_body,
+                repository=repository, work_branch=work_branch,
+                checks=acceptance_checks_from_body(
+                    policy.mission_content({"body": mission_body}), strict=True),
+                trusted_workflows=config.get("trusted_verification_workflows") or {},
+                fetch=lambda path: _github_repository_json(repository, path),
+            )
+        except (RuntimeError, OSError, ValueError):
+            journal_entry(state, "verification_unavailable", conversation=cid)
+    if verification_proof is not None:
+        evidence["independent_verification"] = verification_proof
     validated, verdict = verify_outcome(final, evidence,
                                         expected_roles=agent_names,
                                         mission_body=mission.get("body") or "")
@@ -1108,7 +1189,7 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
     journal_entry(state, "outcome_verdict", validated=validated,
                   verification=verification,
                   roles={r: info.get("proven") for r, info in verdict["roles"].items()},
-                  checks=verdict["checks"])
+                  checks=verdict["checks"], proof=verification_proof)
 
     # --- Persist the outcome on the bus (survives container destruction). ---
     # Fail-closed: if the durable record cannot be written, the mission must NOT
@@ -1143,7 +1224,7 @@ def _finish_mission(*, state, mission, work_branch, cid, final,
     # of ``processed`` so the next run resumes it.
     if validated:
         state["processed"] = sorted(processed | {mission["number"]})
-    if verification != "NEEDS_HUMAN":
+    if final != "finished" or validated:
         state["active"] = None
     save_state(state)
     return 0 if validated else 2
@@ -1319,8 +1400,15 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     # approvers, refuses the run before any spend. A dry run starts no
     # conversation, so it only reports the decision.
     authorized = frozenset(config.get("authorized_approvers") or ())
+    approval, _ = policy.read_approval(mission)
+    digest = policy.mission_digest(policy.mission_content(mission))
     approved, approval_reason = policy.approval_is_authorized(mission, authorized)
-    if approved and not config["dry_run"]:
+    pinned_digest = active.get("approved_content_hash") if resuming else None
+    if pinned_digest is not None:
+        approved = (digest == pinned_digest and active.get("approved_by") in authorized)
+        approval_reason = ("reusing approval for the started conversation" if approved
+                           else "approved mission changed since the conversation started")
+    elif approved and not config["dry_run"]:
         try:
             comments = recent_mission_comments(config["repository"], mission["number"])
         except RuntimeError as exc:
@@ -1337,7 +1425,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     journal_entry(state, "approval_checked", approved=approved,
                   detail=approval_reason, mission=mission["number"])
 
-    work_branch = policy.work_branch_name(
+    work_branch = (active.get("work_branch") if resuming else None) or policy.work_branch_name(
         config["work_branch_prefix"], mission["number"], mission.get("title", "")
     )
     # When re-attaching, the one active mission IS this mission: it must not be
@@ -1371,7 +1459,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         try:
             bus = Bus(REPO_ROOT / "bus", store=default_store(REPO_ROOT / "bus"))
             bus_corr = bus_bridge.correlation_id(config["repository"], mission["number"])
-            if bus_bridge.is_already_finished(bus, bus_corr):
+            if not resuming and bus_bridge.is_already_finished(bus, bus_corr):
                 journal_entry(state, "bus_skip", reason="mission already finished",
                               correlation_id=bus_corr)
                 return 0
@@ -1422,10 +1510,28 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     # proceed, otherwise it would work with no deduplication and no durable record.
     if bus is not None and bus_corr is not None:
         try:
-            opened = bus_bridge.open_or_resume(
-                bus, repository=config["repository"], issue=mission,
-                work_branch=work_branch,
-            )
+            previous = bus.load_mission(bus_corr) if resuming else None
+            if previous and previous.state == "done":
+                result = previous.result or {}
+                if (result.get("metrics") or {}).get("conversation_id") != resume_cid:
+                    journal_entry(state, "abort", reason="ledger completion is for another conversation")
+                    release_lock(owner)
+                    return 2
+                journal_entry(state, "outcome_verdict", validated=True, verification="ACCEPTED",
+                              proof=(result.get("evidence") or {}).get("independent_verification"))
+                state["processed"] = sorted(processed | {mission["number"]})
+                state["active"] = None
+                save_state(state)
+                release_lock(owner)
+                return 0
+            if previous:
+                opened = {"action": "reattached", "correlation_id": bus_corr,
+                          "state": previous.state}
+            else:
+                opened = bus_bridge.open_or_resume(
+                    bus, repository=config["repository"], issue=mission,
+                    work_branch=work_branch,
+                )
             journal_entry(state, "bus_mission", action=opened["action"],
                           correlation_id=opened["correlation_id"],
                           mission_state=opened["state"],
@@ -1450,11 +1556,12 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         report_phase("resuming coordinator")
         agent_names = cfg.unique_names(time.strftime("%H%M%S"))
         try:
-            final = wait_for(resume_cid, deadline, state_dir=state_dir)
+            final = ("finished" if active.get("conversation_finished")
+                     else wait_for(resume_cid, deadline, state_dir=state_dir))
             return _finish_mission(
                 state=state, mission=mission, work_branch=work_branch,
                 cid=resume_cid, final=final, agent_names=agent_names, bus=bus,
-                bus_corr=bus_corr, require_bus=require_bus, owner=owner,
+                bus_corr=bus_corr, require_bus=require_bus, config=config,
                 processed=processed,
             )
         finally:
@@ -1487,7 +1594,8 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     # the conversation ID is ambiguous, so recovery refuses a second POST.
     state["active"] = {"issue": mission["number"], "work_branch": work_branch,
                        "started_at": policy.utcnow_iso(), "owner": owner,
-                       "conversation_id": None, "start_requested": True}
+                       "conversation_id": None, "start_requested": True,
+                       "approved_content_hash": digest, "approved_by": approval["approved_by"]}
     save_state(state)
     report_phase("starting coordinator")
 
@@ -1509,9 +1617,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
 
         # Persist the real conversation id at once: a hard kill after this point
         # leaves a recoverable record, and the next run re-attaches to it.
-        state["active"] = {"issue": mission["number"], "work_branch": work_branch,
-                           "started_at": state["active"]["started_at"], "owner": owner,
-                           "conversation_id": cid}
+        state["active"].update(conversation_id=cid, start_requested=False)
         save_state(state)
         journal_entry(state, "conversation_started", conversation=cid,
                       issue=mission["number"])
@@ -1522,7 +1628,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         return _finish_mission(
             state=state, mission=mission, work_branch=work_branch,
             cid=cid, final=final, agent_names=agent_names, bus=bus,
-            bus_corr=bus_corr, require_bus=require_bus, owner=owner,
+            bus_corr=bus_corr, require_bus=require_bus, config=config,
             processed=processed,
         )
     finally:
@@ -1671,7 +1777,7 @@ def _heading_level(line: str) -> int:
     return 0
 
 
-def acceptance_checks_from_body(body: str) -> list[dict]:
+def acceptance_checks_from_body(body: str, *, strict: bool = False) -> list[dict]:
     """Extract *declared* acceptance checks from a mission body.
 
     A mission may declare executable criteria as ``check: <command>`` lines in
@@ -1693,6 +1799,8 @@ def acceptance_checks_from_body(body: str) -> list[dict]:
         return []
     checks: list[dict] = []
     section_level = 0
+    saw_section = False
+    saw_artifact = False
     for raw in body.splitlines():
         line = raw.strip()
         level = _heading_level(line)
@@ -1701,13 +1809,21 @@ def acceptance_checks_from_body(body: str) -> list[dict]:
             # Capture continues under deeper sub-headings (``#### Detail``), but a
             # heading at the same or a shallower level closes the section.
             if _ACCEPTANCE_HEADING.search(line):
+                if strict and saw_section:
+                    return []
+                saw_section = True
                 section_level = level
             elif section_level and level <= section_level:
                 section_level = 0
             continue
         if not section_level:
             continue
+        if strict and re.match(r"^[-*]?\s*acceptance-artifact:", line, re.IGNORECASE):
+            saw_artifact = True
+            continue
         match = _CHECK_LINE.match(line)
+        if strict and line and not match:
+            return []
         if match and match.group("cmd").strip():
             cmd = match.group("cmd").strip()
             checks.append({
@@ -1718,7 +1834,7 @@ def acceptance_checks_from_body(body: str) -> list[dict]:
                 "reproducible": False,
                 "output_digest": None,
             })
-    return checks
+    return checks if not strict or saw_artifact else []
 
 
 def _as_check_list(value) -> list | None:
