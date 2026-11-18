@@ -14,6 +14,7 @@ Design rules encoded here:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 
@@ -181,3 +182,110 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
         "+00:00", "Z"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Mission approval (S-06): content-bound AND actor-authorised
+# --------------------------------------------------------------------------- #
+# A mission label alone is not an authorisation. Before a mission may start, the
+# issue must carry a single machine-readable approval marker whose (a) content
+# hash matches the issue's current title+body and (b) approver is on an explicit
+# allowlist. An issue edited after approval therefore fails the hash check, and
+# an approval written by anyone not on the allowlist is refused. Both checks are
+# pure and fail-closed, so the decision can be unit-tested with no network.
+#
+# This consumes the *same* approval record shape the handoff engine defines
+# (``approved_content_hash`` / ``approved_by`` / ``approved_at``); the record is
+# carried inside the issue body as a comment so the decision needs no second
+# store. The hashing mirrors the repo's existing sha256 idiom.
+#
+# Marker syntax (one line, HTML comment so it stays invisible on GitHub):
+#   <!-- tel99-approval:v1 hash=sha256:<hex> by=<login> -->
+APPROVAL_SCHEMES = frozenset({"v1"})
+_APPROVAL_MARKER = re.compile(
+    r"<!--\s*tel99-approval:(?P<scheme>[A-Za-z0-9._-]+)"
+    r"\s+hash=(?P<hash>\S+)\s+by=(?P<by>.+?)\s*-->"
+)
+_MARKER_LINE = re.compile(r"^\s*<!--\s*tel99-approval:", re.IGNORECASE)
+
+
+def mission_content(issue: dict) -> str:
+    """The content an approval is bound to: normalised title + body.
+
+    The approval marker line itself is removed so approving an issue does not
+    change the very digest being approved. Trailing whitespace and trailing
+    blank lines are stripped, so a marker appended at the end never perturbs the
+    digest.
+    """
+    if not isinstance(issue, dict):
+        return ""
+    raw = f"{issue.get('title') or ''}\n{issue.get('body') or ''}"
+    lines = [line.rstrip() for line in raw.strip().splitlines()]
+    lines = [line for line in lines if not _MARKER_LINE.match(line)]
+    return "\n".join(lines).strip()
+
+
+def mission_digest(content: str) -> str:
+    """``sha256:<hex>`` over the normalised mission content."""
+    normalised = "\n".join(
+        line.rstrip() for line in (content or "").strip().splitlines()
+    )
+    return "sha256:" + hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def approval_marker(content: str, *, approver: str, scheme: str = "v1") -> str:
+    """Render the approval marker an authorised actor places in the body.
+
+    Kept here so the writer and the reader cannot drift apart.
+    """
+    return (
+        f"<!-- tel99-approval:{scheme} hash={mission_digest(content)} "
+        f"by={approver} -->"
+    )
+
+
+def read_approval(issue: dict) -> tuple[dict | None, str]:
+    """Extract the approval record from the issue body.
+
+    Returns ``(record, reason)``. ``record`` is ``None`` when no well-formed
+    marker of a known scheme is present, and ``reason`` explains why.
+    """
+    body = issue.get("body") if isinstance(issue, dict) else None
+    match = _APPROVAL_MARKER.search(body or "")
+    if not match:
+        return None, "no content-bound approval on the issue"
+    scheme = match.group("scheme")
+    if scheme not in APPROVAL_SCHEMES:
+        return None, f"unsupported approval scheme {scheme!r}"
+    approver = match.group("by").strip()
+    if not approver:
+        return None, "the approval marker names no approver"
+    return {
+        "approved_content_hash": match.group("hash").strip(),
+        "approved_by": approver,
+        "approved_at": None,
+    }, "approval marker found"
+
+
+def approval_is_authorized(
+    issue: dict, authorized: "frozenset[str] | set[str] | list[str] | None"
+) -> tuple[bool, str]:
+    """True only for a current, content-bound approval by an authorised actor.
+
+    Fail-closed: an empty/missing allowlist refuses every mission; a missing or
+    malformed marker refuses; an unknown approver refuses; an issue edited after
+    approval refuses (hash mismatch). Returns ``(ok, reason)``.
+    """
+    allowed = frozenset(str(a) for a in (authorized or ()))
+    if not allowed:
+        return False, "no authorized approvers configured"
+    record, reason = read_approval(issue)
+    if record is None:
+        return False, reason
+    if record["approved_by"] not in allowed:
+        return False, (
+            f"approval by {record['approved_by']!r} is not an authorized approver"
+        )
+    if mission_digest(mission_content(issue)) != record["approved_content_hash"]:
+        return False, "content changed after approval (hash mismatch)"
+    return True, "approved content unchanged and approver authorized"
