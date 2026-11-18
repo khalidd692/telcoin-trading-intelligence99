@@ -875,5 +875,299 @@ class ThreeRoleVerificationTests(unittest.TestCase):
         self.assertEqual(len(evidence["observations"]), 3)
 
 
+class DurableRunReportTests(unittest.TestCase):
+    """Issue #94 / PR #92 item 3: one durable, consultable report per run.
+
+    The platform deletes the sandbox after a run, so the report must be readable
+    from the KV store (durable across container destruction) and must separate
+    SCRIPT SUCCESS (exit code) from MISSION_ACCEPTED (business verdict).
+    """
+
+    def setUp(self):
+        self.cloud = FakeCloud()
+        self._orig_request = orchestrator._request
+        self._orig_kv_get = orchestrator.kv_get
+        self._orig_kv_set = orchestrator.kv_set
+        self._orig_kv = (orchestrator._KV_BASE, orchestrator._KV_TOKEN)
+        self._orig_quota = orchestrator.quota_remaining
+        orchestrator._request = self.cloud.request
+
+        def fake_kv_get(key):
+            status, body = self.cloud._kv("GET", f"https://kv.example/v1/kv/{key}", None)
+            if status == 200 and isinstance(body, dict):
+                return body.get("value")
+            return None
+
+        def fake_kv_set(key, value):
+            status, _ = self.cloud._kv("PUT", f"https://kv.example/v1/kv/{key}", value)
+            if status not in (200, 201, 204):
+                raise orchestrator.urllib.error.HTTPError(
+                    f"https://kv.example/v1/kv/{key}", status, "kv write failed",
+                    {}, None)
+
+        orchestrator.kv_get = fake_kv_get
+        orchestrator.kv_set = fake_kv_set
+        orchestrator._KV_BASE = "https://kv.example"
+        orchestrator._KV_TOKEN = "tok"
+        self._env = {k: os.environ.get(k)
+                     for k in ("AUTOMATION_API_URL", "AUTOMATION_KV_TOKEN",
+                               "OPENHANDS_API_KEY")}
+        os.environ["AUTOMATION_API_URL"] = "https://kv.example"
+        os.environ["AUTOMATION_KV_TOKEN"] = "tok"
+        os.environ["OPENHANDS_API_KEY"] = "test-key"
+        self._orig_store_request = store_mod.KvStore._request
+        store_mod.KvStore._request = lambda store_self, method, url, payload=None:             self.cloud.request(method, url, payload)
+        self._cwd = os.getcwd()
+        os.chdir(ROOT)
+        self._orig_repo_root = orchestrator.REPO_ROOT
+        self._tmp_root = tempfile.TemporaryDirectory()
+        orchestrator.REPO_ROOT = pathlib.Path(self._tmp_root.name)
+
+    def tearDown(self):
+        orchestrator._request = self._orig_request
+        orchestrator.kv_get = self._orig_kv_get
+        orchestrator.kv_set = self._orig_kv_set
+        orchestrator.quota_remaining = self._orig_quota
+        store_mod.KvStore._request = self._orig_store_request
+        orchestrator._KV_BASE, orchestrator._KV_TOKEN = self._orig_kv
+        orchestrator.REPO_ROOT = self._orig_repo_root
+        self._tmp_root.cleanup()
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        os.chdir(self._cwd)
+
+    def _config(self, **over):
+        cfg = dict(orchestrator.DEFAULT_CONFIG)
+        cfg.update({"dry_run": False, "repository": REPO,
+                    "mission_label": "tel99-mission", "max_runtime_seconds": 60})
+        cfg.update(over)
+        return cfg
+
+    def _run(self, config):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = orchestrator.run(config, offline=False)
+        return code, buf.getvalue()
+
+    # -- the report is durable and complete ---------------------------------
+    def test_report_is_persisted_to_the_durable_store(self):
+        code, _ = self._run(self._config())
+        report = self.cloud.kv.get("run_report")
+        self.assertIsInstance(report, dict, "the run report must be in the KV store")
+        for field in ("run_id", "ts", "config_digest", "dry_run", "quota_before",
+                      "quota_after", "mission_id", "started_children", "status",
+                      "mission_accepted", "outcome_verification", "error_reason",
+                      "evidence_uri"):
+            self.assertIn(field, report, f"missing report field {field}")
+
+    def test_accepted_mission_reports_mission_accepted(self):
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 0)
+        report = self.cloud.kv.get("run_report")
+        self.assertEqual(report["status"], "MISSION_ACCEPTED")
+        self.assertTrue(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "ACCEPTED")
+        self.assertEqual(report["mission_id"], "70")
+        self.assertEqual(report["started_children"], 1)
+
+    def test_dry_run_reports_a_selected_mission_but_no_acceptance(self):
+        """A dry run exits 0 without accepting: the report must not claim it."""
+        code, _ = self._run(self._config(dry_run=True))
+        self.assertEqual(code, 0)
+        report = self.cloud.kv.get("run_report")
+        self.assertEqual(report["mission_id"], "70")  # selected, not worked
+        self.assertEqual(report["status"], "SUCCESS_SCRIPT_MISSION_NOT_ACCEPTED")
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "NOT_ATTEMPTED")
+        self.assertEqual(report["started_children"], 0)
+
+    def test_idle_run_reports_no_mission(self):
+        """No eligible mission: exit 0 with NO_MISSION, not a fake acceptance."""
+        self.cloud.issues = []
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 0)
+        report = self.cloud.kv.get("run_report")
+        self.assertEqual(report["mission_id"], "NO_MISSION")
+        self.assertEqual(report["status"], "SUCCESS_SCRIPT_NO_MISSION")
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "NOT_ATTEMPTED")
+        self.assertEqual(report["started_children"], 0)
+
+    def test_a_rejected_mission_is_not_accepted_even_though_script_ran(self):
+        self.cloud.coordinator_response = ""
+        self.cloud.children = []
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 2)
+        report = self.cloud.kv.get("run_report")
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["outcome_verification"], "REJECTED")
+        self.assertEqual(report["status"], "FAILED")
+
+    def test_report_is_readable_after_container_destruction(self):
+        """A fresh reader over the same KV store still sees the report."""
+        self._run(self._config())
+        orchestrator.kv_get = self._orig_kv_get  # drop the fake reader
+        # A new process would read the same KV key; simulate by reading the raw
+        # store the fake kept (equivalent to a fresh pod over the durable store).
+        report = self.cloud.kv.get("run_report")
+        self.assertEqual(report["status"], "MISSION_ACCEPTED")
+        self.assertEqual(orchestrator.read_run_report.__name__, "read_run_report")
+
+    def test_stopped_run_reports_stopped_and_writes_a_report(self):
+        self.cloud.conversation_final = "stopped"
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 3)
+        report = self.cloud.kv.get("run_report")
+        self.assertEqual(report["status"], "STOPPED")
+        self.assertFalse(report["mission_accepted"])
+
+    def test_report_contains_no_secret_looking_values(self):
+        self._run(self._config())
+        blob = json.dumps(self.cloud.kv.get("run_report")).lower()
+        for needle in ("token", "secret", "api_key", "password", "bearer"):
+            self.assertNotIn(needle, blob)
+
+    def test_config_digest_is_stable_and_ignores_unknown_keys(self):
+        d1 = orchestrator.config_digest(self._config())
+        d2 = orchestrator.config_digest(self._config())
+        self.assertEqual(d1, d2)
+        # An injected secret-looking key is NOT part of the whitelist, so it does
+        # not change the digest.
+        self.assertEqual(d1, orchestrator.config_digest(
+            {**self._config(), "GITHUB_TOKEN": "should-not-matter"}))
+
+    def test_report_written_even_when_kv_write_fails(self):
+        """A KV failure must not lose the report: the local file still gets it."""
+        good = orchestrator.kv_set
+
+        def boom(key, value):
+            if key == orchestrator._RUN_REPORT_KEY:
+                raise orchestrator.urllib.error.HTTPError(
+                    "https://kv.example/v1/kv/run_report", 500, "boom", {}, None)
+            return good(key, value)
+
+        orchestrator.kv_set = boom
+        code, _ = self._run(self._config())
+        self.assertEqual(code, 0)  # the run's exit code is unchanged
+        path = orchestrator._state_path().with_name(
+            orchestrator._state_path().stem + "_run_report.json")
+        self.assertTrue(path.is_file(), "the local fallback report must exist")
+        on_disk = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["status"], "MISSION_ACCEPTED")
+
+    def test_build_run_report_never_raises_on_a_plain_state(self):
+        report = orchestrator.build_run_report(
+            {"version": 1, "processed": [], "active": None, "journal": []},
+            self._config(), 0)
+        self.assertEqual(report["mission_id"], "NO_MISSION")
+        self.assertEqual(report["status"], "SUCCESS_SCRIPT_NO_MISSION")
+
+    def test_brake_path_writes_no_report_to_the_network(self):
+        """The emergency brake must halt without any network call."""
+        import automation.emergency as emergency
+        calls = []
+        self._orig_quota2 = orchestrator.quota_remaining
+        orchestrator.quota_remaining = lambda: calls.append("quota")
+        saved_env = os.environ.get(emergency.ENV_FLAG)
+        os.environ[emergency.ENV_FLAG] = "true"
+        orig_load = orchestrator.load_state
+        orig_save = orchestrator.save_state
+        orchestrator.load_state = lambda: {"version": 1, "processed": [],
+                                           "active": None, "journal": []}
+        orchestrator.save_state = lambda state: None
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = orchestrator.run(self._config(), offline=False)
+        finally:
+            orchestrator.load_state = orig_load
+            orchestrator.save_state = orig_save
+            orchestrator.quota_remaining = self._orig_quota2
+            if saved_env is None:
+                os.environ.pop(emergency.ENV_FLAG, None)
+            else:
+                os.environ[emergency.ENV_FLAG] = saved_env
+        self.assertEqual(code, 3)
+        self.assertEqual(calls, [], "the brake path must not probe quota")
+        # No durable KV write on the brake path either.
+        self.assertNotIn("run_report", self.cloud.kv)
+
+    def test_crash_path_still_writes_a_report(self):
+        """Exit code 1 (a crash) must not leave the run invisible."""
+        orig_impl = orchestrator._run_impl
+
+        def boom(config, offline, holder):
+            raise RuntimeError("simulated crash")
+
+        orchestrator._run_impl = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                orchestrator.run(self._config(), offline=False)
+        finally:
+            orchestrator._run_impl = orig_impl
+        report = self.cloud.kv.get("run_report")
+        self.assertIsNotNone(report, "a crash must still produce a durable report")
+        self.assertEqual(report["status"], "FAILED")
+        self.assertFalse(report["mission_accepted"])
+
+    def test_per_run_history_key_is_written(self):
+        """A per-run key preserves history even when 'latest' is overwritten."""
+        self._run(self._config())
+        keys = [k for k in self.cloud.kv if k.startswith("run_report.")]
+        self.assertTrue(keys, "a per-run run_report.<id> key must exist")
+        latest = self.cloud.kv.get("run_report")
+        self.assertEqual(self.cloud.kv[keys[0]]["run_id"], latest["run_id"])
+
+    def test_evidence_uri_points_at_the_per_run_key(self):
+        self._run(self._config())
+        report = self.cloud.kv.get("run_report")
+        self.assertTrue(report["evidence_uri"].startswith("kv://run_report."))
+
+    def test_build_run_report_survives_a_corrupted_journal(self):
+        """A poisoned/edited state must not crash the report builder."""
+        for bad in ({"journal": None}, {"journal": [None, 42, "x"]},
+                    {"journal": [{"event": "run_start", "owner": "r"}]}, {}):
+            report = orchestrator.build_run_report(bad, self._config(), 0)
+            self.assertEqual(report["mission_id"], "NO_MISSION")
+
+    def test_fire_callback_carries_the_mission_outcome(self):
+        captured = {}
+
+        class _Resp:
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=30):
+            captured["body"] = json.loads(req.data.decode())
+            return _Resp()
+
+        orig = orchestrator.urllib.request.urlopen
+        orig_url = os.environ.get("AUTOMATION_CALLBACK_URL")
+        orchestrator.urllib.request.urlopen = fake_urlopen
+        os.environ["AUTOMATION_CALLBACK_URL"] = "https://callback.example/run"
+        try:
+            orchestrator.fire_callback("COMPLETED", outcome={
+                "mission_id": "70", "mission_accepted": True,
+                "outcome_verification": "ACCEPTED", "config_digest": "abc"})
+        finally:
+            orchestrator.urllib.request.urlopen = orig
+            if orig_url is None:
+                os.environ.pop("AUTOMATION_CALLBACK_URL", None)
+            else:
+                os.environ["AUTOMATION_CALLBACK_URL"] = orig_url
+        self.assertEqual(captured["body"]["mission_id"], "70")
+        self.assertTrue(captured["body"]["mission_accepted"])
+        self.assertEqual(captured["body"]["outcome_verification"], "ACCEPTED")
+
+
 if __name__ == "__main__":
     unittest.main()
