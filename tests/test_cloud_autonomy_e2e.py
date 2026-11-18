@@ -748,6 +748,211 @@ class ThreeRoleVerificationTests(unittest.TestCase):
         self.assertTrue(validated, verdict["checks"])
         self.assertEqual(set(verdict["roles"]), set(self.ROLES))
 
+    # --- S-05 / gate G3: the acceptance criterion must be *satisfied*, not just
+    # declared. Three lying PASS reports plus a RED acceptance test must never be
+    # accepted as a success. ---
+
+    def _all_roles_pass(self):
+        return [self._obs(self.ROLES[r]) for r in self.ROLES]
+
+    def test_a_red_acceptance_check_rejects_despite_three_pass_reports(self):
+        """Gate G3: 3 PASS reports + a red test => validated is False.
+
+        This is the regression test for the S-05 defect: before the fix,
+        ``verify_outcome`` accepted the mission on the declared criterion text
+        alone and never looked at the check result.
+        """
+        evidence = self._evidence(self._all_roles_pass())
+        red = [{"id": "business-test", "command": "python -m unittest x",
+                "exit_code": 1, "reproducible": True,
+                "output_digest": "sha256:deadbeef"}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=red)
+        self.assertFalse(validated, verdict["checks"])
+        self.assertIn("criterion_business-test",
+                      [c["check"] for c in verdict["checks"] if not c["ok"]])
+        self.assertEqual(verdict["failed"], ["business-test"])
+
+    def test_a_green_acceptance_check_still_validates(self):
+        """The same three PASS reports WITH a reproducible green check validate."""
+        evidence = self._evidence(self._all_roles_pass())
+        green = [{"id": "business-test", "command": "python -m unittest x",
+                  "exit_code": 0, "reproducible": True,
+                  "output_digest": "sha256:cafe"}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=green)
+        self.assertTrue(validated, verdict["checks"])
+        self.assertEqual(verdict["satisfied"], ["business-test"])
+
+    def test_a_non_automatable_criterion_is_needs_human_not_a_pass(self):
+        """A criterion with no runnable command is NEEDS_HUMAN, never a silent PASS."""
+        evidence = self._evidence(self._all_roles_pass())
+        manual = [{"id": "ux-review", "automatable": False}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=manual)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["needs_human"], ["ux-review"])
+
+    def test_a_check_without_reproducible_evidence_does_not_satisfy(self):
+        """exit_code 0 alone is not proof: reproducible + output_digest are required."""
+        evidence = self._evidence(self._all_roles_pass())
+        weak = [{"id": "business-test", "command": "python -m unittest x",
+                 "exit_code": 0, "reproducible": False,
+                 "output_digest": None}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=weak)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["failed"], ["business-test"])
+
+    def test_no_checks_keeps_the_historical_behaviour(self):
+        """Without acceptance checks the previous behaviour is unchanged."""
+        evidence = self._evidence(self._all_roles_pass())
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertTrue(validated, verdict["checks"])
+        self.assertEqual(verdict["acceptance_checks"], [])
+        self.assertEqual(verdict["failed"], [])
+
+    def test_checks_read_from_evidence_when_not_passed_explicitly(self):
+        """``collect_evidence`` can carry the checks; verify_outcome reads them."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "business-test", "command": "python -m unittest x",
+             "exit_code": 1, "reproducible": True, "output_digest": "sha256:x"}]
+        validated, _ = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+
+    def test_a_declared_check_without_a_result_is_needs_human(self):
+        """A ``check:`` line with no recorded result is a promise, not proof.
+
+        It must route to NEEDS_HUMAN, never be accepted on the criterion text.
+        """
+        body = ("### Critere d'acceptation\nUn test de non-regression passe.\n"
+                "- check: python -m unittest tests.test_x\n")
+        checks = orchestrator.acceptance_checks_from_body(body)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["command"], "python -m unittest tests.test_x")
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_criteria"] = orchestrator.extract_acceptance_criteria(body)
+        evidence["acceptance_checks"] = checks
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+        self.assertEqual(len(verdict["needs_human"]), 1)
+        self.assertEqual(verdict["failed"], [])
+
+    def test_a_producer_never_executes_a_declared_command(self):
+        """The producer only parses: a dangerous line must not be run."""
+        body = ("### Critere d'acceptation\n"
+                "- check: rm -rf /\n")
+        checks = orchestrator.acceptance_checks_from_body(body)
+        # It is captured as text with no result -- never executed.
+        self.assertEqual(checks[0]["command"], "rm -rf /")
+        self.assertIsNone(checks[0]["exit_code"])
+        self.assertFalse(checks[0]["reproducible"])
+
+    def test_a_caller_cannot_hide_a_red_evidence_check(self):
+        """Fail-closed merge: a red check in evidence wins over an empty argument."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "business-test", "command": "python -m unittest x",
+             "exit_code": 1, "reproducible": True, "output_digest": "sha256:red"}]
+        validated, verdict = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=[])
+        self.assertFalse(validated)
+        self.assertEqual(verdict["failed"], ["business-test"])
+
+    def test_a_caller_cannot_downgrade_a_red_evidence_check_to_green(self):
+        """The same id present on both sides keeps the failing entry."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "business-test", "command": "python -m unittest x",
+             "exit_code": 1, "reproducible": True, "output_digest": "sha256:red"}]
+        green = [{"id": "business-test", "command": "python -m unittest x",
+                  "exit_code": 0, "reproducible": True, "output_digest": "sha256:ok"}]
+        validated, _ = orchestrator.verify_outcome(
+            "finished", evidence, acceptance_checks=green)
+        self.assertFalse(validated)
+
+    def test_a_malformed_check_container_does_not_crash(self):
+        """A truthy non-iterable container is treated as absent, not a crash."""
+        evidence = self._evidence(self._all_roles_pass())
+        for bad in (5, True, object()):
+            with self.subTest(bad=type(bad).__name__):
+                validated, verdict = orchestrator.verify_outcome(
+                    "finished", evidence, acceptance_checks=bad)
+                # Falls back to the declared-text check: still validates here.
+                self.assertTrue(validated, verdict["checks"])
+
+    def test_a_check_under_a_subheading_is_still_captured(self):
+        """A ``check:`` under a deeper sub-heading stays in the acceptance section."""
+        body = ("### Critere d'acceptation\n"
+                "#### Detail\n"
+                "- check: python -m unittest tests.test_x\n")
+        checks = orchestrator.acceptance_checks_from_body(body)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["command"], "python -m unittest tests.test_x")
+
+    def test_a_check_after_a_sibling_heading_is_not_captured(self):
+        """A heading at the same level closes the section: the check is out of scope."""
+        body = ("### Critere d'acceptation\nUn rapport.\n"
+                "### Notes\n"
+                "- check: python -m unittest tests.test_x\n")
+        self.assertEqual(orchestrator.acceptance_checks_from_body(body), [])
+
+    def test_a_midsentence_phrase_does_not_open_the_section(self):
+        """A non-heading mention of the phrase must not start capturing checks."""
+        body = ("### Contexte\n"
+                "Voir le critere d'acceptation ci-dessous.\n"
+                "- check: python -m unittest tests.test_x\n")
+        self.assertEqual(orchestrator.acceptance_checks_from_body(body), [])
+
+    def test_a_duplicate_id_inside_the_evidence_is_fail_closed(self):
+        """Two evidence entries sharing an id: a red one can never be hidden."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "x", "command": "c", "exit_code": 1,
+             "reproducible": True, "output_digest": "sha256:red"},
+            {"id": "x", "command": "c", "exit_code": 0,
+             "reproducible": True, "output_digest": "sha256:ok"},
+        ]
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["failed"], ["x"])
+
+    def test_a_green_then_red_duplicate_inside_the_evidence_is_fail_closed(self):
+        """Order must not matter: green-then-red is also rejected."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "x", "command": "c", "exit_code": 0,
+             "reproducible": True, "output_digest": "sha256:ok"},
+            {"id": "x", "command": "c", "exit_code": 1,
+             "reproducible": True, "output_digest": "sha256:red"},
+        ]
+        validated, _ = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+
+    def test_collect_evidence_derives_declared_checks_from_the_body(self):
+        """The producer is WIRED: collect_evidence fills acceptance_checks.
+
+        This is the anti-inertness test: with no explicit checks, a mission body
+        that declares a ``check:`` line must make ``collect_evidence`` carry a
+        structured (unconfirmed) check, which then routes the verdict to
+        NEEDS_HUMAN instead of accepting on the criterion text alone.
+        """
+        body = ("### Critere d'acceptation\nUn test de non-regression passe.\n"
+                "- check: python -m unittest tests.test_x\n")
+        cloud = FakeCloud(mission_body=body)
+        orig = orchestrator._request
+        orchestrator._request = cloud.request
+        try:
+            evidence = orchestrator.collect_evidence(
+                "cid-test-1", expected_roles=self.ROLES, mission_body=body)
+        finally:
+            orchestrator._request = orig
+        self.assertEqual(len(evidence["acceptance_checks"]), 1)
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+        self.assertEqual(len(verdict["needs_human"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
