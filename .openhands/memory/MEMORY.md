@@ -194,3 +194,10 @@
   `?prefix=` est ignore cote serveur (filtrer cote client). `trigger:null` en PATCH -> 500.
 - Le champ `permissions.admin` du GET repo decrit le DEPOT, pas le jeton : protection de
   branche et rulesets restent 403 avec les deux jetons disponibles (action humaine requise).
+
+
+## Charte des trois équipes — 2026-11-17 (OpenHands, v1)
+- Source vérifiée : PR #90, `docs/agents/TEAM_CHARTER_MEMORY_2026-11-17.md`, version 1 ; instruction du propriétaire du 17/11/2026 (statut `validated_by_owner_in_chat`). Mission maîtresse : issue #67.
+- **Lire avant toute mission** : `.openhands/memory/TEAM_COORDINATION_OPENHANDS_2026-11-17.md` (rôles, interdits, chevauchements, risques, sécurité et protocole de preuve). Ce renvoi est une mémoire **de dépôt** ; vérifier séparément son chargement dans une nouvelle session OpenHands.
+- OpenHands = autonomie/exécution cloud ; Hermes = intelligence, routeur, mémoire et Skills ; Kilo = UI Windows, livrables locaux, vérification. Protocoles, workflows, mémoire et garde-fous = revue croisée.
+- Points bloquants : PR #85 touche mémoire/adaptateur Hermes ; PR #87 cockpit cloud ≠ Kilo local ; PR #88/#89 touchent le même workflow ; ne pas supposer Kilo connecté ; révoquer/rotationner la clé OpenHands exposée dans PR #88 sans recopier son secret.
