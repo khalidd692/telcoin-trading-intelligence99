@@ -1156,6 +1156,23 @@ def _slug(text: str, limit: int = 40) -> str:
     return slug[:limit] or "check"
 
 
+def _heading_level(line: str) -> int:
+    """Return the heading level of ``line`` (``#`` count), or 0 for a non-heading.
+
+    A bold-only line (``**...**``) is treated as a level-1 heading, matching
+    :func:`extract_acceptance_criteria`. This lets the producer scope the
+    acceptance section by heading *level*: a sub-heading keeps it open, while a
+    heading at the same or a shallower level closes it. A mid-sentence mention of
+    the acceptance phrase is therefore never mistaken for the section heading.
+    """
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        return len(stripped) - len(stripped.lstrip("#"))
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        return 1
+    return 0
+
+
 def acceptance_checks_from_body(body: str) -> list[dict]:
     """Extract *declared* acceptance checks from a mission body.
 
@@ -1177,17 +1194,21 @@ def acceptance_checks_from_body(body: str) -> list[dict]:
     if not body:
         return []
     checks: list[dict] = []
-    capturing = False
+    section_level = 0
     for raw in body.splitlines():
         line = raw.strip()
-        is_heading = line.startswith("#") or (line.startswith("**") and line.endswith("**"))
-        if _ACCEPTANCE_HEADING.search(line):
-            capturing = True
+        level = _heading_level(line)
+        if level:
+            # A heading: either the acceptance section itself, or the end of it.
+            # Capture continues under deeper sub-headings (``#### Detail``), but a
+            # heading at the same or a shallower level closes the section.
+            if _ACCEPTANCE_HEADING.search(line):
+                section_level = level
+            elif section_level and level <= section_level:
+                section_level = 0
             continue
-        if not capturing:
+        if not section_level:
             continue
-        if is_heading:
-            break
         match = _CHECK_LINE.match(line)
         if match and match.group("cmd").strip():
             cmd = match.group("cmd").strip()
@@ -1247,6 +1268,20 @@ def _check_satisfied(exit_code, reproducible: bool, digest) -> bool:
     return exit_code == 0 and bool(reproducible) and bool(digest)
 
 
+def _entry_satisfied(entry) -> bool:
+    """True only when an entry carries reproducible, positive evidence.
+
+    Non-automatable, unconfirmed (no result recorded) and red entries are all
+    ``False``, so they win any conflict in the fail-closed merge.
+    """
+    _cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
+    if not automatable:
+        return False
+    if exit_code is None and not digest:
+        return False
+    return _check_satisfied(exit_code, reproducible, digest)
+
+
 def _merge_acceptance_checks(evidence_checks, arg_checks) -> list:
     """Merge the evidence's checks with the caller's, fail-closed.
 
@@ -1259,19 +1294,19 @@ def _merge_acceptance_checks(evidence_checks, arg_checks) -> list:
     evidence_list = _as_check_list(evidence_checks) or []
     arg_list = _as_check_list(arg_checks) or []
     merged: dict[str, object] = {}
-    for entry in evidence_list:
+    order: list[str] = []
+    for entry in [*evidence_list, *arg_list]:
         cid = _check_fields(entry)[0]
-        merged[cid] = entry
-    for entry in arg_list:
-        cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
         if cid not in merged:
             merged[cid] = entry
-            continue
-        # Conflict: keep the failing entry so the verdict stays conservative.
-        if not (_check_satisfied(exit_code, reproducible, digest) if automatable
-                else False):
+            order.append(cid)
+        elif not _entry_satisfied(entry):
+            # A failing (or unconfirmed / non-automatable) entry always wins,
+            # whether the clash is between two evidence entries or between the
+            # evidence and the caller: a red check can never be hidden behind a
+            # green one. Order is stable: first-seen ids keep their position.
             merged[cid] = entry
-    return list(merged.values())
+    return [merged[cid] for cid in order]
 
 
 def _role_proves(obs: dict) -> bool:

@@ -882,6 +882,54 @@ class ThreeRoleVerificationTests(unittest.TestCase):
                 # Falls back to the declared-text check: still validates here.
                 self.assertTrue(validated, verdict["checks"])
 
+    def test_a_check_under_a_subheading_is_still_captured(self):
+        """A ``check:`` under a deeper sub-heading stays in the acceptance section."""
+        body = ("### Critere d'acceptation\n"
+                "#### Detail\n"
+                "- check: python -m unittest tests.test_x\n")
+        checks = orchestrator.acceptance_checks_from_body(body)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["command"], "python -m unittest tests.test_x")
+
+    def test_a_check_after_a_sibling_heading_is_not_captured(self):
+        """A heading at the same level closes the section: the check is out of scope."""
+        body = ("### Critere d'acceptation\nUn rapport.\n"
+                "### Notes\n"
+                "- check: python -m unittest tests.test_x\n")
+        self.assertEqual(orchestrator.acceptance_checks_from_body(body), [])
+
+    def test_a_midsentence_phrase_does_not_open_the_section(self):
+        """A non-heading mention of the phrase must not start capturing checks."""
+        body = ("### Contexte\n"
+                "Voir le critere d'acceptation ci-dessous.\n"
+                "- check: python -m unittest tests.test_x\n")
+        self.assertEqual(orchestrator.acceptance_checks_from_body(body), [])
+
+    def test_a_duplicate_id_inside_the_evidence_is_fail_closed(self):
+        """Two evidence entries sharing an id: a red one can never be hidden."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "x", "command": "c", "exit_code": 1,
+             "reproducible": True, "output_digest": "sha256:red"},
+            {"id": "x", "command": "c", "exit_code": 0,
+             "reproducible": True, "output_digest": "sha256:ok"},
+        ]
+        validated, verdict = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+        self.assertEqual(verdict["failed"], ["x"])
+
+    def test_a_green_then_red_duplicate_inside_the_evidence_is_fail_closed(self):
+        """Order must not matter: green-then-red is also rejected."""
+        evidence = self._evidence(self._all_roles_pass())
+        evidence["acceptance_checks"] = [
+            {"id": "x", "command": "c", "exit_code": 0,
+             "reproducible": True, "output_digest": "sha256:ok"},
+            {"id": "x", "command": "c", "exit_code": 1,
+             "reproducible": True, "output_digest": "sha256:red"},
+        ]
+        validated, _ = orchestrator.verify_outcome("finished", evidence)
+        self.assertFalse(validated)
+
     def test_collect_evidence_derives_declared_checks_from_the_body(self):
         """The producer is WIRED: collect_evidence fills acceptance_checks.
 
