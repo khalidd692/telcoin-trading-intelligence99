@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -16,11 +17,15 @@ import sys
 from threading import Thread
 import time
 
-from policy import is_eligible_mission, utcnow_iso
+from policy import (
+    approval_is_authorized, has_authenticated_approval, is_eligible_mission,
+    mission_content, mission_digest, utcnow_iso,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from protocol.store import FileStore
+from local_coordination import CoordinationUnavailable, SharedCoordination, accepted_proof
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
 BACKLOG = "docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/BACKLOG.json"
@@ -144,7 +149,11 @@ def validate_issue(issue, approval):
         return "Attribution exclusive divergente."
     if digest(issue.get("body") or "") != approval["issue_sha256"]:
         return "Contenu GitHub modifié depuis l’approbation."
-    if approval["expires_at"] <= utcnow_iso():
+    try:
+        expiry = datetime.strptime(approval["expires_at"], "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return "Date d’expiration de l’approbation invalide."
+    if expiry.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc):
         return "Approbation expirée."
     return None
 
@@ -171,8 +180,9 @@ class Supervisor:
             raise Blocked(f"Checkpoint illisible pour {mission['id']}")
         return value or {}
 
-    def run(self, missions, blockers=None):
+    def run(self, missions, blockers=None, dependency_proofs=None):
         blockers = blockers or {}
+        dependency_proofs = dependency_proofs or {}
         for mission in sorted(missions, key=lambda item: (item["priority"], item["id"])):
             saved = self.state(mission)
             stage = saved.get("status")
@@ -187,13 +197,16 @@ class Supervisor:
                 continue
             unmet = [
                 dep for dep in mission.get("dependencies", [])
-                if self.state({"id": dep}).get("status") != "ACCEPTED"
+                if dep not in dependency_proofs
+                and (not self.demo or self.state({"id": dep}).get("status") != "ACCEPTED")
             ]
             if unmet:
                 self.checkpoint(mission, "WAITING_DEPENDENCY", dependencies=unmet)
                 continue
             try:
-                if stage == "WORKER_EXITED":
+                if not self.demo:
+                    self.run_shared(mission, saved)
+                elif stage == "WORKER_EXITED":
                     if saved["approval"] != digest(json.dumps(mission, sort_keys=True)):
                         raise Blocked("Approbation différente depuis la sortie du worker.")
                     self.finalize(mission, saved["base"], saved["branch"])
@@ -203,17 +216,54 @@ class Supervisor:
                 status = "INTERRUPTED" if self.state(mission).get("status") == "RUNNING" else "WAITING_QUOTA"
                 self.checkpoint(mission, status, reason=str(exc))
                 return False
+            except CoordinationUnavailable as exc:
+                # Preserve a post-worker checkpoint for eventual reconciliation.
+                if self.state(mission).get("status") not in {"RUNNING", "WORKER_EXITED"}:
+                    self.checkpoint(mission, "WAITING_COORDINATION", reason=str(exc))
+                else:
+                    print(f"WAITING_COORDINATION {mission['id']}: {exc}", flush=True)
             except (Blocked, OSError, ValueError, subprocess.TimeoutExpired) as exc:
                 # Details from third-party processes stay out of the shared ledger.
                 reason = str(exc) if isinstance(exc, Blocked) else type(exc).__name__
                 self.checkpoint(mission, "BLOCKED" if isinstance(exc, Blocked) else "FAILED", reason=reason)
         return True
 
-    def execute(self, mission):
+    def run_shared(self, mission, saved):
+        shared = SharedCoordination()
+        approval = digest(json.dumps(mission, sort_keys=True))
+        if saved.get("status") == "WORKER_EXITED":
+            if saved["approval"] != approval:
+                raise CoordinationUnavailable("L’approbation du checkpoint a changé.")
+            owner = saved["shared_owner"]
+            remote, finish = shared.resume(mission["id"], mission["issue"], approval, owner)
+            fence = lambda: shared.owns(owner)
+            if remote["status"] == "PREPARED":
+                def fence():
+                    raise CoordinationUnavailable("Le commit distant est déjà enregistré.")
+            self.finalize(mission, saved["base"], saved["branch"], fence=fence, finish=finish)
+            return
+        # Check the quota before creating a durable reservation.
+        limits = allowance(rate_snapshot(self.cli, self.root))
+        with shared.claim(mission["id"], mission["issue"], approval) as (owner, finish):
+            try:
+                reason = fetch_approved_issue(mission)
+                if reason:
+                    raise Blocked(reason)
+                self.execute(
+                    mission, limits=limits, shared_owner=owner,
+                    fence=lambda: shared.owns(owner), finish=finish,
+                )
+            except (Blocked, QuotaBlocked, ValueError):
+                # These are known outcomes. A timeout or interruption leaves the
+                # reservation in place until the worker is reconciled.
+                finish("BLOCKED")
+                raise
+
+    def execute(self, mission, *, limits=None, shared_owner=None, fence=None, finish=None):
         task_id = mission["id"]
         if not re.fullmatch(r"[A-Z0-9-]{1,48}", task_id):
             raise Blocked("Identifiant de mission invalide.")
-        bounds = allowance(rate_snapshot(self.cli, self.root))
+        bounds = limits if limits is not None else allowance(rate_snapshot(self.cli, self.root))
         workspace = self.root / task_id
         self.checkpoint(mission, "RUNNING", workspace=str(workspace), quota_used=bounds)
         if workspace.exists():
@@ -243,6 +293,8 @@ class Supervisor:
             "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
             "-c", "sandbox_workspace_write.exclude_slash_tmp=true", "-",
         ]
+        if fence:
+            fence()
         result = call(args, cwd=workspace, env=model_environment(), timeout=240, input_text=prompt)
         if result.returncode:
             if re.search(r"usage limit|rate.?limit|quota|too many requests", result.stderr, re.I):
@@ -252,11 +304,11 @@ class Supervisor:
             raise Blocked(f"codex exec a quitté avec {result.returncode}")
         self.checkpoint(
             mission, "WORKER_EXITED", base=base, branch=branch, codex_exit=result.returncode,
-            approval=digest(json.dumps(mission, sort_keys=True)),
+            approval=digest(json.dumps(mission, sort_keys=True)), shared_owner=shared_owner,
         )
-        self.finalize(mission, base, branch)
+        self.finalize(mission, base, branch, fence=fence, finish=finish)
 
-    def finalize(self, mission, base, branch):
+    def finalize(self, mission, base, branch, *, fence=None, finish=None):
         task_id = mission["id"]
         workspace = self.root / task_id
         target = workspace / mission["path"]
@@ -274,6 +326,8 @@ class Supervisor:
         if commit == base:
             if status not in {f"?? {mission['path']}", f"A  {mission['path']}"}:
                 raise Blocked("Le diff dépasse le nouveau fichier autorisé.")
+            if fence:
+                fence()
             checked(["git", "add", "--", mission["path"]], cwd=workspace)
             self.commit(workspace, f"TEL99 {task_id}: résultat vérifié")
             commit = checked(["git", "rev-parse", "HEAD"], cwd=workspace)
@@ -292,6 +346,8 @@ class Supervisor:
             f"TEL99 {task_id}\n\nBase {base}\nBranche {branch}\nCommit {commit}\n"
             f"Fichier {mission['path']}\nSHA-256 {actual}\n", encoding="utf-8",
         )
+        if finish:
+            finish("PREPARED", commit)
         self.checkpoint(mission, "ACCEPTED" if self.demo else "PREPARED", **proof)
 
     def commit(self, cwd, message, *, empty=False):
@@ -335,6 +391,7 @@ def approved_queue(path, backlog, *, master_state):
     missions = json.loads(path.read_text(encoding="utf-8-sig"))
     blockers = {}
     seen = set()
+    issue_numbers = set()
     for mission in missions:
         task_id = mission["id"]
         if not re.fullmatch(r"[A-Z0-9-]{1,48}", task_id) or task_id in seen:
@@ -351,17 +408,108 @@ def approved_queue(path, backlog, *, master_state):
             or type(mission["issue"]) is not int or mission["issue"] <= 0
         ):
             raise Blocked("Le pilote GitHub exige un nouveau fichier de preuve et un SHA de base épinglé.")
-        try:
-            issue = json.loads(checked(["gh", "api", f"repos/{REPO}/issues/{mission['issue']}"]))
-        except (Blocked, OSError, ValueError, subprocess.TimeoutExpired):
-            blockers[task_id] = "Issue de mission indisponible."
-            continue
-        reason = validate_issue(issue, mission)
+        if mission["issue"] in issue_numbers:
+            raise Blocked("Un même ticket est associé à plusieurs tâches.")
+        issue_numbers.add(mission["issue"])
+        reason = fetch_approved_issue(mission)
+        if mission.get("role") != "codex":
+            reason = "Mandat local du rôle Codex absent."
         if master_state != "open":
             reason = "Issue maître fermée."
         if reason:
             blockers[task_id] = reason
     return missions, blockers
+
+
+def issue_comments(number):
+    pages = json.loads(checked([
+        "gh", "api", "--paginate", "--slurp",
+        f"repos/{REPO}/issues/{number}/comments?per_page=100",
+    ]))
+    return [comment for page in pages for comment in page]
+
+
+def fetch_approved_issue(mission):
+    number = mission["issue"]
+    try:
+        issue = json.loads(checked(["gh", "api", f"repos/{REPO}/issues/{number}"]))
+        reason = validate_issue(issue, mission)
+        if reason:
+            return reason
+        if is_eligible_mission(issue, "tel99-mission"):
+            return "Le ticket figure aussi dans la file OpenHands."
+        approved, _ = approval_is_authorized(issue, {"khalidd692"})
+        if not approved or not has_authenticated_approval(
+            issue, issue_comments(number), now=datetime.now(timezone.utc),
+        ):
+            return "Approbation GitHub #104 authentifiée et liée au contenu absente ou expirée."
+    except (Blocked, OSError, ValueError, subprocess.TimeoutExpired):
+        return "Issue de mission ou approbation GitHub indisponible."
+    return None
+
+
+def dependency_evidence(missions):
+    wanted = {dep for mission in missions for dep in mission["dependencies"]}
+    proofs = {}
+    if not wanted:
+        return proofs
+
+    def fetch(resource):
+        return json.loads(checked(["gh", "api", f"repos/{REPO}/{resource}"]))
+
+    descriptors = {}
+    for mission in missions:
+        for task, descriptor in mission.get("dependency_evidence", {}).items():
+            if task in descriptors and descriptors[task] != descriptor:
+                raise Blocked(f"Politiques de preuve ambiguës pour {task}")
+            descriptors[task] = descriptor
+    for task in wanted & descriptors.keys():
+        descriptor = descriptors[task]
+        try:
+            issue = descriptor["issue"]
+            if type(issue) is not int or issue < 1:
+                continue
+            mission_issue = fetch(f"issues/{issue}")
+            body = mission_issue.get("body") or ""
+            if (
+                digest(body) != descriptor["issue_sha256"]
+                or mission_digest(mission_content(mission_issue)) != descriptor["mission_digest"]
+            ):
+                continue
+            proof = accepted_proof(
+                descriptor, repository=REPO, mission_body=body, fetch=fetch,
+                comments=issue_comments(94),
+            )
+            if proof:
+                proofs[task] = proof
+        except (Blocked, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            continue
+    return proofs
+
+
+def save_admission(supervisor, tasks, missions, blockers, proofs):
+    approved = {mission["id"] for mission in missions}
+    rows = []
+    for task in tasks:
+        task_id = task["id"]
+        missing = [dep for dep in task["dependencies"] if dep not in proofs]
+        reasons = []
+        if task_id not in approved:
+            reasons.append("Réservée au propriétaire" if task["owner"] == "owner"
+                           else "Aucun mandat d’exécution Codex approuvé pour ce lot")
+        if task_id in blockers:
+            reasons.append(blockers[task_id])
+        if missing:
+            reasons.append("Acceptation indépendante manquante pour " + ", ".join(missing))
+        rows.append({**task, "unverified_dependencies": missing, "reasons": reasons})
+    try:
+        SharedCoordination()
+        coordination_status = "CONFIGURED_UNVERIFIED"
+    except CoordinationUnavailable:
+        coordination_status = "WAITING_COORDINATION"
+    supervisor.store.put("github/admission", {
+        "at": utcnow_iso(), "coordination": coordination_status, "tasks": rows, "proofs": proofs,
+    })
 
 
 def main():
@@ -383,12 +531,15 @@ def main():
                 try:
                     if args.demo:
                         missions, blockers = demo_missions(), {}
+                        proofs = {}
                     else:
                         tasks, state = sync_github(supervisor)
                         if args.approvals or approvals.is_file():
                             missions, blockers = approved_queue(approvals, tasks, master_state=state)
                         else:
                             missions, blockers = [], {}
+                        proofs = dependency_evidence(missions)
+                        save_admission(supervisor, tasks, missions, blockers, proofs)
                         print(f"GitHub #94 : {len(tasks)} tâches, {len(missions)} approbations locales", flush=True)
                     if missions:
                         if not args.codex:
@@ -398,7 +549,7 @@ def main():
                             login.stdout + "\n" + login.stderr
                         ).splitlines():
                             raise Blocked("Authentification ChatGPT requise.")
-                        if not supervisor.run(missions, blockers):
+                        if not supervisor.run(missions, blockers, proofs):
                             return 2
                     if args.demo:
                         return 0 if all(

@@ -4,11 +4,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 AUTOMATION = Path(__file__).resolve().parents[1] / "scripts" / "agents" / "automation"
 sys.path.insert(0, str(AUTOMATION))
 import local_codex as runner
+import local_coordination as coordination
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows supervisor")
@@ -105,6 +106,89 @@ class LocalCodexTests(unittest.TestCase):
         ):
             with self.subTest(snapshot=snapshot), self.assertRaises(runner.QuotaBlocked):
                 runner.allowance(snapshot)
+
+    def test_github_run_without_shared_config_does_not_launch(self):
+        live = runner.Supervisor(self.root, "codex.exe")
+        task = dict(self.first, issue=123)
+        with patch.object(coordination, "kv_env", return_value=("", "")):
+            with patch.object(live, "execute") as execute:
+                live.run([task])
+                execute.assert_not_called()
+        self.assertEqual(live.state(task)["status"], "WAITING_COORDINATION")
+
+    def test_shared_lease_holds_ambiguous_work_and_rejects_replay(self):
+        backend = Mock()
+        records = {}
+
+        def update(key, new, expected):
+            if records.get(key) != expected:
+                return False
+            records[key] = new
+            return True
+
+        backend.put_cas.side_effect = update
+        backend.get.side_effect = records.get
+        shared = coordination.SharedCoordination.__new__(coordination.SharedCoordination)
+        shared.store = backend
+        cloud = coordination.orchestrator
+        with patch.object(shared, "owns"), patch.object(cloud, "kv_get", return_value={"active": None}):
+            with patch.object(cloud, "acquire_lock", return_value=(True, "")):
+                with patch.object(cloud, "release_lock") as release:
+                    with self.assertRaises(InterruptedError):
+                        with shared.claim("S-05", 123, "approved") as (owner, finish):
+                            raise InterruptedError
+                    release.assert_not_called()
+                    _, finish = shared.resume("S-05", 123, "approved", owner)
+                    finish("PREPARED", "abc")
+                    release.assert_called_once_with(owner)
+                    with self.assertRaises(coordination.CoordinationUnavailable):
+                        with shared.claim("S-05", 123, "approved"):
+                            self.fail("mission replayed")
+        self.assertEqual(records["codex-windows/S-05"]["commit"], "abc")
+
+    def test_real_windows_processes_race_for_one_local_cas_record(self):
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "from protocol.store import FileStore; "
+            "print(FileStore(sys.argv[2]).put_cas('mission/claim', sys.argv[3], None))"
+        )
+        args = [sys.executable, "-B", "-c", script, str(AUTOMATION.parent), str(self.root)]
+        children = []
+        try:
+            for actor in ("first", "second"):
+                children.append(subprocess.Popen(
+                    [*args, actor], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                ))
+            outcomes = []
+            for child in children:
+                stdout, stderr = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 0, stderr)
+                outcomes.append(stdout.strip())
+            self.assertCountEqual(outcomes, ["True", "False"])
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+
+    def test_verified_acceptance_must_match_the_approved_sha_and_all_checks(self):
+        spec = {
+            "criteria": ["criterion-1", "criterion-2"], "verifiers": ["verifier"],
+            "conversation_id": "conversation", "mission_digest": "digest",
+            "work_branch": "work", "trusted_workflows": {}, "commit_sha": "expected",
+        }
+        proof = {"commit_sha": "expected"}
+        checks = [{"id": "criterion-1", "exit_code": 0}, {"id": "criterion-2", "exit_code": 0}]
+        for results, attestation, expected in (
+            (checks, proof, proof),
+            (checks[:1], proof, None),
+            ([checks[0], dict(checks[1], exit_code=1)], proof, None),
+            (checks, {"commit_sha": "wrong"}, None),
+        ):
+            with patch.object(coordination.acceptance, "verify", return_value=(results, attestation)):
+                self.assertEqual(coordination.accepted_proof(
+                    spec, repository=runner.REPO, mission_body="body", fetch=Mock(), comments=[],
+                ), expected)
 
 
 if __name__ == "__main__":
