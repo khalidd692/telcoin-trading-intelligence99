@@ -14,6 +14,7 @@ Design rules encoded here:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 
@@ -181,3 +182,130 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
         "+00:00", "Z"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Mission approval (S-06): content-bound AND actor-authorised
+# --------------------------------------------------------------------------- #
+# A mission label alone is not an authorisation. Before a mission may start, the
+# issue must carry a single machine-readable approval marker whose (a) content
+# hash matches the issue's current title+body and (b) approver is on an explicit
+# allowlist. An issue edited after approval therefore fails the hash check, and
+# an approval written by anyone not on the allowlist is refused. Both checks are
+# pure and fail-closed, so the decision can be unit-tested with no network.
+#
+# This consumes the *same* approval record shape the handoff engine defines
+# (``approved_content_hash`` / ``approved_by`` / ``approved_at``); the record is
+# carried inside the issue body as a comment so the decision needs no second
+# store. The hashing mirrors the repo's existing sha256 idiom.
+#
+# Marker syntax (one line, HTML comment so it stays invisible on GitHub):
+#   <!-- tel99-approval:v1 hash=sha256:<hex> by=<login> -->
+APPROVAL_SCHEMES = frozenset({"v1"})
+# Any line that *looks* like an approval marker (well-formed or not). Used to
+# detect and reject ambiguous or unbound marker-like content.
+_MARKER_LINE_PREFIX = re.compile(r"^\s*<!--\s*tel99-approval:", re.IGNORECASE)
+# Exactly one well-formed v1 marker line: a sha256 hex digest, a non-empty
+# approver with no whitespace, and nothing else on the line. A line that
+# starts like a marker but does not match this is NOT removed from the
+# digest, so any text an editor smuggles onto such a line still changes the
+# hash and is refused.
+_WELL_FORMED_MARKER = re.compile(
+    r"^\s*<!--\s*tel99-approval:(?P<scheme>[A-Za-z0-9._-]+)"
+    r"\s+hash=(?P<hash>sha256:[0-9a-f]{64})\s+by=(?P<by>\S+)\s*-->\s*$"
+)
+
+
+def mission_content(issue: dict) -> str:
+    """The content an approval is bound to: normalised title + body.
+
+    The approval marker line itself is removed so approving an issue does not
+    change the very digest being approved. Trailing whitespace and trailing
+    blank lines are stripped, so a marker appended at the end never perturbs the
+    digest.
+    """
+    if not isinstance(issue, dict):
+        return ""
+    raw = f"{issue.get('title') or ''}\n{issue.get('body') or ''}"
+    lines = [line.rstrip() for line in raw.strip().splitlines()]
+    # Remove only an exact, well-formed approval marker line from the digest.
+    # A line that merely starts with the marker prefix is kept, so text an
+    # editor smuggles onto such a line is still covered by the hash (and the
+    # parser below refuses the malformed line).
+    lines = [line for line in lines if not _WELL_FORMED_MARKER.match(line)]
+    return "\n".join(lines).strip()
+
+
+def mission_digest(content: str) -> str:
+    """``sha256:<hex>`` over the normalised mission content."""
+    normalised = "\n".join(
+        line.rstrip() for line in (content or "").strip().splitlines()
+    )
+    return "sha256:" + hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def approval_marker(content: str, *, approver: str, scheme: str = "v1") -> str:
+    """Render the approval marker an authorised actor places in the body.
+
+    Kept here so the writer and the reader cannot drift apart.
+    """
+    return (
+        f"<!-- tel99-approval:{scheme} hash={mission_digest(content)} "
+        f"by={approver} -->"
+    )
+
+
+def read_approval(issue: dict) -> tuple[dict | None, str]:
+    """Extract the approval record from the issue body.
+
+    Returns ``(record, reason)``. ``record`` is ``None`` when no well-formed
+    marker of a known scheme is present, and ``reason`` explains why.
+    """
+    body = issue.get("body") if isinstance(issue, dict) else None
+    text = body or ""
+    # Every line that begins like a marker must be a single, well-formed one.
+    # Two markers (or one malformed) is ambiguous and is refused: a smuggled
+    # marker must never be able to shadow the real approval.
+    marker_lines = [ln for ln in text.splitlines() if _MARKER_LINE_PREFIX.match(ln)]
+    if not marker_lines:
+        return None, "no content-bound approval on the issue"
+    if len(marker_lines) > 1:
+        return None, "multiple approval markers present; refusing an ambiguous approval"
+    match = _WELL_FORMED_MARKER.match(marker_lines[0])
+    if not match:
+        return None, "malformed approval marker; refusing"
+    scheme = match.group("scheme")
+    if scheme not in APPROVAL_SCHEMES:
+        return None, f"unsupported approval scheme {scheme!r}"
+    approver = match.group("by").strip()
+    if not approver:
+        return None, "the approval marker names no approver"
+    return {
+        "approved_content_hash": match.group("hash"),
+        "approved_by": approver,
+        "approved_at": None,
+    }, "approval marker found"
+
+
+def approval_is_authorized(
+    issue: dict, authorized: "frozenset[str] | set[str] | list[str] | None"
+) -> tuple[bool, str]:
+    """True only for a current, content-bound approval by an authorised actor.
+
+    Fail-closed: an empty/missing allowlist refuses every mission; a missing or
+    malformed marker refuses; an unknown approver refuses; an issue edited after
+    approval refuses (hash mismatch). Returns ``(ok, reason)``.
+    """
+    allowed = frozenset(str(a) for a in (authorized or ()))
+    if not allowed:
+        return False, "no authorized approvers configured"
+    record, reason = read_approval(issue)
+    if record is None:
+        return False, reason
+    if record["approved_by"] not in allowed:
+        return False, (
+            f"approval by {record['approved_by']!r} is not an authorized approver"
+        )
+    if mission_digest(mission_content(issue)) != record["approved_content_hash"]:
+        return False, "content changed after approval (hash mismatch)"
+    return True, "approved content unchanged and approver authorized"

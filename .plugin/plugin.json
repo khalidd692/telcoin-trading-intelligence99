@@ -95,6 +95,14 @@
           "type": "boolean",
           "default": false,
           "description": "Kill-switch. When true, the run stops immediately (exit 3) before any probe, spend or conversation. Also settable without redeploy via the env var TEL99_EMERGENCY_STOP, the sentinel file .tel99-automation-state/EMERGENCY_STOP, or the KV key emergency_stop."
+        },
+        "authorized_approvers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "S-06: GitHub logins allowed to authorise a mission through a content-bound approval marker in the issue body (<!-- tel99-approval:v1 hash=sha256:... by=<login> -->). Empty means no approver is authorised, so no mission can start (fail-closed). The owner sets this to their own login to enable missions."
         }
       }
     },
