@@ -156,8 +156,10 @@ def build_payload(mission: str, suffix: str, llm: dict | None = None) -> dict:
     return {
         "workspace": {"kind": "LocalWorkspace", "working_dir": str(REPO_ROOT)},
         "worktree": False,
+        # See orchestrator.build_payload: an unattended run must not stall in
+        # ``waiting_for_confirmation`` on UNKNOWN-risk coordination actions.
         "confirmation_policy": {"kind": "ConfirmRisky", "threshold": "HIGH",
-                                "confirm_unknown": True},
+                                "confirm_unknown": False},
         "security_analyzer": {"kind": "LLMSecurityAnalyzer"},
         "max_iterations": cfg.DEFAULT_MAX_ITERATIONS,
         "max_budget_per_run": cfg.DEFAULT_MAX_BUDGET_USD,
