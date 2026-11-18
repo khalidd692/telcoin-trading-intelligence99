@@ -20,6 +20,7 @@ if ((Test-Path -LiteralPath $kvProfile -PathType Leaf) -and
     -not ($env:TEL99_UPSTASH_REST_URL -or $env:TEL99_UPSTASH_REST_TOKEN -or $env:TEL99_UPSTASH_FREE)) {
     $profileData = Get-Content -LiteralPath $kvProfile -Raw | ConvertFrom-Json
     if ($profileData.free -ne $true) { throw 'Profil Upstash Free invalide.' }
+    Import-Module -Name (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $protectedToken = ConvertTo-SecureString $profileData.token
     $env:TEL99_UPSTASH_REST_URL = $profileData.url
     $env:TEL99_UPSTASH_REST_TOKEN = [Net.NetworkCredential]::new('', $protectedToken).Password
