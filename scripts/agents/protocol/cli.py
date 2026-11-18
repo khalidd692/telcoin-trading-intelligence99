@@ -12,6 +12,10 @@ Commands:
     resume     resume an interrupted mission
     status     show a mission's state, steps, errors and result
     demo       run the end-to-end demonstration (a real distributed mission)
+    next-task  select the highest admissible backlog task (no human relaying)
+    handoff    record a handoff event and print the next admissible task
+    receive    idempotently receive a message (one action per request id)
+    verify     compute the real verdict of a mission from evidence
 
 Examples:
     python -m scripts.agents.protocol.cli actors
@@ -118,6 +122,53 @@ def cmd_demo(args) -> int:
     return demo.run(bus_root=args.bus_root)
 
 
+def cmd_next_task(args) -> int:
+    from protocol import handoff
+
+    backlog = handoff.load_backlog(args.backlog)
+    ledger = handoff.HandoffLedger()
+    report = ledger.report(backlog, owner=args.owner or None)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0 if report["next_task"] else 3
+
+
+def cmd_handoff(args) -> int:
+    from protocol import handoff
+
+    backlog = handoff.load_backlog(args.backlog)
+    ledger = handoff.HandoffLedger()
+    ledger.record_handoff(task_id=args.task, owner=args.owner, status=args.status,
+                          sha=args.sha, tests=args.tests, proof=args.proof,
+                          next_task=args.next_task, block_reason=args.block_reason)
+    nxt = ledger.next_task(backlog, owner=args.owner)
+    print(json.dumps({"recorded": args.task, "status": args.status,
+                      "next_task": nxt.get("id") if nxt else None}, indent=2))
+    return 0
+
+
+def cmd_receive(args) -> int:
+    from protocol import handoff
+
+    inbox = handoff.Inbox(args.receiver)
+    message = json.loads(pathlib.Path(args.message).read_text(encoding="utf-8"))
+    out = inbox.receive(message)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_verify(args) -> int:
+    from protocol import handoff
+
+    payload = json.loads(pathlib.Path(args.file).read_text(encoding="utf-8"))
+    verdict = handoff.verify_mission(
+        conversation_finished=bool(payload.get("conversation_finished")),
+        roles=payload.get("roles", {}),
+        acceptance_checks=payload.get("acceptance_checks", []),
+    )
+    print(json.dumps(verdict, indent=2, ensure_ascii=False))
+    return 0 if verdict["validated"] else 4
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -158,6 +209,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("demo", help="run the end-to-end demonstration")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("next-task", help="select the highest admissible task")
+    p.add_argument("--backlog", required=True)
+    p.add_argument("--owner", default="")
+    p.set_defaults(func=cmd_next_task)
+
+    p = sub.add_parser("handoff", help="record a handoff and pick the next task")
+    p.add_argument("--backlog", required=True)
+    p.add_argument("--task", required=True)
+    p.add_argument("--owner", required=True)
+    p.add_argument("--status", required=True)
+    p.add_argument("--sha", default="")
+    p.add_argument("--tests", default="")
+    p.add_argument("--proof", default="")
+    p.add_argument("--next-task", dest="next_task", default="")
+    p.add_argument("--block-reason", dest="block_reason", default="")
+    p.set_defaults(func=cmd_handoff)
+
+    p = sub.add_parser("receive", help="idempotently receive a message")
+    p.add_argument("--receiver", required=True)
+    p.add_argument("--message", required=True)
+    p.set_defaults(func=cmd_receive)
+
+    p = sub.add_parser("verify", help="compute the real verdict of a mission")
+    p.add_argument("--file", required=True)
+    p.set_defaults(func=cmd_verify)
     return parser
 
 
