@@ -25,7 +25,7 @@ from policy import (
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from protocol.store import FileStore
-from local_coordination import CoordinationUnavailable, SharedCoordination, accepted_proof
+from local_coordination import CoordinationUnavailable, UpstashCoordination, accepted_proof, coordination_backend
 from local_code import NATIVE_BASE, contract_digest, status_paths, synthetic_missions, valid_scope
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
@@ -237,7 +237,7 @@ class Supervisor:
         return True
 
     def run_shared(self, mission, saved):
-        shared = SharedCoordination()
+        shared = coordination_backend()
         approval = digest(json.dumps(mission, sort_keys=True))
         if saved.get("status") == "WORKER_EXITED":
             if saved["approval"] != approval:
@@ -643,7 +643,7 @@ def save_admission(supervisor, tasks, missions, blockers, proofs):
             reasons.append("Acceptation indépendante manquante pour " + ", ".join(missing))
         rows.append({**task, "unverified_dependencies": missing, "reasons": reasons})
     try:
-        SharedCoordination()
+        coordination_backend()
         coordination_status = "CONFIGURED_UNVERIFIED"
     except CoordinationUnavailable:
         coordination_status = "WAITING_COORDINATION"
@@ -664,11 +664,15 @@ def main():
     args = parser.parse_args()
     if args.preflight:
         try:
-            SharedCoordination().probe()
+            backend = coordination_backend()
+            backend.probe()
         except CoordinationUnavailable as exc:
             print(f"BLOCKED_KV: {exc}", file=sys.stderr, flush=True)
             return 2
-        print("KV_READ_READY: l’écriture CAS reste à contrôler par une prise réelle.", flush=True)
+        if isinstance(backend, UpstashCoordination):
+            print("KV_CAS_READY: collision, réservation et fencing vérifiés sur Upstash.", flush=True)
+        else:
+            print("KV_READ_READY: l’écriture CAS reste à contrôler par une prise réelle.", flush=True)
         return 0
     demo = args.demo or args.code_demo
     demo_dir = "code-demo" if args.code_demo else "demo"

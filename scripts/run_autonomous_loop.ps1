@@ -13,6 +13,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$kvProfile = Join-Path $root '.tel99-automation-state/local-codex/upstash-user.json'
+if ((Test-Path -LiteralPath $kvProfile -PathType Leaf) -and
+    -not ($env:TEL99_UPSTASH_REST_URL -or $env:TEL99_UPSTASH_REST_TOKEN -or $env:TEL99_UPSTASH_FREE)) {
+    $profileData = Get-Content -LiteralPath $kvProfile -Raw | ConvertFrom-Json
+    if ($profileData.free -ne $true) { throw 'Profil Upstash Free invalide.' }
+    $protectedToken = ConvertTo-SecureString $profileData.token
+    $env:TEL99_UPSTASH_REST_URL = $profileData.url
+    $env:TEL99_UPSTASH_REST_TOKEN = [Net.NetworkCredential]::new('', $protectedToken).Password
+    $env:TEL99_UPSTASH_FREE = '1'
+}
 if (-not $Python) {
     $installed = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($installed -and $installed.Source -notlike '*\WindowsApps\*') {
@@ -30,6 +40,9 @@ if (-not $Codex) {
         $Codex = $installed.Source
     } else {
         $local = Join-Path $root '.tel99-automation-state\codex-cli\node_modules\@openai'
+        if (-not (Test-Path -LiteralPath $local)) {
+            $local = Join-Path (Split-Path -Parent $root) 'codex-cli\node_modules\@openai'
+        }
         if (Test-Path -LiteralPath $local) {
             $runner = Get-ChildItem -LiteralPath $local -Filter codex.exe -File -Recurse |
                 Select-Object -First 1

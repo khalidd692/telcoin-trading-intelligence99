@@ -1,12 +1,15 @@
 """Windows binding to the existing TEL99 CAS lease and GitHub verifier."""
 
 from contextlib import contextmanager
+import os
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import acceptance
 import orchestrator
 from protocol.store import KvStore, StoreError, kv_env
+from upstash_coordination import RedisLease, RedisRest, RedisUnavailable
 
 
 class CoordinationUnavailable(RuntimeError):
@@ -41,7 +44,7 @@ class SharedCoordination:
         ):
             raise CoordinationUnavailable("Le verrou partagé de #94 a changé.")
 
-    def update(self, key, new_value, expected):
+    def update(self, key, new_value, expected, *, owner):
         try:
             return self.store.put_cas(key, new_value, expected)
         except (StoreError, OSError, ValueError) as exc:
@@ -53,11 +56,21 @@ class SharedCoordination:
         except (StoreError, OSError, ValueError) as exc:
             raise CoordinationUnavailable("Lecture de la réservation partagée impossible.") from exc
 
+    def acquire(self, owner):
+        acquired, _ = orchestrator.acquire_lock(owner)
+        return acquired
+
+    def release(self, owner):
+        orchestrator.release_lock(owner)
+
+    def shared_state(self):
+        return orchestrator.kv_get(orchestrator._STATE_KEY)
+
     @contextmanager
     def claim(self, task_id, issue_number, approval):
         owner = f"codex-windows-{uuid4().hex}"
         try:
-            acquired, _ = orchestrator.acquire_lock(owner)
+            acquired = self.acquire(owner)
         except Exception as exc:
             raise CoordinationUnavailable("La prise CAS de #94 est indisponible.") from exc
         if not acquired:
@@ -66,7 +79,7 @@ class SharedCoordination:
         try:
             self.owns(owner)
             try:
-                cloud = orchestrator.kv_get(orchestrator._STATE_KEY)
+                cloud = self.shared_state()
             except (OSError, ValueError, KeyError) as exc:
                 raise CoordinationUnavailable("Lecture de l’état partagé impossible.") from exc
             if not isinstance(cloud, dict) or "active" not in cloud or cloud["active"] is not None:
@@ -74,7 +87,7 @@ class SharedCoordination:
             key = f"codex-windows/{task_id}"
             claim = {"id": task_id, "issue": issue_number, "approval": approval,
                      "owner": owner, "status": "CLAIMED"}
-            if not self.update(key, claim, None):
+            if not self.update(key, claim, None, owner=owner):
                 raise CoordinationUnavailable("Une réservation durable existe déjà pour cette mission.")
             safe_to_release = False
 
@@ -82,14 +95,14 @@ class SharedCoordination:
                 nonlocal safe_to_release
                 self.owns(owner)
                 terminal = {**claim, "status": status, "commit": commit}
-                if not self.update(key, terminal, claim):
+                if not self.update(key, terminal, claim, owner=owner):
                     raise CoordinationUnavailable("La réservation partagée a changé.")
                 safe_to_release = True
 
             yield owner, finish
         finally:
             if safe_to_release:
-                orchestrator.release_lock(owner)
+                self.release(owner)
 
     def resume(self, task_id, issue_number, approval, owner):
         key = f"codex-windows/{task_id}"
@@ -107,11 +120,87 @@ class SharedCoordination:
             if current == terminal:
                 return
             self.owns(owner)
-            if not self.update(key, terminal, claim):
+            if not self.update(key, terminal, claim, owner=owner):
                 raise CoordinationUnavailable("La réservation partagée a changé.")
-            orchestrator.release_lock(owner)
+            self.release(owner)
 
         return current, finish
+
+
+class UpstashCoordination(SharedCoordination):
+    """CAS for the Windows ticket lane, with no legacy-service fallback."""
+
+    def __init__(self, url, token):
+        try:
+            self.store = RedisLease(RedisRest(url, token))
+        except RedisUnavailable as exc:
+            raise CoordinationUnavailable(str(exc)) from exc
+
+    def acquire(self, owner):
+        return self.store.acquire(owner, ttl_ms=1_800_000)
+
+    def release(self, owner):
+        self._run(self.store.release, owner)
+
+    def owns(self, owner):
+        if not self._run(self.store.owns, owner):
+            raise CoordinationUnavailable("Le verrou Redis a changé ou expiré.")
+
+    def update(self, key, new_value, expected, *, owner):
+        return self._run(self.store.put_cas, key, new_value, expected, owner=owner)
+
+    def read(self, key):
+        return self._run(self.store.read, key)
+
+    def shared_state(self):
+        state = self.read("state")
+        return {"active": None} if state is None else state
+
+    def _run(self, op, *args, **kwargs):
+        try:
+            return op(*args, **kwargs)
+        except (RedisUnavailable, OSError, ValueError) as exc:
+            raise CoordinationUnavailable("Le CAS Redis est indisponible.") from exc
+
+    def probe(self):
+        """Exercise the real endpoint in a unique, disposable key namespace."""
+        namespace = "{tel99-94-probe-" + uuid4().hex + "}"
+        left, right = (RedisLease(self.store.transport.fork(), namespace) for _ in range(2))
+        record = {"version": 1}
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                wins = list(pool.map(lambda item: item[0].acquire(item[1], 60_000),
+                                     [(left, "left"), (right, "right")]))
+            if sum(wins) != 1:
+                raise CoordinationUnavailable("Le CAS de précontrôle n’a pas un gagnant unique.")
+            winner, loser = ("left", "right") if wins[0] else ("right", "left")
+            checks = (
+                left.put_cas("claim", record, None, owner=winner),
+                not right.put_cas("claim", {"version": 2}, record, owner=loser),
+                not right.release(loser),
+                left.release(winner),
+                right.acquire(loser, 60_000),
+                not left.put_cas("claim", {"version": 2}, record, owner=winner),
+                not right.put_cas("claim", {"version": 2}, None, owner=loser),
+                right.put_cas("claim", {"version": 2}, record, owner=loser),
+                left.read("claim") == {"version": 2},
+            )
+            if not all(checks):
+                raise CoordinationUnavailable("Le précontrôle Redis CAS/fencing a échoué.")
+            self.store.transport.command("DEL", left.key("claim"), left.key("active_mission_lock"))
+        except (RedisUnavailable, OSError, ValueError) as exc:
+            raise CoordinationUnavailable("Le précontrôle Redis REST a échoué.") from exc
+
+
+def coordination_backend():
+    url = os.environ.get("TEL99_UPSTASH_REST_URL", "")
+    token = os.environ.get("TEL99_UPSTASH_REST_TOKEN", "")
+    free = os.environ.get("TEL99_UPSTASH_FREE", "")
+    if url or token or free:
+        if free != "1" or any(kv_env()):
+            raise CoordinationUnavailable("Exiger Upstash Free confirmé et un seul backend KV.")
+        return UpstashCoordination(url, token)
+    return SharedCoordination()
 
 
 def accepted_proof(descriptor, *, repository, mission_body, fetch, comments):

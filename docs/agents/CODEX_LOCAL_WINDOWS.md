@@ -35,3 +35,17 @@ Le contrat peut épingler un `test_selector` sans caractères génériques pour 
 Les modes GitHub et démo partagent le verrou Windows et gardent chacun leur dossier d’état sous `.tel99-automation-state/local-codex`. `events.jsonl` donne la chronologie, le `ledger` donne le dernier état par mission. Après un arrêt, relancer dans le même mode. Au checkpoint `WORKER_EXITED`, la vérification et la préparation du commit reprennent sans nouvel appel Codex. Une mission `RUNNING` au redémarrage devient `INTERRUPTED` et conserve son clone pour réconciliation. Les tâches indépendantes continuent. Le quota est relu avant chaque appel modèle. `WAITING_QUOTA` arrête le lot et autorise une nouvelle lecture au prochain lancement. `AWAITING_HUMAN` indique un problème d'autorisation ou de coordination. `BLOCKED` et `FAILED` conservent les artefacts pour diagnostic.
 
 Pour la bascule, exécuter d’abord `-Preflight` dans le shell qui recevra la configuration KV existante. Attendre la fin d’une éventuelle mission du superviseur en place en vérifiant son journal, son PID et son processus enfant. À partir de cette version, créer `github/stop.request` sous le dossier d’état demande un arrêt entre deux lots. La version `f508fb08` antérieure à ce signal doit être arrêtée dans sa console ou, si elle tourne en arrière-plan, seulement après avoir vérifié qu’elle est en attente et identifié son processus Python précis. Après la sortie du processus et la libération du verrou, archiver le signal d’arrêt s’il existe, puis utiliser `-Once` pour le premier lancement avec la configuration KV. Conserver le même dossier d’état pour la reprise.
+
+## Activation Upstash Redis Free
+
+Depuis le clone d’intégration, exécuter
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\scripts\activate_upstash_free.ps1
+```
+
+Le script ouvre la console Upstash. Créer une base Redis dédiée **Free**, sans moyen de paiement, avec **Auto Upgrade** et **Eviction** désactivés. Le jeton REST lecture-écriture est saisi dans une invite masquée, puis chiffré avec DPAPI pour l’utilisateur Windows local seulement si le précontrôle passe. L’URL et le jeton chiffré restent dans le dossier d’état hors Git. Les deux backends sont exclusifs. [Tarif Free](https://upstash.com/pricing/redis) · [Paramètre Auto Upgrade](https://upstash.com/docs/redis/features/auto-upgrade)
+
+Le précontrôle `KV_CAS_READY` exige un gagnant unique entre deux clients REST, une réservation durable, un refus d’écriture et de libération pour l’ancien propriétaire, puis la reprise du CAS. Le verrou expire côté Redis. Le jeton de propriétaire et la valeur précédente sont vérifiés dans un seul script Lua pour chaque mutation de la réservation. Si un résultat de worker reste ambigu, la réservation reste en place et la tâche n’est pas rejouée.
+
+Le namespace Redis sert la file réservée à Codex Windows. Un processus cloud qui utilise un autre KV reste hors de ce verrou. La file refuse les tickets également étiquetés OpenHands. Ce choix évite le détournement du dépôt GitHub en registre de baux. GitHub expose la création de référence et le fast-forward, alors que cette intégration a besoin d’un CAS sur le propriétaire et le résultat sous un même TTL. [CAS Lua sur REST](https://upstash.com/blog/lua-scripting-on-upstash-redis-atomic-operations-over-http) · [Références GitHub](https://docs.github.com/en/rest/git/refs)
