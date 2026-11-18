@@ -44,6 +44,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
@@ -1187,7 +1188,7 @@ def run(config: dict, offline: bool = False) -> int:
 
 def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     started = time.time()
-    owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
+    owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{uuid.uuid4().hex}"
 
     # --- Emergency stop, local sources first: NO network before the brake. ----
     # ``load_state`` may read the KV store over the network; a local stop must
@@ -1213,6 +1214,7 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             return 3
 
     state = load_state()
+    initial_active = state.get("active")
     holder["state"] = state
     deadline = started + int(config["max_runtime_seconds"])
 
@@ -1225,13 +1227,11 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     if emergency is not None and kv_available() and emergency.kv_stop(kv_get):
         journal_entry(state, "emergency_stop",
                       reason=f"KV key {emergency.KV_KEY!r} is set", scope="next_run")
-        save_state(state)
         return 3
 
     # --- Stop on error: refuse before any spend when a precondition fails. ---
     if not policy.repository_allowed(config["repository"]):
         journal_entry(state, "abort", reason="repository not allowed")
-        save_state(state)
         return 2
 
     # One mission at a time, with automatic recovery from interruption.
@@ -1245,7 +1245,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         action, detail = _reconcile_decision(state)
         if action == "abort":
             journal_entry(state, "abort", reason=detail, active=active)
-            save_state(state)
             return 2
         if action == "reattach":
             resume_cid = detail
@@ -1258,13 +1257,11 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             journal_entry(state, "stale_active_reconciled", previous=active,
                           note="lock expired or absent; mission re-queued for resume")
             state["active"] = None
-            save_state(state)
             active = None
 
     if offline:
         journal_entry(state, "offline", note="no network calls; selection logic only")
         print(json.dumps(config, indent=2))
-        save_state(state)
         return 0
 
     # --- Environment facts (read-only). Turns assumptions into evidence. ---
@@ -1275,7 +1272,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     reasons = preflight.preflight()
     if reasons:
         journal_entry(state, "abort", reason="preflight failed", problems=reasons)
-        save_state(state)
         return 2
     journal_entry(state, "preflight_ok", checks=["guard", "team_config"])
 
@@ -1288,7 +1284,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
         issues = list_mission_issues(config["repository"], config["mission_label"])
     except RuntimeError as exc:
         journal_entry(state, "abort", reason=str(exc))
-        save_state(state)
         return 2
 
     processed = set(state.get("processed", []))
@@ -1309,13 +1304,11 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
                        "refusing to start another conversation before reconciliation",
                 conversation=resume_cid, issue=resume_issue,
             )
-            save_state(state)
             return 2
     else:
         mission = policy.select_mission(issues, config["mission_label"], processed)
     if mission is None:
         journal_entry(state, "idle", note="no eligible mission")
-        save_state(state)
         return 0
 
     # --- Approval gate (S-06): no mission starts without a current, content-
@@ -1340,7 +1333,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     if not approved and not config["dry_run"]:
         journal_entry(state, "abort", reason=approval_reason,
                       mission=mission["number"])
-        save_state(state)
         return 2
     journal_entry(state, "approval_checked", approved=approved,
                   detail=approval_reason, mission=mission["number"])
@@ -1363,7 +1355,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     )
     if reasons:
         journal_entry(state, "abort", reasons=reasons, mission=mission["number"])
-        save_state(state)
         return 2
 
     journal_entry(state, "mission_selected", issue=mission["number"],
@@ -1383,7 +1374,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             if bus_bridge.is_already_finished(bus, bus_corr):
                 journal_entry(state, "bus_skip", reason="mission already finished",
                               correlation_id=bus_corr)
-                save_state(state)
                 return 0
         except Exception as exc:  # noqa: BLE001 - never let the bus crash the run
             journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
@@ -1391,34 +1381,39 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     elif require_bus:
         journal_entry(state, "abort", reason="bus unavailable: cannot deduplicate",
                       mission=mission["number"])
-        save_state(state)
         return 2
 
     if require_bus:
         if bus is None or bus_corr is None:
             journal_entry(state, "abort", reason="bus unavailable: refusing to start",
                           mission=mission["number"])
-            save_state(state)
             return 2
         report = bus.storage_report()
         if not report.get("durable_across_container"):
             journal_entry(state, "abort",
                           reason="bus storage is not durable across containers",
                           storage=report, mission=mission["number"])
-            save_state(state)
             return 2
 
     if config["dry_run"]:
         journal_entry(state, "dry_run", note="no conversation started",
                       would_run_until=policy.utcnow_iso())
-        save_state(state)
         return 0
 
     # --- Cross-run lock: only one mission may run, across distinct runs. ---
     acquired, detail = acquire_lock(owner, ttl_seconds=int(config["max_runtime_seconds"]) + 600)
     if not acquired:
         journal_entry(state, "abort", reason="mission lock not acquired", detail=detail)
-        save_state(state)
+        return 2
+    try:
+        latest_state = load_state()
+    except Exception:
+        release_lock(owner)
+        raise
+    if (latest_state.get("active") != initial_active
+            or set(latest_state.get("processed", [])) != processed):
+        journal_entry(state, "abort", reason="mission state changed before lock acquisition")
+        release_lock(owner)
         return 2
     journal_entry(state, "lock_acquired", detail=detail, owner=owner)
 
@@ -1436,15 +1431,13 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
                           mission_state=opened["state"],
                           storage=bus.storage_report())
         except Exception as exc:  # noqa: BLE001
-            release_lock(owner)
             journal_entry(state, "abort", reason="bus mission could not be opened",
                           detail=f"{type(exc).__name__}: {exc}")
-            save_state(state)
+            release_lock(owner)
             return 2
     elif require_bus:
-        release_lock(owner)
         journal_entry(state, "abort", reason="bus unavailable: refusing to start")
-        save_state(state)
+        release_lock(owner)
         return 2
 
     # --- Resume: re-attach to a live conversation instead of duplicating it. ---
@@ -1483,10 +1476,9 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     payload_problems += preflight.check_budget(payload)
     payload_problems += preflight.check_model(payload)
     if payload_problems:
-        release_lock(owner)
         journal_entry(state, "abort", reason="payload preflight failed",
                       problems=payload_problems)
-        save_state(state)
+        release_lock(owner)
         return 2
     journal_entry(state, "payload_ok",
                   sub_agents=[d.get("name") for d in payload.get("agent_definitions", [])])

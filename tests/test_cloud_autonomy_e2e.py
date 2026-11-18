@@ -22,6 +22,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import contextlib
+from copy import deepcopy
 import io
 import json
 import os
@@ -242,7 +243,7 @@ class FakeCloud:
                 prefix = url.split("?prefix=", 1)[1]
                 return 200, {"keys": [k for k in self.kv if k.startswith(prefix)]}
             if key in self.kv:
-                body = {"value": self.kv[key]}
+                body = {"value": deepcopy(self.kv[key])}
                 if meta:
                     body["version"] = self.kv_versions.get(key, 1)
                 return 200, body
@@ -262,7 +263,7 @@ class FakeCloud:
                 current = str(self.kv_versions.get(key, 1))
                 if key not in self.kv or current != str(if_version):
                     return 409, "version mismatch"
-            self.kv[key] = payload
+            self.kv[key] = deepcopy(payload)
             self.kv_versions[key] = self.kv_versions.get(key, 0) + 1
             self.state_writes += 1
             return 200, {}
@@ -498,6 +499,25 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(code, 2, out)
         self.assertIn("mission lock not acquired", out)
         self.assertEqual(len(self.cloud.started_conversations), 0)
+        self.assertNotIn("state", self.cloud.kv_put_calls)
+
+    def test_new_active_state_written_before_lock_is_not_overwritten(self):
+        acquire = orchestrator.acquire_lock
+        newer = {"version": 1, "processed": [], "journal": [],
+                 "active": {"issue": 70, "conversation_id": "existing"}}
+
+        def acquire_after_state_change(owner, ttl_seconds):
+            orchestrator.kv_set("state", newer)
+            return acquire(owner, ttl_seconds=ttl_seconds)
+
+        with patch.object(orchestrator, "acquire_lock",
+                          side_effect=acquire_after_state_change):
+            code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertEqual(self.cloud.kv["state"], newer)
+        self.assertIn("mission state changed before lock acquisition", out)
 
     def test_dry_run_starts_nothing_and_touches_no_ledger(self):
         code, out = self._run(self._config(dry_run=True))
@@ -505,6 +525,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(len(self.cloud.started_conversations), 0)
         bus = Bus(ROOT / "bus", store=KvStore("https://kv.example", "tok"))
         self.assertIsNone(bus.load_mission(bus_bridge.correlation_id(REPO, 70)))
+        self.assertNotIn("state", self.cloud.kv_put_calls)
 
     # -- Point 2: the bus must be mandatory, not best-effort -----------------
     def test_real_run_refuses_when_bus_storage_is_not_durable(self):

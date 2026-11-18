@@ -1346,7 +1346,7 @@ class UnattendedConfirmationTests(unittest.TestCase):
             name: getattr(orchestrator, name)
             for name in ("load_state", "save_state", "kv_available", "kv_get",
                          "diagnose_environment", "preflight", "quota_remaining",
-                         "list_mission_issues", "acquire_lock", "release_lock",
+                         "list_mission_issues", "recent_mission_comments", "acquire_lock", "release_lock",
                          "_request", "wait_for", "interrupt_conversation",
                          "report_phase", "bus_bridge")
         }
@@ -1380,9 +1380,15 @@ class UnattendedConfirmationTests(unittest.TestCase):
             orchestrator.diagnose_environment = lambda: {}
             orchestrator.preflight = _Preflight
             orchestrator.quota_remaining = lambda: 20
-            orchestrator.list_mission_issues = lambda repo, label: [
-                {"number": 12, "title": "Fix", "labels": [{"name": "tel99-mission"}],
-                 "state": "open", "body": "b"}
+            issue = {"number": 12, "title": "Fix", "labels": [{"name": "tel99-mission"}],
+                     "state": "open", "body": "b"}
+            marker = policy.approval_marker(policy.mission_content(issue), approver="reviewer")
+            issue["body"] += "\n" + marker
+            orchestrator.list_mission_issues = lambda repo, label: [issue]
+            now = policy.utcnow_iso()
+            orchestrator.recent_mission_comments = lambda repo, issue_number: [
+                {"user": {"login": "reviewer"}, "body": marker,
+                 "created_at": now, "updated_at": now},
             ]
             orchestrator.acquire_lock = lambda owner, ttl_seconds=0: (True, "ok")
             orchestrator.release_lock = lambda owner: None
@@ -1393,6 +1399,7 @@ class UnattendedConfirmationTests(unittest.TestCase):
             cfg = dict(orchestrator.DEFAULT_CONFIG)
             cfg["dry_run"] = False
             cfg["require_durable_bus"] = False
+            cfg["authorized_approvers"] = ["reviewer"]
             code = orchestrator.run(cfg)
         finally:
             for name, value in originals.items():
