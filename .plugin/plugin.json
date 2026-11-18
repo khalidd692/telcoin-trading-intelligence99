@@ -102,7 +102,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "S-06: GitHub logins allowed to authorise a mission through a content-bound approval marker in the issue body (<!-- tel99-approval:v1 hash=sha256:... by=<login> -->). Empty means no approver is authorised, so no mission can start (fail-closed). The owner sets this to their own login to enable missions."
+          "description": "S-06: GitHub logins allowed to authorise a mission through a content-bound approval marker in the issue body (<!-- tel99-approval:v1 hash=sha256:... by=<login> -->). The same marker must be posted as a standalone GitHub comment by that login within the last 24 hours, and the comment must be unedited. An empty allowlist blocks every mission."
         }
       }
     },

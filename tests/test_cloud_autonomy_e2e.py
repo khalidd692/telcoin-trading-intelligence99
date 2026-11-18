@@ -92,6 +92,7 @@ class FakeCloud:
         ]
         if mission_body is not None:
             self.issues = [{**dict(ISSUE), "body": mission_body}]
+        self.approval_comment_author = AUTHORIZED_APPROVER
         self.started_conversations = []
         self.state_writes = 0
         # When >0, ``/events/search`` returns a first page of that size and a
@@ -126,6 +127,18 @@ class FakeCloud:
         # quota
         if url.endswith("/api/quota/status"):
             return 200, {"remaining": 10, "daily_limit": 20}
+        if "api.github.com" in url and "/comments?" in url:
+            approval, _ = policy.read_approval(self.issues[0])
+            if approval is None:
+                return 200, []
+            now = policy.utcnow_iso()
+            return 200, [{
+                "body": policy.approval_marker(
+                    policy.mission_content(self.issues[0]), approver=approval["approved_by"]),
+                "user": {"login": self.approval_comment_author},
+                "created_at": now,
+                "updated_at": now,
+            }]
         # GitHub issues
         if "api.github.com" in url and "/issues" in url:
             return 200, self.issues
@@ -576,6 +589,15 @@ class MissionApprovalTests(EndToEndTests):
         self.assertEqual(len(self.cloud.started_conversations), 1)
         self.assertIn('"approval_checked"', out)
         self.assertIn('"approved": true', out)
+
+    def test_approval_requires_the_author_of_the_github_comment(self):
+        self.cloud.approval_comment_author = "other-contributor"
+
+        code, out = self._run(self._config())
+
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.cloud.started_conversations, [])
+        self.assertIn("no authenticated approval comment", out)
 
     def test_a_mission_without_an_approval_is_refused(self):
         self._issue_with_body("Aucune approbation ici.\n")

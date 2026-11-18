@@ -33,6 +33,7 @@ Local dry-run (no network, no spend):
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -486,7 +487,6 @@ def release_lock(owner: str) -> None:
 
 
 def _expiry_iso(ttl_seconds: int) -> str:
-    from datetime import datetime, timedelta, timezone
 
     return (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).replace(
         microsecond=0
@@ -497,7 +497,6 @@ def _lock_expired(record: dict) -> bool:
     expires = (record or {}).get("expires_at")
     if not expires:
         return False
-    from datetime import datetime, timezone
 
     try:
         when = datetime.fromisoformat(expires.replace("Z", "+00:00"))
@@ -691,6 +690,21 @@ def list_mission_issues(repository: str, mission_label: str) -> list[dict]:
     status, body = _request("GET", url, headers=headers)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub issue listing failed: HTTP {status} {body!r:.200}")
+    return body
+
+
+def recent_mission_comments(repository: str, number: int) -> list:
+    """Read recent approval candidates from this issue's GitHub timeline."""
+    token = github_token()
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    query = urllib.parse.urlencode({"since": since, "per_page": 100})
+    url = f"https://api.github.com/repos/{repository}/issues/{number}/comments?{query}"
+    status, body = _request("GET", url, headers=headers)
+    if status != 200 or not isinstance(body, list):
+        raise RuntimeError(f"GitHub approval lookup failed: HTTP {status}")
     return body
 
 
@@ -1299,6 +1313,16 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     # conversation, so it only reports the decision.
     authorized = frozenset(config.get("authorized_approvers") or ())
     approved, approval_reason = policy.approval_is_authorized(mission, authorized)
+    if approved and not config["dry_run"]:
+        try:
+            comments = recent_mission_comments(config["repository"], mission["number"])
+        except RuntimeError as exc:
+            approved, approval_reason = False, str(exc)
+        else:
+            approved = policy.has_authenticated_approval(
+                mission, comments, now=datetime.now(timezone.utc))
+            if not approved:
+                approval_reason = "no authenticated approval comment for this mission"
     if not approved and not config["dry_run"]:
         journal_entry(state, "abort", reason=approval_reason,
                       mission=mission["number"])

@@ -309,3 +309,38 @@ def approval_is_authorized(
     if mission_digest(mission_content(issue)) != record["approved_content_hash"]:
         return False, "content changed after approval (hash mismatch)"
     return True, "approved content unchanged and approver authorized"
+
+
+_APPROVAL_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def has_authenticated_approval(issue: dict, comments: list, *, now: datetime) -> bool:
+    """Match the issue approval to a recent unedited GitHub comment.
+
+    The author and timestamps come from GitHub metadata. The comment must
+    contain only the canonical marker for the selected mission.
+    """
+    approval, _ = read_approval(issue)
+    if approval is None:
+        return False
+    approver = approval["approved_by"]
+    marker = approval_marker(mission_content(issue), approver=approver)
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        user = comment.get("user")
+        if not isinstance(user, dict) or user.get("login") != approver:
+            continue
+        if str(comment.get("body") or "").strip() != marker:
+            continue
+        created = comment.get("created_at")
+        if not isinstance(created, str) or comment.get("updated_at") != created:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            age = (now - timestamp).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        if 0 <= age <= _APPROVAL_MAX_AGE_SECONDS:
+            return True
+    return False

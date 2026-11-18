@@ -22,6 +22,7 @@ Run:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import importlib.util
 import pathlib
 import sys
@@ -175,6 +176,27 @@ class ContentBindingHardeningTests(unittest.TestCase):
     def test_a_single_well_formed_marker_is_still_accepted(self):
         ok, reason = policy.approval_is_authorized(self._approved(), {OWNER})
         self.assertTrue(ok, reason)
+
+
+class AuthenticatedApprovalTests(unittest.TestCase):
+    def test_only_recent_unedited_comments_are_eligible(self):
+        issue = approved_issue()
+        now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+        canonical = policy.approval_marker(policy.mission_content(issue), approver=OWNER)
+        current = "2026-11-18T11:30:00Z"
+        comment = {"user": {"login": OWNER}, "body": canonical,
+                   "created_at": current, "updated_at": current}
+
+        self.assertTrue(policy.has_authenticated_approval(issue, [comment], now=now))
+        for altered in (
+            {**comment, "updated_at": "2026-11-18T11:31:00Z"},
+            {**comment, "created_at": "2026-11-17T11:59:59Z",
+             "updated_at": "2026-11-17T11:59:59Z"},
+            {**comment, "body": canonical + "\nExtra text"},
+            {**comment, "user": {"login": "other-contributor"}},
+        ):
+            with self.subTest(altered=altered):
+                self.assertFalse(policy.has_authenticated_approval(issue, [altered], now=now))
 
 
 class PluginSchemaTests(unittest.TestCase):
