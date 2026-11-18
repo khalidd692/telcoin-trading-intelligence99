@@ -78,6 +78,13 @@ class ProviderContractTests(unittest.TestCase):
             base_url="http://localhost:1234/v1")
         self.assertEqual(p.model, "openhands/deepseek-v4.1-flash")
 
+    def test_included_model_override_is_only_for_loopback(self):
+        for endpoint in ("https://example.test/v1", "https://127.0.0.1@example.test/v1"):
+            with self.subTest(endpoint=endpoint), self.assertRaises(provider.ProviderConfigError):
+                provider.OpenAICompatibleProvider(
+                    model="gpt-6.2-sol", base_url=endpoint, api_key="fixture",
+                    included_local_model="gpt-6.2-sol")
+
     def test_bad_scheme_is_refused(self):
         with self.assertRaises(provider.ProviderConfigError):
             provider.OpenAICompatibleProvider(
@@ -171,6 +178,27 @@ class KernelTests(unittest.TestCase):
             result = engine.run(spec)
             self.assertEqual(result.verdict, mission.FAIL)
             self.assertIn("README.md", result.attempts[-1]["missing_artifacts"])
+
+    def test_zero_repairs_does_not_retry_missing_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_OK, MATH_OK])
+            result = engine.run(mission.MissionSpec(
+                "no-repair", "two files", artifacts=["mathutils.py", "README.md"], max_repairs=0))
+            self.assertEqual(result.verdict, mission.FAIL)
+            self.assertEqual(result.provider_calls, 1)
+
+    def test_artifact_journal_recovers_if_the_mission_index_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_OK])
+            spec = mission.MissionSpec("recover", "write", artifacts=["mathutils.py"],
+                                       checks=[mission.Check("green", [sys.executable, "-c", "pass"])])
+            with patch.object(engine.store, "put", side_effect=OSError("index unavailable")):
+                with self.assertRaises(OSError):
+                    engine.run(spec)
+            restored = engine.run(spec)
+            self.assertTrue(restored.reused)
+            self.assertEqual(restored.verdict, mission.PASS)
+            self.assertEqual(engine.provider.calls, 1)
 
     def test_repair_preserves_the_quota_floor(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -484,6 +512,13 @@ class HttpContractTests(unittest.TestCase):
             self.assertTrue(
                 (root / "s" / "artifacts" / "http-mission" / "mathutils.py").is_file())
 
+    def test_approved_loopback_model_uses_the_same_http_contract(self):
+        p = provider.OpenAICompatibleProvider(
+            model="gpt-6.2-sol", included_local_model="gpt-6.2-sol",
+            base_url=f"http://127.0.0.1:{self.port}/v1")
+        self.assertTrue(p.requires_explicit_quota)
+        self.assertEqual(p.complete(system="fixture", prompt="fake HTTP contract only"), MATH_OK)
+
     def test_real_http_adapter_refuses_a_paid_model(self):
         with self.assertRaises(provider.ProviderConfigError):
             provider.OpenAICompatibleProvider(
@@ -648,6 +683,59 @@ print("isolated")
                         "--sandbox-script", "probe.py", "--expected-stdout", expected,
                     ])
                     self.assertEqual(code, verdict, output)
+
+    @unittest.skipUnless(os.environ.get("TEL99_TEST_SANDBOX_IMAGE"),
+                         "requires a local Docker image pinned by digest")
+    def test_task_app_mission_repairs_a_real_failed_acceptance_case(self):
+        source = (ROOT / "tests/fixtures/native_tasks_candidate.py").read_text()
+        broken = source.replace('task["done"] = True', 'task["done"] = False')
+
+        def response(program):
+            return ("```tasks.py\n" + program + "\n```\n"
+                    "````README.md\nUse python tasks.py --db tasks.json list.\n"
+                    "```text\n add TITLE; edit ID TITLE; complete ID; delete ID\n```\n````")
+
+        scripted = provider.ScriptedProvider([response(broken), response(source)])
+        with tempfile.TemporaryDirectory() as root:
+            args = ["--state", root, "--memory", root, "--quota", "18", "run",
+                    "--project", "task-demo", "--mission-id", "task-app", "--profile", "tasks",
+                    "--mission", "Crée une application de gestion de tâches.",
+                    "--sandbox-image", os.environ["TEL99_TEST_SANDBOX_IMAGE"]]
+            with patch.object(provider, "provider_from_env", return_value=scripted):
+                code, report = self._run(args)
+            self.assertEqual(code, 0, report)
+            result = json.loads(report)
+            self.assertEqual([attempt["verdict"] for attempt in result["attempts"]],
+                             ["FAIL", "PASS"])
+            self.assertEqual(scripted.calls, 2)
+            program = pathlib.Path(result["artifact_directory"]) / "tasks.py"
+            self.assertEqual(program.read_text().strip(), source.strip())
+            self.assertTrue((program.parent / "journal.json").is_file())
+            status, stored = self._run(["--state", root, "status", "--mission-id",
+                                       "task-app", "--project", "task-demo"])
+            self.assertEqual(status, 0)
+            self.assertEqual(json.loads(stored)["provider"], "scripted")
+            self.assertIsNone(json.loads(stored)["chosen_model"])
+            self.assertEqual(json.loads(stored)["attempts"][0]["checks"][-1]["criterion"],
+                             "complete persists the done flag")
+            verify, _ = self._run(["verify-task-app", "--file", str(program),
+                                   "--sandbox-image", os.environ["TEL99_TEST_SANDBOX_IMAGE"]])
+            self.assertEqual(verify, 0)
+
+    def test_cached_pass_rejects_artifacts_edited_after_check(self):
+        scripted = provider.ScriptedProvider([MATH_OK])
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["--state", tmp, "--memory", tmp, "--quota", "18", "run",
+                    "--mission-id", "before-edit", "--mission", "write",
+                    "--artifact", "mathutils.py"]
+            with patch.object(provider, "provider_from_env", return_value=scripted):
+                code, output = self._run(args)
+                self.assertEqual(code, 0)
+                artifact = pathlib.Path(json.loads(output)["artifact_directory"]) / "mathutils.py"
+                artifact.write_text("modified", encoding="utf-8")
+                code, _ = self._run(args)
+            self.assertEqual(code, 2)
+            self.assertEqual(scripted.calls, 1)
 
     def test_dry_run_needs_no_provider_and_spends_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
