@@ -96,6 +96,7 @@ def pilot_recipe() -> dict[str, Any]:
         "dry_run": True,
         "require_durable_bus": True,
         "emergency_stop": False,
+        "authorized_approvers": [],
     }
 
 

@@ -891,6 +891,12 @@ def build_run_report(state: dict, config: dict, code: int, *,
     Reads the run's journal so the report reflects what actually happened
     (mission selected, quota reading, outcome verdict) rather than a guess.
     """
+    entries = _journal_entries(state)
+    for index in range(len(entries) - 1, -1, -1):
+        if entries[index].get("event") == "run_start":
+            entries = entries[index:]
+            break
+    state = {"journal": entries}
     mission_number = _last_journal_value(state, "mission_selected", "issue")
     if mission_number is None:
         mission_number = _last_journal_value(state, "mission_resume", "issue")
@@ -1488,7 +1494,6 @@ def _run_impl(config: dict, offline: bool, holder: dict) -> int:
             processed=processed,
         )
     finally:
-        release_lock(owner)
         release_lock(owner)
 
 

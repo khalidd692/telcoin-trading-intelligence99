@@ -1222,7 +1222,8 @@ class DurableRunReportTests(unittest.TestCase):
     def _config(self, **over):
         cfg = dict(orchestrator.DEFAULT_CONFIG)
         cfg.update({"dry_run": False, "repository": REPO,
-                    "mission_label": "tel99-mission", "max_runtime_seconds": 60})
+                    "mission_label": "tel99-mission", "max_runtime_seconds": 60,
+                    "authorized_approvers": [AUTHORIZED_APPROVER]})
         cfg.update(over)
         return cfg
 
@@ -1285,6 +1286,18 @@ class DurableRunReportTests(unittest.TestCase):
         self.assertFalse(report["mission_accepted"])
         self.assertEqual(report["outcome_verification"], "REJECTED")
         self.assertEqual(report["status"], "FAILED")
+
+    def test_idle_run_does_not_inherit_the_previous_mission_verdict(self):
+        self.assertEqual(self._run(self._config())[0], 0)
+        self.cloud.issues = []
+
+        self.assertEqual(self._run(self._config())[0], 0)
+
+        report = self.cloud.kv["run_report"]
+        self.assertEqual(report["mission_id"], "NO_MISSION")
+        self.assertEqual(report["outcome_verification"], "NOT_ATTEMPTED")
+        self.assertFalse(report["mission_accepted"])
+        self.assertEqual(report["started_children"], 0)
 
     def test_report_is_readable_after_container_destruction(self):
         """A fresh reader over the same KV store still sees the report."""
