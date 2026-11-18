@@ -32,6 +32,8 @@ jobs:
         run: python -m unittest discover -s tests -p test_agent_intelligence.py -v
       - name: Validate the v1 exchange protocol and the OpenHands/Hermes/Kilo bus
         run: python -m unittest discover -s tests -p test_agent_protocol.py -v
+      - name: Validate the native mission runner (interchangeable provider, deterministic verdict)
+        run: python -m unittest discover -s tests -p test_agent_native.py -v
       - name: Validate cloud-autonomy plugin tests (policy, guard, runtime proof)
         run: python -m unittest discover -s tests -p test_cloud_autonomy.py -v
       - name: Validate the bus<->orchestrator integration (store, bridge, wiring)
