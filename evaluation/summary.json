@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795002623,
-  "observations": 484,
-  "valid_observations": 476,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795010297,
+  "observations": 485,
+  "valid_observations": 477,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 433,
-              "mean_pct": 0.29825
+              "count": 441,
+              "mean_pct": 0.26291
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 353,
-              "mean_pct": 2.363
+              "count": 361,
+              "mean_pct": 2.14937
             }
           }
         }
@@ -127,16 +127,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1794982975,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1794984630,
       "previous_decision": "ATTENDRE",
@@ -283,6 +273,14 @@
         "\u2212 zone"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795010297,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -333,10 +331,10 @@
       }
     },
     "false_positives": {
-      "count": 13,
-      "evaluable": 29,
-      "pending": 11,
-      "unknown": 1,
+      "count": 17,
+      "evaluable": 33,
+      "pending": 8,
+      "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
   }
