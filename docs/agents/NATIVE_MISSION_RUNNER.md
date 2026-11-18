@@ -137,3 +137,26 @@ utiliser un dossier accessible uniquement au compte de l’opérateur. La
 publication atomique utilise un lien physique dans le même dossier et requiert
 un système de fichiers qui le prend en charge. Importer uniquement une
 sauvegarde de confiance.
+
+
+## Vérifier le comportement d’un script dans un conteneur local
+
+Le lanceur vérifie la syntaxe Python en mode isolé. Pour un critère de sortie
+observable, ajouter `--sandbox-image`, `--sandbox-script` et
+`--expected-stdout` à la commande `run`. Le script doit figurer dans
+`--artifact` et être autonome. Le lanceur compare ses octets de sortie à
+la valeur attendue, suivie d’un saut de ligne, depuis le processus hôte.
+
+L’image Python doit être présente sur le moteur Docker local et désignée
+par son digest `sha256`. Le conteneur temporaire reçoit uniquement une copie
+en lecture seule du script. Il tourne sans réseau, capacités ni variables
+d’environnement du fournisseur de modèle. Un résultat déjà en cache n’est
+réutilisé que si le contrôle demandé correspond au contrôle enregistré.
+
+Pour exercer la vérification hors ligne avec un fournisseur scripté et
+une image locale déjà disponible :
+
+```bash
+TEL99_TEST_SANDBOX_IMAGE='docker.io/library/python@sha256:<digest-local>' \
+  python -m unittest discover -s tests -p test_agent_native.py -k native_sandbox
+```

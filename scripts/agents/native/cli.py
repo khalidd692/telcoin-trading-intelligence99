@@ -38,6 +38,7 @@ if str(_AGENTS_DIR) not in sys.path:
 
 from native import mission as mission_mod  # noqa: E402
 from native import provider as provider_mod  # noqa: E402
+from native import sandbox  # noqa: E402
 
 REPO_ROOT = _HERE.parents[3]
 DEFAULT_STATE = REPO_ROOT / ".tel99-native-state"
@@ -83,6 +84,22 @@ def _engine(args, provider) -> mission_mod.MissionEngine:
 
 
 def cmd_run(args) -> int:
+    artifacts = args.artifact or []
+    checks = ([mission_mod.Check(name="syntax", command=[sys.executable, "-I", "-m",
+                                                         "py_compile", *artifacts])]
+              if artifacts else [])
+    sandbox_check = None
+    sandbox_args = (args.sandbox_image, args.sandbox_script, args.expected_stdout)
+    if any(value is not None for value in sandbox_args):
+        try:
+            if None in sandbox_args or args.sandbox_script not in artifacts:
+                raise mission_mod.MissionError(
+                    "sandbox requires a pinned image, a declared script artifact and expected stdout")
+            sandbox_check = sandbox.ScriptCheck(*sandbox_args)
+            checks.append(sandbox_check)
+        except mission_mod.MissionError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
     if args.dry_run:
         # A dry run plans and routes; it never calls a model, so it needs no
         # provider credentials. It spends nothing and writes nothing.
@@ -98,14 +115,18 @@ def cmd_run(args) -> int:
         mission_id=args.mission_id,
         prompt=args.mission,
         project=args.project,
-        artifacts=args.artifact or [],
-        checks=[mission_mod.Check(name="syntax", command=["python3", "-m", "py_compile"]
-                                  + (args.artifact or []))] if args.artifact else [],
+        artifacts=artifacts,
+        checks=checks,
     )
     try:
         result = engine.run(spec)
     except mission_mod.MissionError as exc:
         print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    if result.reused and sandbox_check and not any(
+            check.get("sandbox_fingerprint") == sandbox_check.fingerprint
+            for check in result.checks):
+        print("refused: cached mission did not run this sandbox check", file=sys.stderr)
         return 2
     print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     if args.dry_run:
@@ -238,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--mission-id", required=True)
     run.add_argument("--mission", required=True)
     run.add_argument("--artifact", action="append", default=[])
+    run.add_argument("--sandbox-image", help="locally installed Python image pinned by digest")
+    run.add_argument("--sandbox-script", help="Python artifact to run in the sandbox")
+    run.add_argument("--expected-stdout", help="expected output, excluding the final newline")
     run.add_argument("--project", default=mission_mod.DEFAULT_PROJECT)
     run.add_argument("--dry-run", dest="run_dry_run", action="store_true",
                      help="decide and route without calling the provider")

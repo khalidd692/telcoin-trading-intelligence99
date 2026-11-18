@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -515,7 +516,6 @@ class CliTests(unittest.TestCase):
                 id="different-fact", project="tel99", kind="fact", title="Other project",
                 body="Independently scoped fixture"))
             command = [sys.executable, "-m", "scripts.agents.native.cli"]
-            import subprocess
 
             def call(*args):
                 return subprocess.run([*command, *map(str, args)], cwd=ROOT,
@@ -546,6 +546,70 @@ class CliTests(unittest.TestCase):
             self.assertEqual(call("--memory", source, "export-memory", "--project",
                                   "project-b", "--file", backup).returncode, 2)
             self.assertEqual(json.loads(backup.read_text()), data)
+
+    def test_native_cli_runs_a_declared_script_in_a_pinned_sandbox(self):
+        from native import cli
+        image = "python@sha256:" + "1" * 64
+        source = "```script.py\nprint('fixture result')\n```"
+        scripted = provider.ScriptedProvider([source])
+        completed = subprocess.CompletedProcess([], 0, b"fixture result\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["--state", tmp, "--memory", tmp, "--quota", "18",
+                    "run", "--mission-id", "script-test", "--mission", "write",
+                    "--artifact", "script.py", "--sandbox-image", image,
+                    "--sandbox-script", "script.py", "--expected-stdout", "fixture result"]
+            with patch.object(provider, "provider_from_env", return_value=scripted), \
+                    patch.object(cli.sandbox, "_run_container", return_value=completed) as launch:
+                code, out = self._run(args)
+
+        self.assertEqual(code, 0, out)
+        self.assertEqual(json.loads(out)["checks"][-1]["name"], "sandboxed-script")
+        self.assertEqual(launch.call_args.args[0], image)
+
+    def test_cached_syntax_only_run_cannot_satisfy_a_sandbox_check(self):
+        image = "python@sha256:" + "1" * 64
+        scripted = provider.ScriptedProvider([MATH_OK])
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["--state", tmp, "--memory", tmp, "--quota", "18",
+                    "run", "--mission-id", "syntax-first", "--mission", "write",
+                    "--artifact", "mathutils.py"]
+            with patch.object(provider, "provider_from_env", return_value=scripted):
+                self.assertEqual(self._run(args)[0], 0)
+                code, _ = self._run(args + [
+                    "--sandbox-image", image, "--sandbox-script", "mathutils.py",
+                    "--expected-stdout", "value",
+                ])
+
+        self.assertEqual(code, 2)
+        self.assertEqual(scripted.calls, 1)
+
+    @unittest.skipUnless(os.environ.get("TEL99_TEST_SANDBOX_IMAGE"),
+                         "requires a local Docker image pinned by digest")
+    def test_native_sandbox_accepts_only_the_observed_output(self):
+        image = os.environ["TEL99_TEST_SANDBOX_IMAGE"]
+        fixture = """```probe.py
+import os
+import socket
+assert "TEL99_PRIVATE_FIXTURE" not in os.environ
+assert {name for _, name in socket.if_nameindex()} == {"lo"}
+assert not os.access("/work/program.py", os.W_OK)
+print("isolated")
+```"""
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+                os.environ, {"TEL99_PRIVATE_FIXTURE": "synthetic"}):
+            for mission_id, expected, verdict in (
+                ("probe-good", "isolated", 0), ("probe-incorrect", "other", 3),
+            ):
+                with self.subTest(mission_id=mission_id), patch.object(
+                        provider, "provider_from_env",
+                        return_value=provider.ScriptedProvider([fixture])):
+                    code, output = self._run([
+                        "--state", root, "--memory", root, "--quota", "18",
+                        "run", "--mission-id", mission_id, "--mission", "fixture",
+                        "--artifact", "probe.py", "--sandbox-image", image,
+                        "--sandbox-script", "probe.py", "--expected-stdout", expected,
+                    ])
+                    self.assertEqual(code, verdict, output)
 
     def test_dry_run_needs_no_provider_and_spends_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
