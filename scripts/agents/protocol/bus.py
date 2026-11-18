@@ -24,12 +24,13 @@ submits an order, merges a branch or changes a permission.
 
 from __future__ import annotations
 
+import copy
 import pathlib
 import sys
 from dataclasses import dataclass, field
 
 from .envelope import (Envelope, TERMINAL_STATES, new_id, utcnow_iso, validate)
-from .store import FileStore, default_store, store_report
+from .store import CASConflict, FileStore, default_store, store_report
 
 _HERE = pathlib.Path(__file__).resolve()
 _AGENTS_DIR = _HERE.parents[1]           # scripts/agents
@@ -136,6 +137,58 @@ class Bus:
     def save_mission(self, record: MissionRecord) -> None:
         record.updated_at = utcnow_iso()
         self.store.put(f"missions/{record.correlation_id}", record.to_dict())
+
+    def save_mission_cas(self, record: MissionRecord, expected: dict | None) -> bool:
+        """Write a mission record only if the stored value still equals
+        ``expected``. Returns ``True`` when written, ``False`` on a conflict
+        (another writer committed first). This is the compare-and-set half of
+        the lost-update fix: a plain ``save_mission`` overwrites blindly.
+        """
+        record.updated_at = utcnow_iso()
+        key = f"missions/{record.correlation_id}"
+        if hasattr(self.store, "put_cas"):
+            return bool(self.store.put_cas(key, record.to_dict(), expected))
+        # A store without CAS cannot offer the guarantee; the caller that needs
+        # it must use mutate_mission, which still serialises on a lock-free
+        # read-check-write (best effort on such a backend).
+        self.store.put(key, record.to_dict())
+        return True
+
+    def mutate_mission(self, correlation_id: str, mutate, *,
+                       max_attempts: int = 8) -> MissionRecord:
+        """Read-modify-write a mission with a compare-and-set retry loop.
+
+        ``mutate(record)`` mutates the freshly-read record in place. The write
+        is conditional on the exact bytes we read, so a concurrent writer that
+        committed first makes our write fail and we re-read and retry. No update
+        is lost; after ``max_attempts`` contention the call fails closed with
+        :class:`CASConflict` rather than overwriting.
+        """
+        key = f"missions/{correlation_id}"
+        for _ in range(max_attempts):
+            current = self.store.get(key)
+            if not isinstance(current, dict):
+                raise KeyError(f"unknown mission {correlation_id}")
+            # Deep-copy before building the record: ``from_dict`` shares list
+            # references with ``current``, and ``mutate`` would then corrupt the
+            # very snapshot we compare-and-set against (spurious conflicts).
+            snapshot = copy.deepcopy(current)
+            record = MissionRecord.from_dict(snapshot)
+            mutate(record)
+            record.updated_at = utcnow_iso()
+            if hasattr(self.store, "put_cas"):
+                if self.store.put_cas(key, record.to_dict(), current):
+                    return record
+                continue  # lost the race: re-read and retry
+            # Fallback backend without CAS: re-check before writing so a lost
+            # update is at least detected rather than silent.
+            if self.store.get(key) != current:
+                continue
+            self.store.put(key, record.to_dict())
+            return record
+        raise CASConflict(
+            f"mission {correlation_id}: could not apply an update within "
+            f"{max_attempts} compare-and-set attempts")
 
     def load_mission(self, correlation_id: str) -> MissionRecord | None:
         data = self.store.get(f"missions/{correlation_id}")
