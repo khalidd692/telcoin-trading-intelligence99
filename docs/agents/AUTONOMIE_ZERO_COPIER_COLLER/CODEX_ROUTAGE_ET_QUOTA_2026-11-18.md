@@ -60,3 +60,14 @@ Priorité **P0**, prise en charge uniquement si aucun autre chef n'est en train 
 ## Sécurité
 
 Aucun merge, déploiement, ordre financier réel/simulé, permission, achat ou scheduler permanent sans consentement. Secrets hors GitHub. Vérification systématique du périmètre TEL99. L'objectif d'un système autonome ne permet pas d'outrepasser ces limites.
+
+
+## OBSERVATION REELLE — BLOCAGE CODE REVIEW DU 18 NOVEMBRE 2026
+
+Une seule revue ciblée PR #95 a été demandée via `@codex review` : https://github.com/khalidd692/telcoin-trading-intelligence99/pull/95#issuecomment-6964819864
+
+**Réponse vérifiée du bot Codex** : `You have reached your Codex usage limits for code reviews.` — https://github.com/khalidd692/telcoin-trading-intelligence99/pull/95#issuecomment-6964822922
+
+**Action** : NE PAS relancer `@codex review` maintenant, ne pas activer les revues automatiques. La revue est **BLOCKED_CODE_REVIEW_QUOTA**, pas « FAIL du code » et pas un verdict de sécurité. Cette limite particulière peut différer du quota normal de Codex CLI/IDE/Cloud ; **ne pas inférer** que le quota de développement annoncé rétabli par le propriétaire est épuisé. Vérifier la jauge Codex normale dans l'application/CLI avant une mission P0 et rester en consommation incluse, sans achat.
+
+En attendant, **OpenHands** poursuit les tâches cloud sûres et les tests déterministes indépendants ; **Kilo et Hermes** ont leurs tâches d'interface et de mémoire comme précédemment. Codex devient le renfort de correction P0 quand une exécution normale est réellement disponible, pas un nouveau déclencheur GitHub de revue qui épuiserait un quota distinct.
