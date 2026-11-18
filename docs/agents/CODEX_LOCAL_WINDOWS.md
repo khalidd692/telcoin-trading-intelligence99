@@ -26,6 +26,8 @@ Un ticket distinct et authentifié de la file `codex-local/mission` peut admettr
 
 Le superviseur vérifie les chevauchements dans les PR ouvertes avant le départ, bloque les suppressions et renommages, puis lance les tests dans le checkout propre du commit sous MXC en lecture seule. Le résultat contient les SHA de base et de tête, les chemins modifiés, le blob du test et le nombre de tests réussis. La fiche de PR et le commit sont préparés localement. Le résultat reste `PREPARED` en attente d’une preuve externe.
 
+Le contrat peut épingler un `test_selector` sans caractères génériques pour sélectionner des tests compatibles avec le sandbox en lecture seule dans la suite indépendante. Un `supplemental_test` explicitement autorisé peut vérifier une nouvelle suite ajoutée dans le même commit. Les deux champs sont liés à l’empreinte approuvée. En mode code, l’empreinte exacte du corps peut rester absente lors de la préparation du fichier privé. L’approbation v1 authentifie alors le titre et le corps, et l’empreinte du contrat les lie aux options locales. Une empreinte brute fournie reste obligatoire à vérifier.
+
 `-CodeDemo` exécute deux missions synthétiques de code séquentielles avec de vrais appels Codex. Il utilise le même verrou Windows que la file GitHub. Le contrôle d’accès au KV est disponible avec `-Preflight`. Il lit les métadonnées de version et le registre, sans prendre le verrou ni lancer Codex. `BLOCKED_KV` signale l’absence de configuration ou l’échec de lecture. `KV_READ_READY` laisse le CAS d’écriture à vérifier par une vraie prise.
 
 ## Reprise

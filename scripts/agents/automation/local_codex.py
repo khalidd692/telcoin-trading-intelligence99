@@ -148,7 +148,8 @@ def validate_issue(issue, approval):
         return "Auteur GitHub hors périmètre."
     if [item["login"] for item in issue.get("assignees", [])] != [approval["assignee"]]:
         return "Attribution exclusive divergente."
-    if digest(issue.get("body") or "") != approval["issue_sha256"]:
+    body_hash = approval.get("issue_sha256")
+    if (body_hash is not None or approval.get("kind") != "code") and digest(issue.get("body") or "") != body_hash:
         return "Contenu GitHub modifié depuis l’approbation."
     try:
         expiry = datetime.strptime(approval["expires_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -418,27 +419,41 @@ class Supervisor:
         test_blob = checked(["git", "rev-parse", f"{base}:{test_path}"], cwd=workspace)
         if checked(["git", "rev-parse", f"{commit}:{test_path}"], cwd=workspace) != test_blob:
             raise Blocked("Le test indépendant a changé.")
-        result = call([
-            self.cli, "-c", "windows.sandbox=mxc", "sandbox", "--include-managed-config",
-            "--permission-profile", ":read-only", "--", sys.executable, "-B", "-m",
-            "unittest", "discover", "-s", "tests", "-p", mission["test_file"],
-        ], cwd=workspace, env=model_environment(), timeout=120)
-        report = result.stdout + result.stderr
-        run_count = re.search(r"^Ran ([1-9][0-9]*) tests? in ", report, re.M)
-        if result.returncode or not run_count or not re.search(r"^OK\s*$", report, re.M):
-            raise Blocked(f"Vérification indépendante échouée (sortie {result.returncode}).")
+        test_count = self.run_code_tests(workspace, mission["test_file"], mission.get("test_selector"))
+        extra = mission.get("supplemental_test")
+        if extra:
+            if f"tests/{extra}" not in paths:
+                raise Blocked("Le test complémentaire approuvé manque au commit.")
+            test_count += self.run_code_tests(workspace, extra)
         if checked(["git", "rev-parse", "HEAD"], cwd=workspace) != commit or checked(status_cmd, cwd=workspace):
             raise Blocked("Le checkout a changé pendant la vérification.")
         proof = {"commit": commit, "base": base, "branch": branch, "files": paths,
-                 "test_file": test_path, "test_blob": test_blob, "test_count": int(run_count[1])}
+                 "test_file": test_path, "test_blob": test_blob, "test_count": test_count,
+                 "test_selector": mission.get("test_selector"), "supplemental_test": extra}
         (self.root / f"{task_id}.pr.md").write_text(
             f"TEL99 {task_id}\n\nBase {base}\nCommit {commit}\n"
-            f"Test indépendant {test_path} ({test_blob}): {proof['test_count']} PASS.\n",
+            f"Test indépendant {test_path} ({test_blob}), "
+            f"sélecteur {proof['test_selector']}, complément {extra}: {test_count} PASS.\n",
             encoding="utf-8",
         )
         if finish:
             finish("PREPARED", commit)
         self.checkpoint(mission, "ACCEPTED" if self.demo else "PREPARED", **proof)
+
+    def run_code_tests(self, workspace, test_file, selector=None):
+        command = [
+            self.cli, "-c", "windows.sandbox=mxc", "sandbox", "--include-managed-config",
+            "--permission-profile", ":read-only", "--", sys.executable, "-B", "-m",
+            "unittest", "discover", "-s", "tests", "-p", test_file,
+        ]
+        if selector:
+            command.extend(["-k", selector])
+        result = call(command, cwd=workspace, env=model_environment(), timeout=120)
+        report = result.stdout + result.stderr
+        run_count = re.search(r"^Ran ([1-9][0-9]*) tests? in ", report, re.M)
+        if result.returncode or not run_count or not re.search(r"^OK\s*$", report, re.M):
+            raise Blocked(f"Vérification indépendante échouée (sortie {result.returncode}).")
+        return int(run_count[1])
 
     def commit(self, cwd, message, *, empty=False):
         args = ["git", "-c", f"core.hooksPath={self.root / 'no-hooks'}", "-c",

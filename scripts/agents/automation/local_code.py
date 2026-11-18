@@ -7,6 +7,7 @@ import re
 NATIVE_BASE = "codex/native-v1-delivery-20261118"
 _PYTHON_FILE = re.compile(r"(?:scripts/agents/native/[a-z0-9_]+|tests/test_[a-z0-9_]+)\.py")
 _TEST_FILE = re.compile(r"test_[a-z0-9_]+\.py")
+_TEST_SELECTOR = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 
 
 def contract_digest(mission):
@@ -15,12 +16,16 @@ def contract_digest(mission):
         "objective", "priority", "dependencies", "expires_at",
     )}
     scope["dependency_evidence"] = mission.get("dependency_evidence", {})
+    scope["test_selector"] = mission.get("test_selector")
+    scope["supplemental_test"] = mission.get("supplemental_test")
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def valid_scope(mission):
     files = mission.get("files")
     test = mission.get("test_file", "")
+    selector = mission.get("test_selector")
+    supplemental = mission.get("supplemental_test")
     return (
         isinstance(files, list) and 1 <= len(files) <= 8
         and all(isinstance(path, str) and _PYTHON_FILE.fullmatch(path) for path in files)
@@ -28,6 +33,9 @@ def valid_scope(mission):
         and not {"scripts/agents/native/provider.py", "scripts/agents/native/__init__.py"} & set(files)
         and isinstance(test, str) and bool(_TEST_FILE.fullmatch(test))
         and f"tests/{test}" not in files
+        and (selector is None or isinstance(selector, str) and _TEST_SELECTOR.fullmatch(selector))
+        and (supplemental is None or isinstance(supplemental, str)
+             and _TEST_FILE.fullmatch(supplemental) and f"tests/{supplemental}" in files)
     )
 
 

@@ -204,9 +204,20 @@ class LocalCodexTests(unittest.TestCase):
                      "../outside.py", ".github/workflows/work.py"):
             self.assertFalse(valid_scope(dict(mission, files=[path])))
         self.assertNotEqual(contract_digest(mission), contract_digest(dict(mission, objective="edited")))
+        self.assertNotEqual(contract_digest(mission), contract_digest(dict(mission, test_selector="VerdictTests")))
+        self.assertFalse(valid_scope(dict(mission, test_selector="*")))
+        self.assertFalse(valid_scope(dict(mission, supplemental_test="test_other.py")))
         self.assertEqual(status_paths(" M example.py\n?? other.py"), ["example.py", "other.py"])
         with self.assertRaises(ValueError):
             status_paths(" D example.py")
+
+    def test_code_verifier_selects_only_the_approved_test_class(self):
+        result = subprocess.CompletedProcess([], 0, "", "Ran 3 tests in 0.001s\n\nOK\n")
+        with patch.object(runner, "call", return_value=result) as invoke:
+            self.assertEqual(self.supervisor.run_code_tests(self.root, "test_agent_native.py", "VerdictTests"), 3)
+        command = invoke.call_args.args[0]
+        self.assertEqual(command[-4:], ["-p", "test_agent_native.py", "-k", "VerdictTests"])
+        self.assertIn(":read-only", command)
 
     def test_two_synthetic_code_commits_use_independent_tests_in_order(self):
         missions = synthetic_missions()
