@@ -394,6 +394,7 @@ class MissionEngine:
                     verdict = FAIL
                     break
 
+                provider_evidence = getattr(self.provider, "last_completion_evidence", None)
                 last = stage / str(index + 1)
                 last.mkdir()
                 written = self._extract_artifacts(reply, last, spec.artifacts)
@@ -417,6 +418,8 @@ class MissionEngine:
                                              **({"criterion": check["repair_hint"]}
                                                 if check.get("repair_hint") else {})}
                                             for check in check_results]})
+                if provider_evidence is not None:
+                    attempts[-1]["provider_evidence"] = provider_evidence
                 if (verdict != FAIL or expired or any(c.get("infrastructure_error")
                                                        for c in check_results)
                         or (not missing and spec.max_repairs is None)):
