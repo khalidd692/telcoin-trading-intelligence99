@@ -214,6 +214,9 @@ class PreconditionTests(unittest.TestCase):
         self.assertTrue(self._go(base_branch="main"))
         self.assertTrue(self._go(base_branch="tel99-live-data"))
 
+    def test_tel99_product_branch_is_protected(self):
+        self.assertTrue(policy.branch_is_protected("codex/tel99-quant-terminal"))
+
     def test_protected_work_branch_is_refused(self):
         self.assertTrue(self._go(work_branch="tel99-live-data"))
 

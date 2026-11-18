@@ -27,6 +27,7 @@ PROTECTED_BRANCHES = frozenset(
     {
         "main",
         "master",
+        "codex/tel99-quant-terminal",
         "tel99-live-data",
         "tel99-evaluation-data",
     }
