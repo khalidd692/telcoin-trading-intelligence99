@@ -183,12 +183,25 @@ class ImprovementTests(unittest.TestCase):
                 for t, s in mapping.items()]
 
     def test_keep_when_candidate_improves_without_regression(self):
-        outcomes = (self._outcomes("base", {"t1": False, "t2": True})
-                    + self._outcomes("cand", {"t1": True, "t2": True}))
-        result = improvement.compare(outcomes, baseline_id="base",
-                                     candidate_id="cand")
+        cases = {f"task-{i}": i >= 6 for i in range(10)}
+        outcomes = (self._outcomes("base", cases)
+                    + self._outcomes("cand", dict.fromkeys(cases, True)))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
         self.assertEqual(result.verdict, improvement.KEEP)
-        self.assertAlmostEqual(result.delta, 0.5)
+        self.assertAlmostEqual(result.delta, 0.6)
+
+    def test_one_green_pair_is_inconclusive(self):
+        outcomes = (self._outcomes("base", {"t1": False})
+                    + self._outcomes("cand", {"t1": True}))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+        self.assertEqual(result.verdict, improvement.INCONCLUSIVE)
+
+    def test_candidate_cannot_drop_baseline_tasks_to_win(self):
+        shared = {f"task-{i}": False for i in range(10)}
+        outcomes = (self._outcomes("base", {**shared, "withheld": False})
+                    + self._outcomes("cand", dict.fromkeys(shared, True)))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+        self.assertEqual(result.verdict, improvement.INCONCLUSIVE)
 
     def test_reject_on_regression(self):
         outcomes = (self._outcomes("base", {"t1": True, "t2": False})
@@ -220,17 +233,20 @@ class ImprovementTests(unittest.TestCase):
             loaded = router.load_measured_quality(str(path))
         self.assertEqual(loaded["m1"], 0.5)
 
-    def test_apply_verdict_records_memory(self):
+    def test_keep_is_recorded_as_a_proposal_without_self_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = memory.MemoryStore(tmp)
-            outcomes = (self._outcomes("base", {"t1": False})
-                        + self._outcomes("cand", {"t1": True}))
-            result = improvement.compare(outcomes, baseline_id="base",
-                                         candidate_id="cand")
+            cases = {f"task-{i}": False for i in range(10)}
+            outcomes = (self._outcomes("base", cases)
+                        + self._outcomes("cand", dict.fromkeys(cases, True)))
+            result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+            self.assertEqual(result.verdict, improvement.KEEP)
             entry_id = improvement.apply_verdict(result, store, "tel99")
             stored = store.get("tel99", entry_id)
         self.assertEqual(stored.kind, "procedure")
-        self.assertTrue(stored.verified)
+        self.assertFalse(stored.verified)
+        self.assertEqual(stored.verified_by, "")
+        self.assertIn("proposed", stored.tags)
 
 
 class DemoIntegrationTests(unittest.TestCase):

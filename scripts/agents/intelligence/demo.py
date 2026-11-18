@@ -253,7 +253,7 @@ def run(dry_run: bool = False, memory_root: str | None = None) -> int:
 
     print()
     print("=" * 72)
-    print("STEP 5 — record the verified result for the next missions")
+    print("STEP 5 — record the result as an improvement proposal")
     print("=" * 72)
     if not dry_run:
         entry_id = improvement.apply_verdict(comparison, store, project)

@@ -32,12 +32,20 @@ jobs:
         run: python -m unittest discover -s tests -p test_agent_intelligence.py -v
       - name: Validate the v1 exchange protocol and the OpenHands/Hermes/Kilo bus
         run: python -m unittest discover -s tests -p test_agent_protocol.py -v
+      - name: Validate the native mission runner (interchangeable provider, deterministic verdict)
+        run: python -m unittest discover -s tests -p test_agent_native.py -v
       - name: Validate cloud-autonomy plugin tests (policy, guard, runtime proof)
         run: python -m unittest discover -s tests -p test_cloud_autonomy.py -v
       - name: Validate the bus<->orchestrator integration (store, bridge, wiring)
         run: python -m unittest discover -s tests -p test_cloud_integration.py -v
       - name: Prove the end-to-end autonomy path (deterministic, no spend)
         run: python -m unittest discover -s tests -p test_cloud_autonomy_e2e.py -v
+      - name: Validate the single automation pilot recipe (issue #86, offline)
+        run: python -m unittest discover -s tests -p test_automate_pilot.py -v
+      - name: Validate the read-only mission cockpit
+        run: |
+          python -m unittest discover -s tests -p test_cockpit.py -v
+          node --check cockpit/app.js
       - name: Cloudflare Worker unit tests (no deploy, no network)
         run: node --test cloudflare/tel99-hybrid/test/worker.test.mjs
       - name: Worker syntax and config are valid (disabled, no cron, no workers.dev)

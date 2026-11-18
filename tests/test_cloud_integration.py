@@ -23,6 +23,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -232,6 +233,48 @@ class BusBridgeTests(unittest.TestCase):
         self.assertIsNotNone(outcome["learning"])
         record = self.bus.load_mission(corr)
         self.assertEqual(record.result["status"], "success")
+        self.assertEqual(len(record.learnings), 1)
+
+    def test_completion_retries_contention_and_preserves_the_other_write(self):
+        opened = bus_bridge.open_or_resume(
+            self.bus, repository=self.repo, issue=self.issue,
+            work_branch="agent/mission-71-x")
+        corr = opened["correlation_id"]
+        store = self.bus.store
+        put_cas = store.put_cas
+        conflicts = []
+
+        def competing_write(key, value, expected):
+            if not conflicts:
+                store.put(key, {**expected, "errors": [{"code": "concurrent-update"}]})
+            written = put_cas(key, value, expected)
+            conflicts.append(not written)
+            return written
+
+        with patch.object(store, "put_cas", side_effect=competing_write):
+            bus_bridge.record_outcome(self.bus, corr, success=True, summary="ok",
+                                      verdict={"validated": True, "checks": []})
+
+        record = self.bus.load_mission(corr)
+        self.assertEqual(conflicts, [True, False])
+        self.assertEqual(record.errors, [{"code": "concurrent-update"}])
+        self.assertEqual(record.state, "done")
+        self.assertEqual(len(record.learnings), 1)
+
+    def test_replayed_outcomes_preserve_the_completed_result_and_single_learning(self):
+        opened = bus_bridge.open_or_resume(
+            self.bus, repository=self.repo, issue=self.issue,
+            work_branch="agent/mission-71-x")
+        corr = opened["correlation_id"]
+        bus_bridge.record_outcome(self.bus, corr, success=True, summary="accepted",
+                                  verdict={"validated": True, "checks": []})
+        bus_bridge.record_outcome(self.bus, corr, success=True, summary="replayed",
+                                  verdict={"validated": True, "checks": []})
+        bus_bridge.record_outcome(self.bus, corr, success=False, summary="late failure")
+
+        record = self.bus.load_mission(corr)
+        self.assertEqual(record.state, "done")
+        self.assertEqual(record.result["summary"], "accepted")
         self.assertEqual(len(record.learnings), 1)
 
     def test_failure_marks_resumable(self):

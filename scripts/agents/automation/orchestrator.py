@@ -33,6 +33,8 @@ Local dry-run (no network, no spend):
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 import pathlib
@@ -40,13 +42,16 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(HERE))
 
+import acceptance  # noqa: E402
 import policy  # noqa: E402
 import preflight  # noqa: E402
 import team_config as cfg  # noqa: E402
@@ -91,6 +96,13 @@ DEFAULT_CONFIG = {
     # Kill-switch, mirrored from the plugin schema. When true the run stops
     # immediately (exit 3) before any probe, spend or conversation.
     "emergency_stop": False,
+    # S-06: only these GitHub logins may authorise a mission through a
+    # content-bound approval marker in the issue body. Empty by default,
+    # so with no authorised approver named no mission can start
+    # (fail-closed). The owner sets this to their own login to enable it.
+    "authorized_approvers": [],
+    "authorized_verifiers": [],
+    "trusted_verification_workflows": {},
 }
 
 
@@ -171,12 +183,18 @@ def get_secret(name: str) -> str:
         return r.read().decode().strip()
 
 
-def fire_callback(status: str = "COMPLETED", error: str | None = None) -> None:
+def fire_callback(status: str = "COMPLETED", error: str | None = None,
+                  outcome: dict | None = None) -> None:
     """Signal run completion to the automation service.
 
     The script runner does not mark a run complete on its own, so this must be
     called on every exit path — success and error alike. Without it the run
     stays RUNNING until the platform timeout.
+
+    ``outcome`` carries the run report's business fields (``mission_id``,
+    ``mission_accepted``, ``outcome_verification``, ``config_digest``) so the
+    platform sees a mission verdict, not only "COMPLETED"/"FAILED". It is a
+    summary, never the full journal, and contains no secret.
     """
     url = os.environ.get("AUTOMATION_CALLBACK_URL", "")
     if not url:
@@ -184,6 +202,11 @@ def fire_callback(status: str = "COMPLETED", error: str | None = None) -> None:
     body = {"status": status, "run_id": os.environ.get("AUTOMATION_RUN_ID", "")}
     if error:
         body["error"] = error
+    if outcome:
+        body["mission_id"] = outcome.get("mission_id")
+        body["mission_accepted"] = outcome.get("mission_accepted")
+        body["outcome_verification"] = outcome.get("outcome_verification")
+        body["config_digest"] = outcome.get("config_digest")
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -468,8 +491,6 @@ def release_lock(owner: str) -> None:
 
 
 def _expiry_iso(ttl_seconds: int) -> str:
-    from datetime import datetime, timedelta, timezone
-
     return (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).replace(
         microsecond=0
     ).isoformat().replace("+00:00", "Z")
@@ -479,7 +500,6 @@ def _lock_expired(record: dict) -> bool:
     expires = (record or {}).get("expires_at")
     if not expires:
         return False
-    from datetime import datetime, timezone
 
     try:
         when = datetime.fromisoformat(expires.replace("Z", "+00:00"))
@@ -496,42 +516,110 @@ def reconcile_stale_active(state: dict, dry_run: bool) -> str | None:
     reconciliation the next run would abort forever with "a mission is already
     active" — the queue would be wedged by a mission that no longer runs.
 
-    The single source of truth for "is a mission really running" is the atomic
-    KV lock. So:
+    Two independent sources of truth are consulted, and the run only proceeds
+    when BOTH say nothing is running:
+
+    * the atomic KV lock (covers a second *run* racing for the mission);
+    * the recorded conversation id, probed on the agent server (covers a run
+      killed after it created a conversation but before it cleared ``active``).
+
+    So:
 
     * If the KV lock is still held and unexpired, another run owns the mission:
       return a reason string and let the caller abort.
-    * Otherwise nothing is running. Clear ``active`` and return ``None`` so the
-      mission becomes eligible again and is resumed (never lost, never
-      duplicated: it is not in ``processed`` yet).
+    * Else, if ``active`` carries a ``conversation_id`` and that conversation is
+      still alive on the agent server, the mission is genuinely running: return
+      a reason string (the caller then re-attaches to it instead of starting a
+      duplicate).
+    * Else clear ``active`` and return ``None`` so the mission becomes eligible
+      again and is resumed (never lost, never duplicated: it is not in
+      ``processed`` yet).
 
-    Never clears ``active`` when the lock cannot be read (KV unavailable), so a
-    real run can never silently run two missions at once.
+    Never clears ``active`` when the lock cannot be read (KV unavailable) or
+    when the liveness probe cannot reach the agent server, so a real run can
+    never silently run two missions at once (fail-closed).
     """
-    active = state.get("active")
-    if not active:
-        return None
     if dry_run:
         # A dry run does not touch persistent state; it only reports.
         return None
-    if not kv_available():
+    if not state.get("active"):
+        return None
+    action, detail = _reconcile_decision(state)
+    if action == "abort":
+        return detail
+    if action == "reattach":
         return (
-            "a mission is recorded as active but the atomic KV lock cannot be "
-            "read; refusing to reconcile without proof it is not running"
+            f"a mission is recorded as active with a live conversation {detail}; "
+            "re-attaching rather than duplicating"
         )
-    lock = kv_get(_LOCK_KEY)
-    if _lock_held(lock):
-        return (
-            f"a mission is already active (lock held by {lock.get('owner')} "
-            f"until {lock.get('expires_at')})"
-        )
+    # "proceed": nothing is running; the mission is re-queued for a fresh attempt.
     journal_entry(
-        state, "stale_active_reconciled",
-        previous=active, note="lock expired or absent; mission re-queued for resume",
+        state, "stale_active_reconciled", previous=state.get("active"),
+        note="lock expired or absent; mission re-queued for resume",
     )
     state["active"] = None
     save_state(state)
     return None
+
+
+def _reconcile_decision(state: dict) -> tuple[str, str]:
+    """Decide what to do with an ``active`` record, from two independent proofs.
+
+    Returns ``(action, detail)`` where ``action`` is one of:
+
+    * ``"proceed"`` — nothing is running; the mission may be re-queued.
+    * ``"reattach"`` — a live or finished conversation exists; ``detail`` is its id.
+    * ``"abort"`` — the state cannot be proven safe; ``detail`` is the reason.
+
+    The decision is fail-closed: any uncertainty (unreadable lock, unreachable
+    agent server) is an ``abort``, never a silent re-queue that could start a
+    second conversation for a mission that is actually still running. This
+    function never mutates ``state``.
+    """
+    active = state.get("active")
+    if not active:
+        return "proceed", ""
+    if not kv_available():
+        return "abort", (
+            "a mission is recorded as active but the atomic KV lock cannot be "
+            "read; refusing to reconcile without proof it is not running"
+        )
+    try:
+        lock = kv_get(_LOCK_KEY)
+    except Exception as exc:  # noqa: BLE001 - a KV read error is "cannot prove"
+        return "abort", (
+            "a mission is recorded as active but the atomic KV lock could not be "
+            f"read ({type(exc).__name__}: {exc}); refusing to reconcile without proof"
+        )
+    if _lock_held(lock):
+        return "abort", (
+            f"a mission is already active (lock held by {lock.get('owner')} "
+            f"until {lock.get('expires_at')})"
+        )
+    cid = active.get("conversation_id")
+    if cid and active.get("conversation_finished"):
+        return "reattach", cid
+    if not cid and active.get("start_requested"):
+        return "abort", (
+            "conversation start outcome is unknown; refusing a second request "
+            "until the existing conversation is reconciled"
+        )
+    if cid:
+        outcome, status = conversation_status(cid)
+        if outcome == "alive" or status == "finished":
+            return "reattach", cid
+        if outcome == "unknown":
+            return "abort", (
+                f"a mission is recorded as active with conversation {cid} but the "
+                "agent server is unreachable; refusing to reconcile without proof"
+            )
+        # outcome == "gone": the conversation is not running. Note the residual
+        # assumption: a 404 is trusted as proof of absence. In this architecture
+        # the conversation is created on the same agent server the resume probes,
+        # and the KV lock above already covered the window (its TTL is
+        # max_runtime_seconds + 600) during which a run could still be alive, so a
+        # 404 after the lock expired means the conversation is really gone.
+    return "proceed", ""
 
 
 # --------------------------------------------------------------------------- #
@@ -615,6 +703,55 @@ def list_mission_issues(repository: str, mission_label: str) -> list[dict]:
     return body
 
 
+def recent_mission_comments(repository: str, number: int) -> list:
+    """Read recent approval candidates from this issue's GitHub timeline."""
+    token = github_token()
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    query = urllib.parse.urlencode({"since": since, "per_page": 100})
+    url = f"https://api.github.com/repos/{repository}/issues/{number}/comments?{query}"
+    status, body = _request("GET", url, headers=headers)
+    if status != 200 or not isinstance(body, list):
+        raise RuntimeError(f"GitHub approval lookup failed: HTTP {status}")
+    return body
+
+
+def _verification_comments(repository: str, number: int, since: str) -> list:
+    """Read the bounded timeline since this conversation began."""
+    headers = {"Accept": "application/vnd.github+json"}
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    comments = []
+    for page in range(1, 7):
+        query = urllib.parse.urlencode({"since": since, "per_page": 100, "page": page})
+        status, body = _request(
+            "GET", f"https://api.github.com/repos/{repository}/issues/{number}/comments?{query}",
+            headers=headers, timeout=15)
+        if status != 200 or not isinstance(body, list):
+            raise RuntimeError(f"GitHub verification comments failed: HTTP {status}")
+        comments.extend(body)
+        if len(comments) > 500:
+            break
+        if len(body) < 100:
+            return comments
+    raise RuntimeError("GitHub verification timeline exceeds the page limit")
+
+
+def _github_repository_json(repository: str, path: str) -> dict:
+    headers = {"Accept": "application/vnd.github+json"}
+    token = github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    status, body = _request("GET", f"https://api.github.com/repos/{repository}/{path}",
+                            headers=headers, timeout=15)
+    if status != 200 or not isinstance(body, dict):
+        raise RuntimeError(f"GitHub evidence lookup failed: HTTP {status}")
+    return body
+
+
 def quota_remaining() -> int | None:
     """Remaining free daily conversations, or None when it cannot be read."""
     key = os.environ.get("OPENHANDS_API_KEY") or os.environ.get("TEL99_CLOUD_API_KEY")
@@ -687,10 +824,19 @@ def build_payload(mission_issue: dict, work_branch: str, config: dict, llm: dict
     return {
         "workspace": {"kind": "LocalWorkspace", "working_dir": str(REPO_ROOT)},
         "worktree": False,
+        # ``confirm_unknown`` must stay False for an unattended cloud run. The
+        # security analyzer classifies the coordination actions the mission
+        # depends on (``task_tool_set`` delegation, ``task_tracker``) as UNKNOWN
+        # risk, and no human is present to answer a confirmation. With
+        # ``confirm_unknown: True`` the coordinator stalls in
+        # ``waiting_for_confirmation`` until the platform timeout kills the run
+        # — a guaranteed failure. HIGH-risk actions still require confirmation
+        # (``threshold: HIGH``); the deterministic PreToolUse guard remains the
+        # primary control on terminal commands.
         "confirmation_policy": {
             "kind": "ConfirmRisky",
             "threshold": "HIGH",
-            "confirm_unknown": True,
+            "confirm_unknown": False,
         },
         "security_analyzer": {"kind": "LLMSecurityAnalyzer"},
         "max_iterations": config["max_iterations"],
@@ -730,6 +876,207 @@ def journal_entry(state: dict, event: str, **fields) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Durable run report (survives sandbox destruction)
+# --------------------------------------------------------------------------- #
+# The platform deletes the sandbox after a run, so a report that only lives in
+# the workspace file or on stdout is lost ("Sandbox has been deleted - logs are
+# no longer available"). This section writes ONE structured report per run to the
+# durable KV store (the same namespace/mechanism as ``state``) and, best-effort,
+# to the local workspace file, so a cockpit can always read what a run did.
+#
+# It deliberately separates two things that were previously conflated:
+#   * SCRIPT SUCCESS   - the process exit code (``0`` == the script ran fine);
+#   * MISSION_ACCEPTED - the business verdict (``outcome_verdict.validated``).
+# A run can exit ``0`` having accepted NO mission (idle / dry-run / offline), and
+# a mission can be attempted and rejected (exit ``2``) while the script itself
+# succeeded. ``status`` and ``mission_accepted`` make that explicit instead of
+# hiding it behind a single integer.
+_RUN_REPORT_KEY = "run_report"
+# Per-run copies (history) so a later run never silently erases the only
+# durable trace of an earlier one. Single path segment: the KV namespace is
+# flat, so the separator is a dot, not a slash.
+_RUN_REPORT_PREFIX = "run_report."
+# Only these keys are hashed into ``config_digest``. The config carries no secret
+# today, but hashing a whitelist (never the raw merged dict) keeps a future config
+# field from leaking into a durable, broadly readable record.
+_REPORT_CONFIG_KEYS = (
+    "repository", "mission_label", "base_branch", "work_branch_prefix",
+    "max_concurrent_missions", "max_runtime_seconds", "max_iterations",
+    "max_budget_usd", "agent_max_iterations", "agent_max_budget_usd",
+    "quota_min_remaining", "dry_run", "require_durable_bus", "emergency_stop",
+    "authorized_approvers", "authorized_verifiers", "trusted_verification_workflows",
+)
+
+
+def config_digest(config: dict) -> str:
+    """Stable short digest of the whitelisted configuration. Never a secret."""
+    projection = {k: config.get(k) for k in _REPORT_CONFIG_KEYS if k in config}
+    blob = json.dumps(projection, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _report_key(run_id: str) -> str:
+    """Stable per-run KV key. Sanitised so it stays a single flat segment."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "-", run_id or "") or "unknown"
+    return f"{_RUN_REPORT_PREFIX}{safe}"
+
+
+def _journal_entries(state: dict) -> list:
+    """Return only the well-formed (dict) journal entries.
+
+    ``load_state`` returns a dict read back from the KV store or a local file,
+    which is not schema-checked: a corrupted or hand-edited ``state`` could hold
+    ``journal: None`` or non-dict entries. The report builder must survive that
+    rather than raise (a missing report is preferable to a crashed run).
+    """
+    journal = state.get("journal") if isinstance(state, dict) else None
+    if not isinstance(journal, list):
+        return []
+    return [e for e in journal if isinstance(e, dict)]
+
+
+def _last_journal_value(state: dict, event: str, key: str):
+    """Return ``key`` from the last journal entry named ``event``, or ``None``."""
+    for entry in reversed(_journal_entries(state)):
+        if entry.get("event") == event and key in entry:
+            return entry[key]
+    return None
+
+
+def build_run_report(state: dict, config: dict, code: int, *,
+                     quota_after=None) -> dict:
+    """Build the durable run report from the run's own state (pure function).
+
+    Reads the run's journal so the report reflects what actually happened
+    (mission selected, quota reading, outcome verdict) rather than a guess.
+    """
+    entries = _journal_entries(state)
+    for index in range(len(entries) - 1, -1, -1):
+        if entries[index].get("event") == "run_start":
+            entries = entries[index:]
+            break
+    state = {"journal": entries}
+    mission_number = _last_journal_value(state, "mission_selected", "issue")
+    if mission_number is None:
+        mission_number = _last_journal_value(state, "mission_resume", "issue")
+    started = [
+        e for e in _journal_entries(state)
+        if e.get("event") == "conversation_started"
+    ]
+    resumed = [e for e in _journal_entries(state) if e.get("event") == "conversation_resumed"]
+    mission_id = str(mission_number) if mission_number is not None else "NO_MISSION"
+    validated = _last_journal_value(state, "outcome_verdict", "validated")
+    if validated is None:
+        outcome_verification = "NOT_ATTEMPTED"
+    else:
+        outcome_verification = (_last_journal_value(state, "outcome_verdict", "verification")
+                                or ("ACCEPTED" if validated else "REJECTED"))
+    error_reason = _last_journal_value(state, "abort", "reason")
+    if error_reason is None and code == 3:
+        error_reason = _last_journal_value(state, "emergency_stop", "reason")
+    # The business verdict is separate from the script exit code.
+    mission_accepted = bool(validated is True and code == 0)
+    if mission_accepted:
+        status = "MISSION_ACCEPTED"
+    elif code == 3:
+        status = "STOPPED"
+    elif code != 0:
+        status = "FAILED"
+    elif mission_id == "NO_MISSION":
+        status = "SUCCESS_SCRIPT_NO_MISSION"
+    else:
+        status = "SUCCESS_SCRIPT_MISSION_NOT_ACCEPTED"
+    run_id = (os.environ.get("AUTOMATION_RUN_ID", "")
+              or _last_journal_value(state, "run_start", "owner") or "")
+    return {
+        "schema_version": 1,
+        "record_type": "tel99_run_report",
+        "run_id": run_id,
+        "ts": policy.utcnow_iso(),
+        "config_digest": config_digest(config),
+        "dry_run": bool(config.get("dry_run")),
+        "quota_before": _last_journal_value(state, "quota", "remaining"),
+        "quota_after": quota_after,
+        "mission_id": mission_id,
+        "started_children": len(started),
+        "resumed_conversations": len(resumed),
+        "status": status,
+        "mission_accepted": mission_accepted,
+        "outcome_verification": outcome_verification,
+        "verification_proof": _last_journal_value(state, "outcome_verdict", "proof"),
+        "error_reason": error_reason,
+        "evidence_uri": f"kv://{_report_key(run_id)}",
+    }
+
+
+def write_run_report(state: dict, config: dict, code: int, *,
+                     quota_after=None, write_kv: bool = True) -> dict:
+    """Persist the run report durably (KV), then to the local file; best-effort.
+
+    Never raises: a failure to write a report must not turn a completed run into
+    a crash. The report is always returned so the caller can print it too.
+
+    ``write_kv=False`` skips the durable-store write and keeps only the local
+    workspace file. The emergency-brake path uses it so that halting a run never
+    touches the network (the brake must not depend on a remote store).
+    """
+    try:
+        report = build_run_report(state, config, code, quota_after=quota_after)
+    except Exception as exc:  # noqa: BLE001 - a report must never break the run
+        print(f"[journal] run_report_build_error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return {}
+    # Durable store first (survives container destruction), local file second.
+    # Two keys: ``run_report`` (the latest, for the cockpit/callback) and a
+    # per-run ``run_report.<run_id>`` (history, so a later run cannot erase the
+    # only durable trace of an earlier one).
+    if write_kv and kv_available():
+        for key in (_RUN_REPORT_KEY, _report_key(report.get("run_id", ""))):
+            try:
+                kv_set(key, report)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[journal] run_report_kv_error[{key}]: "
+                      f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    try:
+        path = _state_path()
+        report_path = path.with_name(path.stem + "_run_report.json")
+        tmp = report_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(report, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(report_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[journal] run_report_file_error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+    print(f"[journal] run_report {json.dumps(report, ensure_ascii=False)}")
+    return report
+
+
+def read_run_report() -> dict:
+    """Read the last run report: the local file first, then the durable store.
+
+    Best-effort and read-only: returns ``{}`` when no report is readable, so a
+    caller can always use it without guarding. The local file is tried first
+    because the same process just wrote it (no network call in the common case);
+    the KV store is the fallback that still works after the sandbox is deleted.
+    Used by ``main`` to attach the business verdict to the completion callback.
+    """
+    try:
+        path = _state_path()
+        report_path = path.with_name(path.stem + "_run_report.json")
+        return json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - a missing report is not an error
+        pass
+    if kv_available():
+        try:
+            data = kv_get(_RUN_REPORT_KEY)
+            if isinstance(data, dict):
+                return data
+        except Exception:  # noqa: BLE001
+            pass
+    return {}
+
+
+# --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def load_config(path: str | None) -> dict:
@@ -752,9 +1099,177 @@ def load_config(path: str | None) -> dict:
     return config
 
 
+def _finish_mission(*, state, mission, work_branch, cid, final,
+                    agent_names, bus, bus_corr, require_bus, config,
+                    processed) -> int:
+    """Verify, persist and close out a mission conversation.
+
+    Shared by a fresh start and a re-attach, so both paths apply exactly the same
+    evidence gate: a mission is only ever marked processed (done) when
+    ``verify_outcome`` proves every required role reported. On any failure the
+    mission stays out of ``processed`` and remains resumable. The caller holds
+    the KV lock and releases it in its ``finally``.
+    """
+    journal_entry(state, "conversation_finished", conversation=cid, status=final)
+
+    if final == "confirmation_required":
+        # An unattended run has no one to answer a confirmation. Fail fast and
+        # loudly rather than let the platform timeout kill the run; the mission
+        # stays out of ``processed`` so it is resumable.
+        journal_entry(state, "abort", conversation=cid,
+                      reason="conversation stalled waiting for a confirmation "
+                             "that no operator can answer in an unattended run")
+        state["active"] = None
+        save_state(state)
+        return 2
+
+    if final == "stopped":
+        # An operator set the brake while this mission ran. The conversation was
+        # interrupted; the mission stays resumable.
+        journal_entry(state, "emergency_interrupt", conversation=cid,
+                      scope="active_mission",
+                      note="conversation interrupted; mission left resumable")
+        state["active"] = None
+        save_state(state)
+        return 3
+
+    # Persist the role observations needed to verify a finished conversation
+    # even when a later run cannot reach the same agent server.
+    active = state["active"]
+    mission_body = mission.get("body") or ""
+    if final == "finished" and not active.get("conversation_finished"):
+        active["conversation_finished"] = True
+        save_state(state)
+    evidence = active.get("completed_roles") or collect_evidence(
+        cid, expected_roles=agent_names, mission_body=mission_body)
+    evidence = dict(evidence)
+    if final == "finished" and not active.get("completed_roles"):
+        roles = evidence["roles"]
+        if (evidence["coordinator_response_chars"] > 0 and roles
+                and all(role.get("proven") for role in roles.values())):
+            active["completed_roles"] = {
+                key: evidence[key] for key in ("conversation_id", "coordinator_response_chars",
+                                               "roles", "acceptance_criteria")
+            }
+            save_state(state)
+    evidence["acceptance_checks"] = [{"id": "independent-evidence", "automatable": False}]
+    verification_proof = None
+    if final == "finished" and config.get("authorized_verifiers"):
+        approver = active.get("approved_by")
+        issue_author = (mission.get("user") or {}).get("login")
+        excluded = {login.lower() for login in (approver, issue_author)
+                    if isinstance(login, str)}
+        verifiers = {login.lower() for login in config["authorized_verifiers"]
+                     if isinstance(login, str)} - excluded
+        repository = config["repository"]
+        try:
+            comments = (_verification_comments(repository, mission["number"], active["started_at"])
+                        if verifiers and active.get("approved_content_hash") else [])
+            evidence["acceptance_checks"], verification_proof = acceptance.verify(
+                comments=comments, verifiers=verifiers, conversation_id=cid,
+                mission_digest=active.get("approved_content_hash"), mission_body=mission_body,
+                repository=repository, work_branch=work_branch,
+                checks=acceptance_checks_from_body(
+                    policy.mission_content({"body": mission_body}), strict=True),
+                trusted_workflows=config.get("trusted_verification_workflows") or {},
+                fetch=lambda path: _github_repository_json(repository, path),
+            )
+        except (RuntimeError, OSError, ValueError):
+            journal_entry(state, "verification_unavailable", conversation=cid)
+    if verification_proof is not None:
+        evidence["independent_verification"] = verification_proof
+    validated, verdict = verify_outcome(final, evidence,
+                                        expected_roles=agent_names,
+                                        mission_body=mission.get("body") or "")
+    verification = "ACCEPTED" if validated else "REJECTED"
+    if (verdict["needs_human"] and not verdict["failed"]
+            and all(check["ok"] for check in verdict["checks"]
+                    if not check["check"].startswith("criterion_"))):
+        verification = "NEEDS_HUMAN"
+    journal_entry(state, "outcome_verdict", validated=validated,
+                  verification=verification,
+                  roles={r: info.get("proven") for r, info in verdict["roles"].items()},
+                  checks=verdict["checks"], proof=verification_proof)
+
+    # --- Persist the outcome on the bus (survives container destruction). ---
+    # Fail-closed: if the durable record cannot be written, the mission must NOT
+    # be declared done nor marked processed, otherwise it would be lost from the
+    # ledger and never retried.
+    if bus is not None and bus_corr is not None:
+        try:
+            outcome = bus_bridge.record_outcome(
+                bus, bus_corr, success=validated,
+                summary=(f"validated outcome for issue #{mission['number']}"
+                         if validated else
+                         f"unvalidated outcome ({final}) for issue #{mission['number']}"),
+                conversation_id=str(cid), work_branch=work_branch,
+                status_detail=f"final status {final}; validated={validated}",
+                evidence=evidence, verdict=verdict,
+            )
+            journal_entry(state, "bus_outcome", mission_state=outcome["state"],
+                          learning=(outcome.get("learning") or {}).get("id"))
+        except Exception as exc:  # noqa: BLE001
+            journal_entry(state, "abort",
+                          reason="final bus record failed: mission NOT marked done",
+                          detail=f"{type(exc).__name__}: {exc}")
+            save_state(state)
+            return 2
+    elif require_bus:
+        journal_entry(state, "abort",
+                      reason="bus unavailable at completion: mission NOT marked done")
+        save_state(state)
+        return 2
+
+    # Only a validated mission is marked processed; an unvalidated one stays out
+    # of ``processed`` so the next run resumes it.
+    if validated:
+        state["processed"] = sorted(processed | {mission["number"]})
+    if final != "finished" or validated:
+        state["active"] = None
+    save_state(state)
+    return 0 if validated else 2
+
+
 def run(config: dict, offline: bool = False) -> int:
+    """Run one orchestrator cycle and persist a durable report for it.
+
+    Thin wrapper around :func:`_run_impl` so that every exit code (0, 2, 3, and
+    the crash path that ``main`` turns into 1) is covered by a single durable
+    report write, without threading a return value through the ~20 exit paths of
+    the body. The report is best-effort: a failure to write it never changes the
+    run's exit code and never raises.
+    """
+    holder: dict = {}
+    try:
+        code = _run_impl(config, offline, holder)
+    except BaseException:  # noqa: BLE001 - report the crash, then re-raise
+        # A crash is exit code 1 (``main`` maps it). Persist a report so the run
+        # is not invisible after the sandbox is deleted, then re-raise unchanged.
+        state = holder.get("state")
+        if not isinstance(state, dict):
+            state = {"version": 1, "processed": [], "active": None, "journal": []}
+        write_run_report(state, config, 1, quota_after=None, write_kv=True)
+        raise
+    state = holder.get("state")
+    if isinstance(state, dict):
+        brake = bool(holder.get("brake"))
+        quota_after = None
+        # Never probe quota on the emergency-brake path: the halt must not depend
+        # on the network. On other paths it is a best-effort second reading and
+        # ``quota_remaining`` returns ``None`` when no API key is configured.
+        if not offline and not brake:
+            try:
+                quota_after = quota_remaining()
+            except Exception:  # noqa: BLE001 - the report must never break the run
+                quota_after = None
+        write_run_report(state, config, code, quota_after=quota_after,
+                         write_kv=not brake)
+    return code
+
+
+def _run_impl(config: dict, offline: bool, holder: dict) -> int:
     started = time.time()
-    owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{int(started)}"
+    owner = os.environ.get("AUTOMATION_RUN_ID") or f"local-{uuid.uuid4().hex}"
 
     # --- Emergency stop, local sources first: NO network before the brake. ----
     # ``load_state`` may read the KV store over the network; a local stop must
@@ -772,12 +1287,16 @@ def run(config: dict, offline: bool = False) -> int:
             # ``save_state`` is called, so the brake returns before any KV read
             # or write. The stop is still reported on stdout via the journal.
             state = {"version": 1, "processed": [], "active": None, "journal": []}
+            holder["state"] = state
+            holder["brake"] = True
             journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
                           repository=config["repository"], offline=offline, owner=owner)
             journal_entry(state, "emergency_stop", reason=reason, scope="next_run")
             return 3
 
     state = load_state()
+    initial_active = state.get("active")
+    holder["state"] = state
     deadline = started + int(config["max_runtime_seconds"])
 
     journal_entry(state, "run_start", dry_run=bool(config["dry_run"]),
@@ -789,31 +1308,41 @@ def run(config: dict, offline: bool = False) -> int:
     if emergency is not None and kv_available() and emergency.kv_stop(kv_get):
         journal_entry(state, "emergency_stop",
                       reason=f"KV key {emergency.KV_KEY!r} is set", scope="next_run")
-        save_state(state)
         return 3
 
     # --- Stop on error: refuse before any spend when a precondition fails. ---
     if not policy.repository_allowed(config["repository"]):
         journal_entry(state, "abort", reason="repository not allowed")
-        save_state(state)
         return 2
 
     # One mission at a time, with automatic recovery from interruption.
+    # A prior run killed mid-mission may have left an active record. Decide, from
+    # two independent proofs (the KV lock and the recorded conversation's real
+    # status), whether to abort, re-attach, or re-queue -- never to duplicate.
     active = state.get("active")
+    resume_cid = None
+    resume_issue = None
     if active and not config["dry_run"]:
-        reason = reconcile_stale_active(state, config["dry_run"])
-        if reason:
-            journal_entry(state, "abort", reason=reason, active=active)
-            save_state(state)
+        action, detail = _reconcile_decision(state)
+        if action == "abort":
+            journal_entry(state, "abort", reason=detail, active=active)
             return 2
-        active = state.get("active")
-        if not active:
-            journal_entry(state, "resume", note="interrupted mission re-queued for resume")
+        if action == "reattach":
+            resume_cid = detail
+            resume_issue = active.get("issue")
+            journal_entry(state, "resume_reattach", conversation=resume_cid,
+                          issue=resume_issue,
+                          note="an existing conversation will be re-attached instead "
+                               "of starting a duplicate")
+        else:
+            journal_entry(state, "stale_active_reconciled", previous=active,
+                          note="lock expired or absent; mission re-queued for resume")
+            state["active"] = None
+            active = None
 
     if offline:
         journal_entry(state, "offline", note="no network calls; selection logic only")
         print(json.dumps(config, indent=2))
-        save_state(state)
         return 0
 
     # --- Environment facts (read-only). Turns assumptions into evidence. ---
@@ -824,7 +1353,6 @@ def run(config: dict, offline: bool = False) -> int:
     reasons = preflight.preflight()
     if reasons:
         journal_entry(state, "abort", reason="preflight failed", problems=reasons)
-        save_state(state)
         return 2
     journal_entry(state, "preflight_ok", checks=["guard", "team_config"])
 
@@ -837,32 +1365,84 @@ def run(config: dict, offline: bool = False) -> int:
         issues = list_mission_issues(config["repository"], config["mission_label"])
     except RuntimeError as exc:
         journal_entry(state, "abort", reason=str(exc))
-        save_state(state)
         return 2
 
     processed = set(state.get("processed", []))
-    mission = policy.select_mission(issues, config["mission_label"], processed)
+    resuming = resume_cid is not None
+
+    if resuming:
+        # Re-attaching to a mission that a prior run already started: bind this
+        # run to the SAME mission (its stable id is the issue number), so the
+        # conversation we resume is never confused with a different mission.
+        mission = next(
+            (i for i in issues if i.get("number") == resume_issue), None
+        )
+        if mission is None:
+            journal_entry(
+                state, "abort",
+                reason=f"conversation {resume_cid} was already started for issue "
+                       f"#{resume_issue}, which is no longer in the mission queue; "
+                       "refusing to start another conversation before reconciliation",
+                conversation=resume_cid, issue=resume_issue,
+            )
+            return 2
+    else:
+        mission = policy.select_mission(issues, config["mission_label"], processed)
     if mission is None:
         journal_entry(state, "idle", note="no eligible mission")
-        save_state(state)
         return 0
 
-    work_branch = policy.work_branch_name(
+    # --- Approval gate (S-06): no mission starts without a current, content-
+    # bound approval by an explicitly authorised actor. A label alone is not
+    # an authorisation, and an issue edited after approval is refused (its
+    # hash no longer matches). Fail-closed: a missing/unknown/mismatched
+    # approval, or a configuration that forgot to name the authorised
+    # approvers, refuses the run before any spend. A dry run starts no
+    # conversation, so it only reports the decision.
+    authorized = frozenset(config.get("authorized_approvers") or ())
+    approval, _ = policy.read_approval(mission)
+    digest = policy.mission_digest(policy.mission_content(mission))
+    approved, approval_reason = policy.approval_is_authorized(mission, authorized)
+    pinned_digest = active.get("approved_content_hash") if resuming else None
+    if pinned_digest is not None:
+        approved = (digest == pinned_digest and active.get("approved_by") in authorized)
+        approval_reason = ("reusing approval for the started conversation" if approved
+                           else "approved mission changed since the conversation started")
+    elif approved and not config["dry_run"]:
+        try:
+            comments = recent_mission_comments(config["repository"], mission["number"])
+        except RuntimeError as exc:
+            approved, approval_reason = False, str(exc)
+        else:
+            approved = policy.has_authenticated_approval(
+                mission, comments, now=datetime.now(timezone.utc))
+            if not approved:
+                approval_reason = "no authenticated approval comment for this mission"
+    if not approved and not config["dry_run"]:
+        journal_entry(state, "abort", reason=approval_reason,
+                      mission=mission["number"])
+        return 2
+    journal_entry(state, "approval_checked", approved=approved,
+                  detail=approval_reason, mission=mission["number"])
+
+    work_branch = (active.get("work_branch") if resuming else None) or policy.work_branch_name(
         config["work_branch_prefix"], mission["number"], mission.get("title", "")
     )
+    # When re-attaching, the one active mission IS this mission: it must not be
+    # counted as an *extra* concurrent mission, and no new conversation (thus no
+    # new quota spend) is started, so those two preconditions do not apply.
     reasons = policy.evaluate_preconditions(
         repository=config["repository"],
         base_branch=config["base_branch"],
         work_branch=work_branch,
-        quota_remaining=remaining,
+        quota_remaining=(config["quota_min_remaining"] if resuming else remaining),
         quota_min_remaining=config["quota_min_remaining"],
-        active_missions=1 if active else 0,
+        active_missions=(0 if resuming else (1 if active else 0)),
         max_concurrent_missions=config["max_concurrent_missions"],
         dry_run=config["dry_run"],
     )
     if reasons:
         journal_entry(state, "abort", reasons=reasons, mission=mission["number"])
-        save_state(state)
         return 2
 
     journal_entry(state, "mission_selected", issue=mission["number"],
@@ -879,10 +1459,9 @@ def run(config: dict, offline: bool = False) -> int:
         try:
             bus = Bus(REPO_ROOT / "bus", store=default_store(REPO_ROOT / "bus"))
             bus_corr = bus_bridge.correlation_id(config["repository"], mission["number"])
-            if bus_bridge.is_already_finished(bus, bus_corr):
+            if not resuming and bus_bridge.is_already_finished(bus, bus_corr):
                 journal_entry(state, "bus_skip", reason="mission already finished",
                               correlation_id=bus_corr)
-                save_state(state)
                 return 0
         except Exception as exc:  # noqa: BLE001 - never let the bus crash the run
             journal_entry(state, "bus_error", detail=f"{type(exc).__name__}: {exc}")
@@ -890,34 +1469,39 @@ def run(config: dict, offline: bool = False) -> int:
     elif require_bus:
         journal_entry(state, "abort", reason="bus unavailable: cannot deduplicate",
                       mission=mission["number"])
-        save_state(state)
         return 2
 
     if require_bus:
         if bus is None or bus_corr is None:
             journal_entry(state, "abort", reason="bus unavailable: refusing to start",
                           mission=mission["number"])
-            save_state(state)
             return 2
         report = bus.storage_report()
         if not report.get("durable_across_container"):
             journal_entry(state, "abort",
                           reason="bus storage is not durable across containers",
                           storage=report, mission=mission["number"])
-            save_state(state)
             return 2
 
     if config["dry_run"]:
         journal_entry(state, "dry_run", note="no conversation started",
                       would_run_until=policy.utcnow_iso())
-        save_state(state)
         return 0
 
     # --- Cross-run lock: only one mission may run, across distinct runs. ---
     acquired, detail = acquire_lock(owner, ttl_seconds=int(config["max_runtime_seconds"]) + 600)
     if not acquired:
         journal_entry(state, "abort", reason="mission lock not acquired", detail=detail)
-        save_state(state)
+        return 2
+    try:
+        latest_state = load_state()
+    except Exception:
+        release_lock(owner)
+        raise
+    if (latest_state.get("active") != initial_active
+            or set(latest_state.get("processed", [])) != processed):
+        journal_entry(state, "abort", reason="mission state changed before lock acquisition")
+        release_lock(owner)
         return 2
     journal_entry(state, "lock_acquired", detail=detail, owner=owner)
 
@@ -926,25 +1510,62 @@ def run(config: dict, offline: bool = False) -> int:
     # proceed, otherwise it would work with no deduplication and no durable record.
     if bus is not None and bus_corr is not None:
         try:
-            opened = bus_bridge.open_or_resume(
-                bus, repository=config["repository"], issue=mission,
-                work_branch=work_branch,
-            )
+            previous = bus.load_mission(bus_corr) if resuming else None
+            if previous and previous.state == "done":
+                result = previous.result or {}
+                if (result.get("metrics") or {}).get("conversation_id") != resume_cid:
+                    journal_entry(state, "abort", reason="ledger completion is for another conversation")
+                    release_lock(owner)
+                    return 2
+                journal_entry(state, "outcome_verdict", validated=True, verification="ACCEPTED",
+                              proof=(result.get("evidence") or {}).get("independent_verification"))
+                state["processed"] = sorted(processed | {mission["number"]})
+                state["active"] = None
+                save_state(state)
+                release_lock(owner)
+                return 0
+            if previous:
+                opened = {"action": "reattached", "correlation_id": bus_corr,
+                          "state": previous.state}
+            else:
+                opened = bus_bridge.open_or_resume(
+                    bus, repository=config["repository"], issue=mission,
+                    work_branch=work_branch,
+                )
             journal_entry(state, "bus_mission", action=opened["action"],
                           correlation_id=opened["correlation_id"],
                           mission_state=opened["state"],
                           storage=bus.storage_report())
         except Exception as exc:  # noqa: BLE001
-            release_lock(owner)
             journal_entry(state, "abort", reason="bus mission could not be opened",
                           detail=f"{type(exc).__name__}: {exc}")
-            save_state(state)
+            release_lock(owner)
             return 2
     elif require_bus:
-        release_lock(owner)
         journal_entry(state, "abort", reason="bus unavailable: refusing to start")
-        save_state(state)
+        release_lock(owner)
         return 2
+
+    # --- Resume: re-attach to a live conversation instead of duplicating it. ---
+    # A prior run may have created a conversation and then been killed before it
+    # could record the outcome. ``_reconcile_decision`` proved (via the KV lock
+    # and a live status probe) that this conversation is still running; adopt it.
+    if resume_cid:
+        journal_entry(state, "conversation_resumed", conversation=resume_cid,
+                      issue=resume_issue)
+        report_phase("resuming coordinator")
+        agent_names = cfg.unique_names(time.strftime("%H%M%S"))
+        try:
+            final = ("finished" if active.get("conversation_finished")
+                     else wait_for(resume_cid, deadline, state_dir=state_dir))
+            return _finish_mission(
+                state=state, mission=mission, work_branch=work_branch,
+                cid=resume_cid, final=final, agent_names=agent_names, bus=bus,
+                bus_corr=bus_corr, require_bus=require_bus, config=config,
+                processed=processed,
+            )
+        finally:
+            release_lock(owner)
 
     # --- Build the coordinator payload and prove it declares 3 restricted agents. ---
     profile = os.environ.get("TEL99_LLM_PROFILE", "openhands_deepseek-v4.1-flash")
@@ -962,16 +1583,19 @@ def run(config: dict, offline: bool = False) -> int:
     payload_problems += preflight.check_budget(payload)
     payload_problems += preflight.check_model(payload)
     if payload_problems:
-        release_lock(owner)
         journal_entry(state, "abort", reason="payload preflight failed",
                       problems=payload_problems)
-        save_state(state)
+        release_lock(owner)
         return 2
     journal_entry(state, "payload_ok",
                   sub_agents=[d.get("name") for d in payload.get("agent_definitions", [])])
 
+    # Persist the intent before POST. A gap between this write and receiving
+    # the conversation ID is ambiguous, so recovery refuses a second POST.
     state["active"] = {"issue": mission["number"], "work_branch": work_branch,
-                       "started_at": policy.utcnow_iso(), "owner": owner}
+                       "started_at": policy.utcnow_iso(), "owner": owner,
+                       "conversation_id": None, "start_requested": True,
+                       "approved_content_hash": digest, "approved_by": approval["approved_by"]}
     save_state(state)
     report_phase("starting coordinator")
 
@@ -981,82 +1605,32 @@ def run(config: dict, offline: bool = False) -> int:
             headers={"X-Session-API-Key": session_key()},
         )
         if status not in (200, 201) or not isinstance(body, dict):
-            journal_entry(state, "abort", reason=f"conversation start failed: HTTP {status}")
-            state["active"] = None
+            journal_entry(state, "abort", reason=f"conversation start unconfirmed: HTTP {status}")
             save_state(state)
             return 2
 
         cid = body.get("id") or body.get("conversation_id")
-        journal_entry(state, "conversation_started", conversation=cid, issue=mission["number"])
+        if not isinstance(cid, str) or not cid.strip():
+            journal_entry(state, "abort", reason="conversation start returned no identifier")
+            save_state(state)
+            return 2
+
+        # Persist the real conversation id at once: a hard kill after this point
+        # leaves a recoverable record, and the next run re-attaches to it.
+        state["active"].update(conversation_id=cid, start_requested=False)
+        save_state(state)
+        journal_entry(state, "conversation_started", conversation=cid,
+                      issue=mission["number"])
 
         # --- Wait, bounded by the deadline; stop children on timeout or stop. ---
         report_phase("running coordinator")
         final = wait_for(cid, deadline, state_dir=state_dir)
-        journal_entry(state, "conversation_finished", conversation=cid, status=final)
-        if final == "stopped":
-            # An operator set the brake while this mission ran. The conversation
-            # was interrupted; the mission stays out of ``processed`` so the next
-            # run (once the brake is cleared) resumes it rather than losing it.
-            journal_entry(state, "emergency_interrupt", conversation=cid,
-                          scope="active_mission",
-                          note="conversation interrupted; mission left resumable")
-            state["active"] = None
-            save_state(state)
-            return 3
-
-        # --- Validation: a finished status is NOT a success by itself. ---
-        # Collect the proof each required role actually ran and reported, then
-        # accept the mission only when the evidence supports it. Absence of any
-        # role's proof is a failure, not an assumption of success.
-        evidence = collect_evidence(cid, expected_roles=agent_names,
-                                    mission_body=mission.get("body") or "")
-        validated, verdict = verify_outcome(final, evidence,
-                                            expected_roles=agent_names,
-                                            mission_body=mission.get("body") or "")
-        journal_entry(state, "outcome_verdict", validated=validated,
-                      roles={r: info.get("proven") for r, info in verdict["roles"].items()},
-                      checks=verdict["checks"])
-
-        # --- Persist the outcome on the bus (survives container destruction). ---
-        # Fail-closed on the final write: if the durable record cannot be written,
-        # the mission must NOT be declared done nor marked processed, otherwise it
-        # would be lost from the ledger and never retried.
-        if bus is not None and bus_corr is not None:
-            try:
-                outcome = bus_bridge.record_outcome(
-                    bus, bus_corr, success=validated,
-                    summary=(f"validated outcome for issue #{mission['number']}"
-                             if validated else
-                             f"unvalidated outcome ({final}) for issue #{mission['number']}"),
-                    conversation_id=str(cid), work_branch=work_branch,
-                    status_detail=f"final status {final}; validated={validated}",
-                    evidence=evidence, verdict=verdict,
-                )
-                journal_entry(state, "bus_outcome", mission_state=outcome["state"],
-                              learning=(outcome.get("learning") or {}).get("id"))
-            except Exception as exc:  # noqa: BLE001
-                release_lock(owner)
-                journal_entry(state, "abort",
-                              reason="final bus record failed: mission NOT marked done",
-                              detail=f"{type(exc).__name__}: {exc}")
-                state["active"] = None
-                save_state(state)
-                return 2
-        elif require_bus:
-            release_lock(owner)
-            journal_entry(state, "abort",
-                          reason="bus unavailable at completion: mission NOT marked done")
-            state["active"] = None
-            save_state(state)
-            return 2
-
-        # Only a validated mission is marked processed; an unvalidated one stays
-        # out of ``processed`` so the next run resumes it.
-        if validated:
-            state["processed"] = sorted(processed | {mission["number"]})
-        state["active"] = None
-        save_state(state)
-        return 0 if validated else 2
+        return _finish_mission(
+            state=state, mission=mission, work_branch=work_branch,
+            cid=cid, final=final, agent_names=agent_names, bus=bus,
+            bus_corr=bus_corr, require_bus=require_bus, config=config,
+            processed=processed,
+        )
     finally:
         release_lock(owner)
 
@@ -1078,6 +1652,37 @@ def _get_json(path: str) -> dict:
     status, body = _request("GET", f"{agent_server_base()}{path}",
                             headers={"X-Session-API-Key": session_key()})
     return body if status == 200 and isinstance(body, dict) else {}
+
+
+def _iter_events(cid: str, page_limit: int = 100, max_pages: int = 200):
+    """Yield every persisted event of a conversation, oldest first.
+
+    The agent-server exposes two different event endpoints: the batch
+    ``GET /api/conversations/{cid}/events`` takes a *list of event ids* in the
+    request body (a bare GET answers HTTP 422), while
+    ``GET .../events/search`` is the paginated reader. Reading the batch
+    endpoint here silently returned no events, so every delegation was recorded
+    as "no proof" and a real mission was marked failed. This walks
+    ``events/search`` page by page.
+    """
+    page_id = ""
+    for _ in range(max_pages):
+        query = f"?limit={page_limit}"
+        if page_id:
+            query += f"&page_id={urllib.parse.quote(page_id)}"
+        status, body = _request(
+            "GET",
+            f"{agent_server_base()}/api/conversations/{cid}/events/search{query}",
+            headers={"X-Session-API-Key": session_key()},
+        )
+        if status != 200 or not isinstance(body, dict):
+            return
+        items = body.get("items") or []
+        for item in items:
+            yield item
+        page_id = body.get("next_page_id") or ""
+        if not page_id:
+            return
 
 
 def _observation_text(observation: dict) -> str:
@@ -1141,6 +1746,183 @@ def extract_acceptance_criteria(body: str) -> str:
     return " ".join(captured).strip()
 
 
+# A declared executable criterion inside the acceptance section, e.g.
+#   - check: python -m unittest tests.test_x
+#   - check [business-test]: python -m unittest tests.test_x
+_CHECK_LINE = re.compile(
+    r"^[-*]?\s*check(?:\s*\[(?P<id>[^\]]+)\])?\s*:\s*(?P<cmd>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _slug(text: str, limit: int = 40) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", (text or "").strip().lower()).strip("-")
+    return slug[:limit] or "check"
+
+
+def _heading_level(line: str) -> int:
+    """Return the heading level of ``line`` (``#`` count), or 0 for a non-heading.
+
+    A bold-only line (``**...**``) is treated as a level-1 heading, matching
+    :func:`extract_acceptance_criteria`. This lets the producer scope the
+    acceptance section by heading *level*: a sub-heading keeps it open, while a
+    heading at the same or a shallower level closes it. A mid-sentence mention of
+    the acceptance phrase is therefore never mistaken for the section heading.
+    """
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        return len(stripped) - len(stripped.lstrip("#"))
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        return 1
+    return 0
+
+
+def acceptance_checks_from_body(body: str, *, strict: bool = False) -> list[dict]:
+    """Extract *declared* acceptance checks from a mission body.
+
+    A mission may declare executable criteria as ``check: <command>`` lines in
+    its acceptance section::
+
+        ### Critere d'acceptation
+        Le test de non-regression passe.
+        - check: python -m unittest tests.test_x
+
+    This returns one structured entry per declared command and **never runs the
+    command**: executing a command taken from an untrusted issue body is exactly
+    what the safety contract forbids. The entry therefore carries only the
+    requested ``command`` and no result, which the verdict treats as
+    *automatable but unconfirmed* -> NEEDS_HUMAN, never a silent PASS. A trusted
+    producer (CI, an independent verifier) must supply ``exit_code``,
+    ``reproducible`` and ``output_digest`` to satisfy the criterion.
+    """
+    if not body:
+        return []
+    checks: list[dict] = []
+    section_level = 0
+    saw_section = False
+    saw_artifact = False
+    for raw in body.splitlines():
+        line = raw.strip()
+        level = _heading_level(line)
+        if level:
+            # A heading: either the acceptance section itself, or the end of it.
+            # Capture continues under deeper sub-headings (``#### Detail``), but a
+            # heading at the same or a shallower level closes the section.
+            if _ACCEPTANCE_HEADING.search(line):
+                if strict and saw_section:
+                    return []
+                saw_section = True
+                section_level = level
+            elif section_level and level <= section_level:
+                section_level = 0
+            continue
+        if not section_level:
+            continue
+        if strict and re.match(r"^[-*]?\s*acceptance-artifact:", line, re.IGNORECASE):
+            saw_artifact = True
+            continue
+        match = _CHECK_LINE.match(line)
+        if strict and line and not match:
+            return []
+        if match and match.group("cmd").strip():
+            cmd = match.group("cmd").strip()
+            checks.append({
+                "id": (match.group("id") or _slug(cmd)).strip(),
+                "command": cmd,
+                "automatable": True,
+                "exit_code": None,
+                "reproducible": False,
+                "output_digest": None,
+            })
+    return checks if not strict or saw_artifact else []
+
+
+def _as_check_list(value) -> list | None:
+    """Normalise an acceptance-check input to a list, or ``None`` when absent.
+
+    A malformed container (a truthy non-iterable) is treated as absent so a bad
+    caller can never crash the verdict; the mission then falls back to the
+    declared-text check rather than being silently accepted. A single check dict
+    is wrapped in a one-element list.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return None
+
+
+def _check_fields(entry) -> tuple[str, bool, object, bool, object]:
+    """Read one acceptance-check entry defensively.
+
+    Accepts a dict (the wire shape) or any object exposing the same attributes
+    (e.g. ``protocol.envelope.Evidence``). A malformed entry is treated as a
+    non-automatable check named ``check`` so it routes to NEEDS_HUMAN instead of
+    crashing the verdict or being silently dropped.
+    """
+    if isinstance(entry, dict):
+        cid = str(entry.get("id") or entry.get("command") or "check")
+        automatable = (bool(entry.get("command"))
+                       if entry.get("automatable") is None
+                       else bool(entry.get("automatable")))
+        return (cid, automatable, entry.get("exit_code"),
+                bool(entry.get("reproducible")), entry.get("output_digest"))
+    cid = str(getattr(entry, "claim", None) or getattr(entry, "kind", None)
+              or getattr(entry, "id", None) or "check")
+    command = getattr(entry, "command", None)
+    return (cid, bool(command), getattr(entry, "exit_code", None),
+            bool(getattr(entry, "reproducible", False)),
+            getattr(entry, "output_digest", None))
+
+
+def _check_satisfied(exit_code, reproducible: bool, digest) -> bool:
+    """A criterion is satisfied only by reproducible external evidence."""
+    return exit_code == 0 and bool(reproducible) and bool(digest)
+
+
+def _entry_satisfied(entry) -> bool:
+    """True only when an entry carries reproducible, positive evidence.
+
+    Non-automatable, unconfirmed (no result recorded) and red entries are all
+    ``False``, so they win any conflict in the fail-closed merge.
+    """
+    _cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
+    if not automatable:
+        return False
+    if exit_code is None and not digest:
+        return False
+    return _check_satisfied(exit_code, reproducible, digest)
+
+
+def _merge_acceptance_checks(evidence_checks, arg_checks) -> list:
+    """Merge the evidence's checks with the caller's, fail-closed.
+
+    Both inputs are normalised to lists (a malformed container becomes empty).
+    Entries are keyed by id; when the same id appears on both sides the entry
+    that is NOT satisfied wins, so a caller cannot hide a red check the run
+    actually produced by passing an empty or narrower list. Order is stable:
+    evidence order first, then any argument-only ids.
+    """
+    evidence_list = _as_check_list(evidence_checks) or []
+    arg_list = _as_check_list(arg_checks) or []
+    merged: dict[str, object] = {}
+    order: list[str] = []
+    for entry in [*evidence_list, *arg_list]:
+        cid = _check_fields(entry)[0]
+        if cid not in merged:
+            merged[cid] = entry
+            order.append(cid)
+        elif not _entry_satisfied(entry):
+            # A failing (or unconfirmed / non-automatable) entry always wins,
+            # whether the clash is between two evidence entries or between the
+            # evidence and the caller: a red check can never be hidden behind a
+            # green one. Order is stable: first-seen ids keep their position.
+            merged[cid] = entry
+    return [merged[cid] for cid in order]
+
+
 def _role_proves(obs: dict) -> bool:
     """True when one observation is a real, completed, non-empty result.
 
@@ -1187,7 +1969,8 @@ def _role_evidence(observations: list, expected_name: str, base_name: str) -> di
 
 
 def collect_evidence(cid: str, expected_roles: dict | None = None,
-                     mission_body: str = "") -> dict:
+                     mission_body: str = "",
+                     acceptance_checks: list | None = None) -> dict:
     """Gather observable proof that each required role actually ran and reported.
 
     A ``finished`` execution status only says the conversation stopped; it says
@@ -1211,42 +1994,37 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
     delegations: list[dict] = []
     children: list[str] = []
     seen_children: set[str] = set()
-    status, events = _request(
-        "GET", f"{agent_server_base()}/api/conversations/{cid}/events",
-        headers={"X-Session-API-Key": session_key()},
-    )
-    if status == 200 and isinstance(events, list):
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            action = event.get("action")
-            if isinstance(action, dict) and action.get("kind") in (
-                "TaskAction", "TaskActionWithRisk"
-            ):
-                delegations.append({
-                    "subagent_type": action.get("subagent_type") or "",
-                    "description": action.get("description") or "",
-                })
-            observation = event.get("observation")
-            if not isinstance(observation, dict):
-                continue
-            kind = observation.get("kind")
-            if kind == "TaskObservation":
-                text = _observation_text(observation)
-                observations.append({
-                    "task_id": observation.get("task_id") or "",
-                    "subagent": observation.get("subagent") or "",
-                    "status": observation.get("status") or "",
-                    "is_error": bool(observation.get("is_error")),
-                    "response_chars": len(text),
-                    "result_text": text[:2000],
-                    "is_placeholder": _is_placeholder_result(text),
-                })
-            elif kind == "StartChildConversationObservation":
-                child_id = observation.get("conversation_id")
-                if isinstance(child_id, str) and child_id and child_id not in seen_children:
-                    seen_children.add(child_id)
-                    children.append(child_id)
+    for event in _iter_events(cid):
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        if isinstance(action, dict) and action.get("kind") in (
+            "TaskAction", "TaskActionWithRisk"
+        ):
+            delegations.append({
+                "subagent_type": action.get("subagent_type") or "",
+                "description": action.get("description") or "",
+            })
+        observation = event.get("observation")
+        if not isinstance(observation, dict):
+            continue
+        kind = observation.get("kind")
+        if kind == "TaskObservation":
+            text = _observation_text(observation)
+            observations.append({
+                "task_id": observation.get("task_id") or "",
+                "subagent": observation.get("subagent") or "",
+                "status": observation.get("status") or "",
+                "is_error": bool(observation.get("is_error")),
+                "response_chars": len(text),
+                "result_text": text[:2000],
+                "is_placeholder": _is_placeholder_result(text),
+            })
+        elif kind == "StartChildConversationObservation":
+            child_id = observation.get("conversation_id")
+            if isinstance(child_id, str) and child_id and child_id not in seen_children:
+                seen_children.add(child_id)
+                children.append(child_id)
 
     child_reports = []
     for child_id in children:
@@ -1272,12 +2050,19 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
         "children": child_reports,
         "roles": roles,
         "acceptance_criteria": extract_acceptance_criteria(mission_body),
+        # Structured acceptance checks: the caller's, else the ones the mission
+        # *declares* in its acceptance section (``check: <command>``). A declared
+        # check carries no result, so it is automatable-but-unconfirmed and the
+        # verdict routes it to NEEDS_HUMAN rather than accepting on text alone.
+        "acceptance_checks": (acceptance_checks if acceptance_checks is not None
+                              else acceptance_checks_from_body(mission_body)),
     }
 
 
 def verify_outcome(final: str, evidence: dict, *,
                    expected_roles: dict | None = None,
-                   mission_body: str = "") -> tuple[bool, dict]:
+                   mission_body: str = "",
+                   acceptance_checks: list | None = None) -> tuple[bool, dict]:
     """Decide whether an outcome is *validated*, from evidence alone.
 
     The verdict is deliberately conservative. A run is validated only when:
@@ -1346,12 +2131,90 @@ def verify_outcome(final: str, evidence: dict, *,
         f"{len((criteria or '').strip())} chars declared",
     )
 
-    validated = all([finished, has_response, criteria_check, *role_checks])
+    # --- Acceptance checks: the criterion must be *satisfied*, not just declared.
+    # A criterion is satisfied only by reproducible external evidence: a recorded
+    # command exit code 0, marked reproducible, with an output digest. A red
+    # check makes the mission REJECTED even when every role reported PASS (this is
+    # gate G3/S-05: "trois rapports PASS mensongers + test echoue => false").
+    # A criterion that cannot be automated is NEEDS_HUMAN, never a silent PASS.
+    #
+    # The evidence's checks and the argument's checks are *merged fail-closed*:
+    # when the same id appears in both, the entry that is NOT satisfied wins, so
+    # a caller can never neutralise a red check the run actually produced by
+    # passing a narrower or empty list.
+    merged = _merge_acceptance_checks(evidence.get("acceptance_checks"),
+                                      acceptance_checks)
+    check_results = []
+    satisfied: list[str] = []
+    failed: list[str] = []
+    needs_human: list[str] = []
+    for entry in merged:
+        cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
+        if not automatable:
+            needs_human.append(cid)
+            check_results.append(check(
+                f"criterion_{cid}", False, "not automatable -> NEEDS_HUMAN"))
+            continue
+        if exit_code is None and not digest:
+            # The criterion is executable but no result was recorded: a declared
+            # check is a promise, not a proof. Route it to a human/independent
+            # verifier rather than accepting on the text or faking a FAIL.
+            needs_human.append(cid)
+            check_results.append(check(
+                f"criterion_{cid}", False, "no result recorded -> NEEDS_HUMAN"))
+            continue
+        ok = _check_satisfied(exit_code, reproducible, digest)
+        check_results.append(check(
+            f"criterion_{cid}", ok,
+            f"exit_code={exit_code!r} reproducible={reproducible}"))
+        (satisfied if ok else failed).append(cid)
+
+    validated = all([finished, has_response, criteria_check, *role_checks,
+                     *check_results])
     return validated, {"validated": validated, "checks": checks,
                        "roles": roles, "acceptance_criteria": criteria,
+                       "acceptance_checks": merged,
+                       "satisfied": satisfied, "failed": failed,
+                       "needs_human": needs_human,
                        "observations": evidence.get("observations") or [],
                        "children": evidence.get("children") or []}
 
+
+
+def conversation_status(cid: str) -> tuple[str, str]:
+    """Classify a conversation as ``alive``, ``gone`` or ``unknown``.
+
+    Returns ``(outcome, status)`` where ``outcome`` is one of:
+
+    * ``"alive"`` — the server answered 200 and the execution status is not
+      terminal: the conversation is still running. ``status`` is that status.
+    * ``"gone"`` — the server answered 200 with a terminal status, or answered
+      404: the conversation is not running (finished, errored, or removed).
+    * ``"unknown"`` — the server could not be reached or answered anything else.
+      The caller must fail closed: it cannot prove the conversation is dead.
+
+    A 404 is treated as ``gone`` (a positive proof of absence), while a transport
+    error is ``unknown`` — the distinction is what lets the resume path re-queue
+    a genuinely dead conversation yet still refuse to duplicate an unreachable
+    one.
+    """
+    if not cid:
+        return "gone", ""
+    try:
+        code, body = _request(
+            "GET", f"{agent_server_base()}/api/conversations/{cid}",
+            headers={"X-Session-API-Key": session_key()},
+        )
+    except Exception:  # noqa: BLE001 - a transport error is "cannot tell"
+        return "unknown", ""
+    if code == 404:
+        return "gone", ""
+    if code == 200 and isinstance(body, dict):
+        status = str(body.get("execution_status") or "")
+        if status in TERMINAL_STATES:
+            return "gone", status
+        return "alive", status
+    return "unknown", ""
 
 
 def interrupt_conversation(cid: str) -> bool:
@@ -1372,7 +2235,8 @@ def interrupt_conversation(cid: str) -> bool:
 
 
 def wait_for(cid: str, deadline: float, poll: float = 5.0,
-             state_dir: str | pathlib.Path | None = None) -> str:
+             state_dir: str | pathlib.Path | None = None,
+             confirm_grace_polls: int = 3) -> str:
     """Poll a conversation until a terminal state, the deadline or a stop.
 
     While a conversation runs, the *local* emergency brake is re-read on every
@@ -1380,9 +2244,16 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
     set, the conversation is interrupted and the function returns ``"stopped"``.
     The deadline path also interrupts the child, so no work is left running
     unattended. This only interrupts the conversation this run is driving.
+
+    ``waiting_for_confirmation`` is not terminal: an unattended run has no one to
+    answer it. Left alone it burns the whole deadline and is then killed by the
+    platform timeout. After ``confirm_grace_polls`` consecutive polls in that
+    state the conversation is interrupted and ``"confirmation_required"`` is
+    returned, so the run fails fast, on purpose, and the mission stays resumable.
     """
     headers = {"X-Session-API-Key": session_key()}
     brake_dir = pathlib.Path(state_dir) if state_dir is not None else _state_path().parent
+    waiting_polls = 0
     while time.time() < deadline:
         if emergency is not None and emergency.local_stop(brake_dir)[0]:
             interrupt_conversation(cid)
@@ -1394,6 +2265,13 @@ def wait_for(cid: str, deadline: float, poll: float = 5.0,
             state = body.get("execution_status")
             if state in TERMINAL_STATES:
                 return state
+            if state == "waiting_for_confirmation":
+                waiting_polls += 1
+                if waiting_polls >= confirm_grace_polls:
+                    interrupt_conversation(cid)
+                    return "confirmation_required"
+            else:
+                waiting_polls = 0
         time.sleep(poll)
     # Deadline reached: stop the child so no work is left running unattended.
     interrupt_conversation(cid)
@@ -1422,9 +2300,13 @@ def main() -> int:
         fire_callback("FAILED", str(exc))
         return 1
     # The script runner does not complete a run on its own: signal it on every
-    # exit path so the run never stays RUNNING until the platform timeout.
+    # exit path so the run never stays RUNNING until the platform timeout. The
+    # callback carries the durable report's business verdict when one is readable,
+    # so the platform sees MISSION_ACCEPTED vs SCRIPT-OK, not just COMPLETED.
+    outcome = None if args.offline else read_run_report()
     fire_callback("COMPLETED" if code == 0 else "FAILED",
-                  None if code == 0 else f"orchestrator exit {code}")
+                  None if code == 0 else f"orchestrator exit {code}",
+                  outcome=outcome)
     return code
 
 

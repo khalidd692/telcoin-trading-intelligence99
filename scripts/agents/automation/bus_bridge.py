@@ -158,61 +158,53 @@ def record_outcome(bus: Bus, corr: str, *, success: bool, summary: str,
     non-validated outcome records a failure with the evidence and leaves the
     mission resumable; it never writes a ``verified`` learning.
     """
-    from protocol.envelope import Envelope
-
-    record = bus.load_mission(corr)
-    if record is None:
-        raise KeyError(f"unknown bus mission {corr}")
-
-    # Never accept a "success" that carries no verification verdict: that would be
-    # a false success. This is the single choke point that guards the learning.
     if success and not (verdict and verdict.get("validated")):
         raise ValueError("refusing to record an unverified success as a success")
 
-    if success:
-        for step in record.steps:
-            if step["id"] not in record.completed_step_ids:
-                record.completed_step_ids.append(step["id"])
-        record.state = "done"
+    learning_id = f"mission-{corr}"
+    proof = (evidence or {}).get("independent_verification") or {}
+    artifact = ({"path": proof["artifact"], "commit_sha": proof["commit_sha"],
+                 "sha256": proof["artifact_sha256"]} if proof.get("verifier")
+                else {"path": work_branch} if work_branch else None)
+
+    def complete(record):
+        if record.state == "done":
+            return
+
         record.result = {
-            "status": "success",
+            "status": "success" if success else "failure",
             "summary": summary,
-            "artifacts": [{"path": work_branch}] if work_branch else [],
-            "metrics": {"conversation_id": conversation_id or "",
-                        "roles": len(record.steps)},
-            "evidence": evidence or {},
-            "verdict": verdict or {},
-        }
-    else:
-        record.state = "failed"
-        record.resumable = True
-        record.result = {
-            "status": "failure", "summary": summary, "artifacts": [],
+            "artifacts": [artifact] if success and artifact else [],
             "metrics": {"conversation_id": conversation_id or ""},
             "evidence": evidence or {},
             "verdict": verdict or {},
         }
-        record.errors.append({
-            "code": "orchestrator.outcome_unvalidated",
-            "message": status_detail or summary,
-            "retryable": True, "attempt": 1, "max_attempts": 3, "fatal": False,
-        })
-    bus.save_mission(record)
+        if success:
+            for step in record.steps:
+                if step["id"] not in record.completed_step_ids:
+                    record.completed_step_ids.append(step["id"])
+            record.state = "done"
+            record.result["metrics"]["roles"] = len(record.steps)
+            record.learnings.append({
+                "id": learning_id,
+                "text": f"Mission {corr} reussie en lecture seule: {summary}",
+                "kind": "procedure",
+                "verified": True,
+                "verified_by": proof.get("verifier", "openhands"),
+                "source_envelope_id": record.envelopes[-1] if record.envelopes else None,
+            })
+        else:
+            record.state = "failed"
+            record.resumable = True
+            record.errors.append({
+                "code": "orchestrator.outcome_unvalidated",
+                "message": status_detail or summary,
+                "retryable": True, "attempt": 1, "max_attempts": 3, "fatal": False,
+            })
 
-    # A validated learning on success, so the knowledge survives the container.
-    learning = None
-    if success:
-        learning = {
-            "id": f"mission-{corr}",
-            "text": f"Mission {corr} reussie en lecture seule: {summary}",
-            "kind": "procedure",
-            "verified": True,
-            "verified_by": "openhands",
-            "source_envelope_id": record.envelopes[-1] if record.envelopes else None,
-        }
-        record.learnings.append(learning)
-    bus.save_mission(record)
-
+    record = bus.mutate_mission(corr, complete)
+    learning = next((entry for entry in record.learnings
+                     if entry.get("id") == learning_id), None)
     return {"state": record.state, "result": record.result, "learning": learning}
 
 
