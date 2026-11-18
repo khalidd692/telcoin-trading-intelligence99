@@ -3,6 +3,29 @@
   "project": "tel99",
   "entries": [
     {
+      "id": "fact-le-drapeau-quality-fresh-est-propre-a-chaque-timeframe-pas-un-seuil-global-de-15-min",
+      "project": "tel99",
+      "kind": "fact",
+      "title": "Le drapeau quality.fresh est propre a chaque timeframe (pas un seuil global de 15 min)",
+      "body": "Snapshot 2026-11-16T19:57:31Z (data.json sha256 649641d9...): gap 15m=12.53 min, 1h=57.5, 4h=237.5, 1D=1197.5 vs captured_at. quality.fresh est evalue par timeframe; un 1D/4h n'est pas 'frais' au seuil 15 min. Prouve entre deux runs OpenHands independants via le KV durable (Run A ecrit, Run B relit+verifie).",
+      "tags": [
+        "freshness",
+        "data",
+        "kraken",
+        "fail-closed"
+      ],
+      "source": "data.json sha256 649641d9df36da5f18f39a822f26e890247785f6723a3ea32fdf3500f4be3155",
+      "commit": "cd1cc7a",
+      "author": "tel99-analyst",
+      "created_at": "2026-11-16T20:25:05Z",
+      "version": 1,
+      "confidence": 0.7,
+      "verified": false,
+      "verified_by": "",
+      "supersedes": "",
+      "superseded_by": ""
+    },
+    {
       "id": "guard-git-value-options",
       "project": "tel99",
       "kind": "fix",
@@ -32,6 +55,13 @@
       "actor": "agent",
       "action": "record",
       "id": "guard-git-value-options",
+      "version": 1
+    },
+    {
+      "at": "2026-11-16T20:25:05Z",
+      "actor": "agent",
+      "action": "record",
+      "id": "fact-le-drapeau-quality-fresh-est-propre-a-chaque-timeframe-pas-un-seuil-global-de-15-min",
       "version": 1
     }
   ]

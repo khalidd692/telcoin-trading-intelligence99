@@ -42,7 +42,20 @@ def actor() -> Actor:
 
 
 def _store(root: str | None = None) -> memory.MemoryStore:
-    return memory.MemoryStore(root or MEMORY_ROOT)
+    """Build the memory store, preferring the durable backend when present.
+
+    An explicit ``root`` always means file storage at that path. Otherwise a
+    durable store provided by the run environment (the automation KV store, via
+    ``protocol.store.default_store``) is reused so knowledge survives the
+    container; with no durable store we keep the repository-local files.
+    """
+    if root:
+        return memory.MemoryStore(root)
+    from protocol import store as protocol_store
+    backend = protocol_store.default_store()
+    if backend.durable():
+        return memory.MemoryStore(backend=backend)
+    return memory.MemoryStore(MEMORY_ROOT)
 
 
 def route(task_kind: str, *, touches_files: int = 0, needs_tools: bool = True,

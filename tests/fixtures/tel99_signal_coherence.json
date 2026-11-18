@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "market": "KRAKEN:TELUSD",
+  "captured_at": "2026-11-16T19:57:31.539537+00:00",
+  "published_at": "2026-11-16T19:57:31.978720+00:00",
+  "source": "Kraken public REST / OHLC",
+  "source_sha256": "649641d9df36da5f18f39a822f26e890247785f6723a3ea32fdf3500f4be3155",
+  "as_of": 1794859051.539537,
+  "frames": {
+    "15m": {
+      "interval": "15m",
+      "quality": {
+        "source_rows": 720,
+        "valid_bars": 720,
+        "excluded_rows": 0,
+        "reasons": {},
+        "segments": 1,
+        "last_segment_bars": 720,
+        "missing_bars": 0,
+        "gaps": [],
+        "last_close": 1794858300,
+        "invalid_tail": false,
+        "coverage_pct": 100.0,
+        "fresh": true
+      }
+    },
+    "1h": {
+      "interval": "1h",
+      "quality": {
+        "source_rows": 720,
+        "valid_bars": 720,
+        "excluded_rows": 0,
+        "reasons": {},
+        "segments": 1,
+        "last_segment_bars": 720,
+        "missing_bars": 0,
+        "gaps": [],
+        "last_close": 1794855600,
+        "invalid_tail": false,
+        "coverage_pct": 100.0,
+        "fresh": true
+      }
+    },
+    "4h": {
+      "interval": "4h",
+      "quality": {
+        "source_rows": 720,
+        "valid_bars": 720,
+        "excluded_rows": 0,
+        "reasons": {},
+        "segments": 1,
+        "last_segment_bars": 720,
+        "missing_bars": 0,
+        "gaps": [],
+        "last_close": 1794844800,
+        "invalid_tail": false,
+        "coverage_pct": 100.0,
+        "fresh": true
+      }
+    },
+    "1D": {
+      "interval": "1D",
+      "quality": {
+        "source_rows": 298,
+        "valid_bars": 297,
+        "excluded_rows": 1,
+        "reasons": {
+          "price_wick": 1
+        },
+        "segments": 1,
+        "last_segment_bars": 297,
+        "missing_bars": 0,
+        "gaps": [],
+        "last_close": 1794787200,
+        "invalid_tail": false,
+        "coverage_pct": 100.0,
+        "fresh": true
+      }
+    }
+  },
+  "decision": {
+    "status": "ATTENDRE",
+    "experimental": true,
+    "execution_allowed": false,
+    "proofs": [
+      "Momentum : RSI et histogramme MACD progressent.",
+      "Confirmation temporelle : tendance 1h haussière."
+    ],
+    "contradictions": [
+      "Tendance 4h non alignée à la hausse.",
+      "Pas d’expansion du volume ≥ 1,5 ×.",
+      "Plan indicatif non admissible : niveaux ou RR brut ≥ 1,51 ou net ≥ 1,5 manquants."
+    ],
+    "limits": [
+      "Hypothèse de lecture non validée statistiquement.",
+      "Liquidité et frais réels non vérifiés. Aucun ordre autorisé."
+    ],
+    "invalidation": 0.001388,
+    "plan": {
+      "entry": 0.001492,
+      "stop": 0.001357952719101916,
+      "target": 0.001625,
+      "admissible": false,
+      "reason": "Simulation uniquement ; RR brut ≥ 1,51 et net ≥ 1,5",
+      "quantity": 16233.918189653077,
+      "cash_required": 24.390843632606394,
+      "planned_risk_usd": 2.5,
+      "risk_budget_usd": 2.5,
+      "rr_gross": 0.9921872275881505,
+      "rr_net": 0.7219716670308998,
+      "potential_net_usd": 1.8049291675772494,
+      "fee_per_side": 0.004,
+      "slippage_per_side": 0.003,
+      "gap_risk": "Un gap sous le stop peut dépasser le risque planifié."
+    },
+    "strategy_id": "terminal-confluence-v1"
+  },
+  "radar": {
+    "event": {
+      "schema_version": 1,
+      "id": "KRAKEN:TELUSD:CONFIRMATION:1794858300",
+      "market": "KRAKEN:TELUSD",
+      "type": "CONFIRMATION",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "confirmed": true,
+      "risk_checked_buy": false,
+      "rule_version": "tel99-radar-v1",
+      "source": "Kraken public REST / OHLC",
+      "price": 0.001517,
+      "price_at": 1794858300,
+      "candle_closed_at": 1794858300,
+      "snapshot_at": 1794859051.539537,
+      "data_valid": true,
+      "watch": {
+        "level": 0.001448,
+        "unit": "4h"
+      },
+      "invalidation": {
+        "level": 0.001387,
+        "unit": "4h"
+      },
+      "scenario_id": "reversal",
+      "technical_condition": "Clôture 4h au-dessus de l’EMA20, puis retest tenu sur la clôture suivante ; RSI4h > 50, MACD en amélioration, 1h > EMA20.",
+      "factors": [
+        "convergence"
+      ],
+      "blockers": [
+        "Confirmation technique uniquement : frais personnels, spread, liquidité et RR net restent à vérifier."
+      ]
+    },
+    "blockers": [
+      "Confirmation technique uniquement : frais personnels, spread, liquidité et RR net restent à vérifier."
+    ]
+  },
+  "context": {
+    "btc4h": {
+      "symbol": "KRAKEN:XBTUSD",
+      "latest": {
+        "close": 64400.0,
+        "rsi14": 30.27763473439981,
+        "trend": "BAISSIER",
+        "ema20": 66279.49440594554,
+        "ema50": 69596.5905421569
+      },
+      "correlation": {
+        "n": 90,
+        "pearson": 0.34875879181855163,
+        "last_t": 1794830400,
+        "method": "Pearson, log-returns aligned on closed consecutive 4h bars"
+      }
+    },
+    "eth4h": {
+      "symbol": "KRAKEN:ETHUSD",
+      "latest": {
+        "close": 1818.22,
+        "rsi14": 37.65042221091861,
+        "trend": "BAISSIER",
+        "ema20": 1860.6315626054393,
+        "ema50": 1969.7664780153673
+      },
+      "correlation": {
+        "n": 90,
+        "pearson": 0.3818155201385195,
+        "last_t": 1794830400,
+        "method": "Pearson, log-returns aligned on closed consecutive 4h bars"
+      }
+    }
+  },
+  "safety": {
+    "real_orders": false,
+    "paper_orders": false,
+    "capital_reference": 1000,
+    "risk_fraction": 0.0025,
+    "min_rr": 1.51
+  },
+  "limits": [
+    "Les fenêtres historiques ont déjà été explorées ; aucun holdout vierge.",
+    "Les trous peuvent correspondre à des périodes sans transactions : aucune interpolation.",
+    "RSI14 Wilder pour ce snapshot ; les études et snapshots plus anciens conservent leur RSI arithmétique. ATR Wilder ; VWAP limité à une session UTC entièrement observée.",
+    "Les coûts sont hypothétiques. Aucun carnet historique, aucune probabilité calibrée.",
+    "Les sources externes ne se rafraîchissent pas automatiquement quand cette page est fermée."
+  ]
+}

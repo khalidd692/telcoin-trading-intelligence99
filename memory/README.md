@@ -21,3 +21,25 @@ Chaque entrée porte sa **provenance** : `source`, `commit`, `author`,
 - Re-enregistrer un `id` incrémente la version ; rien n'est écrasé silencieusement.
 - Une entrée remplacée (`superseded_by`) est exclue des recherches par défaut.
 - Aucun secret, aucune donnée personnelle, aucun ordre de trading dans la mémoire.
+
+## Persistance entre deux runs (mémoire inter-missions)
+
+Par défaut, `MemoryStore` écrit les fichiers JSON ci-dessus, **locaux au sandbox** :
+ils ne survivent pas à la destruction du conteneur (`FileStore.durable()` vaut
+`False`). Pour une mémoire réellement inter-runs, `MemoryStore` accepte un
+`backend` — le même contrat `get(key)` / `put(key, value)` que
+`scripts/agents/protocol/store.py` :
+
+```python
+from protocol.store import default_store
+from intelligence import memory
+
+store = memory.MemoryStore(backend=default_store())  # KV durable si dispo
+```
+
+`default_store()` renvoie le KV de l'automation (`KvStore`, `durable() == True`)
+quand `AUTOMATION_API_URL` + `AUTOMATION_KV_TOKEN` sont injectés par le run, et
+retombe sinon sur `FileStore`. La CLI (`cli.py remember/recall`) et l'adaptateur
+Hermes choisissent ce backend automatiquement ; `--memory-root` / `root=` forcent
+le stockage fichier. Les clés du backend vivent sous l'espace `memory/…`, distinct
+de `missions/` et `envelopes/` du bus.

@@ -41,8 +41,22 @@ DEFAULT_MEASURED = HERE.parents[3] / "memory" / "measured_quality.json"
 
 
 def _store(args) -> memory.MemoryStore:
-    root = pathlib.Path(args.memory_root) if args.memory_root else DEFAULT_MEMORY_ROOT
-    return memory.MemoryStore(root)
+    """Build the memory store, preferring the durable backend when present.
+
+    An explicit ``--memory-root`` always means file storage at that path (used
+    by the tests and by an operator who wants a local, reviewable store).
+    Otherwise, if the run environment provides a durable store (the automation
+    KV store, via ``protocol.store.default_store``), it is reused so knowledge
+    survives the container; with no durable store we keep the historical
+    repository-local files.
+    """
+    if args.memory_root:
+        return memory.MemoryStore(pathlib.Path(args.memory_root))
+    from protocol import store as protocol_store
+    backend = protocol_store.default_store()
+    if backend.durable():
+        return memory.MemoryStore(backend=backend)
+    return memory.MemoryStore(DEFAULT_MEMORY_ROOT)
 
 
 def cmd_route(args) -> int:

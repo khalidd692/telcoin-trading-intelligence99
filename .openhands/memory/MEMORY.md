@@ -194,3 +194,13 @@
   `?prefix=` est ignore cote serveur (filtrer cote client). `trigger:null` en PATCH -> 500.
 - Le champ `permissions.admin` du GET repo decrit le DEPOT, pas le jeton : protection de
   branche et rulesets restent 403 avec les deux jetons disponibles (action humaine requise).
+
+## Issue #84 (2026-11-16) — mémoire inter-runs PROUVÉE + diagnostic TEL99 (détail : `.openhands/memory/2026-11-16.md`)
+- KV cloud accessible avec `OPENHANDS_API_KEY` SEULEMENT via `?automation_id=<id>` (sinon 400).
+  Automation INACTIVE `fdffcbc4-...` suffit. Run A écrit, Run B (vraie 2e conversation cloud,
+  sandbox distinct) relit+vérifie : `tel99-memory.memory.projects.tel99`. Cross-sandbox PROUVÉ.
+- PIÈGE : un PUT avec corps `{"value": val}` DOUBLE-NESTE la valeur. Utiliser le `KvStore` du dépôt.
+- Correctif : `MemoryStore(root=None, *, backend=None)` backend-injectable (réutilise protocol/store).
+  CLI + adaptateur Hermes préfèrent `default_store()` durable sinon fichiers. 711 tests OK.
+- TEL99 : `execution_allowed=false`, `risk_checked_buy=false` => CONFIRMATION ≠ achat. Site LIVE :
+  toujours citer captured_at + sha256. `context.btc4h.trend`=None mais `.latest.trend`="BAISSIER".
