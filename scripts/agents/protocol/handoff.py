@@ -42,7 +42,7 @@ if str(_AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(_AGENTS_DIR))
 
 from protocol.envelope import utcnow_iso          # noqa: E402
-from protocol.store import default_store          # noqa: E402
+from protocol.store import CASConflict, default_store          # noqa: E402
 
 HUMAN_RESERVED_OWNERS = frozenset(
     {"owner", "human", "proprietaire", "propriétaire", "user"}
@@ -169,49 +169,36 @@ class Inbox:
         return f"inbox/{self.receiver_id}/{request_id}"
 
     def receive(self, message: dict, *, act=None) -> dict:
-        """Receive a message; run ``act`` at most once per stable request id.
+        """Claim a request atomically before running its action.
 
-        Two-phase and crash-safe: a *claim* is persisted **before** the action
-        runs, so a duplicate that arrives after a crash is never re-executed
-        (no double action — gate G6). The only exception is a previously
-        *failed* action, which may be retried once; a completed or in-flight
-        request is always a no-op.
+        A failed callback may have performed part of the action. Keep the
+        request claimed against redelivery, including when its ACK is lost.
         """
         request_id = self._request_id(message)
-        existing = self.store.get(self._key(request_id))
-        if isinstance(existing, dict) and existing.get("status") != "failed":
+        key = self._key(request_id)
+        claim = {"request_id": request_id, "receiver": self.receiver_id,
+                 "claimed_at": utcnow_iso(), "status": "claimed"}
+        existing = self.store.get(key)
+        if existing is not None or not self.store.put_cas(key, claim, None):
+            if existing is None:
+                existing = self.store.get(key)
+            if not isinstance(existing, dict):
+                raise CASConflict("inbox claim could not be resolved")
             return {"accepted": False, "duplicate": True,
                     "request_id": request_id, "ack": existing, "action": None,
-                    "status": existing.get("status", "ACK")}
+                    "status": existing.get("status", "claimed")}
 
-        # Claim first: any later delivery (even after a crash mid-action) sees
-        # this record and will not re-run the action.
-        self.store.put(self._key(request_id), {
-            "request_id": request_id,
-            "receiver": self.receiver_id,
-            "claimed_at": utcnow_iso(),
-            "status": "claimed",
-        })
-
-        action = None
         try:
-            if act is not None:
-                action = act(message)
+            action = act(message) if act is not None else None
         except Exception:
-            self.store.put(self._key(request_id), {
-                "request_id": request_id, "receiver": self.receiver_id,
-                "failed_at": utcnow_iso(), "status": "failed",
-            })
+            self.store.put_cas(key, {**claim, "failed_at": utcnow_iso(),
+                                     "status": "failed"}, claim)
             raise
 
-        ack = {
-            "request_id": request_id,
-            "receiver": self.receiver_id,
-            "acked_at": utcnow_iso(),
-            "status": "ACK",
-            "action": action,
-        }
-        self.store.put(self._key(request_id), ack)
+        ack = {"request_id": request_id, "receiver": self.receiver_id,
+               "acked_at": utcnow_iso(), "status": "ACK", "action": action}
+        if not self.store.put_cas(key, ack, claim):
+            raise CASConflict("inbox claim changed before acknowledgement")
         return {"accepted": True, "duplicate": False,
                 "request_id": request_id, "ack": ack, "action": action,
                 "status": "ACK"}

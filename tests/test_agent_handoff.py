@@ -15,7 +15,10 @@ Stdlib only, offline, deterministic. They prove the four code gaps the audit of
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
 import pathlib
+from threading import Barrier, Lock, local
 import sys
 import tempfile
 import unittest
@@ -25,6 +28,13 @@ sys.path.insert(0, str(ROOT / "scripts" / "agents"))
 
 from protocol import handoff  # noqa: E402
 from protocol.store import FileStore  # noqa: E402
+
+
+def _deliver_in_process(root, start, results):
+    start.wait(timeout=10)
+    inbox = handoff.Inbox("kilo", store=FileStore(root))
+    result = inbox.receive({"request_id": "req-process"}, act=lambda _: "executed")
+    results.put(result["accepted"])
 
 
 def _backlog():
@@ -125,6 +135,73 @@ class InboxIdempotencyTests(unittest.TestCase):
         self.assertTrue(again["duplicate"])
         self.assertIsNone(again["action"])
         self.assertEqual(calls, ["Z-02"])  # exactly one action
+
+    def test_two_receivers_racing_for_one_request_run_the_action_once(self):
+        rendezvous = Barrier(2, timeout=5)
+        serialized_put = Lock()
+        per_thread = local()
+
+        class RacingStore(FileStore):
+            def get(self, key):
+                value = super().get(key)
+                if not getattr(per_thread, "has_read", False):
+                    per_thread.has_read = True
+                    rendezvous.wait()
+                return value
+
+            def put(self, key, value):
+                with serialized_put:
+                    super().put(key, value)
+
+        calls = []
+
+        def deliver():
+            inbox = handoff.Inbox("kilo", store=RacingStore(self.tmp.name))
+            return inbox.receive({"request_id": "req-race"}, act=lambda _: calls.append(1))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: deliver(), range(2)))
+        self.assertEqual(calls, [1])
+        self.assertEqual(sorted(result["accepted"] for result in outcomes), [False, True])
+
+    def test_file_claim_is_atomic_across_processes(self):
+        ctx = multiprocessing.get_context("spawn")
+        start, results = ctx.Barrier(2), ctx.Queue()
+        workers = [ctx.Process(target=_deliver_in_process,
+                               args=(self.tmp.name, start, results))
+                   for _ in range(2)]
+        try:
+            for worker in workers:
+                worker.start()
+            accepted = [results.get(timeout=15) for _ in workers]
+            self.assertEqual(sorted(accepted), [False, True])
+        finally:
+            for worker in workers:
+                if worker.pid is not None:
+                    worker.join(timeout=1)
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join()
+            results.close()
+        self.assertEqual([worker.exitcode for worker in workers], [0, 0])
+
+    def test_lost_ack_preserves_the_claim(self):
+        class LostAckStore(FileStore):
+            def put_cas(self, key, value, expected):
+                if value["status"] == "ACK":
+                    raise OSError("connection lost")
+                return super().put_cas(key, value, expected)
+
+        calls = []
+        msg = {"request_id": "req-no-ack"}
+        inbox = handoff.Inbox("kilo", store=LostAckStore(self.tmp.name))
+        with self.assertRaises(OSError):
+            inbox.receive(msg, act=lambda _: calls.append(1))
+        retry = handoff.Inbox("kilo", store=self.store).receive(
+            msg, act=lambda _: calls.append(1))
+        self.assertEqual(retry["status"], "claimed")
+        self.assertTrue(retry["duplicate"])
+        self.assertEqual(calls, [1])
 
     def test_seen_reports_a_recorded_request(self):
         inbox = handoff.Inbox("hermes-router", store=self.store)
@@ -376,11 +453,10 @@ class HardeningTests(unittest.TestCase):
         inbox = handoff.Inbox("kilo", store=self.store)
         with self.assertRaises(RuntimeError):
             inbox.receive({"request_id": "req-crash"}, act=flaky)
-        # Redelivery after the crash: a failed action is retried at most once,
-        # never silently doubled into a success.
-        retry = inbox.receive({"request_id": "req-crash"}, act=lambda m: calls.append(1))
-        self.assertTrue(retry["accepted"])
-        self.assertEqual(len(calls), 2)  # one failed attempt + one retry, no dupes
+        redelivery = inbox.receive({"request_id": "req-crash"}, act=lambda m: calls.append(1))
+        self.assertFalse(redelivery["accepted"])
+        self.assertEqual(redelivery["status"], "failed")
+        self.assertEqual(calls, [1])
 
     def test_bus_handoff_dir_is_gitignored(self):
         import subprocess

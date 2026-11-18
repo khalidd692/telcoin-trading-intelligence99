@@ -27,10 +27,15 @@ import pathlib
 import urllib.error
 import urllib.request
 
-try:  # POSIX advisory locking; absent on Windows, where we fall back to the
-    import fcntl      # same directory + atomic-rename discipline.
-except ImportError:   # pragma: no cover - exercised only on Windows
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
     fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 DEFAULT_ROOT = pathlib.Path("bus")
 
@@ -88,8 +93,8 @@ class FileStore:
     def put_cas(self, key: str, value, expected) -> bool:
         """Write ``value`` only if the stored value equals ``expected``.
 
-        Atomic within one host: a POSIX advisory lock (``flock``) serialises
-        concurrent writers to the same key, and the actual file write stays
+        Atomic within one host: an advisory file lock serialises concurrent
+        conditional writers to the same key, and the actual file write stays
         atomic (temp file + rename). Two processes performing a read-modify-
         write on the same key therefore cannot lose an update — the second one
         sees the first one's committed value and is told the CAS failed.
@@ -99,9 +104,14 @@ class FileStore:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = path.with_suffix(".lock")
-        with open(lock_path, "w", encoding="utf-8") as lock:
+        with lock_path.open("a+b") as lock:
             if fcntl is not None:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            elif msvcrt is not None:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                raise StoreError("file compare-and-set requires an OS file lock")
             try:
                 current = self.get(key)
                 if current != expected:
@@ -115,6 +125,9 @@ class FileStore:
             finally:
                 if fcntl is not None:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                else:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
     def durable(self) -> bool:
         """File storage is durable only on a host, not across a cloud pod."""
