@@ -18,6 +18,8 @@ def contract_digest(mission):
     scope["dependency_evidence"] = mission.get("dependency_evidence", {})
     scope["test_selector"] = mission.get("test_selector")
     scope["supplemental_test"] = mission.get("supplemental_test")
+    if mission.get("routing_profile"):
+        scope["routing_profile"] = mission["routing_profile"]
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode("utf-8")).hexdigest()
 
 

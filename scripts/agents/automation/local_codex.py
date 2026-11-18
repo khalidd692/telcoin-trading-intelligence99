@@ -16,6 +16,7 @@ import subprocess
 import sys
 from threading import Thread
 import time
+import codex_model_router as router
 
 from policy import (
     approval_is_authorized, has_authenticated_approval, is_eligible_mission,
@@ -27,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from protocol.store import FileStore
 from local_coordination import CoordinationUnavailable, UpstashCoordination, accepted_proof, coordination_backend
 from local_code import NATIVE_BASE, contract_digest, status_paths, synthetic_missions, valid_scope
+import local_native as native
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
 BACKLOG = "docs/agents/AUTONOMIE_ZERO_COPIER_COLLER/BACKLOG.json"
@@ -149,7 +151,7 @@ def validate_issue(issue, approval):
     if [item["login"] for item in issue.get("assignees", [])] != [approval["assignee"]]:
         return "Attribution exclusive divergente."
     body_hash = approval.get("issue_sha256")
-    if (body_hash is not None or approval.get("kind") != "code") and digest(issue.get("body") or "") != body_hash:
+    if (body_hash is not None or approval.get("kind") not in {"code", "native"}) and digest(issue.get("body") or "") != body_hash:
         return "Contenu GitHub modifié depuis l’approbation."
     try:
         expiry = datetime.strptime(approval["expires_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -188,14 +190,15 @@ class Supervisor:
         for mission in sorted(missions, key=lambda item: (item["priority"], item["id"])):
             saved = self.state(mission)
             stage = saved.get("status")
-            if stage == "RUNNING":
+            recover_native = stage == "RUNNING" and mission.get("kind") == "native" and saved.get("native_base")
+            if stage == "RUNNING" and not recover_native:
                 self.checkpoint(mission, "INTERRUPTED", reason="Exécution orpheline possible")
                 continue
             if stage in {"ACCEPTED", "PREPARED", "INTERRUPTED", "FAILED", "BLOCKED"}:
                 continue
             issue_blocker = blockers.get(mission["id"])
             if issue_blocker:
-                if stage == "WORKER_EXITED":
+                if stage == "WORKER_EXITED" or recover_native:
                     print(f"AWAITING_HUMAN {mission['id']}: {issue_blocker}", flush=True)
                 else:
                     self.checkpoint(mission, "AWAITING_HUMAN", reason=issue_blocker)
@@ -206,7 +209,7 @@ class Supervisor:
                 and (not self.demo or self.state({"id": dep}).get("status") != "ACCEPTED")
             ]
             if unmet:
-                if stage == "WORKER_EXITED":
+                if stage == "WORKER_EXITED" or recover_native:
                     print(f"WAITING_DEPENDENCY {mission['id']}: {', '.join(unmet)}", flush=True)
                 else:
                     self.checkpoint(mission, "WAITING_DEPENDENCY", dependencies=unmet)
@@ -239,7 +242,9 @@ class Supervisor:
     def run_shared(self, mission, saved):
         shared = coordination_backend()
         approval = digest(json.dumps(mission, sort_keys=True))
-        if saved.get("status") == "WORKER_EXITED":
+        if saved.get("status") == "WORKER_EXITED" or (
+            saved.get("status") == "RUNNING" and mission.get("kind") == "native" and saved.get("native_base")
+        ):
             if saved["approval"] != approval:
                 raise CoordinationUnavailable("L’approbation du checkpoint a changé.")
             owner = saved["shared_owner"]
@@ -248,10 +253,11 @@ class Supervisor:
             if remote["status"] == "PREPARED":
                 def fence():
                     raise CoordinationUnavailable("Le commit distant est déjà enregistré.")
-            self.finalize(mission, saved["base"], saved["branch"], fence=fence, finish=finish)
+            self.finalize(mission, saved.get("base") or saved["native_base"],
+                          saved.get("branch", ""), fence=fence, finish=finish)
             return
         # Check the quota before creating a durable reservation.
-        limits = allowance(rate_snapshot(self.cli, self.root))
+        limits = [] if mission.get("kind") == "native" else allowance(rate_snapshot(self.cli, self.root))
         with shared.claim(mission["id"], mission["issue"], approval) as (owner, finish):
             try:
                 reason = fetch_approved_issue(mission)
@@ -278,6 +284,8 @@ class Supervisor:
         self.checkpoint(mission, "RUNNING", workspace=str(workspace), quota_used=bounds)
         if workspace.exists():
             raise Blocked("Espace existant. Réconciliation manuelle requise.")
+        if mission.get("kind") == "native":
+            return self.execute_native(mission, workspace, shared_owner, fence, finish)
         if self.demo:
             workspace.mkdir()
             checked(["git", "init", "-b", "pilot-base"], cwd=workspace)
@@ -318,10 +326,32 @@ class Supervisor:
             "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
             "-c", "sandbox_workspace_write.exclude_slash_tmp=true", "-",
         ]
+        route = None
+        started = time.monotonic()
+        if mission.get("routing_profile"):
+            approval = digest(json.dumps(mission, sort_keys=True))
+            key = f"codex-local-route/{task_id}"
+            checkpoint = self.store.get(key) or router.new_checkpoint(task_id, approval, mission["routing_profile"])
+
+            def persist(plan):
+                if fence:
+                    fence()
+                self.store.put(key, plan)
+
+            try:
+                snapshot = router.read_snapshot(self.cli, workspace, model_environment())
+                route, args = router.prepare_exec(args, checkpoint, approval, base, snapshot, persist)
+            except router.RouteBlocked as exc:
+                if exc.status == "WAITING_QUOTA":
+                    raise QuotaBlocked(str(exc)) from exc
+                raise Blocked(f"{exc.status}: {exc}") from exc
+            self.store.put(f"codex-local-route-clock/{task_id}", {"started": time.time()})
         if fence:
             fence()
         result = call(args, cwd=workspace, env=model_environment(), timeout=240, input_text=prompt)
         if result.returncode:
+            if route:
+                self.complete_route(mission, "worker_error", exec_jsonl=result.stdout)
             if re.search(r"usage limit|rate.?limit|quota|too many requests", result.stderr, re.I):
                 raise QuotaBlocked("Quota atteint pendant le run.")
             if re.search(r"sandbox setup|sandbox failed|access is denied|unauthorized", result.stderr, re.I):
@@ -331,11 +361,43 @@ class Supervisor:
             mission, "WORKER_EXITED", base=base, branch=branch, codex_exit=result.returncode,
             approval=digest(json.dumps(mission, sort_keys=True)), shared_owner=shared_owner,
         )
-        self.finalize(mission, base, branch, fence=fence, finish=finish)
+        if route:
+            self.store.put(f"codex-local-route-clock/{task_id}", {
+                "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+            })
+        self.finalize(mission, base, branch, fence=fence, finish=finish,
+                      **({"exec_jsonl": result.stdout} if route else {}))
 
-    def finalize(self, mission, base, branch, *, fence=None, finish=None):
+    def complete_route(self, mission, status, *, proof=None, exec_jsonl=""):
+        if not mission.get("routing_profile"):
+            return
+        task = mission["id"]
+        key = f"codex-local-route/{task}"
+        checkpoint = self.store.get(key)
+        if not checkpoint or checkpoint["attempts"][-1]["status"] != "running":
+            return
+        clock = self.store.get(f"codex-local-route-clock/{task}") or {}
+        duration = clock.get("duration_ms")
+        if duration is None:
+            duration = max(0, int((time.time() - clock.get("started", time.time())) * 1000))
+        try:
+            after = router.read_snapshot(self.cli, self.root, model_environment(), include_catalog=False)
+        except router.RouteBlocked:
+            after = None
+        updated = router.record_result(
+            checkpoint, digest(json.dumps(mission, sort_keys=True)), checkpoint["attempts"][-1]["number"],
+            status, duration_ms=duration, quota_after=after, exec_jsonl=exec_jsonl,
+            artifact_sha256=digest(json.dumps(proof["artifact_digests"], sort_keys=True)) if proof else None,
+            test_evidence_sha256=digest(json.dumps(proof, sort_keys=True)) if proof else None,
+        )
+        self.store.put(key, updated)
+
+    def finalize(self, mission, base, branch, *, fence=None, finish=None, exec_jsonl=""):
+        if mission.get("kind") == "native":
+            return self.finalize_native(mission, base, fence=fence, finish=finish)
         if mission.get("kind") == "code":
-            return self.finalize_code(mission, base, branch, fence=fence, finish=finish)
+            return self.finalize_code(mission, base, branch, fence=fence, finish=finish,
+                                      exec_jsonl=exec_jsonl)
         task_id = mission["id"]
         workspace = self.root / task_id
         target = workspace / mission["path"]
@@ -377,7 +439,112 @@ class Supervisor:
             finish("PREPARED", commit)
         self.checkpoint(mission, "ACCEPTED" if self.demo else "PREPARED", **proof)
 
-    def finalize_code(self, mission, base, branch, *, fence, finish):
+    def execute_native(self, mission, workspace, owner, fence, finish):
+        workspace.mkdir()
+        checked(["git", "init"], cwd=workspace)
+        checked(["git", "config", "core.autocrlf", "false"], cwd=workspace)
+        checked(["git", "fetch", "--depth=1", "--no-tags", f"https://github.com/{REPO}.git",
+                 native.NATIVE_REF], cwd=workspace)
+        sha = checked(["git", "rev-parse", "FETCH_HEAD"], cwd=workspace)
+        if sha != native.NATIVE_SHA or sha != mission["base_sha"]:
+            raise Blocked("Le moteur #110 a changé depuis l’approbation.")
+        checked(["git", "checkout", "--detach", sha], cwd=workspace)
+        branch = f"agents/codex-local/{mission['id'].lower()}"
+        checked(["git", "checkout", "-b", branch], cwd=workspace)
+        env = {key: value for key, value in model_environment().items()
+               if not key.upper().startswith(("TEL99_NATIVE_", "PYTHON"))}
+        env.update(TEL99_NATIVE_MODEL="kilo-auto/free",
+                   TEL99_NATIVE_BASE_URL="https://ai-gateway.kilo.ai/api/v1")
+        self.checkpoint(
+            mission, "RUNNING", native_base=sha, branch=branch, shared_owner=owner,
+            approval=digest(json.dumps(mission, sort_keys=True)),
+        )
+        fence()
+        result = call(native.args_for(workspace, mission["issue"], "run"), cwd=workspace,
+                      env=env, timeout=240)
+        if result.returncode:
+            raise Blocked(f"Le moteur natif #110 a quitté avec {result.returncode}.")
+        report = json.loads(result.stdout)
+        if report.get("provider_calls") != 1 or report.get("provider") != "kilo-auto-free":
+            raise Blocked("Le journal du fournisseur ne correspond pas au budget approuvé.")
+        self.checkpoint(
+            mission, "WORKER_EXITED", base=sha, branch=branch,
+            approval=digest(json.dumps(mission, sort_keys=True)), shared_owner=owner,
+        )
+        self.finalize_native(mission, sha, fence=fence, finish=finish)
+
+    def finalize_native(self, mission, base, *, fence, finish):
+        workspace = self.root / mission["id"]
+        head = checked(["git", "rev-parse", "HEAD"], cwd=workspace)
+        branch = f"agents/codex-local/{mission['id'].lower()}"
+        if (base != native.NATIVE_SHA or checked(["git", "branch", "--show-current"], cwd=workspace) != branch
+                or (head != base and checked(["git", "rev-list", "--parents", "-1", head],
+                                              cwd=workspace) != f"{head} {base}")):
+            raise Blocked("Le SHA du moteur en reprise ne correspond pas à #110.")
+        env = {key: value for key, value in model_environment().items()
+               if not key.upper().startswith(("TEL99_NATIVE_", "PYTHON"))}
+        result = call(native.args_for(workspace, mission["issue"], "status"), cwd=workspace,
+                      env=env, timeout=45)
+        if result.returncode:
+            raise Blocked("Absence de journal natif récupérable.")
+        record = json.loads(result.stdout)
+        if record.get("verdict") != "PASS" or record.get("artifact_integrity") != "matched":
+            raise Blocked("Les artefacts natifs ne correspondent pas au journal PASS.")
+        directory = Path(record["artifact_directory"])
+        expected = workspace / "_native_state" / "artifacts"
+        if not directory.resolve().is_relative_to(expected.resolve()):
+            raise Blocked("Emplacement des artefacts inattendu.")
+        hashes = record["artifact_digests"]
+        if set(hashes) != set(native.FILES) or any(
+            not (directory / name).is_file() or (directory / name).resolve() != directory.resolve() / name
+            or hashlib.sha256((directory / name).read_bytes()).hexdigest() != hashes[name]
+            for name in native.FILES
+        ):
+            raise Blocked("Échec de la vérification des empreintes natives.")
+        verify = call([
+            sys.executable, "-B", "-m", "scripts.agents.native.cli", "verify-task-app",
+            "--file", str(directory / "tasks.py"), "--sandbox-image", native.IMAGE,
+        ], cwd=workspace, env=env, timeout=120)
+        if verify.returncode:
+            raise Blocked("Le rejeu Docker indépendant du moteur natif a échoué.")
+        proof = json.loads(verify.stdout)
+        if (proof.get("ok") is not True or proof.get("artifact_sha256") != hashes["tasks.py"]
+                or not isinstance(proof.get("checks"), list) or len(proof["checks"]) != 6):
+            raise Blocked("La preuve Docker au SHA est incohérente.")
+        folder = f"docs/agents/codex-local-results/{mission['id'].lower()}"
+        paths = [f"{folder}/{name}" for name in native.FILES]
+        if head == base:
+            fence()
+            target = workspace / folder
+            if target.resolve() != target:
+                raise Blocked("Chemin de publication native redirigé.")
+            target.mkdir(parents=True, exist_ok=True)
+            for name in native.FILES:
+                dest = target / name
+                if dest.exists() and (not dest.is_file() or dest.resolve() != dest
+                                      or hashlib.sha256(dest.read_bytes()).hexdigest() != hashes[name]):
+                    raise Blocked("Artefact de publication antérieur incohérent.")
+                if not dest.exists():
+                    with dest.open("xb") as output:
+                        output.write((directory / name).read_bytes())
+            checked(["git", "add", "--", *paths], cwd=workspace)
+            staged = checked(["git", "diff", "--cached", "--name-only"], cwd=workspace).splitlines()
+            if sorted(staged) != sorted(paths):
+                raise Blocked("L’index natif contient des fichiers inattendus.")
+            self.commit(workspace, f"TEL99 #{mission['issue']}: artefacts natifs vérifiés")
+            head = checked(["git", "rev-parse", "HEAD"], cwd=workspace)
+        if sorted(checked(["git", "diff", "--name-only", base, head], cwd=workspace).splitlines()) != sorted(paths):
+            raise Blocked("Le diff du commit natif dépasse son périmètre.")
+        for name, path in zip(native.FILES, paths):
+            blob = subprocess.check_output(["git", "show", f"{head}:{path}"], cwd=workspace, timeout=45)
+            if hashlib.sha256(blob).hexdigest() != hashes[name]:
+                raise Blocked("Le blob Git natif ne correspond pas à la preuve.")
+        finish("PREPARED", head)
+        self.checkpoint(mission, "PREPARED", commit=head, base=base, branch=branch,
+                        artifact_digests=hashes, test_count=len(proof["checks"]),
+                        native=True, provider="kilo-auto-free")
+
+    def finalize_code(self, mission, base, branch, *, fence, finish, exec_jsonl=""):
         task_id = mission["id"]
         workspace = self.root / task_id
         status_cmd = ["git", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"]
@@ -429,13 +596,20 @@ class Supervisor:
             raise Blocked("Le checkout a changé pendant la vérification.")
         proof = {"commit": commit, "base": base, "branch": branch, "files": paths,
                  "test_file": test_path, "test_blob": test_blob, "test_count": test_count,
-                 "test_selector": mission.get("test_selector"), "supplemental_test": extra}
+                 "test_selector": mission.get("test_selector"), "supplemental_test": extra,
+                 "artifact_digests": {
+                     path: hashlib.sha256(subprocess.check_output(
+                         ["git", "show", f"{commit}:{path}"], cwd=workspace, timeout=45,
+                     )).hexdigest()
+                     for path in paths
+                 }}
         (self.root / f"{task_id}.pr.md").write_text(
             f"TEL99 {task_id}\n\nBase {base}\nCommit {commit}\n"
             f"Test indépendant {test_path} ({test_blob}), "
             f"sélecteur {proof['test_selector']}, complément {extra}: {test_count} PASS.\n",
             encoding="utf-8",
         )
+        self.complete_route(mission, "tests_passed", proof=proof, exec_jsonl=exec_jsonl)
         if finish:
             finish("PREPARED", commit)
         self.checkpoint(mission, "ACCEPTED" if self.demo else "PREPARED", **proof)
@@ -492,8 +666,11 @@ def sync_github(supervisor):
 
 
 def approved_queue(path, backlog, *, master_state):
+    return admit_missions(json.loads(path.read_text(encoding="utf-8-sig")), backlog, master_state=master_state)
+
+
+def admit_missions(missions, backlog, *, master_state):
     known = {task["id"]: task for task in backlog}
-    missions = json.loads(path.read_text(encoding="utf-8-sig"))
     blockers = {}
     seen = set()
     issue_numbers = set()
@@ -506,15 +683,19 @@ def approved_queue(path, backlog, *, master_state):
             type(mission["issue"]) is not int or mission["issue"] <= 94
         ):
             raise Blocked("Ticket distinct et SHA de base épinglé requis.")
-        if mission.get("kind") == "code":
+        kind = mission.get("kind")
+        if kind in {"code", "native"}:
             deps = mission.get("dependencies")
             if (
-                not re.fullmatch(r"CODEX105-[A-Z0-9-]+", task_id)
-                or not valid_scope(mission)
+                (kind == "code" and (
+                    not re.fullmatch(r"CODEX105-[A-Z0-9-]+", task_id) or not valid_scope(mission)
+                    or mission.get("routing_profile") not in {None, *router.PROFILES}
+                ))
+                or (kind == "native" and not native.native_scope(mission))
                 or mission.get("priority") not in {"P0", "P1", "P2", "P3"}
                 or not isinstance(deps, list)
                 or not all(isinstance(dep, str) and (
-                    dep in known or re.fullmatch(r"CODEX105-[A-Z0-9-]+", dep)
+                    dep in known or re.fullmatch(r"CODEX(?:105|110)-[A-Z0-9-]+", dep)
                 ) for dep in deps)
             ):
                 raise Blocked("Contrat de code #105 invalide, hors périmètre ou lot déjà attribué.")
@@ -535,6 +716,39 @@ def approved_queue(path, backlog, *, master_state):
         if reason:
             blockers[task_id] = reason
     return missions, blockers
+
+
+def discover_queue(backlog, master_state):
+    pages = json.loads(checked([
+        "gh", "api", "--paginate", "--slurp",
+        f"repos/{REPO}/issues?state=open&labels=codex-local%2Fmission&per_page=100",
+    ]))
+    candidates, requests, blockers = [], [], {}
+    for issue in (issue for page in pages for issue in page):
+        if not is_eligible_mission(issue, "codex-local/mission") or issue.get("user", {}).get("login") != "khalidd692":
+            continue
+        entries = re.findall(r"^tel99-contract:v1 (.+)$", issue.get("body") or "", re.M)
+        if not entries:
+            continue  # Historical private manifests, including #109.
+        try:
+            if len(entries) != 1 or len(entries[0]) > 8000:
+                raise ValueError("contrat ambigu")
+            spec = json.loads(entries[0])
+            if (type(spec) is not dict or spec.get("issue") != issue.get("number")
+                    or spec.get("kind") not in {"code", "native"}
+                    or (spec.get("kind") == "code" and not spec.get("routing_profile"))):
+                raise ValueError("contrat incomplet")
+            admitted, denied = admit_missions([spec], backlog, master_state=master_state)
+            candidates.extend(admitted)
+            blockers.update(denied)
+            if denied:
+                requests.append({"issue": spec["issue"], "id": spec["id"], "reason": denied[spec["id"]]})
+        except (Blocked, TypeError, ValueError, KeyError):
+            requests.append({"issue": issue["number"], "reason": "Contrat structuré invalide."})
+    counts = {item["id"]: 0 for item in candidates}
+    for item in candidates:
+        counts[item["id"]] += 1
+    return [item for item in candidates if counts[item["id"]] == 1], blockers, requests
 
 
 def issue_comments(number):
@@ -559,8 +773,9 @@ def fetch_approved_issue(mission):
             issue, issue_comments(number), now=datetime.now(timezone.utc),
         ):
             return "Approbation GitHub #104 authentifiée et liée au contenu absente ou expirée."
-        if mission.get("kind") == "code":
-            expected = f"codex-contract-sha256: {contract_digest(mission)}"
+        if mission.get("kind") in {"code", "native"}:
+            fingerprint = native.native_digest(mission) if mission["kind"] == "native" else contract_digest(mission)
+            expected = f"codex-contract-sha256: {fingerprint}"
             rows = [line.strip() for line in issue["body"].splitlines()
                     if line.strip().lower().startswith("codex-contract-sha256:")]
             if rows != [expected]:
@@ -652,11 +867,37 @@ def save_admission(supervisor, tasks, missions, blockers, proofs):
     })
 
 
+def report_prepared(supervisor, missions):
+    for mission in missions:
+        saved = supervisor.state(mission)
+        sha = saved.get("commit")
+        if saved.get("status") != "PREPARED" or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            continue
+        marker = f"<!-- tel99-windows-prepared:{mission['issue']}:{sha} -->"
+        report_key = f"github/report-{mission['issue']}-{sha}"
+        if supervisor.store.get(report_key):
+            continue
+        try:
+            if not any(marker in comment.get("body", "") and comment.get("user", {}).get("login") == "khalidd692"
+                       for comment in issue_comments(94)):
+                checked([
+                    "gh", "api", "--method", "POST", f"repos/{REPO}/issues/94/comments",
+                    "-f", "body=" + marker + f"\n#{mission['issue']} — PREPARED au SHA `{sha}`. "
+                    f"{saved.get('test_count', 0)} tests ou critères vérifiés localement. "
+                    "Le verdict externe reste à établir.",
+                ])
+            supervisor.store.put(report_key, {"status": "PUBLISHED"})
+        except (Blocked, OSError, ValueError, subprocess.TimeoutExpired):
+            print(f"Rapport GitHub en attente pour #{mission['issue']}.", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--code-demo", action="store_true")
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--discover-only", action="store_true")
+    parser.add_argument("--await-issue", type=int)
     parser.add_argument("--demo-attempt", type=int, default=1, choices=range(1, 10))
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--approvals", type=Path)
@@ -685,6 +926,12 @@ def main():
     try:
         shared_local_lock = STATE / "github" / "supervisor.lock"
         shared_local_lock.parent.mkdir(parents=True, exist_ok=True)
+        if args.discover_only:
+            tasks, state = sync_github(supervisor)
+            missions, blockers, requests = discover_queue(tasks, state)
+            print(json.dumps({"discovered": len(missions), "blockers": blockers, "requests": requests},
+                             ensure_ascii=True))
+            return 0
         with exclusive(shared_local_lock):
             while True:
                 if not demo and (root / "stop.request").exists():
@@ -699,11 +946,25 @@ def main():
                         if args.approvals or approvals.is_file():
                             missions, blockers = approved_queue(approvals, tasks, master_state=state)
                         else:
-                            missions, blockers = [], {}
+                            missions, blockers, requests = discover_queue(tasks, state)
+                            supervisor.store.put("github/approval-requests", requests)
                         proofs = dependency_evidence(missions)
                         save_admission(supervisor, tasks, missions, blockers, proofs)
-                        print(f"GitHub #94 : {len(tasks)} tâches, {len(missions)} approbations locales", flush=True)
-                    if missions:
+                        if args.await_issue:
+                            missions = [item for item in missions if item["issue"] == args.await_issue]
+                            if len(missions) != 1 or state != "open":
+                                raise Blocked("Le ticket d’attente n’est plus admissible à la découverte.")
+                            if missions[0]["expires_at"] <= utcnow_iso():
+                                raise Blocked("Délai d’approbation dépassé.")
+                            if missions[0]["id"] in blockers:
+                                print(f"AWAITING_HUMAN #{args.await_issue}: "
+                                      f"{blockers[missions[0]['id']]}", flush=True)
+                                time.sleep(60)
+                                continue
+                        ready = sum(mission["id"] not in blockers for mission in missions)
+                        print(f"GitHub #94 : {len(tasks)} tâches, {len(missions)} contrats, {ready} approuvés", flush=True)
+                    if any(mission.get("kind") != "native" and mission["id"] not in blockers
+                           for mission in missions):
                         if not args.codex:
                             raise Blocked("codex.exe introuvable.")
                         login = call([args.codex, "login", "status"], env=model_environment())
@@ -711,17 +972,19 @@ def main():
                             login.stdout + "\n" + login.stderr
                         ).splitlines():
                             raise Blocked("Authentification ChatGPT requise.")
-                        if not supervisor.run(missions, blockers, proofs):
-                            return 2
+                    if missions and not supervisor.run(missions, blockers, proofs):
+                        return 2
+                    if not demo:
+                        report_prepared(supervisor, missions)
                     if demo:
                         return 0 if all(
                             supervisor.state(m).get("status") == "ACCEPTED" for m in missions
                         ) else 2
-                    if args.once:
+                    if args.once or args.await_issue:
                         return 0
                 except (Blocked, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
                     print(f"BLOCKED: {exc}", file=sys.stderr, flush=True)
-                    if demo or args.once:
+                    if demo or args.once or args.await_issue:
                         return 2
                 time.sleep(60)
     except KeyboardInterrupt:

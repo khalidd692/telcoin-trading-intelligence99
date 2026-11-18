@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -58,6 +59,24 @@ class ServerTests(unittest.TestCase):
 
     def test_concurrent_preflight_runs_actual_lua(self):
         self.shared.probe()
+
+    def test_two_native_deliveries_execute_once_on_the_same_request(self):
+        namespace = self.shared.store.namespace
+
+        def attempt(_):
+            client = coordination.UpstashCoordination.__new__(coordination.UpstashCoordination)
+            client.store = RedisLease(DockerRedis(), namespace)
+            try:
+                with client.claim("CODEX110-EXAMPLE", 112, "approval") as (owner, finish):
+                    finish("PREPARED", owner)
+                    return 1
+            except coordination.CoordinationUnavailable:
+                return 0
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(attempt, range(2)))
+        self.assertEqual(sorted(outcomes), [0, 1])
+        self.assertEqual(self.shared.read("codex-windows/CODEX110-EXAMPLE")["status"], "PREPARED")
 
     def test_closed_worker_can_resume_after_transient_network_failure(self):
         with self.assertRaises(ConnectionError):

@@ -12,10 +12,55 @@ sys.path.insert(0, str(AUTOMATION))
 import local_codex as runner
 import local_coordination as coordination
 from local_code import contract_digest, status_paths, synthetic_missions, valid_scope
+import local_native as native
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows supervisor")
 class LocalCodexTests(unittest.TestCase):
+    def test_discovery_ignores_historical_ticket_and_leaves_unauthenticated_one_pending(self):
+        first = {"number": 109, "state": "open", "user": {"login": "khalidd692"},
+                 "labels": [{"name": "codex-local/mission"}], "body": "historical"}
+        spec = {"issue": 112, "id": "CODEX110-FIRST", "kind": "native"}
+        second = {**first, "number": 112, "body": "tel99-contract:v1 " + json.dumps(spec)}
+        with (
+            patch.object(runner, "checked", return_value=json.dumps([[first, second]])),
+            patch.object(runner, "admit_missions", return_value=([spec], {spec["id"]: "pending"})) as admit,
+        ):
+            items, blockers, requests = runner.discover_queue([], "open")
+        admit.assert_called_once_with([spec], [], master_state="open")
+        self.assertEqual(items, [spec])
+        self.assertEqual(blockers[spec["id"]], "pending")
+        self.assertEqual(requests[0]["issue"], 112)
+
+    def test_native_contract_only_allows_the_pinned_synthetic_input_and_one_call(self):
+        spec = {"id": "CODEX110-FIRST", "base_sha": native.NATIVE_SHA,
+                "objective": native.OBJECTIVE, "synthetic_data": True, "call_budget": 1}
+        self.assertTrue(native.native_scope(spec))
+        self.assertFalse(native.native_scope(dict(spec, objective="private repository")))
+        self.assertFalse(native.native_scope(dict(spec, call_budget=2)))
+        args = native.args_for(Path("isolated"), 112, "run")
+        self.assertEqual(args[args.index("--max-repairs") + 1], "0")
+        self.assertEqual(args[args.index("--mission-id") + 1], "github-112")
+        self.assertNotIn("--synthetic-data", native.args_for(Path("isolated"), 112, "status"))
+
+    def test_native_restart_recovers_status_instead_of_launching_again(self):
+        mission = {"id": "CODEX110-FIRST", "kind": "native", "issue": 112}
+        checkpoint = {
+            "status": "RUNNING", "native_base": native.NATIVE_SHA, "branch": "topic",
+            "approval": runner.digest(json.dumps(mission, sort_keys=True)), "shared_owner": "owner",
+        }
+        backend = Mock()
+        backend.resume.return_value = ({"status": "CLAIMED"}, Mock())
+        with (
+            patch.object(runner, "coordination_backend", return_value=backend),
+            patch.object(self.supervisor, "execute") as execute,
+            patch.object(self.supervisor, "finalize") as finalize,
+        ):
+            self.supervisor.run_shared(mission, checkpoint)
+        execute.assert_not_called()
+        finalize.assert_called_once()
+        self.assertEqual(finalize.call_args.args, (mission, native.NATIVE_SHA, "topic"))
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

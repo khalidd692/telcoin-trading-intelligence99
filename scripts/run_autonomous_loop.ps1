@@ -3,6 +3,8 @@ param(
     [switch]$Demo,
     [switch]$CodeDemo,
     [switch]$Preflight,
+    [switch]$DiscoverOnly,
+    [int]$AwaitIssue,
     [ValidateRange(1, 9)]
     [int]$DemoAttempt = 1,
     [switch]$Once,
@@ -55,6 +57,8 @@ if ($Demo) { $runnerArgs += @('--demo', '--demo-attempt', $DemoAttempt) }
 if ($CodeDemo) { $runnerArgs += @('--code-demo', '--demo-attempt', $DemoAttempt) }
 if ($Once) { $runnerArgs += '--once' }
 if ($Preflight) { $runnerArgs += '--preflight' }
+if ($DiscoverOnly) { $runnerArgs += '--discover-only' }
+if ($AwaitIssue) { $runnerArgs += @('--await-issue', $AwaitIssue) }
 if ($Approvals) { $runnerArgs += @('--approvals', $Approvals) }
 if ($Codex) { $runnerArgs += @('--codex', $Codex) }
 & $Python @runnerArgs

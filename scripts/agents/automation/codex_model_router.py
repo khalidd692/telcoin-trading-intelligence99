@@ -328,7 +328,10 @@ def _compatible(models, display_name, effort):
         raise RouteBlocked("BLOCKED_MODEL", "Invalid Codex model catalog.")
     candidates = set()
     for model in models:
-        if model.get("displayName") != display_name or model.get("hidden") is not False:
+        label = model.get("displayName")
+        # App Server 0.170.0 displays the tier with a hyphen on some accounts.
+        hyphen_label = display_name.replace(" ", "-")
+        if label not in (display_name, hyphen_label) or model.get("hidden") is not False:
             continue
         slug = model.get("model")
         efforts = model.get("supportedReasoningEfforts")
