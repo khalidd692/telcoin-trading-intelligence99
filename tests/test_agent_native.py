@@ -21,6 +21,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -157,6 +158,31 @@ class KernelTests(unittest.TestCase):
             self.assertFalse(first.reused)
             self.assertTrue(second.reused)
             self.assertEqual(second.provider_calls, 0)
+
+    def test_same_mission_id_is_isolated_across_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_OK, MATH_BAD])
+            check = mission.Check("behaviour", [
+                "python3", "-c", "import mathutils; assert mathutils.double(21) == 42",
+            ])
+            common = {"mission_id": "shared-id", "prompt": "write",
+                      "artifacts": ["mathutils.py"], "checks": [check]}
+            first = engine.run(mission.MissionSpec(project="tel99", **common))
+            second = engine.run(mission.MissionSpec(project="project-b", **common))
+
+            self.assertEqual(first.verdict, mission.PASS)
+            self.assertEqual(second.verdict, mission.FAIL)
+            self.assertFalse(second.reused)
+            self.assertEqual(second.provider_calls, 1)
+            self.assertEqual(engine.recall("shared-id", project="tel99")[0]["project"], "tel99")
+            self.assertEqual(engine.recall("shared-id", project="project-b")[0]["project"],
+                             "project-b")
+            artifacts = pathlib.Path(tmp) / "state" / "artifacts"
+            self.assertIn("return add(x, x)",
+                          (artifacts / "shared-id" / "mathutils.py").read_text())
+            self.assertIn("return x",
+                          (artifacts / "_projects" / "project-b" / "shared-id"
+                           / "mathutils.py").read_text())
 
     def test_refused_run_leaks_no_claim(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -441,6 +467,40 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("DEMO: PASS", out)
         self.assertIn('"negative_fixture_verdict": "FAIL"', out)
+
+    def test_cached_failure_remains_a_cli_failure(self):
+        bad_file = "```mathutils.py\ndef incomplete(\n```"
+        scripted = provider.ScriptedProvider([bad_file])
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["--state", tmp, "--memory", tmp, "--quota", "18",
+                    "run", "--mission-id", "cli-bad", "--mission", "write",
+                    "--artifact", "mathutils.py"]
+            with patch.object(provider, "provider_from_env", return_value=scripted):
+                self.assertEqual(self._run(args)[0], 3)
+                code, out = self._run(args)
+
+        self.assertEqual(code, 3)
+        self.assertIn('"reused": true', out)
+        self.assertIn('"provider_calls": 0', out)
+
+    def test_cli_project_controls_mission_and_recall(self):
+        scripted = provider.ScriptedProvider([MATH_OK])
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = ["--state", tmp, "--memory", tmp]
+            with patch.object(provider, "provider_from_env", return_value=scripted):
+                code, _ = self._run(roots + [
+                    "--quota", "18", "run", "--project", "project-b",
+                    "--mission-id", "cli-scoped", "--mission", "write",
+                    "--artifact", "mathutils.py",
+                ])
+            self.assertEqual(code, 0)
+            _, default = self._run(roots + ["recall", "--query", "cli-scoped"])
+            _, scoped = self._run(roots + [
+                "recall", "--project", "project-b", "--query", "cli-scoped",
+            ])
+
+        self.assertEqual(json.loads(default), [])
+        self.assertEqual(json.loads(scoped)[0]["project"], "project-b")
 
     def test_dry_run_needs_no_provider_and_spends_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -68,7 +68,9 @@ def read_quota() -> int | None:
 def _engine(args, provider) -> mission_mod.MissionEngine:
     store_root = pathlib.Path(args.state) if args.state else DEFAULT_STATE
     memory_root = pathlib.Path(args.memory) if args.memory else DEFAULT_MEMORY
-    quota = args.quota if args.quota is not None else read_quota()
+    quota = args.quota
+    if quota is None and args.command == "run" and not args.dry_run:
+        quota = read_quota()
     return mission_mod.MissionEngine(
         provider=provider,
         store_root=store_root,
@@ -95,6 +97,7 @@ def cmd_run(args) -> int:
     spec = mission_mod.MissionSpec(
         mission_id=args.mission_id,
         prompt=args.mission,
+        project=args.project,
         artifacts=args.artifact or [],
         checks=[mission_mod.Check(name="syntax", command=["python3", "-m", "py_compile"]
                                   + (args.artifact or []))] if args.artifact else [],
@@ -105,14 +108,18 @@ def cmd_run(args) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-    if result.reused or args.dry_run:
-        return 0  # a reused or planned mission is not a work failure
+    if args.dry_run:
+        return 0
     return 0 if result.verdict == mission_mod.PASS else 3
 
 
 def cmd_recall(args) -> int:
     engine = _engine(args, provider_mod.ScriptedProvider([]))
-    hits = engine.recall(args.query, limit=args.limit)
+    try:
+        hits = engine.recall(args.query, limit=args.limit, project=args.project)
+    except mission_mod.MissionError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(hits, indent=2, ensure_ascii=False))
     return 0
 
@@ -214,12 +221,14 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--mission-id", required=True)
     run.add_argument("--mission", required=True)
     run.add_argument("--artifact", action="append", default=[])
+    run.add_argument("--project", default=mission_mod.DEFAULT_PROJECT)
     run.add_argument("--dry-run", dest="run_dry_run", action="store_true",
                      help="decide and route without calling the provider")
     run.set_defaults(func=cmd_run)
 
     recall = sub.add_parser("recall", help="search the shared memory")
     recall.add_argument("--query", required=True)
+    recall.add_argument("--project", default=mission_mod.DEFAULT_PROJECT)
     recall.add_argument("--limit", type=int, default=5)
     recall.set_defaults(func=cmd_recall)
 

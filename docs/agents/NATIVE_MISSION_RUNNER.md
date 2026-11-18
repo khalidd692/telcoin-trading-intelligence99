@@ -85,8 +85,16 @@ la démonstration la plus forte disponible ici est le contrat HTTP local réel.
 | Échec fournisseur ⇒ FAIL, pas crash | `mission.run` | `test_provider_error_yields_fail_not_crash` |
 | Mémoire isolée par projet | `memory.MemoryStore` | `test_memory_is_project_isolated` |
 
-Codes de sortie de la CLI : `0` succès (ou mission déjà faite), `2` refus
-fail-closed (précondition), `3` mission `FAIL`.
+`run --project projet-b` et `recall --project projet-b` sélectionnent le
+même espace de projet. Les noms acceptent des lettres minuscules, des
+chiffres et des tirets simples entre les groupes. `common` est réservé à
+la mémoire partagée. L’espace par défaut `tel99` conserve ses chemins de
+stockage. Les autres projets stockent leurs artefacts sous
+`.tel99-native-state/artifacts/_projects/<projet>/<mission>`.
+
+La CLI renvoie `0` pour un succès ou une préparation à blanc, `2` pour
+un refus avant exécution et `3` pour un résultat `FAIL` ou `NEEDS_HUMAN`.
+Une mission relue conserve le code de sortie de son verdict.
 
 ## 5. Ce qui reste une action humaine
 

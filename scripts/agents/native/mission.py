@@ -63,6 +63,9 @@ MIN_QUOTA_REQUIRED = 12
 MISSION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
+DEFAULT_PROJECT = "tel99"
+PROJECT_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
 DEFAULT_DEADLINE_S = 120
 MAX_PROVIDER_CALLS = 4
 
@@ -91,6 +94,12 @@ def valid_mission_id(mission_id: str) -> bool:
 
 def valid_artifact_name(name: str) -> bool:
     return bool(name) and bool(ARTIFACT_NAME_RE.match(name))
+
+
+def validate_project(project: str) -> None:
+    if (not isinstance(project, str) or len(project) > 64
+            or not PROJECT_RE.fullmatch(project) or project == memory.COMMON_PROJECT):
+        raise MissionError(f"invalid project name: {project!r}")
 
 
 @dataclass
@@ -127,10 +136,11 @@ class MissionSpec:
     prompt: str
     artifacts: list[str] = field(default_factory=list)
     checks: list[Check] = field(default_factory=list)
-    project: str = "tel99"
+    project: str = DEFAULT_PROJECT
     deadline_s: int = DEFAULT_DEADLINE_S
 
     def validate(self) -> None:
+        validate_project(self.project)
         if not valid_mission_id(self.mission_id):
             raise MissionError(f"unsafe mission_id: {self.mission_id!r}")
         for name in self.artifacts:
@@ -139,6 +149,12 @@ class MissionSpec:
         for check in self.checks:
             if not check.command or not isinstance(check.command, list):
                 raise MissionError(f"check {check.name!r} has no command list")
+
+
+def _mission_path(spec: MissionSpec) -> pathlib.Path:
+    if spec.project == DEFAULT_PROJECT:
+        return pathlib.Path(spec.mission_id)
+    return pathlib.Path("_projects", spec.project, spec.mission_id)
 
 
 @dataclass
@@ -212,9 +228,8 @@ class MissionEngine:
         no-op path). The claim is released by :meth:`_release_claim`, which
         ``run`` always calls in a ``finally`` block.
         """
-        claim_dir = pathlib.Path(self.store.root) / "claims"
-        claim_dir.mkdir(parents=True, exist_ok=True)
-        claim = claim_dir / f"{spec.mission_id}.lock"
+        claim = self.store.root / "claims" / f"{_mission_path(spec)}.lock"
+        claim.parent.mkdir(parents=True, exist_ok=True)
         try:
             fd = os.open(str(claim), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
@@ -239,9 +254,10 @@ class MissionEngine:
             dry_run=True, measured_quality=measured,
         )
 
-    def recall(self, query: str, limit: int = 3) -> list[dict]:
-        return [e.to_dict() for e in
-                self.memory.search("tel99", query, limit=limit)]
+    def recall(self, query: str, limit: int = 3, *,
+               project: str = DEFAULT_PROJECT) -> list[dict]:
+        validate_project(project)
+        return [e.to_dict() for e in self.memory.search(project, query, limit=limit)]
 
     # -- execution ----------------------------------------------------------
     def run(self, spec: MissionSpec) -> MissionResult:
@@ -250,7 +266,7 @@ class MissionEngine:
 
         # Idempotency: a recorded mission is a no-op. Preconditions are checked
         # BEFORE the atomic claim so a refused run never leaks a claim file.
-        previous = self.store.get(f"missions/{spec.mission_id}")
+        previous = self.store.get(f"missions/{_mission_path(spec).as_posix()}")
         if previous is not None:
             return MissionResult(
                 mission_id=spec.mission_id, verdict=previous.get("verdict", NEEDS_HUMAN),
@@ -284,7 +300,7 @@ class MissionEngine:
             self._release_claim(spec)
 
     def _execute(self, spec: MissionSpec, decision, chosen, started) -> MissionResult:
-        out_dir = self.workspace_root / spec.mission_id
+        out_dir = self.workspace_root / _mission_path(spec)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         calls = 0
@@ -333,7 +349,7 @@ class MissionEngine:
         Called from ``run``'s ``finally``, so it must not mask the original
         exception: every failure mode is swallowed.
         """
-        claim = pathlib.Path(self.store.root) / "claims" / f"{spec.mission_id}.lock"
+        claim = self.store.root / "claims" / f"{_mission_path(spec)}.lock"
         try:
             claim.unlink()
         except OSError:
@@ -363,7 +379,7 @@ class MissionEngine:
         record["decision"] = decision.to_dict()
         record["provider"] = getattr(self.provider, "name", "unknown")
         # Only the model id is stored -- never the endpoint, key or headers.
-        self.store.put(f"missions/{spec.mission_id}", record)
+        self.store.put(f"missions/{_mission_path(spec).as_posix()}", record)
         if out_dir is not None:
             (out_dir / "journal.json").write_text(
                 json.dumps(record, indent=2, ensure_ascii=False) + "\n",
