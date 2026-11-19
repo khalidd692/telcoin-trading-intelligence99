@@ -901,7 +901,7 @@ def dependency_evidence(missions):
                 continue
             proof = accepted_proof(
                 descriptor, repository=REPO, mission_body=body, fetch=fetch,
-                comments=issue_comments(94),
+                comments=issue_comments(issue if descriptor.get("verification_mode") == "g3-bot-v1" else 94),
             )
             if proof:
                 proofs[task] = proof
