@@ -1,154 +1,111 @@
 ---
 name: market-data-quality-readonly
-description: "Contrôler la qualité des données de marché Kraken (et sources associées) en lecture seule : fraîcheur, complétude, cohérence, anomalies — sans jamais modifier les données ni envoyer d'ordres."
+description: Permet à un agent de contrôler la fraîcheur, les horodatages UTC, les doublons et les données manquantes sur des fixtures synthétiques, strictement en lecture seule.
 ---
 
 # Skill: market-data-quality-readonly
 
-**But :** Contrôler la qualité des données de marché Kraken (et sources associées) en **lecture seule** : fraîcheur, complétude, cohérence, anomalies — sans jamais modifier les données ni envoyer d'ordres.
+**But :** Permettre à un agent de contrôler la qualité des données de marché (fraîcheur, horodatages UTC, doublons, données manquantes) sur des fixtures synthétiques, strictement en lecture seule, sans aucun ordre financier ni modification de donnée de production.
 
----
+**Quand déclencher :**
+- Vérification de fraîcheur d'un snapshot de données de marché.
+- Contrôle d'horodatages UTC sur des bougies Kraken.
+- Détection de doublons dans une série de données.
+- Détection de données manquantes (gaps temporels).
 
-## Quand déclencher
+**Quand NE PAS déclencher :**
+- Données de marché réelles en production (→ lire seulement, jamais modifier).
+- Ordre d'achat/vente (interdit absolu).
+- Erreur Python/JS (→ `python-test-triage` / `javascript-regression-triage`).
 
-- Avant toute analyse/décision basée sur les données de marché.
-- Après collecte (collector) pour valider l'artefact avant publication.
-- Sur détection d'anomalie (spread anormal, gaps, prix aberrants).
-- Demande explicite : "vérifie la qualité des données Kraken 15m".
+**Comment utiliser :**
 
----
+### 1. Charger une fixture synthétique (lecture seule)
 
-## Principes fondamentaux
+Utiliser un fichier de test synthétique (JSON, CSV) représentant des données de marché. Ne jamais charger de données de production réelles.
 
-- **STRICTEMENT LECTURE SEULE** : aucune écriture sur fichiers de données, aucun ordre, aucune modification de la collecte.
-- **Preuves d'exécution** : chaque contrôle produit un artefact JSON avec timestamp, métriques, empreinte SHA-256.
-- **Fail-closed** : si une vérification ne peut pas s'exécuter (données manquantes, source indisponible), le statut est `DEGRADED` ou `FAIL`, jamais `OK` par défaut.
+### 2. Contrôler la fraîcheur
 
----
+Comparer l'horodatage le plus récent des données avec l'heure UTC actuelle :
+- Si l'écart dépasse le seuil configuré (ex: 15 min pour des bougies 15m) → `STALE`.
+- Sinon → `FRESH`.
 
-## Contrôles obligatoires
+### 3. Vérifier les horodatages UTC
 
-### 1. Fraîcheur (Freshness)
-- **Entrée** : artefact `tel_snapshot.json` (ou `site/tel_snapshot.json` publié).
-- **Vérification** : `age_seconds = now - snapshot.timestamp_ms/1000`.
-- **Seuils** :
-  - 15m : `age < 300s` (5 min) → `OK`, `300-900s` → `STALE`, `>900s` → `EXPIRED`.
-  - 1h/4h/1d : seuils proportionnels.
-- **Sortie** : `{ "timeframe": "15m", "age_seconds": 288, "status": "OK", "threshold_ok": 300, "threshold_warn": 900 }`.
+- Tous les horodatages doivent être en UTC (suffixe `Z` ou offset `+00:00`).
+- Pas d'horodatage naïf (sans fuseau) ni en heure locale.
 
-### 2. Complétude (Completeness)
-- **Vérification** : tous les timeframes attendus présents (`15m`, `1h`, `4h`, `1d`).
-- **Champs requis par timeframe** : `open`, `high`, `low`, `close`, `volume`, `timestamp_ms`, `source`.
-- **Gaps** : détection trous > 2 intervalles manquants consécutifs.
-- **Sortie** : `{ "timeframe": "15m", "expected_bars": 96, "actual_bars": 96, "gaps": 0, "status": "OK" }`.
+### 4. Détecter les doublons
 
-### 3. Cohérence OHLC (OHLC Consistency)
-- **Règles** : `high >= max(open, close)`, `low <= min(open, close)`, `volume >= 0`.
-- **Vérification** : sur chaque barre de chaque timeframe.
-- **Sortie** : `{ "timeframe": "15m", "checked_bars": 96, "violations": 0, "status": "OK" }`.
+- Identifier les doublons sur la clé (symbole, timestamp).
+- Signaler tout doublon comme `DUPLICATE`.
 
-### 4. Spread / Qualité livre d'ordres (Order Book Quality)
-- **Si disponible** : `bid`, `ask`, `spread_bps = (ask-bid)/mid*10000`.
-- **Seuil** : `spread_bps < 50` (0.5%) pour `OK`, `50-100` → `WARN`, `>100` → `FAIL`.
-- **Sortie** : `{ "bid": 0.00612, "ask": 0.00615, "spread_bps": 48.7, "status": "OK" }`.
+### 5. Détecter les données manquantes
 
-### 5. Détection anomalies prix (Price Anomalies)
-- **Règles** : variation > 20% sur 1 barre (sauf gap connu), prix = 0 ou négatif, volume = 0 sur barre non-gap.
-- **Méthode** : z-score sur returns (|z| > 4) + seuils absolus.
-- **Sortie** : `{ "timeframe": "15m", "anomalies": [], "status": "OK" }`.
+- Identifier les gaps dans la série temporelle (ex: bougie manquante à t+15min).
+- Signaler tout gap comme `MISSING`.
 
-### 6. Provenance & Empreinte (Provenance & Fingerprint)
-- **Vérification** : `collection_id` présent, `sha256` des données brutes calculable et cohérent.
-- **Sortie** : `{ "collection_id": "abc-123", "sha256_raw": "ca7f46ee...", "status": "OK" }`.
+### 6. Produire un rapport de qualité
 
----
+Format :
+```markdown
+## Rapport de qualité des données — <fixture>
 
-## Agrégation finale
-
-**Statut global** = pire statut parmi tous les contrôles (priorité : `FAIL` > `EXPIRED` > `DEGRADED` > `WARN` > `STALE` > `OK`).
-
-**Format sortie standardisée :**
-```json
-{
-  "timestamp_ms": 1732027200000,
-  "source": "kraken",
-  "symbol": "TEL/USDT",
-  "overall_status": "OK",
-  "checks": {
-    "freshness": { "15m": {...}, "1h": {...}, "4h": {...}, "1d": {...} },
-    "completeness": { "15m": {...}, ... },
-    "ohlc_consistency": { "15m": {...}, ... },
-    "spread_quality": { "15m": {...}, ... },
-    "price_anomalies": { "15m": {...}, ... },
-    "provenance": { "collection_id": "...", "sha256_raw": "...", "status": "OK" }
-  },
-  "sha256_report": "a1b2c3d4..."
-}
+**Fichier :** <chemin>
+**Nombre de lignes :** <N>
+**Fraîcheur :** FRESH | STALE (écart : <X> min)
+**Horodatages UTC :** OK | KO (N non-UTC)
+**Doublons :** 0 | <N> (ex: symbol=BTC/USD, ts=...)
+**Données manquantes :** 0 | <N> (ex: ts=2026-11-19T14:00:00Z)
+**Verdict :** VALIDE | INVALIDE
 ```
 
 ---
 
 ## Entrées
 
-- Artefact snapshot : `site/tel_snapshot.json` (publié) ou `artifacts/tel_snapshot_<timestamp>.json` (local).
-- Optionnel : données brutes collector (`artifacts/raw/`) pour recalculer empreintes.
-- Configuration seuils (optionnel, défauts ci-dessus).
+- Fixture synthétique (fichier JSON/CSV de données de marché).
+- Seuil de fraîcheur configurable (en minutes).
 
 ## Sorties
 
-- **Rapport de qualité** JSON (format ci-dessus) → `results/market_data_quality_<timestamp>.json`.
-- **Empreinte SHA-256** du rapport.
-- **Journal** : `.kilo/sessions/<id>/market-data-quality-log.jsonl`.
-- **Statut exit code** : 0 = OK, 1 = WARN/STALE, 2 = DEGRADED/EXPIRED/FAIL.
-
----
+- **Rapport de qualité** (Markdown) avec verdict VALIDE/INVALIDE.
+- Jamais de modification de la fixture ni de donnée de production.
 
 ## Permissions
 
-- **Lecture seule** : `site/`, `artifacts/`, `results/`, `data/` (si existe).
-- **Écriture** : **uniquement** `results/market_data_quality_*.json` et journal de session.
-- **Interdits** : modifier `collector/`, `src/`, `site/tel_snapshot.json`, envoyer ordres, écrire sur sources de données.
+- **Lecture seule** : fichier de fixture, logs.
+- **Interdits absolus** : écriture sur donnée de production, ordre d'achat/vente, modification de solde, clé API, secret.
 
----
+## Exclusions (ne pas faire)
 
-## Exclusions (ne pas déclencher / ne pas faire)
-
-- Ne pas collecter de données (rôle du `collector/`).
-- Ne pas modifier les seuils de décision du détecteur (stratégie figée).
-- Ne pas valider des données MEXC/KuCoin (seulement Kraken comme source de référence primaire).
-- Ne pas déclencher si pas de snapshot disponible (bloquer + signaler).
-- Ne jamais écrire hors `results/` et journal de session.
-
----
+- Ne jamais envoyer d'ordre financier (réel ou simulé).
+- Ne jamais modifier une donnée de marché de production.
+- Ne pas utiliser de clé API ou de secret.
+- Ne pas modifier `scripts/agents/native/*` (Codex G3).
+- Ne pas déclarer une donnée valide sans avoir vérifié fraîcheur ET UTC ET doublons ET manquants.
 
 ## Tests de validation
 
-### Test positif — Snapshot OK
-- `site/tel_snapshot.json` : 15m age 288s, 96 barres, 0 violations OHLC, spread 48bps, provenance OK.
-- Rapport → `overall_status: "OK"`, exit code 0.
-- Empreinte SHA-256 calculée et journalisée.
+### Test positif — Fixture valide
+- Fixture synthétique : 100 bougies BTC/USD 15m, horodatages UTC, aucun doublon, aucun gap, fraîcheur < 15 min.
+- Verdict : VALIDE.
 
-### Test positif — Données dégradées (STALE)
-- Snapshot 15m age 600s (10 min), autres OK.
-- Rapport → `overall_status: "STALE"`, exit code 1.
-- Détail : `freshness.15m.status = "STALE"`.
+### Test négatif — Fixture invalide (donnée manquante)
+- Fixture synthétique avec une bougie manquante à t+15min.
+- Verdict : INVALIDE, `MISSING` signalé.
 
-### Test positif — Spread FAIL (cas réel MEXC)
-- Spread 64bps > 50bps seuil.
-- Rapport → `overall_status: "FAIL"`, exit code 2.
-- Correspond au comportement live documenté (T53, T66).
+### Test négatif — Fixture invalide (doublon)
+- Fixture synthétique avec un doublon (symbole + timestamp identiques).
+- Verdict : INVALIDE, `DUPLICATE` signalé.
 
-### Test négatif — Pas de snapshot
-- `site/tel_snapshot.json` absent ou vide.
-- Skill → exit code 2, rapport `{ "overall_status": "FAIL", "error": "no_snapshot" }`.
-- Ne pas inventer de données.
+### Test négatif — Fixture invalide (pas UTC)
+- Fixture synthétique avec un horodatage sans fuseau horaire.
+- Verdict : INVALIDE, `KO` sur horodatages UTC.
 
-### Test sécurité — Lecture seule respectée
-- Tentative d'écriture sur `collector/tel_collector.py` → refusée.
-- Tentative d'envoi ordre → refusée.
-- Aucune modification de `site/tel_snapshot.json`.
-
----
+### Test sécurité — Aucun ordre financier
+- Le Skill ne contient aucune logique d'achat/vente.
+- Aucun secret ni clé API dans le rapport.
 
 ## Version
 
@@ -156,13 +113,11 @@ description: "Contrôler la qualité des données de marché Kraken (et sources 
 
 ## Retour arrière
 
-- Supprimer `results/market_data_quality_*.json` de la session échouée.
-- Journal de session conservé pour audit.
-- Aucune modification des données sources.
+- Aucune modification effectuée (lecture seule).
+- Fichiers de rapport temporaires supprimés.
 
 ## Conflits connus
 
-- Ne pas interférer avec le collector (`collector/tel_collector.py`) — lecture seule.
-- Ne pas modifier les seuils de `src/agent_analysis.py` (stratégie figée, `PROTOCOLE_STRATEGIE_FIGE.md`).
-- Utilise `autonomous-error-recovery` si erreur d'exécution (ex: JSON invalide).
-- Complémentaire de `github-continuity` (vérifie artefact publié) et `safe-repo-change` (écriture seulement `results/`).
+- Ne pas modifier les données de marché de production.
+- Ne pas interférer avec les travaux de l'autre chef (G0–G7).
+- Ne pas modifier `scripts/agents/native/*` (Codex G3).

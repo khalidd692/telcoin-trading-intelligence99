@@ -1,155 +1,104 @@
 ---
 name: javascript-regression-triage
-description: "Diagnostiquer et trier les régressions JavaScript/Node : tests qui échouent, erreurs runtime, casses de build, incompatibilités navigateur/CI."
+description: Permet à un agent d'identifier les problèmes JavaScript/Node, de comparer l'avant et l'après et de produire un rapport reproductible, sans modifier le terminal existant.
 ---
 
 # Skill: javascript-regression-triage
 
-**But :** Diagnostiquer et trier les régressions JavaScript/Node : tests qui échouent, erreurs runtime, casses de build, incompatibilités navigateur/CI.
+**But :** Permettre à un agent d'identifier les problèmes JavaScript/Node (erreur d'exécution, test qui échoue, régression), de comparer l'état avant et après un changement, et de produire un rapport reproductible, sans modifier le terminal existant.
 
----
+**Quand déclencher :**
+- Échec d'un test JavaScript/Node (node, Jest, etc.).
+- Erreur d'exécution d'un script Node (exception, code de sortie non-zéro).
+- Régression suspectée sur le dashboard ou un module JS.
 
-## Quand déclencher
+**Quand NE PAS déclencher :**
+- Erreur Python (→ `python-test-triage`).
+- Erreur de données de marché (→ `market-data-quality-readonly`).
+- Modification du terminal TEL99 sans mission produit autorisée (→ bloquer).
 
-- Échec de `node tests/test_<module>.js` ou `npm test`.
-- Erreur JavaScript dans le dashboard (`site/index.html`, `site/realtime.js`).
-- Build échoué (si build step existe : `npm run build`, `vite build`, etc.).
-- Régression détectée : test/dashboard qui fonctionnait, cassé après changement.
-- Demande explicite : "diagnostique ce test JS qui échoue".
+**Comment utiliser :**
 
----
+### 1. Reproduire le problème (lecture seule)
 
-## Comment utiliser
+Exécuter la commande qui échoue et capturer :
+- La sortie complète (stdout/stderr).
+- Le code de retour.
+- Le fichier et la ligne pointés par l'erreur.
+- La version de Node et des dépendances.
 
-### 1. Collecter l'échec (lecture seule)
+### 2. Comparer avant / après
 
-```bash
-node tests/test_<module>.js 2>&1
-node tests/test_dashboard.js 2>&1
-node tests/test_realtime.js 2>&1
-# Si package.json existe :
-npm test 2>&1
-```
+Utiliser Git pour identifier le changement récent :
+- `git log --oneline -5` sur le fichier concerné.
+- `git diff <sha_avant> <sha_après> -- <fichier>` pour voir le diff exact.
+- Identifier ce qui a changé entre la version qui passait et celle qui échoue.
 
-**Extraire :**
-- Fichier et ligne de l'erreur (stack trace).
-- Type : `AssertionError`, `ReferenceError`, `TypeError`, `SyntaxError`, `Error: timeout`, etc.
-- Module concerné : `site/index.html` (inline JS), `site/realtime.js`, `tests/test_*.js`.
-- Contexte : dernier commit touchant les fichiers JS.
+### 3. Produire un rapport reproductible
 
-### 2. Classifier l'échec
-
-| Catégorie | Signes | Exemples |
-|-----------|--------|----------|
-| **Assertion test** | `assert.strictEqual` / `console.assert` échoue | Badge vert affiché alors qu'il ne devrait pas |
-| **Régression code** | Test OK avant commit X, KO après | `git log --oneline -20 -- site/ tests/` |
-| **Runtime/DOM** | `ReferenceError`, `TypeError: Cannot read property` | `element.querySelector` null, variable non définie |
-| **Environnement** | `module not found`, `fetch` échoue, `WebSocket` | CI sans navigateur, `jsdom` manquant |
-| **Flaky** | Échoue intermittemment (timing, async) | `setTimeout`, `fetch` mock, ordre tests |
-| **Test bogué** | Mock ne correspond plus, assertion obsolète | API changée, test non mis à jour |
-
-### 3. Diagnostic ciblé
-
-**Pour AssertionError (tests) :**
-- Lire `tests/test_<module>.js` → comprendre l'assertion.
-- Lire le code source concerné (`site/realtime.js`, `site/index.html` script).
-- Vérifier : le code a-t-il changé ? Le test est-il obsolète ?
-- Exécuter en mode debug : `node --inspect-brk tests/test_<module>.js`.
-
-**Pour Runtime/DOM :**
-- Identifier l'élément/la variable `undefined`/`null`.
-- Vérifier l'ordre d'exécution (DOMReady, event listeners).
-- Vérifier les sélecteurs CSS (`querySelector`, `getElementById`).
-- Dashboard : vérifier `site/index.html` structure HTML vs JS.
-
-**Pour Régression :**
-- `git log --oneline -20 -- site/ tests/`
-- `git show <commit> -- site/realtime.js tests/test_dashboard.js`
-- Identifier le changement cassant.
-
-### 4. Proposer correction minimale
-
-**Format :**
+Format :
 ```markdown
-## Diagnostic javascript-regression-triage
+## Rapport de régression JS — <fichier>
 
-**Test/Erreur :** `tests/test_dashboard.js` / `site/realtime.js:42`
-**Type :** <AssertionError / TypeError / ReferenceError / ...>
-**Message :** <message exact>
-**Cause racine :** <1 phrase>
-**Fichier(s) à corriger :** <liste : site/realtime.js, tests/test_dashboard.js, site/index.html>
-**Diff minimal :** ```diff ... ```
-**Tests de validation :** `node tests/test_dashboard.js` + `node tests/test_realtime.js` + `node tests/`
-**Risque régression :** LOW/MEDIUM/HIGH
+**Erreur :** <description>
+**Commande qui échoue :** <commande>
+**Code de retour :** <N>
+**Fichier concerné :** <chemin>
+**Diff avant/après :** <diff unifié minimal>
+**Cause racine :** <analyse en 1 phrase>
+**Correction proposée :** <diff minimal>
+**Tests à relancer :** <liste explicite>
+**Risque de régression :** LOW/MEDIUM/HIGH
 ```
 
-### 5. Valider la correction
+### 4. Vérifier sans modifier le terminal
 
-1. Appliquer le diff.
-2. Relancer le test ciblé → PASS.
-3. Relancer tous les tests JS (`node tests/`) → TOUS PASS.
-4. Vérifier manuellement si dashboard (ouvrir `site/index.html` si possible).
-5. Si échec → itérer (max 3 fois, voir `autonomous-error-recovery`).
+- Ne jamais modifier `site/index.html`, `site/realtime.js`, ni tout fichier du terminal TEL99 sans mission produit autorisée.
+- Travailler sur une copie temporaire ou une branche isolée.
+- Relancer les tests JS sur la version corrigée pour confirmer la réparation.
 
 ---
 
 ## Entrées
 
-- Nom du test ou fichier JS en erreur (ex: `tests/test_dashboard.js`, `site/realtime.js`).
-- Sortie brute `node tests/...` (fournie ou collectée).
-- Contexte Git (branche, derniers commits touchant `site/` ou `tests/*.js`).
+- Erreur brute (logs, traceback, sortie node).
+- Contexte : fichier concerné, branche, commit avant/après.
+- Historique Git (git log, git diff).
 
 ## Sorties
 
-- **Rapport de diagnostic** (format ci-dessus).
-- **Diff minimal** applicable.
-- **Résultat validation** : PASS/FAIL + logs.
-- **Journal** : `.kilo/sessions/<id>/javascript-regression-triage-log.jsonl`.
-
----
+- **Rapport de régression** (Markdown) avec diff avant/après et cause racine.
+- **Correction proposée** (diff minimal) ou **blocage** si hors périmètre.
+- Tests JS relancés et verts → `RECOVERED`.
 
 ## Permissions
 
-- **Lecture** : `site/`, `tests/*.js`, `package.json` (si existe), Git history.
-- **Écriture** : **uniquement** fichiers listés dans "Fichier(s) à corriger" (source JS + son test).
-- **Exécution** : `node tests/...`, `npm test` (si dispo).
-- **Interdits** : modifier fichiers Python, config CI, déploiement, `scripts/agents/native/*`.
+- **Lecture** : code JS, tests, logs, Git history.
+- **Exécution** : `node`, scripts de test JS.
+- **Interdits** : modifier le terminal TEL99 sans autorisation, merge, déploiement, secrets, fichiers d'autres agents.
 
----
+## Exclusions (ne pas faire)
 
-## Exclusions (ne pas déclencher)
-
-- Tests Python (`pytest`) → `python-test-triage`.
-- Collecte données marché → `market-data-quality-readonly`.
-- Échec CI non-JS (workflow YAML, étapes Python, déploiement).
-- Tests qui passent.
-
----
+- Ne pas modifier `site/index.html`, `site/realtime.js` sans mission produit autorisée.
+- Ne pas créer de nouveau système de build ou de bundler.
+- Ne pas modifier `scripts/agents/native/*` (Codex G3).
+- Ne pas déclarer "corrigé" sans test JS repassé vert.
 
 ## Tests de validation
 
-### Test positif — Assertion dashboard (T37/T65)
-- `node tests/test_dashboard.js` échoue : badge vert affiché pour `exploitable=false`.
-- Diagnostic : `site/realtime.js` ne vérifie pas `snapshot.verified` avant badge vert.
-- Correction : ajouter garde `if (!snapshot.verified) return` avant setAttribute.
-- Validation : `node tests/test_dashboard.js` PASS (8 assertions) + `scripts/verify_t37_e2e.py` PASS.
+### Test positif — Régression détectée et corrigée
+- Un test JS qui passait échoue après un changement sur `site/realtime.js`.
+- Diff avant/après identifie la suppression d'une gestion d'erreur.
+- Correction minimale rétablit la gestion d'erreur.
+- Le test JS repasse vert.
 
-### Test positif — ReferenceError realtime.js
-- `ReferenceError: updateRegimeBadge is not defined` dans `site/realtime.js`.
-- Diagnostic : fonction renommée `renderRegimeBadge` mais appel non mis à jour.
-- Correction : renommer l'appel ou la fonction (1 ligne).
-- Validation : `node tests/test_realtime.js` PASS + pas de regression `test_dashboard.js`.
+### Test négatif — Terminal protégé
+- Tentative de modifier `site/index.html` sans mission produit.
+- Le Skill doit refuser et signaler `BLOCKED` : terminal protégé.
 
-### Test négatif — Ne pas déclencher
-- `pytest tests/test_alert_state.py` échoue → hors périmètre.
-- Workflow `.github/workflows/monitor.yml` étape `python` échoue → hors périmètre.
-- `node tests/test_dashboard.js` PASS → pas de triage.
-
-### Test reprise
-- Interruption après diagnostic, avant correction.
-- Nouvelle session → retrouve diagnostic dans journal → applique correction → valide.
-
----
+### Test de reproduction — Rapport reproductible
+- Le rapport contient le diff exact avant/après.
+- Un tiers peut appliquer le diff et obtenir le même résultat.
 
 ## Version
 
@@ -157,13 +106,12 @@ npm test 2>&1
 
 ## Retour arrière
 
-- `git checkout` branche isolée avant correction.
-- `git reset --hard` commit pré-correction.
-- Tests non modifiés (sauf si test bogué — correction test + code).
+- `git checkout` sur la version précédente du fichier JS.
+- Artefacts de test temporaires supprimés.
+- Journal de session conservé pour audit.
 
 ## Conflits connus
 
+- Ne pas modifier le terminal TEL99 sans mission produit.
+- Ne pas interférer avec les corrections de l'autre chef (G0–G7).
 - Ne pas modifier `scripts/agents/native/*` (Codex G3).
-- Ne pas toucher aux tests Python (`python-test-triage`).
-- Utilise `autonomous-error-recovery` pour la boucle de correction/validation.
-- Dashboard `site/index.html` contient JS inline — modifications coordonnées avec `site/realtime.js`.

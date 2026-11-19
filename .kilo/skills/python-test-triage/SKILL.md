@@ -1,148 +1,127 @@
 ---
 name: python-test-triage
-description: "Diagnostiquer et trier les échecs de tests Python (pytest) : identifier la cause racine, proposer une correction minimale, et valider sans régression."
+description: Permet à un agent de comprendre une erreur Python, d'identifier la cause, de proposer un correctif minimal et de vérifier les tests, sans modifier des tests pour cacher une régression.
 ---
 
 # Skill: python-test-triage
 
-**But :** Diagnostiquer et trier les échecs de tests Python (pytest) : identifier la cause racine, proposer une correction minimale, et valider sans régression.
+**But :** Permettre à un agent de comprendre une erreur Python (pytest, traceback, assertion), d'identifier la cause racine, de proposer un correctif minimal et de vérifier les tests, sans jamais modifier un test pour cacher une régression.
 
----
+**Quand déclencher :**
+- Échec d'un test Python (pytest, unittest) : assertion, TypeError, SyntaxError, ModuleNotFoundError, etc.
+- Erreur d'exécution d'un script Python (exception, code de sortie non-zéro).
+- Demande explicite de diagnostiquer une régression Python.
 
-## Quand déclencher
+**Quand NE PAS déclencher :**
+- Erreur JavaScript/Node (→ `javascript-regression-triage`).
+- Erreur de données de marché (→ `market-data-quality-readonly`).
+- Échec d'autorisation, de merge, de déploiement (→ bloquer, demander humain).
 
-- Échec de `pytest` (un ou plusieurs tests).
-- Échec de `pytest tests/test_<module>.py` sur un module spécifique.
-- Régression détectée : test qui passait, maintenant échoue après changement.
-- Demande explicite : "diagnostique ce test qui échoue".
+**Comment utiliser :**
 
----
+### 1. Analyser l'erreur réelle (lecture seule)
 
-## Comment utiliser
+Collecter :
+- La sortie complète de l'erreur (stdout/stderr, traceback, logs pytest).
+- La commande qui a échoué + son code de retour.
+- Le fichier et la ligne pointés par le traceback.
+- L'environnement : version Python, OS, dépendances installées.
 
-### 1. Collecter l'échec (lecture seule)
+Ne jamais deviner : lire les logs réels, pas les messages d'erreur tronqués.
 
-```bash
-pytest tests/ -v --tb=long 2>&1 | head -200
-pytest tests/test_<module>.py -v --tb=long 2>&1
-```
+### 2. Classer la cause
 
-**Extraire :**
-- Nom du test échoué (`test_<name>`).
-- Type d'erreur : `AssertionError`, `TypeError`, `AttributeError`, `ModuleNotFoundError`, `TimeoutError`, etc.
-- Traceback complet (dernier appel utilisateur → code test → code source).
-- Fixtures/mocks impliqués.
+| Type | Indicateurs | Action |
+|------|-------------|--------|
+| Erreur de syntaxe | `SyntaxError`, `IndentationError` | Corriger la syntaxe |
+| Erreur de type | `TypeError`, `AttributeError` | Vérifier les types/attributs |
+| Erreur d'import | `ModuleNotFoundError`, `ImportError` | Corriger l'import ou l'environnement |
+| Assertion échouée | `AssertionError` | Vérifier la logique métier attendue |
+| Erreur de donnée | Valeur inattendue, champ manquant | Corriger la source ou la gestion d'erreur |
 
-### 2. Classifier l'échec
+### 3. Proposer une correction minimale
 
-| Catégorie | Signes | Exemples |
-|-----------|--------|----------|
-| **Assertion métier** | `AssertionError` sur valeur attendue vs réelle | `assert result.exploitable == False` |
-| **Régression code** | Test OK avant commit X, KO après | `git bisect` ou `git log --oneline -20` |
-| **Dépendance manquante** | `ModuleNotFoundError`, `ImportError` | `pytest` absent, `src.` path incorrect |
-| **Données/environnement** | `FileNotFoundError`, timeout, DNS, API | MEXC DNS, fixture corrompue |
-| **Flaky** | Échoue 1/5 fois, non déterministe | Timing, ordre de tests, état partagé |
-| **Test lui-même bogué** | Logique de test incorrecte, mock cassé | Mock ne correspond plus à l'API |
+Principes :
+- **Une seule chose à la fois** : un commit = une correction.
+- **Minimal** : changer le moins de lignes possible pour fixer la cause racine.
+- **Localisé** : ne toucher qu'au module concerné + ses tests.
+- **Sans casser l'existant** : tous les tests précédents doivent passer.
+- **Ne jamais modifier un test pour le faire passer** : si un test échoue, c'est le code qui est en cause, pas l'attente.
 
-### 3. Diagnostic ciblé
-
-**Pour AssertionError :**
-- Lire le code source testé (`src/<module>.py`).
-- Lire le test (`tests/test_<module>.py`).
-- Comparer : quelle condition métier a changé ?
-- Vérifier si le test ou le code est "la vérité" (consulter TASKS.md, docs, historique).
-
-**Pour ModuleNotFound/ImportError :**
-- Vérifier `PYTHONPATH` / `sys.path` dans `pytest.ini` ou `conftest.py`.
-- Vérifier structure `src/` vs `tests/` (imports relatifs vs absolus).
-- Windows : encoding, chemins, subprocess.
-
-**Pour Régression :**
-- `git log --oneline -20 -- tests/test_<module>.py src/<module>.py`
-- Identifier le commit introducteur.
-- `git show <commit> --stat` pour voir les fichiers touchés.
-
-### 4. Proposer correction minimale
-
-**Format :**
+Format de proposition :
 ```markdown
-## Diagnostic python-test-triage
+## Correction proposée pour <erreur>
 
-**Test :** `tests/test_<module>.py::test_<name>`
-**Erreur :** <type + message>
-**Cause racine :** <1 phrase>
-**Fichier(s) à corriger :** <liste>
-**Diff minimal :** ```diff ... ```
-**Tests de validation :** `pytest tests/test_<module>.py::test_<name> -v` + `pytest tests/ -x --tb=short`
-**Risque régression :** LOW/MEDIUM/HIGH
+**Cause racine :** <analyse en 1 phrase>
+**Fichiers à modifier :** <liste exacte>
+**Diff attendu :** <diff unifié minimal>
+**Tests à relancer :** <liste explicite>
+**Risque de régression :** LOW/MEDIUM/HIGH
 ```
 
-### 5. Valider la correction
+### 4. Tester la correction
 
-1. Appliquer le diff.
-2. Relancer le test ciblé → PASS.
-3. Relancer le module → TOUS PASS.
-4. Relancer suite complète (ou `pytest tests/ -x`) → PAS DE RÉGRESSION.
-5. Si échec → itérer (max 3 fois, voir `autonomous-error-recovery`).
+Ordre :
+1. Appliquer le diff minimal.
+2. Lancer le test qui échouait → doit passer.
+3. Lancer la suite de tests du module → tous passent.
+4. Lancer la suite complète (ou sous-ensemble pertinent) → pas de régression.
+5. Si échec → revenir à l'étape 2 (max 3 itérations).
+
+### 5. Éviter les boucles infinies
+
+Garde-fous :
+- Compteur `attempt_count` par erreur (max 3).
+- Si même erreur après 3 corrections différentes → **BLOQUER** + publier blocage.
+- Historique des tentatives : `.kilo/sessions/<id>/python-test-triage-log.jsonl`.
+- Ne pas réessayer la même correction (même diff) deux fois.
 
 ---
 
 ## Entrées
 
-- Nom du test ou module échoué (ex: `test_alert_state.py::test_advance_fail_closed`).
-- Sortie brute `pytest` (fournie par l'appelant ou collectée).
-- Contexte Git (branche, derniers commits).
+- Erreur brute (logs, traceback, sortie pytest).
+- Contexte : tâche en cours, fichiers modifiés, branche, commit.
+- Historique de session (tentatives précédentes).
 
 ## Sorties
 
-- **Rapport de diagnostic** (format ci-dessus).
-- **Diff minimal** applicable.
-- **Résultat validation** : PASS/FAIL + logs.
-- **Journal** : `.kilo/sessions/<id>/python-test-triage-log.jsonl`.
-
----
+- **Correction appliquée** + tests verts → `RECOVERED`.
+- **Blocage publié** → `BLOCKED` avec cause et tentatives.
+- Journal : `.kilo/sessions/<id>/python-test-triage-log.jsonl` :
+  `{ "timestamp": "...", "error": "...", "diagnosis": "...", "attempt": N, "diff": "...", "test_result": "pass|fail", "status": "recovered|blocked|retry" }`.
 
 ## Permissions
 
-- **Lecture** : tout le code (`src/`, `tests/`), Git history, logs CI.
-- **Écriture** : **uniquement** fichiers listés dans "Fichier(s) à corriger" (module source + son test).
-- **Exécution** : `pytest`, `python -m pytest`, scripts de vérification.
-- **Interdits** : modifier d'autres modules, tests non liés, `scripts/agents/native/*`, config CI, déploiement.
+- **Lecture** : logs, code, tests, Git history.
+- **Écriture** : fichiers du module concerné (selon plan), branche isolée, journal de session.
+- **Exécution** : `pytest`, `python -m unittest`.
+- **Interdits** : modifier un test pour le faire passer, merge, déploiement, secrets, fichiers d'autres agents.
 
----
+## Exclusions (ne pas faire)
 
-## Exclusions (ne pas déclencher)
-
-- Tests JavaScript/Node (`node tests/...`) → `javascript-regression-triage`.
-- Collecte données marché → `market-data-quality-readonly`.
-- Échec CI non-python (workflow YAML, déploiement, etc.).
-- Tests qui passent (pas de triage nécessaire).
-
----
+- Ne pas commenter un test qui échoue.
+- Ne pas masquer l'erreur par un try/except vide.
+- Ne pas modifier `scripts/agents/native/*` (Codex G3).
+- Ne pas déclarer "corrigé" sans test de régression passé.
 
 ## Tests de validation
 
-### Test positif — Assertion métier
-- `test_alert_state.py::test_advance_fail_closed` échoue : `exploitable_reason` manquant.
-- Diagnostic : collecteur n'écrit pas le champ → correction 1 ligne dans `collector/tel_collector.py`.
-- Validation : test ciblé PASS + 260 tests suite PASS.
+### Test positif — Réparation d'une erreur Python
+- Erreur reproductible : `TypeError` sur un argument manquant dans `collector/tel_collector.py`.
+- Diagnostic : paramètre `market` omis à l'appel.
+- Correction minimale : ajouter l'argument (1 ligne).
+- Tests : le test qui échouait passe + suite complète sans régression.
+- Journal : 1 tentative, status `recovered`.
 
-### Test positif — ImportError Windows
-- `ModuleNotFoundError: No module named 'src.agent_analysis'`.
-- Diagnostic : `sys.path` manque racine projet dans `conftest.py` ou `pytest.ini`.
-- Correction : ajouter `sys.path.insert(0, root)` dans `conftest.py`.
-- Validation : suite complète PASS.
+### Test négatif — Pas de modification de test pour cacher
+- Tentative de modifier `assert x == 1` en `assert True` dans un test.
+- Le Skill doit refuser et signaler `BLOCKED` : modification de test interdite.
 
-### Test négatif — Ne pas déclencher
-- `node tests/test_dashboard.js` échoue → hors périmètre.
-- Workflow GitHub Actions `.github/workflows/monitor.yml` rouge → hors périmètre (sauf si étape `pytest`).
-- Test `test_alert_state.py` passe → pas de triage.
-
-### Test reprise
-- Interruption après diagnostic, avant correction.
-- Nouvelle session → retrouve diagnostic dans journal → applique correction → valide.
-
----
+### Test de reprise — Interruption puis reprise
+- Interruption après diagnostic, avant application de la correction.
+- Nouvelle session : reprend à "appliquer correction" sans refaire le diagnostic.
+- Checkpoint préservé, pas de double exécution.
 
 ## Version
 
@@ -150,12 +129,13 @@ pytest tests/test_<module>.py -v --tb=long 2>&1
 
 ## Retour arrière
 
-- `git checkout` branche isolée avant correction.
-- `git reset --hard` commit pré-correction.
-- Tests non modifiés (sauf si le test lui-même était bogué — alors correction test + code).
+- `git checkout` branche précédente (checkpoint avant correction).
+- `git reset --hard` au commit pré-correction.
+- Artefacts inchangés (sur branche isolée).
+- Journal de session conservé pour audit.
 
 ## Conflits connus
 
-- Ne pas modifier `scripts/agents/native/*` (Codex G3).
-- Ne pas toucher aux tests d'autres skills (`javascript-regression-triage`, `market-data-quality-readonly`).
-- Utilise `autonomous-error-recovery` pour la boucle de correction/validation.
+- Ne pas interférer avec les corrections de l'autre chef (G0–G7).
+- Utilise `safe-repo-change` pour les guards Git.
+- Ne pas modifier `scripts/agents/native/*` (propriété Codex G3).
