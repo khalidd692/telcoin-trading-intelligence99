@@ -15,7 +15,7 @@ class SitesBuildProvenance(unittest.TestCase):
         names=['index.html','app.js','core.js','scenarios.js','smartview.js','radar.js','smartwidgets.js','terminal.css','data.json','vendor/lightweight-charts-5.0.8.js']
         paths=['site/terminal/'+name for name in names]+['deploy/sites/worker.mjs','deploy/sites/build.py']
         def digest(name):
-            content=Path(name).read_bytes()
+            content=Path(name).read_bytes().replace(b'\r\n',b'\n')
             return hashlib.sha1(b'blob '+str(len(content)).encode()+b'\0'+content).hexdigest()
         manifest=Path(directory,'manifest.json')
         manifest.write_text(json.dumps({'commit':commit,'files':{name:digest(name) for name in paths}}))
@@ -37,7 +37,7 @@ class SitesBuildProvenance(unittest.TestCase):
             run = subprocess.run([sys.executable, 'deploy/sites/build.py', directory], env=env,
                                  text=True, capture_output=True)
             self.assertEqual(run.returncode, 0, run.stderr)
-            source = Path(directory, 'index.js').read_text()
+            source = Path(directory, 'index.js').read_text(encoding='utf-8')
             assets = json.loads(source.removeprefix('const ASSETS=').split(';\n', 1)[0])
             self.assertEqual(json.loads(assets['/version.json']['body'])['product_commit'], commit)
             self.assertIn('/smartwidgets.js', assets)
@@ -59,9 +59,9 @@ class SitesBuildProvenance(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manifest=self.manifest(directory,commit)
             fallback=Path(directory,'fallback.json')
-            payload=json.loads(Path('site/terminal/data.json').read_text())
+            payload=json.loads(Path('site/terminal/data.json').read_text(encoding='utf-8'))
             payload['safety']['real_orders']=True
-            fallback.write_text(json.dumps(payload))
+            fallback.write_text(json.dumps(payload),encoding='utf-8')
             env=dict(os.environ,TEL99_PRODUCT_COMMIT=commit,TEL99_PRODUCT_BLOBS_PATH=str(manifest),TEL99_FALLBACK_DATA=str(fallback))
             run=subprocess.run([sys.executable,'deploy/sites/build.py',directory],env=env,text=True,capture_output=True)
             self.assertNotEqual(run.returncode,0)
