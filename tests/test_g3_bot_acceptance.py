@@ -183,5 +183,57 @@ class ExternalProofTest(unittest.TestCase):
         ))
 
 
+class G3DependencyAdmissionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(ROOT / "scripts/agents/automation"))
+        import local_coordination
+        cls.coordination = local_coordination
+
+    def descriptor(self):
+        raw = (ROOT / "docs/agents/G3_AUTO_TRUST_114.json").read_bytes()
+        policy = json.loads(raw)
+        return {
+            "verification_mode": "g3-bot-v1",
+            "policy_sha256": hashlib.sha256(raw).hexdigest(),
+            **{field: policy[field] for field in
+               ("issue", "mission_id", "work_branch", "commit_sha", "criteria")},
+        }
+
+    def test_opt_in_and_policy_hash_required(self):
+        from unittest.mock import patch
+        descriptor = self.descriptor()
+        with patch.object(self.coordination.g3_bot_acceptance, "verify",
+                          return_value={"status": "VERIFIED_EXTERNAL"}) as verifier:
+            proof = self.coordination.accepted_proof(
+                descriptor, repository=REPO, mission_body="approved fixture",
+                comments=[], fetch=lambda path: {},
+            )
+            self.assertEqual(proof["status"], "VERIFIED_EXTERNAL")
+            verifier.assert_called_once()
+
+    def test_wrong_policy_hash_fails_closed(self):
+        from unittest.mock import patch
+        descriptor = self.descriptor()
+        descriptor["policy_sha256"] = "f" * 64
+        with patch.object(self.coordination.g3_bot_acceptance, "verify") as verifier:
+            self.assertIsNone(self.coordination.accepted_proof(
+                descriptor, repository=REPO, mission_body="fixture",
+                comments=[], fetch=lambda path: {},
+            ))
+            verifier.assert_not_called()
+
+    def test_wrong_issue_fails_closed(self):
+        from unittest.mock import patch
+        descriptor = self.descriptor()
+        descriptor["issue"] = 999
+        with patch.object(self.coordination.g3_bot_acceptance, "verify") as verifier:
+            self.assertIsNone(self.coordination.accepted_proof(
+                descriptor, repository=REPO, mission_body="fixture",
+                comments=[], fetch=lambda path: {},
+            ))
+            verifier.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
