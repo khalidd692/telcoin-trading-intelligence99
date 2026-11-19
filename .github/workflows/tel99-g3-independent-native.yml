@@ -1,0 +1,66 @@
+name: TEL99 G3 independent native verification
+
+# No AI, production deploy, or repository write. Checks exact #114 SHA
+# without moving its artifact branch or consuming Codex quota.
+on:
+  push:
+    branches:
+      - agents/g3-independent-verifier-20261119
+  pull_request:
+    branches:
+      - integration/codex-agent-core-20261118
+    paths:
+      - scripts/agents/automation/g3_native_*.py
+      - tests/test_g3_native_verifier.py
+      - .github/workflows/tel99-g3-independent-native.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-native:
+    name: Independent native code check (SHA pinned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout verification code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: caec35793c9d2e04900c8bb4cf31ce6ca9bdbfe3
+          fetch-depth: 2
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: G3 policy regressions (no model, no Docker)
+        run: python -m unittest discover -s tests -p test_g3_native_verifier.py -v
+
+      - name: Verify candidate branch is still at approved SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(git ls-remote https://github.com/khalidd692/telcoin-trading-intelligence99.git refs/heads/agents/codex-local/codex110-windows-native-shortpath | cut -f1)
+          test "$current" = "caec35793c9d2e04900c8bb4cf31ce6ca9bdbfe3"
+
+      - name: Run candidate in a sealed, network-disabled container
+        run: |
+          python -B scripts/agents/automation/g3_native_verifier.py \
+            --candidate candidate --output /tmp/tel99-g3/verification.json
+
+      - name: Upload reproducible evidence even when rejected
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tel99-g3-native-114-evidence
+          path: /tmp/tel99-g3/verification.json
+          retention-days: 14
+          if-no-files-found: warn
