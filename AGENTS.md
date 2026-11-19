@@ -1,5 +1,13 @@
 # TEL99 — Instructions de continuité pour agents (Codex, Copilot, Hermes et autres)
 
+## REGLE DE REPRISE OBLIGATOIRE — superviseur / multi-agents (19/11/2026)
+
+**AVANT tout développement de superviseur, routeur, délégation ou autonomie, appliquer « REUSE FIRST ».**
+Lire **[l'inventaire des superviseurs et la procédure anti-duplication](docs/agents/SUPERVISOR_REUSE_FIRST_2026-11-19.md)**, puis les issues #94/#123 et les PR #93, #106/#107/#108, #118/#119 et #124. Des superviseurs existaient déjà au 18/11 : ne jamais conclure « absent » à partir du seul état de `main` ou du worktree courant. Rechercher les branches, les contrats, les checkpoints et les preuves.
+
+À chaque nouvelle intervention, consigner **REUSE** (fichier/PR/SHA repris), **GAP** (manque prouvé), **OWNER** (worktree responsable), **NEXT** (correction minimale et preuve). **Pas de troisième superviseur redondant**, pas de relance des anciennes tâches, pas de nouvelle architecture avant comparaison de l'existant. Les composants #107 (GitHub/file) et #124 (exécution native Kilo) sont deux morceaux à intégrer, et ne valent pas encore validation générale G0–G7. Conserver la séparation des rôles et les protections des branches.
+
+
 **Avant toute modification :** lire [issue #61](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/61) et [incident #60](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/60), puis consulter **les quatre documents** sur la branche `codex/tel99-quant-terminal` :
 1. [Passation initiale](https://github.com/khalidd692/telcoin-trading-intelligence99/blob/codex/tel99-quant-terminal/docs/smart-view/PASSATION_SMART_VIEW_2026-11-13.md)
 2. [Passation finale avec 11 expressions](https://github.com/khalidd692/telcoin-trading-intelligence99/blob/codex/tel99-quant-terminal/docs/smart-view/PASSATION_SMART_VIEW_2026-11-13_FINAL.md)
