@@ -616,5 +616,50 @@ class VerifyDelegationTests(unittest.TestCase):
             self.assertEqual(self._verify_quietly("conv123", tmp, "1"), 1)
 
 
+class CommittedGitBlobReadTests(unittest.TestCase):
+    """Regression for Git for Windows SHA:path stat failures in #114."""
+
+    @classmethod
+    def setUpClass(cls):
+        automation = ROOT / "scripts" / "agents" / "automation"
+        sys.path.insert(0, str(automation))
+        cls.worker = _load("tel99_codex_local_git_blob_test", automation / "local_codex.py")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = pathlib.Path(self.tmp.name) / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True)
+        subprocess.run(["git", "config", "user.name", "TEL99 Test"], cwd=self.repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.repo, check=True)
+        self.relative = "docs/agents/codex-local-results/codex110-windows-native-shortpath/README.md"
+        target = self.repo / self.relative
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"Original file contents\\n")
+        subprocess.run(["git", "add", "--", self.relative], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], cwd=self.repo, check=True)
+        self.commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.repo, text=True,
+        ).strip()
+
+    def test_exact_blob_matches_commit_without_sha_colon_path(self):
+        self.assertEqual(
+            self.worker.git_committed_blob(self.repo, self.commit, self.relative),
+            b"Original file contents\\n",
+        )
+
+    def test_worktree_change_does_not_change_committed_blob(self):
+        (self.repo / self.relative).write_bytes(b"Uncommitted edit\\n")
+        self.assertEqual(
+            self.worker.git_committed_blob(self.repo, self.commit, self.relative),
+            b"Original file contents\\n",
+        )
+
+    def test_missing_file_fails_closed(self):
+        with self.assertRaises(self.worker.Blocked):
+            self.worker.git_committed_blob(self.repo, self.commit, "missing.md")
+
+
 if __name__ == "__main__":
     unittest.main()
