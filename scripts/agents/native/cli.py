@@ -238,11 +238,11 @@ def cmd_demo(args) -> int:
         mission_id="demo-mathutils", prompt="Ecris mathutils.py avec add et double.",
         artifacts=["mathutils.py"],
         checks=[
-            mission_mod.Check(name="compile", command=["python3", "-m", "py_compile",
+            mission_mod.Check(name="compile", command=[sys.executable, "-m", "py_compile",
                                                        "mathutils.py"]),
             mission_mod.Check(
                 name="behaviour",
-                command=["python3", "-c",
+                command=[sys.executable, "-c",
                          "import mathutils; assert mathutils.double(21) == 42; "
                          "print('ok')"],
                 must_contain="ok"),
@@ -269,7 +269,7 @@ def cmd_demo(args) -> int:
         artifacts=["mathutils.py"],
         checks=[mission_mod.Check(
             name="behaviour",
-            command=["python3", "-c",
+            command=[sys.executable, "-c",
                      "import mathutils; assert mathutils.double(21) == 42"],
             must_contain="")],
     )

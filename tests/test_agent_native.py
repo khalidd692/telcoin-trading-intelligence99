@@ -254,7 +254,7 @@ class KernelTests(unittest.TestCase):
             spec = mission.MissionSpec(
                 mission_id="m-good", prompt="write mathutils", artifacts=["mathutils.py"],
                 checks=[mission.Check("compile",
-                                      ["python3", "-m", "py_compile", "mathutils.py"])],
+                                      [sys.executable, "-m", "py_compile", "mathutils.py"])],
             )
             result = engine.run(spec)
             self.assertEqual(result.verdict, mission.PASS)
@@ -272,7 +272,7 @@ class KernelTests(unittest.TestCase):
                 mission_id="m-bad", prompt="write mathutils", artifacts=["mathutils.py"],
                 checks=[mission.Check(
                     "behaviour",
-                    ["python3", "-c",
+                    [sys.executable, "-c",
                      "import mathutils; assert mathutils.double(21) == 42"])],
             )
             result = engine.run(spec)
@@ -344,7 +344,7 @@ class KernelTests(unittest.TestCase):
             spec = mission.MissionSpec(
                 mission_id="m-once", prompt="write", artifacts=["mathutils.py"],
                 checks=[mission.Check("compile",
-                                      ["python3", "-m", "py_compile", "mathutils.py"])],
+                                      [sys.executable, "-m", "py_compile", "mathutils.py"])],
             )
             first = engine.run(spec)
             second = engine.run(spec)
@@ -356,7 +356,7 @@ class KernelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             engine = _engine(tmp, [MATH_OK, MATH_BAD])
             check = mission.Check("behaviour", [
-                "python3", "-c", "import mathutils; assert mathutils.double(21) == 42",
+                sys.executable, "-c", "import mathutils; assert mathutils.double(21) == 42",
             ])
             common = {"mission_id": "shared-id", "prompt": "write",
                       "artifacts": ["mathutils.py"], "checks": [check]}
@@ -628,7 +628,7 @@ class HttpContractTests(unittest.TestCase):
                 artifacts=["mathutils.py"],
                 checks=[mission.Check(
                     "behaviour",
-                    ["python3", "-c",
+                    [sys.executable, "-c",
                      "import mathutils; assert mathutils.double(21) == 42"])],
             )
             result = engine.run(spec)
