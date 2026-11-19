@@ -182,7 +182,12 @@ class MemoryStore:
         except (OSError, ValueError):
             return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
                     "history": []}
-        data.setdefault("entries", [])
+        if not isinstance(data, dict) or data.get("project") != project:
+            raise ValueError("memory document belongs to a different project or is invalid")
+        entries = data.setdefault("entries", [])
+        if not isinstance(entries, list) or any(
+                not isinstance(entry, dict) or entry.get("project") != project for entry in entries):
+            raise ValueError("memory document contains invalid or foreign entries")
         data.setdefault("history", [])
         return data
 
@@ -205,6 +210,12 @@ class MemoryStore:
         if not isinstance(entry.project, str) or not entry.project.strip():
             raise ValueError("entry project must be a non-empty string")
         data = self._load(entry.project)
+        self._record_entry(data, entry, actor)
+        self._save(entry.project, data)
+        return entry
+
+    @staticmethod
+    def _record_entry(data: dict, entry: Entry, actor: str) -> None:
         previous = [e for e in data["entries"] if e["id"] == entry.id]
         if previous:
             entry.version = max(int(e.get("version", 1)) for e in previous) + 1
@@ -218,8 +229,6 @@ class MemoryStore:
             "id": entry.id,
             "version": entry.version,
         })
-        self._save(entry.project, data)
-        return entry
 
     def supersede(self, project: str, old_id: str, new: Entry, *,
                   actor: str = "agent") -> Entry:
@@ -228,13 +237,17 @@ class MemoryStore:
         The old entry is kept (with ``superseded_by`` set) so the reason a
         belief changed remains auditable.
         """
-        new.supersedes = old_id
-        new.project = project
-        self.record(new, actor=actor)
+        if new.project != project:
+            raise ValueError("a replacement entry must belong to the same project")
+        if new.id == old_id:
+            raise ValueError("a replacement entry needs a distinct id")
         data = self._load(project)
-        for e in data["entries"]:
-            if e["id"] == old_id:
-                e["superseded_by"] = new.id
+        old = next((entry for entry in data["entries"] if entry["id"] == old_id), None)
+        if old is None:
+            raise ValueError("the entry to replace does not exist")
+        new.supersedes = old_id
+        old["superseded_by"] = new.id
+        self._record_entry(data, new, actor)
         data["history"].append({
             "at": utcnow_iso(),
             "actor": actor,

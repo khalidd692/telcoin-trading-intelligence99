@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -136,6 +138,23 @@ class MemoryTests(unittest.TestCase):
         self.assertIn("b", other)
         self.assertNotIn("a", other)
 
+    def test_colliding_legacy_filenames_cannot_read_or_overwrite_another_project(self):
+        self.store.record(self._entry("project-a", "original"))
+        with self.assertRaises(ValueError):
+            self.store.search("project a", "original")
+        with self.assertRaises(ValueError):
+            self.store.record(self._entry("project a", "foreign"))
+        self.assertEqual([entry.id for entry in self.store.all_entries("project-a")], ["original"])
+
+    def test_store_refuses_foreign_entries_in_a_project_document(self):
+        self.store.record(self._entry("project-a", "original"))
+        document = self.store._path("project-a")
+        data = json.loads(document.read_text(encoding="utf-8"))
+        data["entries"].append(self._entry("project-b", "foreign").to_dict())
+        document.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.store.search("project-a", "foreign")
+
     def test_common_pool_is_visible_to_every_project(self):
         self.store.record(self._entry(memory.COMMON_PROJECT, "c", title="shared rule"))
         self.assertIn("c", {e.id for e in self.store.all_entries("tel99")})
@@ -163,6 +182,34 @@ class MemoryTests(unittest.TestCase):
         old = self.store.get("tel99", "old")
         self.assertEqual(old.superseded_by, "new")
         self.assertEqual(self.store.get("tel99", "new").supersedes, "old")
+
+    def test_supersede_cannot_copy_an_entry_from_another_project(self):
+        self.store.record(self._entry("tel99", "old"))
+        new = self._entry("other", "new")
+        with self.assertRaises(ValueError):
+            self.store.supersede("tel99", "old", new)
+        self.assertEqual(new.project, "other")
+        self.assertEqual(self.store.get("tel99", "old").superseded_by, "")
+        self.assertIsNone(self.store.get("tel99", "new"))
+
+    def test_supersede_commits_both_links_and_history_in_one_write(self):
+        self.store.record(self._entry("tel99", "old"))
+        new = self._entry("tel99", "new")
+        with patch.object(self.store, "_save", wraps=self.store._save) as save:
+            self.store.supersede("tel99", "old", new)
+        save.assert_called_once()
+        persisted = memory.MemoryStore(self.tmp.name)
+        self.assertEqual(persisted.get("tel99", "old").superseded_by, "new")
+        self.assertEqual(persisted.get("tel99", "new").supersedes, "old")
+        self.assertEqual([event["action"] for event in persisted.history("tel99")],
+                         ["record", "record", "supersede"])
+
+    def test_supersede_rejects_a_missing_or_self_referencing_predecessor(self):
+        self.store.record(self._entry("tel99", "current"))
+        for old_id in ("missing", "current"):
+            with self.subTest(old_id=old_id), self.assertRaises(ValueError):
+                self.store.supersede("tel99", old_id, self._entry("tel99", "current"))
+        self.assertEqual(self.store.get("tel99", "current").version, 1)
 
     def test_verify_marks_entry_verified(self):
         self.store.record(self._entry("tel99", "a", title="claim"))
