@@ -100,7 +100,8 @@ def verify(*, policy, comments, repository, fetch):
             proof = json.loads(body[len(MARKER):])
         except (ValueError, RecursionError):
             continue
-        if isinstance(proof, dict) and proof.get("mission_id") == policy["mission_id"]:
+        if (isinstance(proof, dict) and proof.get("mission_id") == policy["mission_id"]
+                and proof.get("verifier_sha") == verifier_sha):
             candidates.append((comment["id"], proof))
     if not candidates:
         return None
