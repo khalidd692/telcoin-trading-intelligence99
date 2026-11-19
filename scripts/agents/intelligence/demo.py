@@ -31,6 +31,7 @@ import importlib.util
 import pathlib
 import re
 import sys
+from uuid import uuid4
 
 HERE = pathlib.Path(__file__).resolve()
 AGENTS_DIR = HERE.parents[1]          # scripts/agents
@@ -257,10 +258,10 @@ def run(dry_run: bool = False, memory_root: str | None = None) -> int:
     print("=" * 72)
     if not dry_run:
         entry_id = improvement.apply_verdict(comparison, store, project)
-        measured_path = root / "measured_quality.json"
-        improvement.write_measured_quality(measured_path, outcomes)
+        report_path = root / "evaluations" / f"guard-{uuid4().hex}.json"
+        improvement.write_evaluation_report(report_path, comparison, outcomes)
         print(f"verdict recorded in memory as {entry_id}")
-        print(f"measured quality written to {measured_path}")
+        print(f"evaluation report written to {report_path}")
     else:
         print("dry run: nothing written")
 
