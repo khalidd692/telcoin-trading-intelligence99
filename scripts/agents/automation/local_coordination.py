@@ -1,12 +1,16 @@
 """Windows binding to the existing TEL99 CAS lease and GitHub verifier."""
 
 from contextlib import contextmanager
+import hashlib
+import json
+from pathlib import Path
 import os
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import acceptance
+import g3_bot_acceptance
 import orchestrator
 from protocol.store import KvStore, StoreError, kv_env
 from upstash_coordination import RedisLease, RedisRest, RedisUnavailable
@@ -204,7 +208,26 @@ def coordination_backend():
 
 
 def accepted_proof(descriptor, *, repository, mission_body, fetch, comments):
-    """A PASS exists only when #104 independently checks every pinned criterion."""
+    """Require verified, immutable, mission-scoped proof; never trust an LLM verdict."""
+    if descriptor.get("verification_mode") == "g3-bot-v1":
+        # The original #104 acceptance verifier is unchanged. This explicitly
+        # enabled alternative is only for the owner's pinned, synthetic #114.
+        policy_path = Path(__file__).resolve().parents[3] / "docs/agents/G3_AUTO_TRUST_114.json"
+        try:
+            raw = policy_path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != descriptor.get("policy_sha256"):
+                return None
+            policy = json.loads(raw)
+            required = ("issue", "mission_id", "work_branch", "commit_sha", "criteria")
+            if (descriptor.get("issue") != 114
+                    or not all(descriptor.get(key) == policy.get(key) for key in required)
+                    or policy.get("schema_version") != 1):
+                return None
+            return g3_bot_acceptance.verify(
+                policy=policy, comments=comments, repository=repository, fetch=fetch,
+            )
+        except (OSError, ValueError, TypeError, KeyError):
+            return None
     checks = [{"id": item, "automatable": True} for item in descriptor["criteria"]]
     verdicts, proof = acceptance.verify(
         comments=comments, verifiers=set(descriptor["verifiers"]),
