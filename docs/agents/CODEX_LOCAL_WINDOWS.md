@@ -1,5 +1,22 @@
 # Superviseur Codex local TEL99
 
+## Réconciliation du ticket #114
+
+Dans le checkout du superviseur qui possède déjà le registre local et le claim
+Upstash de #114, lancer `python -B scripts/agents/automation/local_codex.py --reconcile-g3-114`
+avec le compte GitHub et le backend existants. Ce mode ponctuel ne lance aucun worker.
+Il exige le checkpoint `PREPARED` documenté, le mandat d'origine et la réservation
+du même commit. Le superviseur relit la preuve GitHub épinglée, puis revalide le
+mandat et tente l'écriture CAS sous le bail existant. La preuve GitHub et le CAS
+sont des systèmes distincts, et le bail couvre uniquement l'écriture CAS.
+
+Le registre local répercute `ACCEPTED` après confirmation du CAS. Après une
+interruption, le même passage peut répercuter une écriture distante déjà validée
+sans en effectuer une seconde. Un bail orphelin peut retarder la reprise jusqu'à
+son expiration. Une dépendance de #114 exige la preuve GitHub et l'enregistrement
+`ACCEPTED` du même commit côté CAS. La politique `g3-bot-v1` épingle le SHA-256
+du fichier de confiance tel que stocké dans Git, avec fins de ligne LF.
+
 Depuis le dossier isolé, lancer dans PowerShell
 
 ```powershell

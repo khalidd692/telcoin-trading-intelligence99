@@ -26,7 +26,10 @@ from policy import (
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from protocol.store import FileStore
-from local_coordination import CoordinationUnavailable, UpstashCoordination, accepted_proof, coordination_backend
+from local_coordination import (
+    G3_POLICY_SHA, G3_TASK, CoordinationUnavailable, UpstashCoordination,
+    accepted_proof, coordination_backend, g3_policy,
+)
 from local_code import NATIVE_BASE, contract_digest, status_paths, synthetic_missions, valid_scope
 import local_native as native
 
@@ -243,6 +246,9 @@ class Supervisor:
                 self.checkpoint(mission, "INTERRUPTED", reason="Exécution orpheline possible")
                 continue
             if stage in {"ACCEPTED", "PREPARED", "INTERRUPTED", "FAILED", "BLOCKED"}:
+                continue
+            if not self.demo and mission.get("issue") == 114:
+                print("WAITING_COORDINATION #114: réconciliation uniquement.", flush=True)
                 continue
             issue_blocker = blockers.get(mission["id"])
             if issue_blocker:
@@ -821,7 +827,7 @@ def discover_queue(backlog, master_state):
 
 def issue_comments(number):
     pages = json.loads(checked([
-        "gh", "api", "--paginate", "--slurp",
+        "gh", "api", "--hostname", "github.com", "--paginate", "--slurp",
         f"repos/{REPO}/issues/{number}/comments?per_page=100",
     ]))
     return [comment for page in pages for comment in page]
@@ -830,7 +836,7 @@ def issue_comments(number):
 def fetch_approved_issue(mission):
     number = mission["issue"]
     try:
-        issue = json.loads(checked(["gh", "api", f"repos/{REPO}/issues/{number}"]))
+        issue = fetch_acceptance_resource(f"issues/{number}")
         reason = validate_issue(issue, mission)
         if reason:
             return reason
@@ -871,14 +877,58 @@ def check_code_conflicts(mission):
             raise Blocked(f"Conflit de fichiers possible avec la PR #{pull['number']}.")
 
 
+def fetch_acceptance_resource(resource):
+    return json.loads(checked(["gh", "api", "--hostname", "github.com", f"repos/{REPO}/{resource}"]))
+
+
+def reconcile_g3_114(supervisor, missions, blockers):
+    """Promote only the original, admitted #114 result, with no execution path."""
+    policy = g3_policy()
+    task = policy["mission_id"]
+    mission = next((m for m in missions if m["id"] == task and m["issue"] == 114), None)
+    if not mission:
+        return False
+    saved = supervisor.state(mission)
+    if (saved.get("status") not in {"PREPARED", "ACCEPTED"} or saved.get("native") is not True
+            or (saved.get("id"), saved.get("issue"), saved.get("commit"), saved.get("branch"),
+                saved.get("base"), saved.get("artifact_digests")) !=
+            (task, 114, policy["commit_sha"], policy["work_branch"], policy["base_sha"], policy["artifact_digests"])):
+        return False
+    approval = digest(json.dumps(mission, sort_keys=True))
+    local_claim = supervisor.store.get(f"claims/{task}")
+    if (not isinstance(local_claim, dict) or
+            (local_claim.get("issue"), local_claim.get("approval"), local_claim.get("state")) != (114, approval, "ACK")):
+        raise CoordinationUnavailable("Le checkpoint #114 n'est pas lié au mandat d'origine.")
+    backend = coordination_backend()
+    if not isinstance(backend, UpstashCoordination):
+        raise CoordinationUnavailable("L'acceptation #114 exige le CAS avec fencing Upstash.")
+    descriptor = {key: policy[key] for key in ("issue", "mission_id", "work_branch", "commit_sha", "criteria")}
+    descriptor.update(verification_mode="g3-bot-v1", policy_sha256=G3_POLICY_SHA)
+
+    def load_proof(writing):
+        if writing and (saved["status"] != "PREPARED" or task in blockers):
+            raise CoordinationUnavailable("Le mandat #114 n'est plus approuvé pour cette transition.")
+        proof = accepted_proof(descriptor, repository=REPO, mission_body="",
+                               comments=issue_comments(114), fetch=fetch_acceptance_resource)
+        if writing and proof and fetch_approved_issue(mission):
+            raise CoordinationUnavailable("Le mandat #114 n'est plus approuvé pour cette transition.")
+        return proof
+
+    accepted = backend.promote_prepared(task, 114, approval, policy["commit_sha"], load_proof)
+    if saved["status"] == "ACCEPTED":
+        if saved.get("acceptance") != accepted["evidence"]:
+            raise CoordinationUnavailable("Le verdict local diffère de l'acceptation CAS.")
+        return True
+    details = {key: value for key, value in saved.items() if key not in {"id", "issue", "status", "at"}}
+    supervisor.checkpoint(mission, "ACCEPTED", **details, acceptance=accepted["evidence"])
+    return True
+
+
 def dependency_evidence(missions):
     wanted = {dep for mission in missions for dep in mission.get("dependencies", [])}
     proofs = {}
     if not wanted:
         return proofs
-
-    def fetch(resource):
-        return json.loads(checked(["gh", "api", f"repos/{REPO}/{resource}"]))
 
     descriptors = {}
     for mission in missions:
@@ -892,7 +942,12 @@ def dependency_evidence(missions):
             issue = descriptor["issue"]
             if type(issue) is not int or issue < 1:
                 continue
-            mission_issue = fetch(f"issues/{issue}")
+            g3 = descriptor.get("verification_mode") == "g3-bot-v1"
+            if (issue == 114 or task == G3_TASK or g3) and not (
+                g3 and issue == 114 and task == G3_TASK and descriptor.get("mission_id") == G3_TASK
+            ):
+                continue
+            mission_issue = fetch_acceptance_resource(f"issues/{issue}")
             body = mission_issue.get("body") or ""
             if (
                 digest(body) != descriptor["issue_sha256"]
@@ -900,12 +955,22 @@ def dependency_evidence(missions):
             ):
                 continue
             proof = accepted_proof(
-                descriptor, repository=REPO, mission_body=body, fetch=fetch,
+                descriptor, repository=REPO, mission_body=body, fetch=fetch_acceptance_resource,
                 comments=issue_comments(issue if descriptor.get("verification_mode") == "g3-bot-v1" else 94),
             )
+            if proof and g3:
+                backend = coordination_backend()
+                if not isinstance(backend, UpstashCoordination):
+                    continue
+                claim = backend.read(f"codex-windows/{task}")
+                if (not isinstance(claim, dict) or
+                        (claim.get("id"), claim.get("issue"), claim.get("status"), claim.get("commit"),
+                         claim.get("evidence")) != (task, issue, "ACCEPTED", descriptor["commit_sha"], proof)):
+                    continue
             if proof:
                 proofs[task] = proof
-        except (Blocked, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+        except (Blocked, CoordinationUnavailable, OSError, ValueError, KeyError, TypeError,
+                subprocess.TimeoutExpired):
             continue
     return proofs
 
@@ -1050,6 +1115,8 @@ def main():
     parser.add_argument("--code-demo", action="store_true")
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--discover-only", action="store_true")
+    parser.add_argument("--reconcile-g3-114", action="store_true",
+                        help="Vérifier et réconcilier uniquement la preuve et le CAS de #114.")
     parser.add_argument("--await-issue", type=int)
     parser.add_argument("--session-minutes", type=int, choices=range(1, 181))
     parser.add_argument("--status-read", action="store_true")
@@ -1059,6 +1126,9 @@ def main():
     parser.add_argument("--approvals", type=Path)
     parser.add_argument("--codex", default=shutil.which("codex.exe"))
     args = parser.parse_args()
+    if args.reconcile_g3_114 and (args.demo or args.code_demo or args.await_issue or args.discover_only
+                                 or args.preflight or args.status_read or args.request_stop):
+        parser.error("--reconcile-g3-114 est un mode autonome sans worker.")
     github = STATE / "github"
     if args.status_read:
         print(json.dumps(heartbeat_status(github), ensure_ascii=True))
@@ -1116,6 +1186,18 @@ def main():
                         else:
                             missions, blockers, requests = discover_queue(tasks, state)
                             supervisor.store.put("github/approval-requests", requests)
+                        try:
+                            reconciled = reconcile_g3_114(supervisor, missions, blockers)
+                        except (CoordinationUnavailable, Blocked, OSError, ValueError, KeyError,
+                                subprocess.TimeoutExpired) as exc:
+                            if args.reconcile_g3_114:
+                                raise Blocked(f"Réconciliation #114 indisponible : {exc}") from exc
+                            print("WAITING_COORDINATION #114: réconciliation indisponible.", flush=True)
+                            reconciled = False
+                        if args.reconcile_g3_114:
+                            if not reconciled:
+                                raise Blocked("Aucun checkpoint #114 PREPARED compatible.")
+                            return 0
                         proofs = dependency_evidence(missions)
                         save_admission(supervisor, tasks, missions, blockers, proofs)
                         if args.await_issue:
@@ -1168,7 +1250,7 @@ def main():
                         return 0
                 except (Blocked, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
                     print(f"BLOCKED: {exc}", file=sys.stderr, flush=True)
-                    if demo or args.once or args.await_issue:
+                    if demo or args.once or args.await_issue or args.reconcile_g3_114:
                         return 2
                 idle_wait(root, deadline)
     except KeyboardInterrupt:

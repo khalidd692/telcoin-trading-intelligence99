@@ -18,6 +18,9 @@ MARKER = "tel99-g3-bot-proof:v1 "
 SHA40 = re.compile(r"[0-9a-f]{40}")
 SHA64 = re.compile(r"[0-9a-f]{64}")
 BOT = "github-actions[bot]"
+BOT_USER_ID = 41898282
+ACTIONS_APP_ID = 15368
+WORKFLOW_PATH = ".github/workflows/tel99-g3-independent-native.yml"
 CHECK_JOB = "Independent native code check (SHA pinned)"
 ATTEST_JOB = "G3 authenticated bot evidence"
 MAX_SIZE = 256 * 1024
@@ -91,10 +94,9 @@ def verify(*, policy, comments, repository, fetch):
         body = comment["body"]
         actor = comment.get("user")
         if (len(body) > 8192 or not body.startswith(MARKER)
-                or not isinstance(actor, dict) or actor.get("login") != BOT
+                or not isinstance(actor, dict) or actor.get("login") != BOT or actor.get("id") != BOT_USER_ID
                 or type(comment.get("id")) is not int or comment["id"] < 1
-                or not comment.get("created_at")
-                or comment["created_at"] != comment.get("updated_at")):
+                or not comment.get("created_at")):
             continue
         try:
             proof = json.loads(body[len(MARKER):])
@@ -102,10 +104,16 @@ def verify(*, policy, comments, repository, fetch):
             continue
         if (isinstance(proof, dict) and proof.get("mission_id") == policy["mission_id"]
                 and proof.get("verifier_sha") == verifier_sha):
-            candidates.append((comment["id"], proof))
-    if not candidates:
+            app = comment.get("performed_via_github_app")
+            if (comment["created_at"] != comment.get("updated_at")
+                    or (app is not None and (not isinstance(app, dict) or app.get("id") != ACTIONS_APP_ID))):
+                return None
+            item = (comment["id"], proof)
+            if item not in candidates:
+                candidates.append(item)
+    if len(candidates) != 1:
         return None
-    _, proof = max(candidates)
+    _, proof = candidates[0]
     if (
         proof.get("version") != 1
         or proof.get("project_id") != policy["project_id"]
@@ -132,11 +140,6 @@ def verify(*, policy, comments, repository, fetch):
         except (OSError, ValueError, KeyError):
             return {}
 
-    ref = get("git/ref/heads/" + quote(branch, safe="/"))
-    subject = ref.get("object") or {}
-    if (ref.get("ref") != "refs/heads/" + branch
-            or subject.get("type") != "commit" or subject.get("sha") != sha):
-        return None
     commit = get("commits/" + sha)
     if (commit.get("sha") != sha or not isinstance(commit.get("parents"), list)
             or [p.get("sha") for p in commit["parents"]] != [base]):
@@ -163,7 +166,7 @@ def verify(*, policy, comments, repository, fetch):
             or run.get("head_branch") != verifier_branch
             or (run.get("head_repository") or {}).get("full_name") != repository
             or run.get("workflow_id") != workflow_id
-            or run.get("path") not in blobs
+            or run.get("path") != WORKFLOW_PATH
             or run.get("status") != "completed" or run.get("conclusion") != "success"):
         return None
     jobs_page = get(f"actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
@@ -182,6 +185,11 @@ def verify(*, policy, comments, repository, fetch):
                 or job.get("status") != "completed" or job.get("conclusion") != "success"):
             return None
         found[name] = job["id"]
+    ref = get("git/ref/heads/" + quote(branch, safe="/"))
+    subject = ref.get("object") or {}
+    if (ref.get("ref") != "refs/heads/" + branch or not isinstance(subject, dict)
+            or subject.get("type") != "commit" or subject.get("sha") != sha):
+        return None
     return {
         "project_id": policy["project_id"], "mission_id": policy["mission_id"],
         "commit_sha": sha, "base_sha": base, "artifact_digests": files,

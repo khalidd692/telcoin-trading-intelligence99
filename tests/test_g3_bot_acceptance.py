@@ -41,7 +41,7 @@ def make_fixture():
         "verdict": "PASS", "accepted": False, "run_id": 123, "run_attempt": 1,
     }
     comment = {
-        "id": 42, "body": g3.MARKER + json.dumps(payload), "user": {"login": g3.BOT},
+        "id": 42, "body": g3.MARKER + json.dumps(payload), "user": {"login": g3.BOT, "id": g3.BOT_USER_ID},
         "created_at": "2026-11-19T00:00:00Z",
         "updated_at": "2026-11-19T00:00:00Z",
     }
@@ -107,6 +107,21 @@ class ExternalProofTest(unittest.TestCase):
     def test_same_owner_impersonating_bot_is_rejected(self):
         self.comment["user"]["login"] = "khalidd692"
         self.assertIsNone(self.result())
+
+    def test_bot_actor_id_and_app_are_bound(self):
+        self.comment["user"]["id"] = 15
+        self.assertIsNone(self.result())
+        self.comment["user"]["id"] = g3.BOT_USER_ID
+        self.comment["performed_via_github_app"] = {"id": 15}
+        self.assertIsNone(self.result())
+
+    def test_distinct_pinned_attestations_block_and_pagination_copy_is_idempotent(self):
+        read = lambda path: self.maps[path]
+        self.assertIsNotNone(g3.verify(policy=self.policy, repository=REPO, fetch=read,
+                                        comments=[self.comment, copy.deepcopy(self.comment)]))
+        second = {**self.comment, "id": self.comment["id"] + 1}
+        self.assertIsNone(g3.verify(policy=self.policy, repository=REPO, fetch=read,
+                                    comments=[self.comment, second]))
 
     def test_comment_edited_later_is_not_an_attestation(self):
         self.comment["updated_at"] = "2026-11-19T00:01:00Z"
@@ -191,7 +206,7 @@ class G3DependencyAdmissionTests(unittest.TestCase):
         cls.coordination = local_coordination
 
     def descriptor(self):
-        raw = (ROOT / "docs/agents/G3_AUTO_TRUST_114.json").read_bytes()
+        raw = (ROOT / "docs/agents/G3_AUTO_TRUST_114.json").read_bytes().replace(b"\r\n", b"\n")
         policy = json.loads(raw)
         return {
             "verification_mode": "g3-bot-v1",
