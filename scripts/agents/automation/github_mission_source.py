@@ -33,8 +33,12 @@ MAX_MISSIONS = 20
 
 
 def default_fetcher(endpoint):
-    completed = subprocess.run(["gh", "api", endpoint], capture_output=True,
-                               text=True, timeout=60, check=False)
+    try:
+        completed = subprocess.run(["gh", "api", endpoint], capture_output=True,
+                                   text=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired as exc:
+        # Fail-closed to the engine's SOURCE_UNAVAILABLE path (review F1).
+        raise OSError("gh api timeout") from exc
     if completed.returncode != 0:
         raise OSError(f"gh api unavailable: {completed.stderr.strip()[:200]}")
     return json.loads(completed.stdout)

@@ -16,15 +16,15 @@
  "new_files_sha256": {
   "hermes_executor.py": "c15b57cc74f72ccbaf11e6140a172e2a29cb84c8cefad58b4ae3e8facb1b4d9b",
   "hermes_verifier.py": "b60cc942b915c04227aef93ee2db3719ebfb27093081405b9757fc8da31274e2",
-  "github_mission_source.py": "51767d78fc7d6ce45384087948d793a40d13e2d14acb645a9cde09c419b7364d",
-  "hermes_github_adapter.py": "887b6a74b77c8dbb240dfd6e08da30bf375e305937f03973936afda15314703d"
+  "github_mission_source.py": "9a3de400ce02e2f39dc4bb28a2eb2ae30c15e68bc944f8a4a53dcdbd31fb8917",
+  "hermes_github_adapter.py": "fd924af383d7954307caaf4e2cc65f38058943fbf865ff1b16049642da779841"
  },
  "tests": {
-  "test_hermes_relay.py": "30/30",
+  "test_hermes_relay.py": "33/33",
   "test_autonomy_runtime.py": "14/14",
   "test_agent_state_cas.py": "7/7",
   "test_kilo_executor.py": "8/8",
-  "total": "59/59",
+  "total": "62/62",
   "model_calls_in_tests": 0
  },
  "approvals": {
@@ -232,8 +232,12 @@
  "independent_review_subagent": {
   "delegation_id": "deleg_b1e652f9",
   "subagent_id": "sa-0-4cb76064",
-  "role": "tel99-verifier",
-  "verdict": "EN_ATTENDU (résultat consigné à réception)"
+  "role": "tel99-verifier (lecture seule, processus Hermes distinct)",
+  "duration_s": 565.2,
+  "verdict": "SUPPORT",
+  "reserves": "F1/F2: timeouts gh (subprocess.TimeoutExpired) non couverts par le fail-closed documenté, reproduits en isolation par le vérificateur, fail-safe au redémarrage",
+  "corrections_appliquees_par_auteur": "default_fetcher et publish_comment convertissent TimeoutExpired en OSError (fail-closed SOURCE_UNAVAILABLE / retry publication) + 3 tests de régression TimeoutFailClosedTests",
+  "verdict_file": "docs/agents/autonomy-evidence/hermes-relay-independent-review.json"
  },
  "limits": [
   "PC allumé requis (local_requires_pc_on=true); aucun service permanent installé",

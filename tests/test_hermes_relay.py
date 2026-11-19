@@ -7,14 +7,18 @@ idempotent GitHub publication. No network, no model call, no paid provider.
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from scripts.agents.automation.autonomy_runtime import Runtime, seal, fingerprint
+from scripts.agents.automation import github_mission_source as gms
+from scripts.agents.automation import hermes_github_adapter as hga
 from scripts.agents.automation.github_mission_source import (
     parse_approvals, fetch_mandate, EVENT_MARKER,
 )
@@ -343,6 +347,30 @@ class PublisherTests(unittest.TestCase):
         pub.sync()
         self.assertEqual(self.published, [])
         self.assertTrue((self.root / "relay-events.jsonl").exists())
+
+
+class TimeoutFailClosedTests(unittest.TestCase):
+    """Review indépendante F1/F2 : tout timeout gh doit rester fail-closed."""
+
+    def test_fetcher_timeout_maps_to_oserror(self):
+        with mock.patch.object(gms.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("gh", 60)):
+            with self.assertRaises(OSError):
+                gms.default_fetcher("repos/x/y/issues/1/comments")
+
+    def test_publish_timeout_maps_to_oserror(self):
+        with mock.patch.object(hga.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("gh", 60)):
+            with self.assertRaises(OSError):
+                hga.publish_comment("x/y", 94, "body")
+
+    def test_poll_timeout_fail_closed_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Runtime(Path(tmp), executor=lambda m: ok_result(m))
+            with mock.patch.object(gms.subprocess, "run",
+                                   side_effect=subprocess.TimeoutExpired("gh", 60)):
+                self.assertFalse(r.poll(lambda: gms.github_source("x/y", 94, 67, MANDATE)))
+            self.assertEqual(r.status()["state"], "BLOCKED")
 
 
 if __name__ == "__main__":

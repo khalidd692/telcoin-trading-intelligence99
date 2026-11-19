@@ -39,9 +39,13 @@ def publish_comment(repo, issue, body, *, publisher=None):
     if publisher is not None:
         return publisher(body)
     payload = json.dumps({"body": body})
-    completed = subprocess.run(
-        ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{issue}/comments", "--input", "-"],
-        input=payload, capture_output=True, text=True, timeout=60, check=False)
+    try:
+        completed = subprocess.run(
+            ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{issue}/comments", "--input", "-"],
+            input=payload, capture_output=True, text=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired as exc:
+        # Durable state is already claimed; publication is retried later (review F2).
+        raise OSError("gh publish timeout") from exc
     if completed.returncode != 0:
         raise OSError("gh publish failed")
     return json.loads(completed.stdout).get("html_url", "")
