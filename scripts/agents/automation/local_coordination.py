@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -18,6 +19,20 @@ from upstash_coordination import RedisLease, RedisRest, RedisUnavailable
 
 class CoordinationUnavailable(RuntimeError):
     pass
+
+
+G3_POLICY_SHA = "f74741b38b8ea56ba28b0d0dbc9ba80bdef65afd4c0be4fe9aeb49d1beb6768a"
+G3_TASK = "CODEX110-WINDOWS-NATIVE-SHORTPATH"
+
+
+def g3_policy():
+    path = Path(__file__).resolve().parents[3] / "docs/agents/G3_AUTO_TRUST_114.json"
+    # Hash the policy's Git LF representation across Windows/Linux checkouts.
+    # Candidate artefact bytes are verified exactly and never normalized.
+    raw = path.read_bytes().replace(b"\r\n", b"\n")
+    if hashlib.sha256(raw).hexdigest() != G3_POLICY_SHA:
+        raise ValueError("Politique d'acceptation #114 divergente.")
+    return json.loads(raw)
 
 
 class SharedCoordination:
@@ -160,6 +175,39 @@ class UpstashCoordination(SharedCoordination):
         state = self.read("state")
         return {"active": None} if state is None else state
 
+    def promote_prepared(self, task_id, issue, approval, commit, verify):
+        """Reconcile the existing reservation under a fresh fenced lease, with no worker."""
+        owner = f"codex-windows-{uuid4().hex}"
+        if not self.acquire(owner):
+            raise CoordinationUnavailable("Le verrou partagé est occupé.")
+        try:
+            state = self.shared_state()
+            if not isinstance(state, dict) or "active" not in state or state["active"] is not None:
+                raise CoordinationUnavailable("Une mission active empêche la réconciliation.")
+            key = f"codex-windows/{task_id}"
+            current = self.read(key)
+            original_owner = current.get("owner") if isinstance(current, dict) else None
+            if not isinstance(original_owner, str) or not re.fullmatch(r"codex-windows-[0-9a-f]{32}", original_owner):
+                raise CoordinationUnavailable("Réservation PREPARED absente ou invalide.")
+            prepared = {"id": task_id, "issue": issue, "approval": approval, "commit": commit,
+                        "owner": original_owner, "status": "PREPARED"}
+            if current != prepared and current != {**prepared, "status": "ACCEPTED",
+                                                    "evidence": current.get("evidence")}:
+                raise CoordinationUnavailable("La réservation ne correspond pas au checkpoint.")
+            proof = verify(current["status"] == "PREPARED")
+            if not isinstance(proof, dict) or (
+                proof.get("status"), proof.get("mission_id"), proof.get("commit_sha")
+            ) != ("VERIFIED_EXTERNAL", task_id, commit):
+                raise CoordinationUnavailable("Preuve externe indépendante absente ou invalide.")
+            accepted = {**prepared, "status": "ACCEPTED", "evidence": proof}
+            if current == accepted:
+                return current
+            if current != prepared or not self.update(key, accepted, prepared, owner=owner):
+                raise CoordinationUnavailable("Écriture d'acceptation refusée par le CAS.")
+            return accepted
+        finally:
+            self.release(owner)
+
     def _run(self, op, *args, **kwargs):
         try:
             return op(*args, **kwargs)
@@ -212,12 +260,10 @@ def accepted_proof(descriptor, *, repository, mission_body, fetch, comments):
     if descriptor.get("verification_mode") == "g3-bot-v1":
         # The original #104 acceptance verifier is unchanged. This explicitly
         # enabled alternative is only for the owner's pinned, synthetic #114.
-        policy_path = Path(__file__).resolve().parents[3] / "docs/agents/G3_AUTO_TRUST_114.json"
         try:
-            raw = policy_path.read_bytes()
-            if hashlib.sha256(raw).hexdigest() != descriptor.get("policy_sha256"):
+            if descriptor.get("policy_sha256") != G3_POLICY_SHA:
                 return None
-            policy = json.loads(raw)
+            policy = g3_policy()
             required = ("issue", "mission_id", "work_branch", "commit_sha", "criteria")
             if (descriptor.get("issue") != 114
                     or not all(descriptor.get(key) == policy.get(key) for key in required)
