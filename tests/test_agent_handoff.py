@@ -16,8 +16,11 @@ Stdlib only, offline, deterministic. They prove the four code gaps the audit of
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 import multiprocessing
+import os
 import pathlib
+import subprocess
 from threading import Barrier, Lock, local
 import sys
 import tempfile
@@ -83,6 +86,16 @@ class TaskSelectionTests(unittest.TestCase):
             {"id": "S-04", "owner": "openhands", "dependencies": ["S-03"]},
             {"S-03": "accepted"})
         self.assertTrue(ok)
+
+    def test_prepared_or_externally_verified_work_is_not_relaunched_or_a_dependency(self):
+        backlog = {"tasks": [
+            {"id": "FIRST", "owner": "codex"},
+            {"id": "SECOND", "owner": "codex", "dependencies": ["FIRST"]},
+        ]}
+        for stage in ("PREPARED", "VERIFIED_EXTERNAL", "prepared", "verified_external"):
+            with self.subTest(stage=stage):
+                self.assertIsNone(handoff.select_next_task(backlog, {"FIRST": stage}))
+        self.assertEqual(handoff.select_next_task(backlog, {"FIRST": "ACCEPTED"})["id"], "SECOND")
 
     def test_owner_filter_restricts_to_that_owner(self):
         chosen = handoff.select_next_task(_backlog(), owner="hermes")
@@ -350,6 +363,100 @@ class HandoffLedgerTests(unittest.TestCase):
             task_id="S-02", owner="openhands", status="in_progress")
         reopened = handoff.HandoffLedger(store=self.store)
         self.assertEqual(reopened.statuses()["S-02"], "in_progress")
+
+    def test_two_stale_writers_preserve_both_events_and_statuses(self):
+        ready = Barrier(2)
+
+        class ConcurrentStore(FileStore):
+            def __init__(self, root):
+                super().__init__(root)
+                self.first_read = True
+
+            def get(self, key):
+                value = super().get(key)
+                if self.first_read:
+                    self.first_read = False
+                    ready.wait(timeout=5)
+                return value
+
+        def write(task_id):
+            ledger = handoff.HandoffLedger(store=ConcurrentStore(self.tmp.name))
+            return ledger.record_handoff(task_id=task_id, owner="codex", status="prepared")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(write, ("FIRST", "SECOND")))
+        ledger = handoff.HandoffLedger(store=self.store)
+        self.assertEqual(ledger.statuses(), {"FIRST": "prepared", "SECOND": "prepared"})
+        self.assertCountEqual([event["task_id"] for event in ledger.events()], ("FIRST", "SECOND"))
+
+    def test_existing_split_ledger_is_retained_after_atomic_update(self):
+        self.store.put("handoff/events", [{"task_id": "FIRST", "status": "prepared"}])
+        self.store.put("handoff/statuses", {"FIRST": "prepared"})
+        ledger = handoff.HandoffLedger(store=self.store)
+        self.assertEqual(ledger.statuses(), {"FIRST": "prepared"})
+        ledger.record_handoff(task_id="SECOND", owner="codex", status="in_progress")
+        ledger.set_status("THIRD", "blocked")
+        reopened = handoff.HandoffLedger(store=self.store)
+        self.assertEqual(reopened.statuses(),
+                         {"FIRST": "prepared", "SECOND": "in_progress", "THIRD": "blocked"})
+        self.assertEqual([event["task_id"] for event in reopened.events()], ["FIRST", "SECOND"])
+
+    def test_failed_atomic_write_does_not_publish_partial_state(self):
+        class RejectingStore(FileStore):
+            def put_cas(self, key, value, expected):
+                return False
+
+        ledger = handoff.HandoffLedger(store=RejectingStore(self.tmp.name))
+        with self.assertRaises(handoff.CASConflict):
+            ledger.record_handoff(task_id="FIRST", owner="codex", status="prepared")
+        self.assertEqual(ledger.events(), [])
+        self.assertEqual(ledger.statuses(), {})
+
+    def test_cli_receipts_and_next_task_use_explicit_bus_root_across_processes(self):
+        root = pathlib.Path(self.tmp.name)
+        message = root / "message.json"
+        message.write_text(json.dumps({"request_id": "receipt-01"}), encoding="utf-8")
+        backlog = root / "backlog.json"
+        backlog.write_text(json.dumps({"tasks": [
+            {"id": "FIRST", "owner": "codex"},
+            {"id": "SECOND", "owner": "codex", "dependencies": ["FIRST"]},
+        ]}), encoding="utf-8")
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(("AUTOMATION_", "OPENHANDS_", "TEL99_"))}
+        env["PYTHONPATH"] = str(ROOT)
+        state = root / "shared-bus"
+
+        def launch(*args, cwd, expected_code=0):
+            outcome = subprocess.run(
+                [sys.executable, "-B", "-m", "scripts.agents.protocol.cli",
+                 "--bus-root", str(state), *args],
+                cwd=cwd, env=env, capture_output=True, text=True, timeout=20,
+            )
+            self.assertEqual(outcome.returncode, expected_code, outcome.stderr)
+            return json.loads(outcome.stdout) if outcome.stdout else outcome.stderr
+
+        first = root / "first-runtime"
+        second = root / "second-runtime"
+        first.mkdir()
+        second.mkdir()
+        self.assertFalse(launch("receive", "--receiver", "codex", "--message",
+                                str(message), cwd=first)["duplicate"])
+        self.assertTrue(launch("receive", "--receiver", "codex", "--message",
+                               str(message), cwd=second)["duplicate"])
+        launch("handoff", "--task", "FIRST", "--status", "PREPARED",
+               "--owner", "codex", "--backlog", str(backlog), cwd=first)
+        error = launch("handoff", "--task", "FIRST", "--status", "ACCEPTED",
+                       "--owner", "codex", "--backlog", str(backlog), cwd=first, expected_code=2)
+        self.assertIn("independent verification", error)
+        waiting = launch("next-task", "--owner", "codex", "--backlog", str(backlog),
+                         cwd=second, expected_code=3)
+        self.assertIsNone(waiting["next_task"])
+        # An authoritative reconciler supplied the accepted fixture, outside the CLI.
+        handoff.HandoffLedger(FileStore(state)).set_status("FIRST", "ACCEPTED")
+        next_task = launch("next-task", "--owner", "codex", "--backlog", str(backlog), cwd=second)
+        self.assertEqual(next_task["next_task"], "SECOND")
+        self.assertFalse((first / "bus").exists())
+        self.assertFalse((second / "bus").exists())
 
 
 

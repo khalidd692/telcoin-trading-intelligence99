@@ -37,6 +37,7 @@ if str(AGENTS_DIR) not in sys.path:
 
 from protocol import validate  # noqa: E402
 from protocol.bus import Bus  # noqa: E402
+from protocol.store import FileStore  # noqa: E402
 
 
 def cmd_actors(args) -> int:
@@ -126,7 +127,7 @@ def cmd_next_task(args) -> int:
     from protocol import handoff
 
     backlog = handoff.load_backlog(args.backlog)
-    ledger = handoff.HandoffLedger()
+    ledger = handoff.HandoffLedger(store=FileStore(args.bus_root) if args.bus_root else None)
     report = ledger.report(backlog, owner=args.owner or None)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report["next_task"] else 3
@@ -135,8 +136,12 @@ def cmd_next_task(args) -> int:
 def cmd_handoff(args) -> int:
     from protocol import handoff
 
+    if args.status.strip().lower() == handoff.ACCEPTED:
+        print("ACCEPTED requires independent verification and the supervisor's durable CAS.",
+              file=sys.stderr)
+        return 2
     backlog = handoff.load_backlog(args.backlog)
-    ledger = handoff.HandoffLedger()
+    ledger = handoff.HandoffLedger(store=FileStore(args.bus_root) if args.bus_root else None)
     ledger.record_handoff(task_id=args.task, owner=args.owner, status=args.status,
                           sha=args.sha, tests=args.tests, proof=args.proof,
                           next_task=args.next_task, block_reason=args.block_reason)
@@ -149,7 +154,7 @@ def cmd_handoff(args) -> int:
 def cmd_receive(args) -> int:
     from protocol import handoff
 
-    inbox = handoff.Inbox(args.receiver)
+    inbox = handoff.Inbox(args.receiver, store=FileStore(args.bus_root) if args.bus_root else None)
     message = json.loads(pathlib.Path(args.message).read_text(encoding="utf-8"))
     out = inbox.receive(message)
     print(json.dumps(out, indent=2, ensure_ascii=False))
