@@ -31,6 +31,12 @@ def _open(bus, cid="msn-cas-test-0001"):
         steps=[{"id": "s1", "description": "do", "assigned_to": "hermes-router"}],
         correlation_id=cid)
 
+def _bump_attempt(root):
+    local = Bus(store=FileStore(root))
+    local.mutate_mission("msn-contend-0001",
+                         lambda record: record.attempts.__setitem__(
+                             "s1", record.attempts.get("s1", 0) + 1))
+
 
 class CompareAndSetTests(unittest.TestCase):
     def setUp(self):
@@ -75,17 +81,12 @@ class LostUpdateTests(unittest.TestCase):
         bus = Bus(store=store)
         _open(bus, cid="msn-contend-0001")
 
-        def bump(_):
-            local = Bus(store=FileStore(self.tmp.name))
-            local.mutate_mission("msn-contend-0001",
-                                 lambda r: r.attempts.__setitem__(
-                                     "s1", r.attempts.get("s1", 0) + 1))
-
-        procs = [mp.Process(target=bump, args=(i,)) for i in range(8)]
+        procs = [mp.Process(target=_bump_attempt, args=(self.tmp.name,)) for _ in range(8)]
         for pr in procs:
             pr.start()
         for pr in procs:
             pr.join(timeout=30)
+            self.assertEqual(pr.exitcode, 0)
         final = Bus(store=FileStore(self.tmp.name)).load_mission("msn-contend-0001")
         # Every increment survived: the CAS loop lost nothing.
         self.assertEqual(final.attempts.get("s1"), 8)

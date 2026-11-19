@@ -25,7 +25,8 @@ from policy import (
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from protocol.store import FileStore
+from protocol.store import CASConflict, FileStore, StoreError
+from local_bus import WindowsBus
 from local_coordination import (
     G3_POLICY_SHA, G3_TASK, CoordinationUnavailable, UpstashCoordination,
     accepted_proof, coordination_backend, g3_policy,
@@ -200,6 +201,7 @@ class Supervisor:
     def __init__(self, root, cli=None, *, demo=False):
         self.root = root
         self.store = FileStore(root / "ledger")
+        self.windows_bus = WindowsBus(self.store)
         self.cli = cli
         self.demo = demo
         self.deadline = None
@@ -214,6 +216,8 @@ class Supervisor:
     def checkpoint(self, mission, status, **details):
         task_id = mission["id"]
         row = {"id": task_id, "issue": mission.get("issue"), "status": status, "at": utcnow_iso(), **details}
+        if not self.demo and status == "PREPARED" and row.get("commit"):
+            self.publish_bus_outcome(mission, row)
         self.observe(STATE=status, ACTIVE_TASK=task_id if status in {"RUNNING", "WORKER_EXITED"} else None,
                      BLOCKER=status if status.startswith(("WAITING", "BLOCKED", "AWAITING")) else None)
         if "quota_used" in details:
@@ -224,6 +228,12 @@ class Supervisor:
         with (self.root / "events.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(json.dumps(row, ensure_ascii=True), flush=True)
+
+    def publish_bus_outcome(self, mission, row):
+        try:
+            self.windows_bus.outcome(mission, row)
+        except (CASConflict, StoreError, OSError) as exc:
+            raise CoordinationUnavailable("Écriture du résultat dans le bus indisponible.") from exc
 
     def state(self, mission):
         key = f"codex-local/{mission['id']}"
@@ -314,15 +324,20 @@ class Supervisor:
         limits = [] if mission.get("kind") == "native" else allowance(rate_snapshot(self.cli, self.root))
         with shared.claim(mission["id"], mission["issue"], approval) as (owner, finish):
             self.observe(CLAIM="HELD", ACTIVE_TASK=mission["id"])
-            self.store.put(f"claims/{mission['id']}", {
-                "issue": mission["issue"], "at": utcnow_iso(), "approval": approval, "state": "ACK",
-            })
             try:
                 reason = fetch_approved_issue(mission)
                 if reason:
                     raise Blocked(reason)
                 if mission.get("kind") == "code":
                     check_code_conflicts(mission)
+                try:
+                    if not self.windows_bus.admit(mission, approval):
+                        raise CoordinationUnavailable("ACK durable déjà présent, réconciliation requise.")
+                except (CASConflict, StoreError, OSError) as exc:
+                    raise CoordinationUnavailable("Le bus n'a pas confirmé REQUEST et ACK.") from exc
+                self.store.put(f"claims/{mission['id']}", {
+                    "issue": mission["issue"], "at": utcnow_iso(), "approval": approval, "state": "ACK",
+                })
                 self.execute(
                     mission, limits=limits, shared_owner=owner,
                     fence=lambda: shared.owns(owner), finish=finish,
@@ -915,9 +930,10 @@ def reconcile_g3_114(supervisor, missions, blockers):
         return proof
 
     accepted = backend.promote_prepared(task, 114, approval, policy["commit_sha"], load_proof)
+    if saved["status"] == "ACCEPTED" and saved.get("acceptance") != accepted["evidence"]:
+        raise CoordinationUnavailable("Le verdict local diffère de l'acceptation CAS.")
+    supervisor.publish_bus_outcome(mission, {**saved, "status": "ACCEPTED", "acceptance": accepted["evidence"]})
     if saved["status"] == "ACCEPTED":
-        if saved.get("acceptance") != accepted["evidence"]:
-            raise CoordinationUnavailable("Le verdict local diffère de l'acceptation CAS.")
         return True
     details = {key: value for key, value in saved.items() if key not in {"id", "issue", "status", "at"}}
     supervisor.checkpoint(mission, "ACCEPTED", **details, acceptance=accepted["evidence"])
