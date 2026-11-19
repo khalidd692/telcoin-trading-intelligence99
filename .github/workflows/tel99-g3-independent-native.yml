@@ -46,6 +46,9 @@ jobs:
       - name: G3 policy regressions (no model, no Docker)
         run: python -m unittest discover -s tests -p test_g3_native_verifier.py -v
 
+      - name: G3 bot provenance and fail-closed policy tests
+        run: python -m unittest discover -s tests -p test_g3_bot_acceptance.py -v
+
       - name: Verify candidate branch is still at approved SHA
         shell: bash
         run: |
@@ -162,3 +165,38 @@ jobs:
               ], check=True, capture_output=True)
               print("G3 bot evidence posted as authenticated GitHub Actions identity.")
           PY
+
+  reconcile-native:
+    name: G3 verified external proof (read-only)
+    needs: attest-native
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agents/g3-independent-verifier-20261119'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    steps:
+      - name: Checkout pinned proof reader (no write credential)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python for deterministic verification
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Independently verify bot identity, source hashes and GitHub jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B scripts/agents/automation/g3_verify_live.py
+
+      - name: Upload reconciled proof (never auto-accepted)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tel99-g3-114-external-proof
+          path: /tmp/tel99-g3/external-proof.json
+          retention-days: 14
+          if-no-files-found: warn
