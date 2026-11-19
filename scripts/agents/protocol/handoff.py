@@ -54,7 +54,8 @@ def _normalise_owner(owner) -> str:
     return str(owner or "").strip().lower()
 
 NON_STARTABLE_STATES = frozenset(
-    {"accepted", "blocked", "awaiting_human", "cancelled", "in_progress"}
+    {"accepted", "blocked", "awaiting_human", "cancelled", "in_progress",
+     "prepared", "verified_external"}
 )
 
 ACCEPTED = "accepted"
@@ -88,11 +89,11 @@ def is_admissible(task: dict, statuses: dict | None = None, *,
         return False, f"owner {task.get('owner')!r} is not {owner!r}"
 
     state = task_state(task, statuses)
-    if state in NON_STARTABLE_STATES:
+    if state.strip().lower() in NON_STARTABLE_STATES:
         return False, f"state {state!r} is not startable"
 
     missing = [d for d in task.get("dependencies", [])
-               if statuses.get(d) != ACCEPTED]
+               if str(statuses.get(d, "")).strip().lower() != ACCEPTED]
     if missing:
         return False, f"dependencies not accepted: {missing}"
     return True, ""
@@ -286,24 +287,45 @@ def verify_mission(*, conversation_finished: bool, roles: dict,
 
 
 class HandoffLedger:
+    SNAPSHOT_KEY = "handoff/ledger-v1"
     STATUSES_KEY = "handoff/statuses"
     EVENTS_KEY = "handoff/events"
 
     def __init__(self, store=None) -> None:
         self.store = store or default_store()
 
+    def _snapshot(self, current) -> tuple[dict, list]:
+        if current is None:
+            # The first conditional write migrates the two legacy records
+            # together. Keep the old keys readable and leave their bytes intact.
+            statuses = self.store.get(self.STATUSES_KEY)
+            events = self.store.get(self.EVENTS_KEY)
+            return (dict(statuses) if isinstance(statuses, dict) else {},
+                    list(events) if isinstance(events, list) else [])
+        if (not isinstance(current, dict) or not isinstance(current.get("statuses"), dict)
+                or not isinstance(current.get("events"), list)):
+            raise CASConflict("handoff ledger snapshot is invalid")
+        return dict(current["statuses"]), list(current["events"])
+
     def statuses(self) -> dict:
-        data = self.store.get(self.STATUSES_KEY)
-        return dict(data) if isinstance(data, dict) else {}
+        return self._snapshot(self.store.get(self.SNAPSHOT_KEY))[0]
 
     def events(self) -> list:
-        data = self.store.get(self.EVENTS_KEY)
-        return list(data) if isinstance(data, list) else []
+        return self._snapshot(self.store.get(self.SNAPSHOT_KEY))[1]
+
+    def _update(self, task_id: str, status: str, event: dict | None = None) -> None:
+        for _ in range(8):
+            current = self.store.get(self.SNAPSHOT_KEY)
+            statuses, events = self._snapshot(current)
+            statuses[task_id] = status
+            if event is not None:
+                events.append(event)
+            if self.store.put_cas(self.SNAPSHOT_KEY, {"statuses": statuses, "events": events}, current):
+                return
+        raise CASConflict("handoff event and status could not be committed together")
 
     def set_status(self, task_id: str, status: str) -> None:
-        statuses = self.statuses()
-        statuses[task_id] = status
-        self.store.put(self.STATUSES_KEY, statuses)
+        self._update(task_id, status)
 
     def record_handoff(self, *, task_id: str, owner: str, status: str,
                        sha: str = "", tests: str = "", proof: str = "",
@@ -319,10 +341,7 @@ class HandoffLedger:
             "block_reason": block_reason,
             "at": utcnow_iso(),
         }
-        log = self.events()
-        log.append(event)
-        self.store.put(self.EVENTS_KEY, log)
-        self.set_status(task_id, status)
+        self._update(task_id, status, event)
         return event
 
     def next_task(self, backlog: dict, *, owner: str | None = None) -> dict | None:
