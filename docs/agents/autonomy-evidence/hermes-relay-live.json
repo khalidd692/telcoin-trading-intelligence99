@@ -1,0 +1,245 @@
+{
+ "generated_at": "2026-11-19T23:41:05Z",
+ "owner": "HERMES (failover lead, mandat GO issue #67 commentaire 7024804657)",
+ "branch": "hermes/relay-github-adapter-20261120",
+ "base_pr": 124,
+ "base_sha": "4c40f9eed0906efc27d30c45d82768c5005f1f80",
+ "head_sha_at_generation": "4c40f9eed0906efc27d30c45d82768c5005f1f80",
+ "state_root": "C:\\Users\\sabri\\AppData\\Local\\hermes-tel99\\autonomous\\relay-live",
+ "engine_reuse": [
+  "autonomy_runtime.Runtime (superviseur #124, patch additif owner allowlist kilo/hermes uniquement)",
+  "protocol/store.FileStore.put_cas (CAS #97)",
+  "protocol/handoff.Inbox (ACK #96)",
+  "intelligence.memory.MemoryStore (#121)",
+  "local_codex.exclusive/heartbeat (verrous + heartbeat #118/#119)"
+ ],
+ "new_files_sha256": {
+  "hermes_executor.py": "c15b57cc74f72ccbaf11e6140a172e2a29cb84c8cefad58b4ae3e8facb1b4d9b",
+  "hermes_verifier.py": "b60cc942b915c04227aef93ee2db3719ebfb27093081405b9757fc8da31274e2",
+  "github_mission_source.py": "51767d78fc7d6ce45384087948d793a40d13e2d14acb645a9cde09c419b7364d",
+  "hermes_github_adapter.py": "887b6a74b77c8dbb240dfd6e08da30bf375e305937f03973936afda15314703d"
+ },
+ "tests": {
+  "test_hermes_relay.py": "30/30",
+  "test_autonomy_runtime.py": "14/14",
+  "test_agent_state_cas.py": "7/7",
+  "test_kilo_executor.py": "8/8",
+  "total": "59/59",
+  "model_calls_in_tests": 0
+ },
+ "approvals": {
+  "A": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025204495",
+  "B": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025204873",
+  "C": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025319789"
+ },
+ "approval_mechanism": "Commentaires hermes-mission/v1 publiés via le CLI gh authentifié du propriétaire (khalidd692) sous son mandat GO explicite 7024804657; auteur GitHub vérifié + mandat épinglé + expiration 6h + fingerprint de contenu. Aucune signature forgée: seal()/fingerprint() restent des empreintes.",
+ "missions": {
+  "HERMES-RELAY-DEMO-A-20261120": {
+   "status": "ACCEPTED",
+   "contract_sha256": "b775f16d032afc5281fc2500abfa18ea8b38c42d2724cde9aa95b62cda2add17",
+   "reason": null,
+   "artifact_sha256": "c44f3af51591d88fc832f8c1912c1ad06cbac4dbe5e664bed37e66aef0e38b8d",
+   "session_id": "local-52649e1caa8cc584ea6cd065a10179c018a9f84f37fce7debc21186f996ccbcd",
+   "model": "meituan/longcat-2.5:free",
+   "specialist": "tel99-analyst",
+   "verification": {
+    "ok": true,
+    "checks": [
+     {
+      "name": "synthetic-contract",
+      "ok": true
+     },
+     {
+      "name": "artifact-sha256",
+      "ok": true
+     },
+     {
+      "name": "specialist-identity",
+      "ok": true
+     },
+     {
+      "name": "hermes-session-evidence",
+      "ok": true
+     },
+     {
+      "name": "zero-cost-evidence",
+      "ok": true
+     }
+    ],
+    "artifact_sha256": "c44f3af51591d88fc832f8c1912c1ad06cbac4dbe5e664bed37e66aef0e38b8d",
+    "verifier": "hermes-fixed-subprocess-v1"
+   },
+   "published": {
+    "ACK": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025291416",
+    "ACCEPTED": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025300458"
+   }
+  },
+  "HERMES-RELAY-DEMO-B-20261120": {
+   "status": "ACCEPTED",
+   "contract_sha256": "1f6100050467e4fcacb1284f00c27f4037719af16e8c90ca2de94f548332ffd1",
+   "reason": null,
+   "artifact_sha256": "b3ffc927a74b5b972a2185948233441f743b3bb8845850bc4ba613f56e20f299",
+   "session_id": "local-951a4e79dabb7684d853a7d6d53a9bfceed9fc7187a6ebfe287695f29115fa22",
+   "model": "meituan/longcat-2.5:free",
+   "specialist": "tel99-dev",
+   "verification": {
+    "ok": true,
+    "checks": [
+     {
+      "name": "synthetic-contract",
+      "ok": true
+     },
+     {
+      "name": "artifact-sha256",
+      "ok": true
+     },
+     {
+      "name": "specialist-identity",
+      "ok": true
+     },
+     {
+      "name": "hermes-session-evidence",
+      "ok": true
+     },
+     {
+      "name": "zero-cost-evidence",
+      "ok": true
+     }
+    ],
+    "artifact_sha256": "b3ffc927a74b5b972a2185948233441f743b3bb8845850bc4ba613f56e20f299",
+    "verifier": "hermes-fixed-subprocess-v1"
+   },
+   "published": {
+    "ACK": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025295469",
+    "ACCEPTED": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025301258"
+   }
+  },
+  "HERMES-RELAY-DEMO-C-20261120": {
+   "status": "AWAITING_HUMAN",
+   "contract_sha256": "94c80529513eaaaa55cd21c696567774b2fe7d8e435a234542e792b2a23f56f7",
+   "reason": "uncertain worker outcome; never replay",
+   "artifact_sha256": null,
+   "session_id": null,
+   "model": null,
+   "specialist": null,
+   "verification": null,
+   "published": {
+    "ACK": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025330791",
+    "AWAITING_HUMAN": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7025343456"
+   }
+  }
+ },
+ "crash_resume_probe": {
+  "mission": "HERMES-RELAY-DEMO-C-20261120",
+  "method": "taskkill /T /F de l'arbre adaptateur+worker pendant RUNNING (PID 31880, worker 33500)",
+  "checkpoint_after_crash": "RUNNING, sans result",
+  "after_restart": "AWAITING_HUMAN reason='uncertain worker outcome; never replay'",
+  "sessions_before_restart": [
+   {
+    "id": "local-52649e1caa8cc584ea6cd065a10179c018a9f84f37fce7debc21186f996ccbcd",
+    "started_at": 1795131410.434218,
+    "ended_at": 1795131417.0515678,
+    "end_reason": "cli_close",
+    "message_count": 2,
+    "api_call_count": 1
+   },
+   {
+    "id": "local-951a4e79dabb7684d853a7d6d53a9bfceed9fc7187a6ebfe287695f29115fa22",
+    "started_at": 1795131425.715825,
+    "ended_at": 1795131434.2690942,
+    "end_reason": "cli_close",
+    "message_count": 2,
+    "api_call_count": 1
+   },
+   {
+    "id": "local-75a3d3d0cc584c28f964c049296f606049a79de20a60c130cc9b304f9d356a92",
+    "started_at": 1795131545.060414,
+    "ended_at": null,
+    "end_reason": null,
+    "message_count": 2,
+    "api_call_count": 1
+   }
+  ],
+  "sessions_after_restart": [
+   {
+    "id": "local-52649e1caa8cc584ea6cd065a10179c018a9f84f37fce7debc21186f996ccbcd",
+    "started_at": 1795131410.434218,
+    "ended_at": 1795131417.0515678,
+    "end_reason": "cli_close",
+    "message_count": 2,
+    "api_call_count": 1
+   },
+   {
+    "id": "local-951a4e79dabb7684d853a7d6d53a9bfceed9fc7187a6ebfe287695f29115fa22",
+    "started_at": 1795131425.715825,
+    "ended_at": 1795131434.2690942,
+    "end_reason": "cli_close",
+    "message_count": 2,
+    "api_call_count": 1
+   },
+   {
+    "id": "local-75a3d3d0cc584c28f964c049296f606049a79de20a60c130cc9b304f9d356a92",
+    "started_at": 1795131545.060414,
+    "ended_at": null,
+    "end_reason": null,
+    "message_count": 2,
+    "api_call_count": 1
+   }
+  ],
+  "new_model_call_on_resume": false,
+  "duplicate_ack_on_resume": false,
+  "idempotent_third_run": "aucune nouvelle publication, états inchangés, exit 2 (AWAITING_HUMAN présent)"
+ },
+ "cost_evidence": [
+  {
+   "session_id": "local-52649e1caa8cc584ea6cd065a10179c018a9f84f37fce7debc21186f996ccbcd",
+   "model": "meituan/longcat-2.5:free",
+   "billing_provider": "nous",
+   "estimated_cost_usd": 0.0,
+   "actual_cost_usd": 0.0,
+   "input_tokens": 17114,
+   "output_tokens": 52,
+   "api_call_count": 1
+  },
+  {
+   "session_id": "local-75a3d3d0cc584c28f964c049296f606049a79de20a60c130cc9b304f9d356a92",
+   "model": "meituan/longcat-2.5:free",
+   "billing_provider": "nous",
+   "estimated_cost_usd": 0.0,
+   "actual_cost_usd": 0.0,
+   "input_tokens": 591,
+   "output_tokens": 230,
+   "api_call_count": 1
+  },
+  {
+   "session_id": "local-951a4e79dabb7684d853a7d6d53a9bfceed9fc7187a6ebfe287695f29115fa22",
+   "model": "meituan/longcat-2.5:free",
+   "billing_provider": "nous",
+   "estimated_cost_usd": 0.0,
+   "actual_cost_usd": 0.0,
+   "input_tokens": 17102,
+   "output_tokens": 149,
+   "api_call_count": 1
+  }
+ ],
+ "memory_recall_fresh_process": "2/2 (A: contrat+artefact sha; B: présent)",
+ "incident_fixed": {
+  "symptom": "TypeError 'HermesExecutor object is not callable' au premier run live",
+  "behavior": "fail-closed: mission A BLOCKED checkpointé, aucun worker lancé, aucune exécution partielle (événements 7025234924 / 7025235261)",
+  "fix": "build_runtime lie executor.execute (méthode liée) + test de régression test_build_runtime_executor_is_callable",
+  "second_bug": "endpoint mandat GitHub: issues/comments/{id} sans numéro d'issue (404 fail-closed SOURCE_UNAVAILABLE au tout premier run)"
+ },
+ "independent_review_subagent": {
+  "delegation_id": "deleg_b1e652f9",
+  "subagent_id": "sa-0-4cb76064",
+  "role": "tel99-verifier",
+  "verdict": "EN_ATTENDU (résultat consigné à réception)"
+ },
+ "limits": [
+  "PC allumé requis (local_requires_pc_on=true); aucun service permanent installé",
+  "C reste AWAITING_HUMAN: réconciliation opérateur requise, jamais de replay automatique",
+  "quota fair-share Nous non mesuré globalement (INCONNU); cooldown 429 borné 60..3600s",
+  "2 modèles gratuits vérifiés appelables; pas de repli payant ni de modèle local",
+  "les approbations de démonstration sont publiées par Hermes via le gh authentifié du propriétaire sous mandat GO explicite — le propriétaire peut révoquer/STOP"
+ ]
+}

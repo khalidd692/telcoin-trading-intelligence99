@@ -23,8 +23,10 @@ def validate_contract(m,approvals):
         raise ValueError("invalid mission id")
     if approvals.get(m["id"]) != fingerprint(m):
         raise ValueError("unapproved or modified contract")
+    # Additive owner allowlist for the Hermes failover relay (hermes/relay-github-adapter-20261120).
+    # The engine, bus, CAS, ACK and memory paths are unchanged; only the admitted owner set grows.
     if (m.get("project")!="synthetic" or m.get("synthetic_data") is not True
-        or m.get("owner")!="kilo" or m.get("specialist") not in ROLES
+        or m.get("owner") not in ("kilo","hermes") or m.get("specialist") not in ROLES
         or not isinstance(m.get("objective"),str) or not 1<=len(m["objective"])<=4000
         or not re.fullmatch(r"[0-9a-f]{64}",str(m.get("expected_sha256","")))
         or not isinstance(m.get("dependencies"),list)
