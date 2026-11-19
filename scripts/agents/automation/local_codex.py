@@ -72,6 +72,37 @@ def checked(argv, *, cwd=ROOT, env=None):
     return result.stdout.strip()
 
 
+
+def git_committed_blob(workspace, commit, path):
+    """Read the exact committed blob without stat'ing 'SHA:path' on Windows.
+
+    A deeply nested Git for Windows checkout can reject the composite
+    'git show SHA:path' argument with Filename too long. Use the tree object
+    to find the exact blob ID and read that object directly.
+    """
+    try:
+        listing = subprocess.check_output(
+            ["git", "-c", "core.longpaths=true", "ls-tree", "-r", "-z",
+             "--full-tree", commit, "--", path],
+            cwd=workspace, timeout=45,
+        )
+        entries = [entry for entry in listing.split(b"\0") if entry]
+        if len(entries) != 1:
+            raise Blocked("Le commit ne contient pas exactement le fichier attendu.")
+        meta, sep, name = entries[0].partition(b"\t")
+        fields = meta.split()
+        if (not sep or name.decode("utf-8") != path or len(fields) != 3
+                or fields[1] != b"blob"
+                or re.fullmatch(rb"[0-9a-f]{40,64}", fields[2]) is None):
+            raise Blocked("L'entree Git ne correspond pas au blob attendu.")
+        return subprocess.check_output(
+            ["git", "-c", "core.longpaths=true", "cat-file", "blob",
+             fields[2].decode("ascii")], cwd=workspace, timeout=45,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeError) as exc:
+        raise Blocked("Lecture independante du blob Git impossible.") from exc
+
+
 def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -447,7 +478,7 @@ class Supervisor:
         elif status or checked(["git", "rev-list", "--parents", "-1", commit], cwd=workspace) != f"{commit} {base}":
             raise Blocked("Historique ou état inattendu pendant la reprise.")
         paths = checked(["git", "diff", "--name-only", base, commit], cwd=workspace)
-        blob = subprocess.check_output(["git", "show", f"{commit}:{mission['path']}"], cwd=workspace, timeout=45)
+        blob = git_committed_blob(workspace, commit, mission["path"])
         if paths != mission["path"] or hashlib.sha256(blob).hexdigest() != actual:
             raise Blocked("Contrôle indépendant du résultat échoué.")
         proof = {
@@ -575,7 +606,7 @@ class Supervisor:
         if sorted(checked(["git", "diff", "--name-only", base, head], cwd=workspace).splitlines()) != sorted(paths):
             raise Blocked("Le diff du commit natif dépasse son périmètre.")
         for name, path in zip(native.FILES, paths):
-            blob = subprocess.check_output(["git", "show", f"{head}:{path}"], cwd=workspace, timeout=45)
+            blob = git_committed_blob(workspace, head, path)
             if hashlib.sha256(blob).hexdigest() != hashes[name]:
                 raise Blocked("Le blob Git natif ne correspond pas à la preuve.")
         finish("PREPARED", head)
@@ -637,9 +668,7 @@ class Supervisor:
                  "test_file": test_path, "test_blob": test_blob, "test_count": test_count,
                  "test_selector": mission.get("test_selector"), "supplemental_test": extra,
                  "artifact_digests": {
-                     path: hashlib.sha256(subprocess.check_output(
-                         ["git", "show", f"{commit}:{path}"], cwd=workspace, timeout=45,
-                     )).hexdigest()
+                     path: hashlib.sha256(git_committed_blob(workspace, commit, path)).hexdigest()
                      for path in paths
                  }}
         (self.root / f"{task_id}.pr.md").write_text(
