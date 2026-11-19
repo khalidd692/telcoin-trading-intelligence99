@@ -1,11 +1,12 @@
 """Regression: replay reports must not depend on wall-clock execution time."""
 import json
 import subprocess
-import sys
 import unittest
 from pathlib import Path
 
 from scripts.strategy_backtest import history_quality as Q
+
+from tests._win_python import python_interpreter
 
 
 class ValidationReproducibilityTests(unittest.TestCase):
@@ -24,7 +25,7 @@ class ValidationReproducibilityTests(unittest.TestCase):
             reports = []
             for _ in range(2):
                 subprocess.run(
-                    [sys.executable, "-m", "scripts.strategy_backtest.run_validation"],
+                    [python_interpreter(), "-m", "scripts.strategy_backtest.run_validation"],
                     cwd=Q.ROOT, check=True, capture_output=True, text=True,
                 )
                 reports.append(output.read_bytes())

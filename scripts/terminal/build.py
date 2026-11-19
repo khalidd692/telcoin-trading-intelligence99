@@ -68,7 +68,7 @@ def main():
     p.add_argument('--no-study-write',action='store_true',help='Build a market snapshot without writing any laboratory result files')
     args=p.parse_args();data=build(args.input.resolve(),args.market_input.resolve() if args.market_input else None)
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    args.output.write_text(json.dumps(data,ensure_ascii=False,separators=(',',':'),allow_nan=False)+'\n')
+    args.output.write_text(json.dumps(data,ensure_ascii=False,separators=(',',':'),allow_nan=False)+'\n',encoding='utf-8')
     if not args.no_study_write:
         study_path=ROOT/'results/terminal/experiments.json';study_path.parent.mkdir(parents=True,exist_ok=True)
         study_path.write_text(json.dumps(data['lab']['experiments'],ensure_ascii=False,indent=2,allow_nan=False)+'\n')

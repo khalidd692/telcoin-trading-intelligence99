@@ -2,13 +2,14 @@ import io
 import json
 import hashlib
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from scripts.terminal import collect
 from scripts.terminal.build import build
+
+from tests._win_python import python_interpreter
 
 class PublicCollection(unittest.TestCase):
     def test_public_payload_conversion(self):
@@ -43,7 +44,7 @@ class MarketOnlyBuildRegression(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target=Path(directory)/'market.json'
             subprocess.run([
-                sys.executable,'-m','scripts.terminal.build',
+                python_interpreter(),'-m','scripts.terminal.build',
                 '--market-input','research/terminal/raw/kraken_2026-11-10_refresh.json',
                 '--output',str(target),'--no-study-write',
             ],check=True,capture_output=True,text=True)

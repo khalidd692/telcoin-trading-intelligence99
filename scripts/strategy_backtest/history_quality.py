@@ -81,7 +81,7 @@ def validate_csv(path, timeframe, *, as_of, provenance=None):
     step = INTERVALS[timeframe]
     if as_of.tzinfo is None or as_of.utcoffset() != dt.timedelta(0):
         raise ValueError('as_of must be UTC')
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
     cutoff = as_of
     if provenance is not None:
         if provenance.get('market') != 'KRAKEN:TELUSD' or provenance.get('timeframe') != timeframe:
