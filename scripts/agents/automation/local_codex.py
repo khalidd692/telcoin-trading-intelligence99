@@ -51,12 +51,15 @@ class QuotaBlocked(Blocked):
 
 @contextmanager
 def exclusive(path):
-    import msvcrt
-
     with path.open("a+b") as handle:
         handle.seek(0)
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             raise Blocked("Un superviseur utilise déjà cette file.") from exc
         yield

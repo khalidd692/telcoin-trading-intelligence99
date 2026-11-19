@@ -56,3 +56,5 @@ python -B -m unittest tests.test_autonomy_runtime tests.test_kilo_executor tests
 Set TEL99_TEST_SANDBOX_IMAGE to the pinned image in tests-summary.json and DOCKER_HOST to the existing Docker pipe to include the two Docker acceptance tests. No model call is made by this deterministic suite; local mock HTTP servers are used in provider tests.
 
 Back up the entire private state directory after the executor stops, including ledger, memory, registry and archived evidence. Memory isolation/export/restore and stale contradiction tests reuse the existing modules. The private state and proof logs must not be committed. PC-off cloud operation, the12-agent system, general GitHub ingestion and full G0–G7 acceptance remain unproven.
+
+The GitHub Linux jobs exposed the inherited Windows-only lock. The compatibility fix keeps the Windows lock and adds POSIX flock. The same32 targeted tests passed in a read-only Linux container without network, and381 Windows tests were rerun successfully. This is portability evidence, not an OpenHands runtime or PC-off cloud proof. See autonomy-evidence/portability.json.
