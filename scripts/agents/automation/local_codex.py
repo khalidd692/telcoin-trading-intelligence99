@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
-from threading import Thread
+from threading import Event, Lock, Thread
 import time
 import codex_model_router as router
 
@@ -168,10 +168,24 @@ class Supervisor:
         self.store = FileStore(root / "ledger")
         self.cli = cli
         self.demo = demo
+        self.deadline = None
+        self.live_lock = Lock()
+        self.live = dict(STATE="IDLE", CLAIM="NONE", ACTIVE_TASK=None, QUOTA=None,
+                         LAST_VERDICT=None, BLOCKER=None, NEXT=None)
+
+    def observe(self, **fields):
+        with self.live_lock:
+            self.live.update(fields)
 
     def checkpoint(self, mission, status, **details):
         task_id = mission["id"]
-        row = {"id": task_id, "status": status, "at": utcnow_iso(), **details}
+        row = {"id": task_id, "issue": mission.get("issue"), "status": status, "at": utcnow_iso(), **details}
+        self.observe(STATE=status, ACTIVE_TASK=task_id if status in {"RUNNING", "WORKER_EXITED"} else None,
+                     BLOCKER=status if status.startswith(("WAITING", "BLOCKED", "AWAITING")) else None)
+        if "quota_used" in details:
+            self.observe(QUOTA=details["quota_used"] or None)
+        if status in {"PREPARED", "ACCEPTED", "BLOCKED", "FAILED"}:
+            self.observe(LAST_VERDICT=status)
         self.store.put(f"codex-local/{task_id}", row)
         with (self.root / "events.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -188,6 +202,9 @@ class Supervisor:
         blockers = blockers or {}
         dependency_proofs = dependency_proofs or {}
         for mission in sorted(missions, key=lambda item: (item["priority"], item["id"])):
+            if not self.demo and ((self.root / "stop.request").exists()
+                                  or self.deadline is not None and time.monotonic() >= self.deadline):
+                return True
             saved = self.state(mission)
             stage = saved.get("status")
             recover_native = stage == "RUNNING" and mission.get("kind") == "native" and saved.get("native_base")
@@ -259,6 +276,10 @@ class Supervisor:
         # Check the quota before creating a durable reservation.
         limits = [] if mission.get("kind") == "native" else allowance(rate_snapshot(self.cli, self.root))
         with shared.claim(mission["id"], mission["issue"], approval) as (owner, finish):
+            self.observe(CLAIM="HELD", ACTIVE_TASK=mission["id"])
+            self.store.put(f"claims/{mission['id']}", {
+                "issue": mission["issue"], "at": utcnow_iso(), "approval": approval, "state": "ACK",
+            })
             try:
                 reason = fetch_approved_issue(mission)
                 if reason:
@@ -274,6 +295,9 @@ class Supervisor:
                 # reservation in place until the worker is reconciled.
                 finish("BLOCKED")
                 raise
+            finally:
+                # Release is separately determined by the coordination backend.
+                self.observe(CLAIM="RECHECK")
 
     def execute(self, mission, *, limits=None, shared_owner=None, fence=None, finish=None):
         task_id = mission["id"]
@@ -440,6 +464,9 @@ class Supervisor:
         self.checkpoint(mission, "ACCEPTED" if self.demo else "PREPARED", **proof)
 
     def execute_native(self, mission, workspace, owner, fence, finish):
+        data_root = native.storage_root(ROOT, mission["issue"])
+        if data_root.resolve() != data_root or data_root.exists():
+            raise Blocked("Le stockage natif existe déjà ou est redirigé.")
         workspace.mkdir()
         checked(["git", "init"], cwd=workspace)
         checked(["git", "config", "core.autocrlf", "false"], cwd=workspace)
@@ -457,19 +484,29 @@ class Supervisor:
                    TEL99_NATIVE_BASE_URL="https://ai-gateway.kilo.ai/api/v1")
         self.checkpoint(
             mission, "RUNNING", native_base=sha, branch=branch, shared_owner=owner,
-            approval=digest(json.dumps(mission, sort_keys=True)),
+            approval=digest(json.dumps(mission, sort_keys=True)), short_native_storage=True,
         )
         fence()
-        result = call(native.args_for(workspace, mission["issue"], "run", objective=mission["objective"]), cwd=workspace,
+        data_root.mkdir(parents=True, exist_ok=False)
+        result = call(native.args_for(workspace, mission["issue"], "run", objective=mission["objective"],
+                                      data_root=data_root), cwd=workspace,
                       env=env, timeout=240)
+        if result.returncode in (0, 3):
+            report = json.loads(result.stdout)
+            evidence = native.result_evidence(report)
+            evidence["exit_code"] = result.returncode
+            evidence["base"] = sha
+            self.store.put(f"native-results/{mission['id']}", evidence)
+        if result.returncode == 3:
+            raise Blocked(f"Le moteur natif a rendu {evidence['verdict']} (code 3).")
         if result.returncode:
             raise Blocked(f"Le moteur natif #110 a quitté avec {result.returncode}.")
-        report = json.loads(result.stdout)
         if report.get("provider_calls") != 1 or report.get("provider") != "kilo-auto-free":
             raise Blocked("Le journal du fournisseur ne correspond pas au budget approuvé.")
         self.checkpoint(
             mission, "WORKER_EXITED", base=sha, branch=branch,
             approval=digest(json.dumps(mission, sort_keys=True)), shared_owner=owner,
+            short_native_storage=True,
         )
         self.finalize_native(mission, sha, fence=fence, finish=finish)
 
@@ -483,7 +520,9 @@ class Supervisor:
             raise Blocked("Le SHA du moteur en reprise ne correspond pas à #110.")
         env = {key: value for key, value in model_environment().items()
                if not key.upper().startswith(("TEL99_NATIVE_", "PYTHON"))}
-        result = call(native.args_for(workspace, mission["issue"], "status"), cwd=workspace,
+        saved = self.state(mission)
+        data_root = native.storage_root(ROOT, mission["issue"]) if saved.get("short_native_storage") else workspace
+        result = call(native.args_for(workspace, mission["issue"], "status", data_root=data_root), cwd=workspace,
                       env=env, timeout=45)
         if result.returncode:
             raise Blocked("Absence de journal natif récupérable.")
@@ -491,7 +530,7 @@ class Supervisor:
         if record.get("verdict") != "PASS" or record.get("artifact_integrity") != "matched":
             raise Blocked("Les artefacts natifs ne correspondent pas au journal PASS.")
         directory = Path(record["artifact_directory"])
-        expected = workspace / "_native_state" / "artifacts"
+        expected = data_root / "_native_state" / "artifacts"
         if not directory.resolve().is_relative_to(expected.resolve()):
             raise Blocked("Emplacement des artefacts inattendu.")
         hashes = record["artifact_digests"]
@@ -870,36 +909,110 @@ def save_admission(supervisor, tasks, missions, blockers, proofs):
 def report_prepared(supervisor, missions):
     for mission in missions:
         saved = supervisor.state(mission)
+        status = saved.get("status")
         sha = saved.get("commit")
-        if saved.get("status") != "PREPARED" or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        terminal = status in {"PREPARED", "BLOCKED"}
+        waiting = {"WAITING_COORDINATION", "WAITING_QUOTA", "WAITING_DEPENDENCY", "AWAITING_HUMAN"}
+        if not terminal and status not in waiting:
             continue
-        marker = f"<!-- tel99-windows-prepared:{mission['issue']}:{sha} -->"
-        report_key = f"github/report-{mission['issue']}-{sha}"
+        if status == "PREPARED" and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)):
+            continue
+        approval = digest(json.dumps(mission, sort_keys=True))
+        identity = sha if status == "PREPARED" else approval
+        marker = f"<!-- tel99-windows-{status.lower()}:{mission['issue']}:{identity} -->"
+        report_key = f"github/report-{mission['issue']}-{identity}" + ("" if status == "PREPARED" else f"-{status}")
         if supervisor.store.get(report_key):
             continue
         try:
             # A local checkpoint can survive a ticket edit or an ID collision.
             # Publish only the result still bound to this exact shared claim.
-            shared = coordination_backend().read(f"codex-windows/{mission['id']}")
-            approval = digest(json.dumps(mission, sort_keys=True))
-            if (
-                not isinstance(shared, dict) or shared.get("status") != "PREPARED"
-                or shared.get("issue") != mission["issue"] or shared.get("commit") != sha
-                or shared.get("approval") != approval
-            ):
-                print(f"Rapport GitHub bloqué pour #{mission['issue']}: réservation différente.", flush=True)
-                continue
+            if terminal:
+                shared = coordination_backend().read(f"codex-windows/{mission['id']}")
+                if (
+                    not isinstance(shared, dict) or shared.get("status") != status
+                    or shared.get("issue") != mission["issue"] or shared.get("commit") != sha
+                    or shared.get("approval") != approval
+                ):
+                    print(f"Rapport GitHub bloqué pour #{mission['issue']}: réservation différente.", flush=True)
+                    continue
+            body = marker + f"\n#{mission['issue']} — {status}."
+            if status == "PREPARED":
+                body += (f" SHA `{sha}`. {saved.get('test_count', 0)} tests ou critères vérifiés "
+                         "localement. Le verdict externe reste à établir.")
+            evidence = supervisor.store.get(f"native-results/{mission['id']}")
+            if terminal and evidence:
+                # The store only contains the allowlisted result, never the full worker report.
+                fence = chr(96) * 3
+                body += f"\n\n{fence}json\n" + json.dumps(evidence, ensure_ascii=True) + f"\n{fence}"
             if not any(marker in comment.get("body", "") and comment.get("user", {}).get("login") == "khalidd692"
                        for comment in issue_comments(94)):
                 checked([
                     "gh", "api", "--method", "POST", f"repos/{REPO}/issues/94/comments",
-                    "-f", "body=" + marker + f"\n#{mission['issue']} — PREPARED au SHA `{sha}`. "
-                    f"{saved.get('test_count', 0)} tests ou critères vérifiés localement. "
-                    "Le verdict externe reste à établir.",
+                    "-f", "body=" + body,
                 ])
             supervisor.store.put(report_key, {"status": "PUBLISHED"})
         except (Blocked, CoordinationUnavailable, OSError, ValueError, subprocess.TimeoutExpired):
             print(f"Rapport GitHub en attente pour #{mission['issue']}.", flush=True)
+
+
+@contextmanager
+def heartbeat(supervisor):
+    cancelled = Event()
+
+    def save():
+        with supervisor.live_lock:
+            row = dict(supervisor.live)
+        supervisor.store.put("github/heartbeat", {"PID": os.getpid(), "HEARTBEAT": utcnow_iso(), **row})
+
+    def pulse():
+        while not cancelled.wait(10):
+            save()
+
+    save()
+    worker = Thread(target=pulse, daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        cancelled.set()
+        worker.join()
+        supervisor.observe(STATE="STOPPED", ACTIVE_TASK=None)
+        save()
+
+
+def heartbeat_status(github):
+    row = FileStore(github / "ledger").get("github/heartbeat")
+    if not isinstance(row, dict):
+        return {"STATE": "UNKNOWN", "QUOTA": None}
+    if row.get("STATE") != "STOPPED":
+        try:
+            last = datetime.fromisoformat(row["HEARTBEAT"])
+            fresh = 0 <= (datetime.now(timezone.utc) - last).total_seconds() <= 30
+        except (KeyError, TypeError, ValueError):
+            fresh = False
+        if not fresh:
+            row.update(STATE="UNKNOWN", CLAIM="RECHECK", ACTIVE_TASK=None, BLOCKER="HEARTBEAT_STALE")
+    return row
+
+
+def accept_stop(root):
+    signal = root / "stop.request"
+    if not signal.exists():
+        return False
+    signal.replace(root / f"stop-consumed-{time.time_ns()}.request")
+    print("Demande d’arrêt reçue. Registre conservé.", flush=True)
+    return True
+
+
+def idle_wait(root, deadline):
+    until = time.monotonic() + 60
+    if deadline is not None:
+        until = min(until, deadline)
+    while not (root / "stop.request").exists():
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(1, remaining))
 
 
 def main():
@@ -909,11 +1022,23 @@ def main():
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--discover-only", action="store_true")
     parser.add_argument("--await-issue", type=int)
+    parser.add_argument("--session-minutes", type=int, choices=range(1, 181))
+    parser.add_argument("--status-read", action="store_true")
+    parser.add_argument("--request-stop", action="store_true")
     parser.add_argument("--demo-attempt", type=int, default=1, choices=range(1, 10))
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--approvals", type=Path)
     parser.add_argument("--codex", default=shutil.which("codex.exe"))
     args = parser.parse_args()
+    github = STATE / "github"
+    if args.status_read:
+        print(json.dumps(heartbeat_status(github), ensure_ascii=True))
+        return 0
+    if args.request_stop:
+        github.mkdir(parents=True, exist_ok=True)
+        (github / "stop.request").touch(exist_ok=True)
+        print("Arrêt demandé entre les missions.")
+        return 0
     if args.preflight:
         try:
             backend = coordination_backend()
@@ -934,6 +1059,8 @@ def main():
     approvals = args.approvals or STATE / "approvals.json"
     root.mkdir(parents=True, exist_ok=True)
     supervisor = Supervisor(root, args.codex, demo=demo)
+    deadline = time.monotonic() + 60 * args.session_minutes if args.session_minutes else None
+    supervisor.deadline = deadline
     try:
         shared_local_lock = STATE / "github" / "supervisor.lock"
         shared_local_lock.parent.mkdir(parents=True, exist_ok=True)
@@ -943,10 +1070,11 @@ def main():
             print(json.dumps({"discovered": len(missions), "blockers": blockers, "requests": requests},
                              ensure_ascii=True))
             return 0
-        with exclusive(shared_local_lock):
+        with exclusive(shared_local_lock), heartbeat(supervisor):
             while True:
-                if not demo and (root / "stop.request").exists():
-                    print("Demande d’arrêt reçue. Registre conservé.", flush=True)
+                if not demo and accept_stop(root):
+                    return 0
+                if deadline is not None and time.monotonic() >= deadline:
                     return 0
                 try:
                     if demo:
@@ -968,11 +1096,17 @@ def main():
                             if missions[0]["expires_at"] <= utcnow_iso():
                                 raise Blocked("Délai d’approbation dépassé.")
                             if missions[0]["id"] in blockers:
+                                supervisor.observe(STATE="AWAITING_HUMAN", BLOCKER="APPROVAL",
+                                                   NEXT=missions[0]["id"])
                                 print(f"AWAITING_HUMAN #{args.await_issue}: "
                                       f"{blockers[missions[0]['id']]}", flush=True)
-                                time.sleep(60)
+                                idle_wait(root, deadline)
                                 continue
                         ready = sum(mission["id"] not in blockers for mission in missions)
+                        supervisor.observe(NEXT=next((mission["id"] for mission in missions
+                                                     if mission["id"] not in blockers and
+                                                     supervisor.state(mission).get("status") not in
+                                                     {"PREPARED", "ACCEPTED", "BLOCKED", "FAILED", "INTERRUPTED"}), None))
                         print(f"GitHub #94 : {len(tasks)} tâches, {len(missions)} contrats, {ready} approuvés", flush=True)
                     if any(mission.get("kind") != "native" and mission["id"] not in blockers
                            for mission in missions):
@@ -983,16 +1117,19 @@ def main():
                             login.stdout + "\n" + login.stderr
                         ).splitlines():
                             raise Blocked("Authentification ChatGPT requise.")
-                    if missions and not supervisor.run(missions, blockers, proofs):
-                        return 2
+                    continued = not missions or supervisor.run(missions, blockers, proofs)
                     if not demo:
                         report_prepared(supervisor, missions)
+                        if accept_stop(root):
+                            return 0
+                    if not continued:
+                        return 2
                     if args.await_issue and missions:
                         # An unavailable lease before any worker ran is safe
                         # to retry. Checkpoints with possible work are held.
                         saved = supervisor.state(missions[0])
                         if saved.get("status") in {"WAITING_COORDINATION", "WAITING_DEPENDENCY"}:
-                            time.sleep(60)
+                            idle_wait(root, deadline)
                             continue
                     if demo:
                         return 0 if all(
@@ -1004,7 +1141,7 @@ def main():
                     print(f"BLOCKED: {exc}", file=sys.stderr, flush=True)
                     if demo or args.once or args.await_issue:
                         return 2
-                time.sleep(60)
+                idle_wait(root, deadline)
     except KeyboardInterrupt:
         return 130
     except Blocked as exc:

@@ -17,6 +17,55 @@ import local_native as native
 
 @unittest.skipUnless(sys.platform == "win32", "Windows supervisor")
 class LocalCodexTests(unittest.TestCase):
+    def test_native_failure_evidence_excludes_arbitrary_worker_text(self):
+        result = native.result_evidence({
+            "verdict": "FAIL", "provider_calls": 1, "prompt": "never-copy-this",
+            "artifact_digests": {"tasks.py": "a" * 64, "README.md": "b" * 64, "private": "bad"},
+            "checks": [{"name": "syntax", "ok": False, "exit": 1,
+                        "detail": "__pycache__ short-lived-path"},
+                       {"name": "task-app-acceptance", "ok": True, "exit": 0}],
+            "attempts": [{"missing_artifacts": ["random", "README.md"],
+                          "provider_evidence": {"http_status": 200, "cost_usd": "0",
+                                                "response_sha256": "c" * 64, "raw": "never-copy-this"}}],
+        })
+        self.assertEqual(result["checks"][0]["cause"], "BYTECODE_IO")
+        self.assertEqual(result["missing_artifacts"], ["README.md"])
+        self.assertEqual(result["provider_calls"], 1)
+        self.assertNotIn("never-copy-this", json.dumps(result))
+
+    def test_heartbeat_persists_actual_pid_and_marks_clean_stop(self):
+        with runner.heartbeat(self.supervisor):
+            self.assertEqual(self.supervisor.store.get("github/heartbeat")["PID"], os.getpid())
+            self.supervisor.observe(STATE="RUNNING", ACTIVE_TASK="example")
+        status = self.supervisor.store.get("github/heartbeat")
+        self.assertEqual(status["STATE"], "STOPPED")
+        self.assertIsNone(status["ACTIVE_TASK"])
+
+    def test_stop_signal_prevents_the_next_claim(self):
+        live = runner.Supervisor(self.root, "codex.exe")
+        (self.root / "stop.request").touch()
+        with patch.object(live, "run_shared") as launch:
+            self.assertTrue(live.run([{"id": "CODEX110-NEXT", "issue": 114, "priority": "P1"}]))
+        launch.assert_not_called()
+
+    def test_blocked_and_quota_reports_are_idempotent_and_do_not_expose_reasons(self):
+        mission = {"id": "CODEX110-ERR", "issue": 113}
+        backend = Mock()
+        backend.read.return_value = {"issue": 113, "status": "BLOCKED", "commit": None,
+                                     "approval": runner.digest(json.dumps(mission, sort_keys=True))}
+        with (
+            patch.object(runner, "coordination_backend", return_value=backend),
+            patch.object(runner, "issue_comments", return_value=[]),
+            patch.object(runner, "checked") as gh,
+        ):
+            self.supervisor.checkpoint(mission, "BLOCKED", reason="private-out")
+            runner.report_prepared(self.supervisor, [mission])
+            runner.report_prepared(self.supervisor, [mission])
+            self.supervisor.checkpoint(mission, "WAITING_QUOTA", reason="private-out")
+            runner.report_prepared(self.supervisor, [mission])
+        self.assertEqual(gh.call_count, 2)
+        self.assertNotIn("private-out", repr(gh.call_args_list))
+
     def test_prepared_report_requires_the_same_issue_commit_and_approval_in_cas(self):
         mission = {"id": "CODEX110-EXAMPLE", "issue": 112}
         sha = "a" * 40

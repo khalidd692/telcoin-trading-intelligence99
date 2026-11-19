@@ -61,3 +61,15 @@ Le contrat natif #110 épingle le SHA du moteur et l’image Docker, avec une co
 Le nouvel essai de format conserve le même moteur et le même budget. Sa consigne fixe précise que les deux blocs de réponse commencent par le nom exact du fichier attendu par le parseur. Le choix de consigne est lié à l’empreinte de l’approbation. Une mission dont l’appel précédent a échoué conserve son claim terminal et ne peut pas autoriser cet essai.
 
 Une publication `PREPARED` dans #94 exige une relecture du CAS correspondant au numéro de ticket, au SHA et à l’empreinte d’approbation. Le mode d’attente peut repoller un blocage de coordination ou de dépendance avant démarrage, jusqu’à expiration du contrat. Les checkpoints qui impliquent une exécution incertaine restent traités séparément et ne déclenchent aucun second appel modèle.
+
+## Session supervisée et diagnostic natif
+
+Lancer volontairement une session bornée depuis ce clone.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\scripts\run_autonomous_loop.ps1 -SessionMinutes 30
+```
+
+Dans un autre terminal, remplacer `-SessionMinutes 30` par `-Status` pour lire le PID, le heartbeat et le dernier état. Un heartbeat arrêté ou périmé ne fait pas présumer un worker actif. Utiliser `-RequestStop` pour demander la sortie entre deux missions. Le signal est archivé à la sortie, ce qui permet un redémarrage volontaire. Une session ne démarre pas de nouvelle mission après sa limite ou après une demande d’arrêt.
+
+Le moteur natif utilise un stockage de staging court sous le dossier d’état Windows. Le checkout Git et les preuves historiques restent en place. La sortie JSON terminale conserve uniquement les champs autorisés, dont le verdict, les compteurs, les empreintes et les résultats des contrôles. Les états `BLOCKED`, `PREPARED` et d’attente remontent dans #94 de façon idempotente. L’échec de syntaxe sur une écriture `__pycache__` est enregistré comme `BYTECODE_IO`. La publication conserve la distinction entre un résultat local et une preuve externe.

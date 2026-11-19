@@ -5,6 +5,10 @@ param(
     [switch]$Preflight,
     [switch]$DiscoverOnly,
     [int]$AwaitIssue,
+    [ValidateRange(1, 180)]
+    [int]$SessionMinutes,
+    [switch]$Status,
+    [switch]$RequestStop,
     [ValidateRange(1, 9)]
     [int]$DemoAttempt = 1,
     [switch]$Once,
@@ -16,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $kvProfile = Join-Path $root '.tel99-automation-state/local-codex/upstash-user.json'
-if ((Test-Path -LiteralPath $kvProfile -PathType Leaf) -and
+if (-not ($Status -or $RequestStop) -and (Test-Path -LiteralPath $kvProfile -PathType Leaf) -and
     -not ($env:TEL99_UPSTASH_REST_URL -or $env:TEL99_UPSTASH_REST_TOKEN -or $env:TEL99_UPSTASH_FREE)) {
     $profileData = Get-Content -LiteralPath $kvProfile -Raw | ConvertFrom-Json
     if ($profileData.free -ne $true) { throw 'Profil Upstash Free invalide.' }
@@ -60,6 +64,9 @@ if ($Once) { $runnerArgs += '--once' }
 if ($Preflight) { $runnerArgs += '--preflight' }
 if ($DiscoverOnly) { $runnerArgs += '--discover-only' }
 if ($AwaitIssue) { $runnerArgs += @('--await-issue', $AwaitIssue) }
+if ($SessionMinutes) { $runnerArgs += @('--session-minutes', $SessionMinutes) }
+if ($Status) { $runnerArgs += '--status-read' }
+if ($RequestStop) { $runnerArgs += '--request-stop' }
 if ($Approvals) { $runnerArgs += @('--approvals', $Approvals) }
 if ($Codex) { $runnerArgs += @('--codex', $Codex) }
 & $Python @runnerArgs

@@ -41,10 +41,21 @@ def native_digest(mission):
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
-def args_for(workspace, issue, command, *, objective=OBJECTIVE):
+def storage_root(checkout, issue):
+    if type(issue) is not int or issue < 1:
+        raise ValueError("Numéro de ticket natif invalide.")
+    state = checkout.parent if checkout.parent.name == ".tel99-automation-state" else checkout / ".tel99-automation-state"
+    target = state / "n" / str(issue)
+    if len(str(target / "_native_state/artifacts/tel99-windows/.attempts-12345678/1")) > 190:
+        raise ValueError("Chemin de staging natif trop long pour py_compile sous Windows.")
+    return target
+
+
+def args_for(workspace, issue, command, *, objective=OBJECTIVE, data_root=None):
+    data = data_root or workspace
     argv = [sys.executable, "-B", "-m", "scripts.agents.native.cli",
-            "--state", str(workspace / "_native_state"),
-            "--memory", str(workspace / "_native_memory")]
+            "--state", str(data / "_native_state"),
+            "--memory", str(data / "_native_memory")]
     if command == "run":
         # Engine quota bookkeeping, with exactly one permitted POST and zero repairs.
         argv += ["--quota", "12"]
@@ -55,3 +66,47 @@ def args_for(workspace, issue, command, *, objective=OBJECTIVE):
         argv += ["--synthetic-data", "--profile", "tasks", "--sandbox-image", IMAGE,
                  "--max-repairs", "0", "--mission", objective]
     return argv
+
+
+def result_evidence(report):
+    """Allowlist terminal fields. Never publish worker text, output or paths."""
+    if not isinstance(report, dict):
+        raise ValueError("Rapport natif invalide.")
+    verdict = report.get("verdict")
+    details = {"verdict": verdict if verdict in ("PASS", "FAIL", "NEEDS_HUMAN") else "UNKNOWN"}
+    calls = report.get("provider_calls")
+    if type(calls) is int and 0 <= calls <= 1:
+        details["provider_calls"] = calls
+    hashes = report.get("artifact_digests")
+    if isinstance(hashes, dict):
+        details["artifact_digests"] = {name: hashes[name] for name in FILES if
+                                      isinstance(hashes.get(name), str) and re.fullmatch(r"[0-9a-f]{64}", hashes[name])}
+    last = report["attempts"][-1] if isinstance(report.get("attempts"), list) and report["attempts"] else {}
+    if not isinstance(last, dict):
+        last = {}
+    missing = last.get("missing_artifacts")
+    if isinstance(missing, list):
+        details["missing_artifacts"] = [name for name in FILES if name in missing]
+    checks = report.get("checks")
+    if isinstance(checks, list):
+        details["checks"] = []
+        for check in checks:
+            if not isinstance(check, dict) or check.get("name") not in ("syntax", "task-app-acceptance"):
+                continue
+            row = {"name": check["name"], "ok": check.get("ok") is True}
+            if type(check.get("exit")) is int:
+                row["exit"] = check["exit"]
+            if (check["name"] == "syntax" and not row["ok"]
+                    and "__pycache__" in str(check.get("detail", ""))):
+                row["cause"] = "BYTECODE_IO"
+            details["checks"].append(row)
+    received = last.get("provider_evidence")
+    if isinstance(received, dict):
+        evidence = {key: received[key] for key in ("catalog_sha256", "response_sha256")
+                    if isinstance(received.get(key), str) and re.fullmatch(r"[0-9a-f]{64}", received[key])}
+        if type(received.get("http_status")) is int and 100 <= received["http_status"] < 600:
+            evidence["http_status"] = received["http_status"]
+        if received.get("cost_usd") == "0":
+            evidence["cost_usd"] = "0"
+        details["provider_evidence"] = evidence
+    return details
