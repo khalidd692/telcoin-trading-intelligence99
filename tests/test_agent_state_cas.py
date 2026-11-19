@@ -16,13 +16,14 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
 
 from protocol import bus as bus_mod  # noqa: E402
 from protocol.bus import Bus  # noqa: E402
-from protocol.store import CASConflict, FileStore  # noqa: E402
+from protocol.store import CASConflict, FileStore, StoreError  # noqa: E402
 
 
 def _open(bus, cid="msn-cas-test-0001"):
@@ -58,6 +59,20 @@ class CompareAndSetTests(unittest.TestCase):
         self.assertFalse(self.store.put_cas("k/one", {"v": 3}, {"v": 1}))
         self.assertEqual(self.store.get("k/one"), {"v": 2})
 
+    def test_windows_sharing_violation_does_not_make_existing_key_look_missing(self):
+        self.store.put("k/one", {"v": 1})
+        denied = PermissionError("file being replaced")
+        denied.winerror = 32
+        with patch.object(pathlib.Path, "read_text", side_effect=[denied, '{"v": 1}']):
+            self.assertEqual(self.store.get("k/one"), {"v": 1})
+
+    def test_cas_refuses_to_replace_unreadable_state_as_if_missing(self):
+        self.store.put("k/one", {"v": 1})
+        with patch.object(pathlib.Path, "read_text", side_effect=PermissionError("read denied")):
+            with self.assertRaises(StoreError):
+                self.store.put_cas("k/one", {"v": 2}, None)
+        self.assertEqual(self.store.get("k/one"), {"v": 1})
+
     def test_save_mission_cas_refuses_stale(self):
         bus = Bus(store=self.store)
         record = _open(bus)
@@ -86,7 +101,10 @@ class LostUpdateTests(unittest.TestCase):
             pr.start()
         for pr in procs:
             pr.join(timeout=30)
-            self.assertEqual(pr.exitcode, 0)
+            if pr.is_alive():
+                pr.terminate()
+                pr.join(timeout=5)
+        self.assertEqual([pr.exitcode for pr in procs], [0] * len(procs))
         final = Bus(store=FileStore(self.tmp.name)).load_mission("msn-contend-0001")
         # Every increment survived: the CAS loop lost nothing.
         self.assertEqual(final.attempts.get("s1"), 8)
