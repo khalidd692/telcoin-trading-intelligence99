@@ -168,10 +168,14 @@ class TeamConfigTests(unittest.TestCase):
     def test_validate_passes(self):
         team_config.validate()
 
-    def test_three_active_agents(self):
-        self.assertEqual(len(team_config.ACTIVE_AGENTS), 3)
+    def test_twelve_active_agents(self):
+        self.assertEqual(len(team_config.ACTIVE_AGENTS), 12)
         roles = {spec.role for spec in team_config.ACTIVE_AGENTS}
-        self.assertEqual(roles, {"development", "quant", "quality"})
+        self.assertEqual(roles, {
+            "development", "quant", "quality", "coordination", "cloud",
+            "security", "mobile", "documentation", "evaluation",
+            "market_data", "monitoring", "release",
+        })
 
     def test_active_agents_are_terminal_only(self):
         for spec in team_config.ACTIVE_AGENTS:
@@ -212,10 +216,21 @@ class UniqueNameTests(unittest.TestCase):
 
     def test_names_carry_suffix(self):
         names = team_config.unique_names("120000")
-        self.assertEqual(
-            set(names.values()),
-            {"tel99-dev-120000", "tel99-analyst-120000", "tel99-verifier-120000"},
-        )
+        expected = {
+            "tel99-dev-120000",
+            "tel99-analyst-120000",
+            "tel99-verifier-120000",
+            "tel99-coordination-120000",
+            "tel99-cloud-120000",
+            "tel99-security-120000",
+            "tel99-mobile-120000",
+            "tel99-documentation-120000",
+            "tel99-evaluation-120000",
+            "tel99-market-data-120000",
+            "tel99-monitoring-120000",
+            "tel99-release-120000",
+        }
+        self.assertEqual(set(names.values()), expected)
 
     def test_two_runs_never_collide(self):
         first = set(team_config.unique_names("000001").values())
@@ -224,9 +239,12 @@ class UniqueNameTests(unittest.TestCase):
 
     def test_default_suffix_is_generated(self):
         names = team_config.unique_names()
-        self.assertEqual(len(names), 3)
+        self.assertEqual(len(names), 12)
         for name in names.values():
-            self.assertRegex(name, r"^tel99-(dev|analyst|verifier)-\d{6}$")
+            self.assertRegex(
+                name,
+                r"^tel99-(dev|analyst|verifier|coordination|cloud|security|mobile|documentation|evaluation|market-data|monitoring|release)-\d{6}$",
+            )
 
 
 class AgentFileTests(unittest.TestCase):
@@ -264,13 +282,12 @@ class AgentFileTests(unittest.TestCase):
 class ReservedRoleTests(unittest.TestCase):
     """The nine extra specializations are prepared but never auto-discovered."""
 
-    def test_nine_reserved_roles(self):
-        self.assertEqual(len(team_config.reserved_agents()), 9)
+    def test_no_reserved_roles(self):
+        self.assertEqual(len(team_config.reserved_agents()), 0)
 
     def test_reserved_files_live_in_subdirectory(self):
-        for spec in team_config.reserved_agents():
-            with self.subTest(agent=spec.name):
-                self.assertTrue((RESERVE_DIR / f"{spec.name}.md").is_file())
+        # No reserved roles remain; nothing to check in reserve/.
+        pass
 
     def test_reserved_agents_are_not_top_level(self):
         # The SDK only loads top-level *.md, so a reserve/ file cannot be
@@ -313,8 +330,8 @@ class RunPilotPayloadTests(unittest.TestCase):
 
     def test_agents_have_unique_suffixed_names(self):
         names = [d["name"] for d in self.payload["agent_definitions"]]
-        self.assertEqual(len(names), 3)
-        self.assertEqual(len(set(names)), 3)
+        self.assertEqual(len(names), 12)
+        self.assertEqual(len(set(names)), 12)
         for name in names:
             self.assertTrue(name.endswith("-090909"), name)
 

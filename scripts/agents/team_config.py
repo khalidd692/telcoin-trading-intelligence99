@@ -115,36 +115,127 @@ _VERIFIER = AgentSpec(
     ),
 )
 
-ACTIVE_AGENTS: tuple[AgentSpec, ...] = (_DEV, _ANALYST, _VERIFIER)
+# --- Reserved roles: none remaining -----------------------------------------
+# All 12 TEL99 specialisations are now active at top-level .agents/agents/.
+# The SDK only loads top-level *.md files, so nothing is held in reserve.
+RESERVED_ROLES: tuple[dict, ...] = ()
 
-# --- Reserved roles: prepared, never auto-discovered ----------------------
-# These mirror the remaining specializations of docs/agents/ROLE_CATALOG.md.
-# They live in .agents/agents/reserve/ (a subdirectory), which the SDK loader
-# ignores, so they cannot be triggered until an operator moves them up.
-RESERVED_ROLES: tuple[dict, ...] = (
-    {"role": "coordination", "title": "Coordinator",
-     "prompt": "Split a mission into independent tasks, assign each to one owner, "
-               "and never declare work finished without verifiable results."},
-    {"role": "cloud", "title": "Cloud & Reliability",
-     "prompt": "Audit GitHub Actions, branches, schedules and publication. Require "
-               "evidence of runs independent of the PC before claiming autonomy."},
-    {"role": "security", "title": "Security",
-     "prompt": "Review permissions, secrets and read-only guarantees. Report any "
-               "capability that exceeds the declared scope."},
-    {"role": "mobile", "title": "Mobile Experience",
-     "prompt": "Review Android usability without redesigning the terminal."},
-    {"role": "documentation", "title": "Documentation",
-     "prompt": "Maintain handovers, decisions and traceability. Keep archives intact."},
-    {"role": "evaluation", "title": "Evaluation",
-     "prompt": "Measure prospective results and detect temporal leakage or look-ahead bias."},
-    {"role": "market_data", "title": "Market Data",
-     "prompt": "Check Kraken data freshness and candle quality. A stale snapshot must "
-               "block any actionable decision."},
-    {"role": "monitoring", "title": "Monitoring",
-     "prompt": "Review logs, alerts and incidents. Do not infer delivery from display."},
-    {"role": "release", "title": "Release",
-     "prompt": "Compare before/after and control publication. Never merge by default."},
+_COORDINATION = AgentSpec(
+    role="coordination",
+    name="tel99-coordination",
+    description=(
+        "TEL99 Coordinator. Splits a mission into independent tasks, assigns each "
+        "to one owner, tracks dependencies and synthesizes verifiable results."
+    ),
+    system_prompt=(
+        "Split a mission into independent tasks, assign each to one owner, and "
+        "never declare work finished without verifiable results. Read AGENTS.md, "
+        "issue #94 and the ROLE_CATALOG before delegating. Choose one specialist "
+        "per task, avoid duplicates, and respect file owners (never touch "
+        "scripts/agents/native/* which belong to Codex G3)."
+    ),
 )
+_CLOUD = AgentSpec(
+    role="cloud",
+    name="tel99-cloud",
+    description=(
+        "TEL99 Cloud & Reliability. Audits GitHub Actions, branches, schedules and "
+        "publication; requires evidence of PC-independent runs before claiming autonomy."
+    ),
+    system_prompt=(
+        "Audit GitHub Actions, branches, schedules and publication. Require evidence "
+        "of runs independent of the PC before claiming autonomy. No persistent cloud "
+        "activation or deployment without explicit owner authorization."
+    ),
+)
+_SECURITY = AgentSpec(
+    role="security",
+    name="tel99-security",
+    description=(
+        "TEL99 Security. Reviews permissions, secrets and read-only guarantees; "
+        "reports any capability exceeding the declared scope."
+    ),
+    system_prompt=(
+        "Review permissions, secrets and read-only guarantees. Report any capability "
+        "that exceeds the declared scope. Read-only: never display or copy secrets."
+    ),
+)
+_MOBILE = AgentSpec(
+    role="mobile",
+    name="tel99-mobile",
+    description=(
+        "TEL99 Mobile Experience. Reviews Android usability and accessibility "
+        "without redesigning the terminal."
+    ),
+    system_prompt=(
+        "Review Android usability and accessibility. Do not redesign the terminal "
+        "without a product-authorized mission."
+    ),
+)
+_DOCUMENTATION = AgentSpec(
+    role="documentation",
+    name="tel99-documentation",
+    description=(
+        "TEL99 Documentation. Maintains handovers, decisions and traceability; "
+        "keeps archives intact for non-technical readers."
+    ),
+    system_prompt=(
+        "Maintain handovers, decisions and traceability. Keep archives intact. "
+        "Produce documentation understandable by someone who does not program."
+    ),
+)
+_EVALUATION = AgentSpec(
+    role="evaluation",
+    name="tel99-evaluation",
+    description=(
+        "TEL99 Evaluation. Measures prospective results, success rates, errors and "
+        "temporal leakage using independent tests."
+    ),
+    system_prompt=(
+        "Measure prospective results and detect temporal leakage or look-ahead bias. "
+        "Use independent tests that the evaluated agent cannot modify. Distinguish "
+        "measured performance from claims."
+    ),
+)
+_MARKET_DATA = AgentSpec(
+    role="market_data",
+    name="tel99-market-data",
+    description=(
+        "TEL99 Market Data. Checks Kraken data freshness and candle quality; a "
+        "stale snapshot blocks any actionable decision."
+    ),
+    system_prompt=(
+        "Check Kraken data freshness and candle quality. A stale snapshot must "
+        "block any actionable decision. Read-only: no financial orders."
+    ),
+)
+_MONITORING = AgentSpec(
+    role="monitoring",
+    name="tel99-monitoring",
+    description=(
+        "TEL99 Monitoring. Reviews logs, alerts and incidents; does not infer "
+        "delivery from display alone."
+    ),
+    system_prompt=(
+        "Review logs, alerts and incidents. Do not infer delivery from display. "
+        "Do not touch auto/surveillance-telegram (owned by another session)."
+    ),
+)
+_RELEASE = AgentSpec(
+    role="release",
+    name="tel99-release",
+    description=(
+        "TEL99 Release. Compares before/after and controls publication; never "
+        "merges by default."
+    ),
+    system_prompt=(
+        "Compare before/after and control publication. Never merge by default. "
+        "Prepare draft PRs and verify delivered files; no production publication "
+        "without owner authorization."
+    ),
+)
+
+ACTIVE_AGENTS: tuple[AgentSpec, ...] = (_DEV, _ANALYST, _VERIFIER, _COORDINATION, _CLOUD, _SECURITY, _MOBILE, _DOCUMENTATION, _EVALUATION, _MARKET_DATA, _MONITORING, _RELEASE)
 
 
 def _slug(text: str) -> str:
@@ -152,21 +243,8 @@ def _slug(text: str) -> str:
 
 
 def reserved_agents() -> tuple[AgentSpec, ...]:
-    specs = []
-    for item in RESERVED_ROLES:
-        specs.append(
-            AgentSpec(
-                role=item["role"],
-                name=f"tel99-{_slug(item['role'])}",
-                description=(
-                    f"TEL99 {item['title']}. Reserved specialization of the TEL99 "
-                    "role catalogue; not active."
-                ),
-                system_prompt=item["prompt"],
-                active=False,
-            )
-        )
-    return tuple(specs)
+    """No reserved roles remain; all 12 TEL99 specialisations are active."""
+    return ()
 
 
 def unique_names(suffix: str | None = None) -> dict[str, str]:

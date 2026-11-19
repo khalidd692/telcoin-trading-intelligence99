@@ -1,0 +1,35 @@
+{
+  "entries": [
+    {
+      "id": "kilo-20261119-001",
+      "project": "telcoin-trading-intelligence99",
+      "mission": "KILO-WIN-ENV-01",
+      "source": "tests/test_terminal_sites_build.py, tests/test_agent_team.py",
+      "date": "2026-11-19T02:00:00Z",
+      "evidence": [
+        "python -m unittest tests.test_terminal_sites_build -v → 6/6 OK",
+        "python -m unittest tests.test_agent_team -v → 34/34 OK",
+        "python -m unittest discover -s tests → 521 tests, OK (skipped=3), 0 erreur (baseline errors=7)"
+      ],
+      "validation_degree": "proven",
+      "version": 1,
+      "contradictions": []
+    },
+    {
+      "id": "kilo-20261119-002",
+      "project": "telcoin-trading-intelligence99",
+      "mission": "LOT 2 — 12 agents activés",
+      "source": "scripts/agents/team_config.py, .agents/agents/*.md",
+      "date": "2026-11-19T02:00:00Z",
+      "evidence": [
+        "team_config.validate() → OK, 12 agents actifs",
+        "python -m unittest tests.test_agent_team -v → 34/34 OK",
+        "python scripts/agents/render_agents.py --check → OK"
+      ],
+      "validation_degree": "proven",
+      "version": 1,
+      "contradictions": []
+    }
+  ],
+  "version": 1
+}
