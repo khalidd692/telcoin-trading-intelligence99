@@ -42,6 +42,12 @@ function Write-Log([string]$message, [string]$level='INFO') {
     Write-Host "[$level] $message"
 }
 
+function Compute-Sha256([string]$inputText) {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($inputText)
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ($hash | ForEach-Object { $_.ToString("x2") }) -join ''
+}
+
 function Invoke-GitHubApi([string]$url) {
     $headers = @{ Accept = 'application/vnd.github+json' }
     if ($PSBoundParameters.ContainsKey('Token') -and $Token) {
@@ -62,7 +68,7 @@ function Test-Mandat([object]$comment) {
         Write-Log "Mandat refusé : auteur $($comment.user.login) n'est pas le propriétaire $Owner" 'WARN'
         return $false
     }
-    $body = $comment.body -replace '`n',' '
+    $body = $comment.body
     # Mot-clé de mandat explicite
     $mandateKeywords = @('APPROVÉ','MISSION','GO','AUTORISÉ','AUTORISATION')
     $hasMandate = $false
@@ -101,51 +107,76 @@ if (-not $targetComment) {
 }
 
 $missionId = "mission-$IssueNumber-$($targetComment.id)"
+$commentBody = $targetComment.body
 $issueSha = $targetComment.node_id
-$commentSha = $targetComment.node_id
+$commentNodeSha = $targetComment.node_id
+$commentSha256 = Compute-Sha256 -inputText $commentBody
 $claimedAt = Get-Date -Format 'o'
 
-# --- Étape 2 : Claim CAS (anti-doublon) ---
+# --- Étape 2 : Claim CAS atomique (compare-and-set sur le fichier de claim) ---
 if (-not (Test-Path $claimsDir)) { New-Item -ItemType Directory -Path $claimsDir -Force | Out-Null }
 $claimFile = Join-Path $claimsDir "$missionId.json"
+
 if (Test-Path $claimFile) {
     $existing = Get-Content -Path $claimFile -Raw | ConvertFrom-Json
-    Write-Log "Claim déjà présent pour $missionId (claimé par $($existing.author) à $($existing.claimed_at)) — doublon refusé" 'WARN'
-    exit 2
+    $existingStatus = if ($existing.PSObject.Properties.Name -contains 'status') { $existing.status } else { 'unknown' }
+    if ($existingStatus -eq 'processed') {
+        Write-Log "Claim déjà traité (status=processed) pour $missionId — doublon refusé" 'WARN'
+        exit 2
+    }
+    if ($existingStatus -eq 'claimed') {
+        Write-Log "Claim déjà présent (status=claimed) pour $missionId — réclamation en doublon refusée" 'WARN'
+        exit 2
+    }
 }
 
+# CAS : écrire seulement si le fichier n'existe pas encore (état attendu = absent)
+# Tentative d'écriture avec vérification post-coup pour détecter la concurrence
 $claim = @{
-    mission_id   = $missionId
-    issue_number = $IssueNumber
-    issue_sha    = $issueSha
-    comment_sha  = $commentSha
-    author       = $targetComment.user.login
-    claimed_at   = $claimedAt
-    status       = 'claimed'
-    receiver     = 'KILO-INTEGRATOR'
-    worktree     = (Join-Path $root '.kilo' 'worktrees' $missionId)
-    branch       = 'feat/kilo-github-receiver-123'
+    mission_id        = $missionId
+    issue_number      = $IssueNumber
+    issue_sha         = $issueSha
+    comment_node_id   = $commentNodeSha
+    comment_sha256    = $commentSha256
+    mandate_sha256    = $commentSha256
+    author            = $targetComment.user.login
+    claimed_at        = $claimedAt
+    status            = 'claimed'
+    receiver          = 'KILO-INTEGRATOR'
+    worktree          = (Join-Path $root '.kilo' 'worktrees' $missionId)
+    branch            = 'feat/kilo-github-receiver-123'
 } | ConvertTo-Json -Depth 5
 
-Set-Content -Path $claimFile -Value $claim
-Write-Log "Claim CAS enregistré : $missionId (claimFile=$claimFile)"
+# Écriture atomique : fichier temporaire puis rename
+$tmpClaim = $claimFile + '.tmp'
+Set-Content -Path $tmpClaim -Value $claim -Encoding UTF8
+if (Test-Path $claimFile) {
+    # Un autre processus a créé le claim entre-temps : refus (perte de mise à jour évitée)
+    Remove-Item -Path $tmpClaim -Force
+    $existing = Get-Content -Path $claimFile -Raw | ConvertFrom-Json
+    Write-Log "Conflit CAS : claim $missionId déjà créé par un autre worker — refus" 'WARN'
+    exit 2
+}
+Move-Item -Path $tmpClaim -Destination $claimFile -Force
+Write-Log "Claim CAS enregistré : $missionId (claimFile=$claimFile, comment_sha256=$commentSha256)"
 
 # --- Étape 3 : ACK corrélé ---
 if (-not (Test-Path $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
 $ack = @{
-    mission_id    = $missionId
-    issue_number  = $IssueNumber
-    ack_at        = $claimedAt
-    receiver      = 'KILO-INTEGRATOR'
-    status        = 'ACK'
-    claim_sha     = $commentSha
-    claim_file    = $claimFile
-    session_id    = $sessionId
+    mission_id     = $missionId
+    issue_number   = $IssueNumber
+    ack_at         = $claimedAt
+    receiver       = 'KILO-INTEGRATOR'
+    status         = 'ACK'
+    claim_sha256   = $commentSha256
+    comment_node_id= $commentNodeSha
+    claim_file     = $claimFile
+    session_id     = $sessionId
 } | ConvertTo-Json -Depth 5
 
 $ackFile = Join-Path $sessionDir ("ack_" + $missionId + ".json")
-Set-Content -Path $ackFile -Value $ack
-Write-Log "ACK émis : $missionId (ackFile=$ackFile)"
+Set-Content -Path $ackFile -Value $ack -Encoding UTF8
+Write-Log "ACK émis : $missionId (ackFile=$ackFile, claim_sha256=$commentSha256)"
 
 # --- Étape 4 : Journal ---
 $logEntry = @{

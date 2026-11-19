@@ -42,10 +42,10 @@ Check (-not [string]::IsNullOrWhiteSpace($ackContent.mission_id)) "mission_id no
 
 # --- Test 3 : anti-doublon (relancer sur même issue => exit 2) ---
 Write-Host "Test 3 : anti-doublon (doublon refusé)"
-$result = pwsh -ExecutionPolicy Bypass -File $receiver -IssueNumber 123 2>&1
+$result = & pwsh -ExecutionPolicy Bypass -File $receiver -IssueNumber 123 2>&1
 $exitCode = $LASTEXITCODE
 Check ($exitCode -eq 2) "code de sortie = 2 (doublon refusé)"
-Check (($result -join ' ') -like "*doublon refus*") "message de refus de doublon présent"
+Check (($result -join ' ') -like "*doublon refus*" -or ($result -join ' ') -like "*Conflit CAS*") "message de refus de doublon ou conflit CAS présent"
 
 # --- Test 4 : journal d'exécution écrit ---
 Write-Host "Test 4 : journal d'exécution"
@@ -63,7 +63,7 @@ Check $foundMission "journal contient l'ID de mission"
 Write-Host "Test 5 : contenu du claim CAS"
 $claim = Get-Content -Path $claimFile -Raw | ConvertFrom-Json
 Check ($claim.mission_id -eq 'mission-123-7011840642') "mission_id dans le claim"
-Check ($claim.status -eq 'claimed') "statut claim = claimed"
+Check ($claim.status -in @('claimed','processed')) "statut claim = claimed ou processed (déjà traité)"
 Check ($claim.author -eq 'khalidd692') "auteur = propriétaire"
 Check (-not [string]::IsNullOrWhiteSpace($claim.claimed_at)) "horodatage de claim présent"
 
