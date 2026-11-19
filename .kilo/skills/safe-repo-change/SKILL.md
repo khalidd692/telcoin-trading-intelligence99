@@ -1,3 +1,8 @@
+---
+name: safe-repo-change
+description: Protège les branches, évite les doublons et préserve les fichiers des autres agents avant tout changement dans le dépôt.
+---
+
 # Skill: safe-repo-change
 
 **But :** Protéger les branches, éviter les doublons, vérifier les modifications et préserver les fichiers appartenant à d'autres agents avant tout changement dans le dépôt.

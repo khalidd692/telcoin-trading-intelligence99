@@ -1,3 +1,8 @@
+---
+name: github-continuity
+description: Récupère les tâches, PR, commits et preuves GitHub au démarrage de chaque session pour éviter les doublons et garantir la continuité.
+---
+
 # Skill: github-continuity
 
 **But :** Récupérer au début de chaque session les dernières tâches, PR, commits, responsabilités et preuves depuis GitHub, afin d'éviter les doublons et de repartir de l'état actuel du projet.
