@@ -10,11 +10,10 @@ comparison, and it writes a decision record. It never edits a permission, a
 security rule, a model choice in production, or the repository history. A human
 keeps the last word; the loop only makes the comparison reproducible.
 
-The measurable quantity is a model's **success rate on a fixed task set**: the
-same tasks are run with a baseline and a candidate, and the candidate is kept
-only when it does not regress. That measured rate is exactly what
-``router.load_measured_quality`` reads back, which closes the loop between
-"what we measured" and "what the router chooses next time".
+The measurable quantity is a model's **success rate on a fixed task set**.
+The same tasks are run with a baseline and a candidate. An improvement without
+regressions is a proposal for review. Evaluation reports are separate from
+the routing inputs consumed by ``router.load_measured_quality``.
 """
 
 from __future__ import annotations
@@ -195,6 +194,21 @@ def write_measured_quality(path: str | pathlib.Path, outcomes: list[Outcome]) ->
                    encoding="utf-8")
     tmp.replace(target)
     return data
+
+
+def write_evaluation_report(path: str | pathlib.Path, comparison: Comparison,
+                            outcomes: list[Outcome]) -> None:
+    """Publish immutable review data with a shape the router does not consume."""
+    from .memory import _write_new_private
+
+    target = pathlib.Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_new_private(target, {
+        "schema_version": 1,
+        "kind": "tel99-improvement-evaluation",
+        "evaluation": comparison.to_dict(),
+        "measured_quality": measured_quality(outcomes),
+    })
 
 
 def apply_verdict(comparison: Comparison, store, project: str, *,
