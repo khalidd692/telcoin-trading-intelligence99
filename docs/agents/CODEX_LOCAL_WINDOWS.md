@@ -1,5 +1,21 @@
 # Superviseur Codex local TEL99
 
+## Enveloppes du bus sur Windows
+
+Le superviseur écrit les enveloppes du protocole existant dans le même
+`FileStore` que son registre, sous `ledger/envelopes`. Une mission admise
+produit `REQUEST`, puis un `ACK` d'Inbox avant le worker. Le résultat
+`PREPARED` reste partiel. La réconciliation G3 peut écrire `EVIDENCE`
+après l'acceptation CAS confirmée. Les messages sont liés à l'issue, à la
+mission et à l'empreinte d'approbation, et contiennent uniquement les
+métadonnées de suivi.
+
+La redélivrance d'un ACK et la reprise à `WORKER_EXITED` n'appellent pas une
+seconde fois le worker. Une interruption avant une sortie vérifiable nécessite
+une réconciliation du claim. Ce registre est local au superviseur Windows.
+La recette entre deux runtimes requiert un transport connecté et deux
+missions nouvelles approuvées.
+
 ## Réconciliation du ticket #114
 
 Dans le checkout du superviseur qui possède déjà le registre local et le claim

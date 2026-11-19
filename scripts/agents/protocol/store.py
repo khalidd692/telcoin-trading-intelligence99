@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import time
 import urllib.error
 import urllib.request
 
@@ -64,12 +65,27 @@ class FileStore:
     def _path(self, key: str) -> pathlib.Path:
         return self.root / f"{key}.json"
 
-    def get(self, key: str):
-        path = self._path(key)
-        if not path.is_file():
-            return None
+    @staticmethod
+    def _retry_file_access(operation):
+        # Windows can deny a concurrent read/rename while an open handle is
+        # being released. Keep retries bounded and leave other errors visible.
+        for attempt in range(6):
+            try:
+                return operation()
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 5:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+
+    def _read(self, path):
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(self._retry_file_access(lambda: path.read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            return None
+
+    def get(self, key: str):
+        try:
+            return self._read(self._path(key))
         except (OSError, ValueError):
             return None
 
@@ -79,7 +95,7 @@ class FileStore:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n",
                        encoding="utf-8")
-        tmp.replace(path)
+        self._retry_file_access(lambda: tmp.replace(path))
 
     def keys(self, prefix: str = "") -> list[str]:
         base = self.root / prefix if prefix else self.root
@@ -113,14 +129,17 @@ class FileStore:
             else:
                 raise StoreError("file compare-and-set requires an OS file lock")
             try:
-                current = self.get(key)
+                try:
+                    current = self._read(path)
+                except (OSError, ValueError) as exc:
+                    raise StoreError("cannot read the existing value for file CAS") from exc
                 if current != expected:
                     return False
                 tmp = path.with_suffix(".tmp")
                 tmp.write_text(
                     json.dumps(value, indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8")
-                tmp.replace(path)
+                self._retry_file_access(lambda: tmp.replace(path))
                 return True
             finally:
                 if fcntl is not None:
