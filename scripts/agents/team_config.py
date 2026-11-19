@@ -35,6 +35,9 @@ MAX_BUDGET_CEILING_USD = float(os.environ.get("TEL99_MAX_BUDGET_CEILING_USD", "5
 # override (TEL99_LLM_MODEL) cannot silently switch a mission onto a paid model;
 # validate() refuses to start if DEFAULT_MODEL is not on this list.
 FREE_MODEL_IDS = frozenset({"openhands/deepseek-v4.1-flash"})
+# Kilo is eligible only through the native adapter's anonymous preflight.
+KILO_FREE_MODEL_ID = "kilo-auto/free"
+NATIVE_FREE_MODEL_IDS = FREE_MODEL_IDS | {KILO_FREE_MODEL_ID}
 
 READ_ONLY_CONTRACT = (
     "CONTRAINTE DURE (non negociable): LECTURE SEULE. Interdiction de modifier un "

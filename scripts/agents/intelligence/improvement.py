@@ -10,11 +10,10 @@ comparison, and it writes a decision record. It never edits a permission, a
 security rule, a model choice in production, or the repository history. A human
 keeps the last word; the loop only makes the comparison reproducible.
 
-The measurable quantity is a model's **success rate on a fixed task set**: the
-same tasks are run with a baseline and a candidate, and the candidate is kept
-only when it does not regress. That measured rate is exactly what
-``router.load_measured_quality`` reads back, which closes the loop between
-"what we measured" and "what the router chooses next time".
+The measurable quantity is a model's **success rate on a fixed task set**.
+The same tasks are run with a baseline and a candidate. An improvement without
+regressions is a proposal for review. Evaluation reports are separate from
+the routing inputs consumed by ``router.load_measured_quality``.
 """
 
 from __future__ import annotations
@@ -25,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 KEEP, REJECT, INCONCLUSIVE = "keep", "reject", "inconclusive"
+_MIN_PAIRED_TASKS = 10
+_MAX_ONE_SIDED_P = 0.05
 
 
 def utcnow_iso() -> str:
@@ -92,14 +93,17 @@ def compare(
 ) -> Comparison:
     """Compare a candidate against a baseline on the tasks they both ran.
 
-    Only tasks present for *both* models are counted, so a candidate cannot win
-    by skipping the hard tasks. The candidate is kept only when its rate is at
-    least ``min_delta`` better and it did not lose any task the baseline won —
-    a guard against trading one failure for another.
+    Only shared tasks contribute to the rates. A proposal needs complete,
+    unambiguous pairs with a sufficiently large improvement and no regression.
     """
     by_task: dict[str, dict[str, Outcome]] = {}
+    duplicate = False
     for o in outcomes:
-        by_task.setdefault(o.task_id, {})[o.model_id] = o
+        if o.model_id not in (baseline_id, candidate_id):
+            continue
+        pair = by_task.setdefault(o.task_id, {})
+        duplicate = duplicate or o.model_id in pair
+        pair[o.model_id] = o
 
     shared = sorted(
         t for t, m in by_task.items() if baseline_id in m and candidate_id in m
@@ -132,13 +136,25 @@ def compare(
     ]
 
     reasons: list[str] = []
-    if regressions:
+    if duplicate or len(shared) != len(by_task):
+        reasons.append("the evaluation contains incomplete or duplicate task pairs")
+        verdict = INCONCLUSIVE
+    elif regressions:
         reasons.append(f"regressed on {len(regressions)} task(s) the baseline won: "
                        f"{regressions}")
         verdict = REJECT
-    elif delta > min_delta:
-        reasons.append(f"candidate improves {delta:+.2%} with no regression")
-        verdict = KEEP
+    elif delta > max(0.0, min_delta):
+        # Exact one-sided paired sign test with no discordant losses.
+        gains = cand_wins - base_wins
+        probability = 0.5 ** gains
+        if len(shared) < _MIN_PAIRED_TASKS or probability > _MAX_ONE_SIDED_P:
+            reasons.append(f"insufficient paired evidence: {len(shared)} task(s), "
+                           f"{gains} gain(s), one-sided p={probability:.4g}")
+            verdict = INCONCLUSIVE
+        else:
+            reasons.append(f"candidate improves {delta:+.2%} with no regression "
+                           f"(one-sided p={probability:.4g})")
+            verdict = KEEP
     elif delta >= 0:
         reasons.append(f"no measurable improvement ({delta:+.2%}); keeping baseline")
         verdict = REJECT
@@ -180,12 +196,27 @@ def write_measured_quality(path: str | pathlib.Path, outcomes: list[Outcome]) ->
     return data
 
 
+def write_evaluation_report(path: str | pathlib.Path, comparison: Comparison,
+                            outcomes: list[Outcome]) -> None:
+    """Publish immutable review data with a shape the router does not consume."""
+    from .memory import _write_new_private
+
+    target = pathlib.Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_new_private(target, {
+        "schema_version": 1,
+        "kind": "tel99-improvement-evaluation",
+        "evaluation": comparison.to_dict(),
+        "measured_quality": measured_quality(outcomes),
+    })
+
+
 def apply_verdict(comparison: Comparison, store, project: str, *,
                   actor: str = "improvement-loop") -> str:
     """Record the loop's outcome in shared memory.
 
-    A ``keep`` records a verified procedure; a ``reject`` records an error entry
-    so the same candidate is not re-tried blindly. Returns the entry id.
+    A ``keep`` records a proposal for separate verification. A rejected
+    candidate or inconclusive result is recorded for future evaluation.
     """
     from .memory import Entry
 
@@ -194,26 +225,25 @@ def apply_verdict(comparison: Comparison, store, project: str, *,
             id=f"improve-{comparison.candidate_id}-{comparison.decided_at}",
             project=project,
             kind="procedure",
-            title=f"Adopt {comparison.candidate_id} over {comparison.baseline_id}",
+            title=f"Propose {comparison.candidate_id} over {comparison.baseline_id}",
             body=(f"Measured on {comparison.task_count} shared task(s): "
                   f"baseline {comparison.baseline_rate:.0%} -> candidate "
                   f"{comparison.candidate_rate:.0%} ({comparison.delta:+.0%}). "
                   + "; ".join(comparison.reasons)),
-            tags=("improvement", "adopted"),
+            tags=("improvement", "proposed"),
             source="improvement-loop",
             author=actor,
             confidence=min(0.95, 0.5 + abs(comparison.delta)),
-            verified=True,
-            verified_by="improvement-loop",
         )
     else:
         entry = Entry(
             id=f"improve-{comparison.candidate_id}-{comparison.decided_at}",
             project=project,
-            kind="error",
-            title=f"Reject {comparison.candidate_id} vs {comparison.baseline_id}",
-            body=("Candidate not adopted. " + "; ".join(comparison.reasons)),
-            tags=("improvement", "rejected"),
+            kind="error" if comparison.verdict == REJECT else "decision",
+            title=f"{comparison.verdict.capitalize()} {comparison.candidate_id} vs "
+                  f"{comparison.baseline_id}",
+            body="; ".join(comparison.reasons),
+            tags=("improvement", comparison.verdict),
             source="improvement-loop",
             author=actor,
             confidence=0.7,

@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "project_id": "tel99-agent-autonomy",
+  "recorded_on": "2026-11-19",
+  "overall_status": "PARTIEL",
+  "author": "Codex integration",
+  "integration": {
+    "branch": "assist/autonomy-integration-20261119",
+    "base_sha": "44ca6bd900505b587220244a15e14e789a8b501a",
+    "delivery_sha": null,
+    "note": "Verified isolated integration; delivered code commit is recorded after commit creation. No main merge; see draft PR for delivery head."
+  },
+  "sources": {
+    "backlog_pr": 93,
+    "backlog_sha": "315fd08c11a18093c99ccaff2bd3b69358e6fbbc",
+    "master_issue": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94",
+    "priority_issue": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/123",
+    "component_shas": {
+      "104": "20cbb7848553252e6ad604f8907614c1672f0089",
+      "110": "982f5e22297694f122d87a1419c12d13a6aa7188",
+      "116": "4a172770945473b2892011cb9bad94dc49ef1c79",
+      "117": "fb1286469c7c272c8f5a79a82f33fe96ab367cac",
+      "118": "f83d4704ca4c642726063a43d58db78299c4b08e",
+      "119": "6d1d936bff7a51b05196f89464f4ab78cc1d6185",
+      "120": "1121a021a18bc013709d4d2e4d20e4bc5dc05693",
+      "121": "d478d7a827382217f05d36ba58aaf8e6685b790d",
+      "122": "06a838d130fa4bc27d69d9fda25d48d7c6731843"
+    }
+  },
+  "evidence": {
+    "live_chain": {
+      "provenance": "Directly verified by integrating runtime, private receipts and preserved worker outputs; restart forbids model calls.",
+      "public_sanitized_path": "docs/agents/autonomy-evidence/live-chain.json",
+      "private_registry": ".tel99-automation-state/acceptance-live-20261119/registry.json",
+      "private_ledgers": [
+        ".tel99-automation-state/acceptance-live-20261119/runtime/ledger/kilo-local/integration-live-a-20261119.json",
+        ".tel99-automation-state/acceptance-live-20261119/runtime/ledger/kilo-local/integration-live-b-20261119.json"
+      ],
+      "observed_scope": "Two distinct synthetic text missions via native free Kilo gateway; analyst/dev roles; four subprocess checks true for each; sequential with zero human inter-agent copies.",
+      "limitation": "Does not establish 12 active workers, GitHub ticket ingestion, remote cloud continuity or G7 application."
+    },
+    "preservation": {
+      "manifest": ".tel99-automation-state/kilo-source-preserved/manifest.json",
+      "source_sha": "08e79fba3288ee0d98b7816c2c8cbcb69a4aa5e0",
+      "reported_head_blobs_archived": 18,
+      "deletion_origin": "UNASCERTAINED",
+      "original_worktree_modified_by_this_integration": false
+    },
+    "tests": {
+      "status": "See final delivery test log; do not infer full acceptance from test count.",
+      "integrator_reported_minimum": 44,
+      "final_total": 381,
+      "passed": 378,
+      "skipped": 3
+    },
+    "native_app": {
+      "path": "docs/agents/autonomy-evidence/native-app.json",
+      "generation_status": "FAIL",
+      "independent_code_checks": "6/6 PASS",
+      "missing_original": "README.md",
+      "integrator_completed_readme": true
+    }
+  },
+  "gates": {
+    "G0": {
+      "status": "AWAITING_HUMAN",
+      "accepted": false
+    },
+    "G1": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G2": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G3": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G4": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G5": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G6": {
+      "status": "PARTIAL",
+      "accepted": false
+    },
+    "G7": {
+      "status": "PARTIAL",
+      "accepted": false
+    }
+  },
+  "tasks": [
+    {
+      "id": "S-01",
+      "title": "Attester la r\u00e9vocation du jeton OpenHands expos\u00e9 dans #88",
+      "owner": "owner",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "V\u00e9rification de la r\u00e9vocation par le propri\u00e9taire, aucune valeur de secret publi\u00e9e"
+      ],
+      "initial_state": "awaiting_human",
+      "notes": "S\u00e9curit\u00e9 : les agents peuvent rep\u00e9rer les fuites sans effectuer la rotation",
+      "status": "awaiting_human",
+      "checkpoint": "Aucune attestation de r\u00e9vocation du jeton historique #88 disponible. Action r\u00e9serv\u00e9e au propri\u00e9taire.",
+      "component_prs": [],
+      "accepted": false
+    },
+    {
+      "id": "S-02",
+      "title": "Contr\u00f4ler protections GitHub et permissions minimales",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Rapport ruleset main+branche produit, CI obligatoire, impossibilit\u00e9 d'\u00e9crire sur branches prot\u00e9g\u00e9es sans accord"
+      ],
+      "initial_state": "todo",
+      "notes": "S\u00e9parer audit et changement de permissions propri\u00e9taire",
+      "status": "blocked",
+      "checkpoint": "Protections r\u00e9elles et privil\u00e8ges effectifs \u00e0 attester; aucun changement de permissions autoris\u00e9.",
+      "component_prs": [],
+      "accepted": false
+    },
+    {
+      "id": "S-03",
+      "title": "Comparer #79 et #92 pour un correctif cloud unique s\u00fbr",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Diff sur main, tests de vraie API, actions HIGH toujours bloqu\u00e9es; un seul PR candidat, aucune fusion automatique"
+      ],
+      "initial_state": "in_review",
+      "notes": "PR #92 nouvelle, rapporte 747 tests et correction reprise; pas encore prouv\u00e9e sur main",
+      "status": "in_review",
+      "checkpoint": "Correctifs #79/#92 repris dans le candidat #104. Validation du candidat int\u00e9gr\u00e9 et API cloud r\u00e9elle restent distinctes.",
+      "component_prs": [
+        104
+      ],
+      "accepted": false
+    },
+    {
+      "id": "S-04",
+      "title": "Fiabiliser les mises \u00e0 jour d'\u00e9tat CAS/fencing et le ledger",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "Deux runners en concurrence -> une conversation au plus; aucun lost update; \u00e9tat r\u00e9cup\u00e9rable apr\u00e8s crash"
+      ],
+      "initial_state": "todo",
+      "notes": "R\u00e9utiliser verrou KV existant, ne pas cr\u00e9er deuxi\u00e8me arbiter",
+      "status": "in_review",
+      "checkpoint": "CAS/fencing et ledger existants r\u00e9utilis\u00e9s; tests d\u00e9terministes de concurrence/reprise dans le lot courant. Cloud r\u00e9el restant \u00e0 \u00e9tablir.",
+      "component_prs": [
+        104,
+        117,
+        118,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "S-05",
+      "title": "Verdict m\u00e9tier r\u00e9ellement v\u00e9rifi\u00e9 pour chaque crit\u00e8re",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "3 r\u00f4les PASS mensongers + test \u00e9chou\u00e9 => MISSION_ACCEPTED=false; preuve ref/SHA exig\u00e9e"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas confondre completed et accepted",
+      "status": "in_review",
+      "checkpoint": "Verdicts d\u00e9terministes et contr\u00f4le ind\u00e9pendant des artefacts pr\u00e9sents. Deux textes synth\u00e9tiques contr\u00f4l\u00e9s; couverture de tous crit\u00e8res m\u00e9tier restant \u00e0 d\u00e9montrer.",
+      "component_prs": [
+        104,
+        116,
+        117
+      ],
+      "accepted": false
+    },
+    {
+      "id": "S-06",
+      "title": "Approbation li\u00e9e au contenu et protections anti-injection",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Issue modifi\u00e9e apr\u00e8s approbation refus\u00e9e; acteur non autoris\u00e9 refus\u00e9; garde commandes"
+      ],
+      "initial_state": "todo",
+      "notes": "Filtre pull_request existe d\u00e9j\u00e0",
+      "status": "in_review",
+      "checkpoint": "Approbation li\u00e9e au contenu et refus de contrats falsifi\u00e9s couverts par le candidat. Revue finale du chemin d'admission requise.",
+      "component_prs": [
+        104,
+        118
+      ],
+      "accepted": false
+    },
+    {
+      "id": "Z-01",
+      "title": "Entr\u00e9e unique de mission dans notre propre programme",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "CLI native ex\u00e9cute une mission born\u00e9e et produit fichier+test+preuve, sans ouvrir les trois applications"
+      ],
+      "initial_state": "todo",
+      "notes": "S'appuyer sur bus/router/memory existants; model provider r\u00e9ellement interchangeable",
+      "status": "in_review",
+      "checkpoint": "Lanceur et runtime natif ajout\u00e9s; deux missions texte r\u00e9elles encha\u00een\u00e9es. Programme ex\u00e9cutable neuf complet restant \u00e0 livrer.",
+      "component_prs": [
+        104,
+        110,
+        120
+      ],
+      "accepted": false
+    },
+    {
+      "id": "Z-02",
+      "title": "Pont GitHub Kilo Windows sans copier-coller",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "S-04",
+        "S-06"
+      ],
+      "acceptance_checks": [
+        "Issue dirig\u00e9e vers Kilo -> re\u00e7u+ack+r\u00e9sultat sans copier-coller, hors ligne puis reprise sans doublon"
+      ],
+      "initial_state": "todo",
+      "notes": "connected=False tant que le test live \u00e9choue ; pas de tunnel ni token Contents write inutile",
+      "status": "in_review",
+      "checkpoint": "Chemin local durable et sp\u00e9cialistes analyst/dev exerc\u00e9s; preuve de r\u00e9ception de deux nouveaux tickets GitHub approuv\u00e9s non \u00e9tablie.",
+      "component_prs": [
+        118,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "Z-03",
+      "title": "Pont Hermes de r\u00e9cup\u00e9ration des missions et preuves",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [
+        "S-06"
+      ],
+      "acceptance_checks": [
+        "Hermes r\u00e9cup\u00e8re mission nouvelle et publie m\u00e9moire/plan dans GitHub sans collage manuel; nouvelle session prouv\u00e9e"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas supposer injection auto d'une issue GitHub",
+      "status": "blocked",
+      "checkpoint": "Aucun runtime Hermes connect\u00e9 \u00e0 la r\u00e9cup\u00e9ration automatique et aux preuves \u00e9tabli.",
+      "component_prs": [],
+      "accepted": false
+    },
+    {
+      "id": "Z-04",
+      "title": "Passation automatique \u00e0 la t\u00e2che suivante",
+      "owner": "openhands",
+      "priority": "P1",
+      "dependencies": [
+        "Z-02",
+        "Z-03",
+        "S-04",
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "Une mission peut parcourir deux chefs et deux \u00e9tapes avec ack, v\u00e9rification et nouvelle t\u00e2che sans intervention utilisateur"
+      ],
+      "initial_state": "todo",
+      "notes": "Pas de d\u00e9pendance au PC allum\u00e9 pour t\u00e2ches 100% cloud",
+      "status": "in_review",
+      "checkpoint": "Deux missions texte locales distinctes encha\u00een\u00e9es sans transfert humain. Cha\u00eene inter-environnements avec Hermes/OpenHands non \u00e9tablie.",
+      "component_prs": [
+        118,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "Z-05",
+      "title": "Mode hors-ligne : reprise des t\u00e2ches non d\u00e9pendantes",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "Z-02",
+        "Z-04"
+      ],
+      "acceptance_checks": [
+        "48h PC indisponible => cloud non bloquant poursuit, t\u00e2che Kilo attend; reprise sans travail doubl\u00e9"
+      ],
+      "initial_state": "todo",
+      "notes": "Les dur\u00e9es sont des fixtures simulables sans attendre 48h r\u00e9elles",
+      "status": "blocked",
+      "checkpoint": "Reprise locale test\u00e9e; continuit\u00e9 cloud ind\u00e9pendante pendant absence du PC non d\u00e9montr\u00e9e, aucun ex\u00e9cuteur cloud distinct \u00e9tabli.",
+      "component_prs": [
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "I-01",
+      "title": "Routeur des mod\u00e8les gratuits r\u00e9ellement disponibles",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [],
+      "acceptance_checks": [
+        "API gratuite test\u00e9e, quota/latence et fallback \u00e9tablis ; inconnu => fail closed"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas r\u00e9activer mod\u00e8les locaux",
+      "status": "in_review",
+      "checkpoint": "Fournisseur Kilo gratuit v\u00e9rifi\u00e9 et appel\u00e9 r\u00e9ellement; aucun repli payant. Disponibilit\u00e9/quota inconnus doivent bloquer. Routeur multi-provider r\u00e9el restant \u00e0 d\u00e9montrer.",
+      "component_prs": [
+        110,
+        120
+      ],
+      "accepted": false
+    },
+    {
+      "id": "I-02",
+      "title": "M\u00e9moire portable inter-sessions, scoping et restauration",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "Un fait v\u00e9rifi\u00e9 \u00e9crit en session A, rappel\u00e9 session B sans collage; tests projets A/B; restauration priv\u00e9e"
+      ],
+      "initial_state": "todo",
+      "notes": "R\u00e9utiliser isolation et version memory.py existants, pas de dump priv\u00e9 dans Git public",
+      "status": "in_review",
+      "checkpoint": "Correctif #121 import\u00e9 pour isolation projet et provenance. Preuve finale de rappel/restauration dans un runtime distant non \u00e9tablie.",
+      "component_prs": [
+        121
+      ],
+      "accepted": false
+    },
+    {
+      "id": "I-03",
+      "title": "\u00c9valuateur ind\u00e9pendant + Skills avec rollback",
+      "owner": "hermes",
+      "priority": "P2",
+      "dependencies": [
+        "S-05",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "Skill mauvais rejet\u00e9; gain sur test prot\u00e9g\u00e9; petit \u00e9chantillon inconclusif; rollback d\u00e9montr\u00e9"
+      ],
+      "initial_state": "todo",
+      "notes": "Le mod\u00e8le proposant ne v\u00e9rifie pas ses r\u00e9sultats",
+      "status": "in_review",
+      "checkpoint": "Correctif #122 import\u00e9 pour emp\u00eacher promotion automatique des \u00e9valuations. Cycle Skill sur \u00e9chec r\u00e9el, \u00e9valuateur distinct et rollback non d\u00e9montr\u00e9.",
+      "component_prs": [
+        122
+      ],
+      "accepted": false
+    },
+    {
+      "id": "P-01",
+      "title": "Inventaire des PR et int\u00e9gration sans conflits",
+      "owner": "openhands",
+      "priority": "P1",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "Carte #78/#79/#83/#85/#87/#88/#89/#90/#91/#92; compatibilit\u00e9 et tests sur SHA final"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas merger sans approbation",
+      "status": "in_progress",
+      "checkpoint": "Inventaire cibl\u00e9 #90/#93/#104-#122 et imports s\u00e9lectifs effectu\u00e9s. Revue finale et validation sur SHA int\u00e9gr\u00e9 requises; aucune fusion main.",
+      "component_prs": [
+        104,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122
+      ],
+      "accepted": false
+    },
+    {
+      "id": "P-02",
+      "title": "Cockpit / \u00e9tat avec preuves et alertes",
+      "owner": "openhands",
+      "priority": "P2",
+      "dependencies": [
+        "S-05",
+        "Z-04"
+      ],
+      "acceptance_checks": [
+        "Affiche RUNNING/BLOCKED/ACCEPTED sourc\u00e9s, quota horodat\u00e9, alerte externe test\u00e9e"
+      ],
+      "initial_state": "todo",
+      "notes": "R\u00e9utiliser PR #87, pas de seconde UI concurrente",
+      "status": "in_review",
+      "checkpoint": "STATUS et STOP du lanceur en cours de validation. Cockpit et alerte externe bout-en-bout non d\u00e9montr\u00e9s.",
+      "component_prs": [
+        104,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "P-03",
+      "title": "Isolation deux projets et s\u00e9curit\u00e9 TEL99",
+      "owner": "kilo",
+      "priority": "P2",
+      "dependencies": [
+        "Z-01",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "T\u00e2che nouveau projet B n'acc\u00e8de pas m\u00e9moire/data TEL99; tests politiques de branche"
+      ],
+      "initial_state": "todo",
+      "notes": "Aucun ordre financier",
+      "status": "in_review",
+      "checkpoint": "Isolation m\u00e9moire de projet reprise de #121. Recette compl\u00e8te de deux projets et barri\u00e8res TEL99 requise.",
+      "component_prs": [
+        121
+      ],
+      "accepted": false
+    },
+    {
+      "id": "F-01",
+      "title": "D\u00e9mo une mission sans transfert humain",
+      "owner": "kilo",
+      "priority": "P3",
+      "dependencies": [
+        "Z-01",
+        "Z-04",
+        "I-01",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "Une instruction propri\u00e9taire -> livrable ex\u00e9cutable+tests+retour, z\u00e9ro copier-coller et z\u00e9ro faux PASS"
+      ],
+      "initial_state": "todo",
+      "notes": "Premier livrable simple puis t\u00e2che TEL99 isol\u00e9e",
+      "status": "in_review",
+      "checkpoint": "Deux textes synth\u00e9tiques live accept\u00e9s localement; aucune petite application neuve compl\u00e8te produite dans cette recette.",
+      "component_prs": [
+        110,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "F-02",
+      "title": "Crash, reprise et compatibilit\u00e9 sans chacun des trois outils",
+      "owner": "openhands",
+      "priority": "P3",
+      "dependencies": [
+        "F-01",
+        "Z-05"
+      ],
+      "acceptance_checks": [
+        "Reprise sans doublon apr\u00e8s kill; noyau travaille sans clients Hermes/Kilo/OpenHands"
+      ],
+      "initial_state": "todo",
+      "notes": "Distinguer noyau natif local et cloud n\u00e9cessitant ex\u00e9cuteur",
+      "status": "in_review",
+      "checkpoint": "Tests d\u00e9terministes crash/reprise/ACK perdu et contr\u00f4le processus pr\u00e9sents. Compatibilit\u00e9 r\u00e9elle sans chacun des trois ateliers non enti\u00e8rement d\u00e9montr\u00e9e.",
+      "component_prs": [
+        118,
+        119
+      ],
+      "accepted": false
+    },
+    {
+      "id": "F-03",
+      "title": "Livraison, guide propri\u00e9taire et preuve finale",
+      "owner": "kilo",
+      "priority": "P3",
+      "dependencies": [
+        "F-01",
+        "F-02",
+        "I-03",
+        "P-02",
+        "P-03"
+      ],
+      "acceptance_checks": [
+        "Guide 1 commande, sauvegarde/export, journal PASS/FAIL/BLOCKED, preuves, reste \u00e0 approuver"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas pr\u00e9tendre tout finir si actions humaines sensibles non r\u00e9solues",
+      "status": "blocked",
+      "checkpoint": "Livraison partielle: gates G0-G7 non tous prouv\u00e9s; connexions Hermes/OpenHands et application G7 manquent.",
+      "component_prs": [],
+      "accepted": false
+    }
+  ],
+  "resume": {
+    "mode": "Explicit session start only; no permanent service or scheduled task.",
+    "next_steps": [
+      "Read final delivery SHA, test log, source issues and private durable state before selecting work.",
+      "Revalidate approved registry, dependency evidence, free-provider availability and quota before execution.",
+      "Resume pending verification from existing receipts; never replay historical #109/#112/#113/#114.",
+      "Finish deterministic acceptance coverage and independent review of current integration.",
+      "Establish authorized Hermes/OpenHands runtime connections before claiming cross-environment continuation.",
+      "Run a new bounded non-financial application mission and independent criteria checks for G7.",
+      "Select next task only when its dependencies have current ACCEPTED evidence; checkpoint after every lot."
+    ],
+    "human_requests_file": "docs/agents/AWAITING_HUMAN.md",
+    "pc_off_behavior": "Local execution stops. No cloud continuation claimed without distinct connected executor.",
+    "never": [
+      "merge main without approval",
+      "paid fallback",
+      "trading real or simulated",
+      "permanent Windows service or scheduler without approval",
+      "publish secrets",
+      "overwrite Kilo worktree",
+      "promote ACK or model self-report to ACCEPTED"
+    ]
+  }
+}
