@@ -1,0 +1,202 @@
+name: TEL99 G3 independent native verification
+
+# No AI, production deploy, or repository write. Checks exact #114 SHA
+# without moving its artifact branch or consuming Codex quota.
+on:
+  push:
+    branches:
+      - agents/g3-independent-verifier-20261119
+  pull_request:
+    branches:
+      - integration/codex-agent-core-20261118
+    paths:
+      - scripts/agents/automation/g3_native_*.py
+      - tests/test_g3_native_verifier.py
+      - .github/workflows/tel99-g3-independent-native.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-native:
+    name: Independent native code check (SHA pinned)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout verification code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: caec35793c9d2e04900c8bb4cf31ce6ca9bdbfe3
+          fetch-depth: 2
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: G3 policy regressions (no model, no Docker)
+        run: python -m unittest discover -s tests -p test_g3_native_verifier.py -v
+
+      - name: G3 bot provenance and fail-closed policy tests
+        run: python -m unittest discover -s tests -p test_g3_bot_acceptance.py -v
+
+      - name: Verify candidate branch is still at approved SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(git ls-remote https://github.com/khalidd692/telcoin-trading-intelligence99.git refs/heads/agents/codex-local/codex110-windows-native-shortpath | cut -f1)
+          test "$current" = "caec35793c9d2e04900c8bb4cf31ce6ca9bdbfe3"
+
+      - name: Run candidate in a sealed, network-disabled container
+        run: |
+          python -B scripts/agents/automation/g3_native_verifier.py \
+            --candidate candidate --output /tmp/tel99-g3/verification.json
+
+      - name: Upload reproducible evidence even when rejected
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tel99-g3-native-114-evidence
+          path: /tmp/tel99-g3/verification.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  attest-native:
+    name: G3 authenticated bot evidence
+    needs: verify-native
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agents/g3-independent-verifier-20261119'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      # Separate job with an isolated token. The generated candidate code
+      # never has any credentials, writable repository access, or network.
+      - name: Download isolated verification evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: tel99-g3-native-114-evidence
+          path: /tmp/tel99-g3
+      - name: Verify proof and publish authenticated GitHub comment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          expected_sha = "caec35793c9d2e04900c8bb4cf31ce6ca9bdbfe3"
+          expected_branch = "agents/codex-local/codex110-windows-native-shortpath"
+          expected_digests = {
+              "tasks.py": "1e72cf3ab3c9049b735ec9451f6d50191e0af0e9321a14d7e99913cc646bc0f8",
+              "README.md": "eb01edaaa004ab93d1d3a945b498fc72d6e3f1eadc8a95893fb2bc8cff6dc51c",
+          }
+          required = (
+              "empty-list", "add", "edit", "complete", "persisted-list", "delete",
+              "empty-after-delete", "unknown-id-rejected", "unknown-command-rejected",
+          )
+          report = json.loads(Path("/tmp/tel99-g3/verification.json").read_text())
+          checks = report.get("checks")
+          assert report.get("project_id") == "agent-core"
+          assert report.get("mission_id") == "CODEX110-WINDOWS-NATIVE-SHORTPATH"
+          assert report.get("work_commit") == expected_sha
+          assert report.get("work_branch") == expected_branch
+          assert report.get("artifact_digests") == expected_digests
+          assert report.get("provider_calls") == 0 and report.get("model_used") is False
+          assert report.get("verdict") == "PASS" and report.get("accepted") is False
+          assert isinstance(checks, list) and len(checks) == len(required)
+          assert {c["id"] for c in checks} == set(required)
+          assert all(c["status"] == "PASS" and c["reproducible"] is True for c in checks)
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          assert repo == "khalidd692/telcoin-trading-intelligence99"
+          assert os.environ["GITHUB_REF"] == "refs/heads/agents/g3-independent-verifier-20261119"
+          assert os.environ["GITHUB_EVENT_NAME"] == "push"
+          current = json.loads(subprocess.check_output([
+              "gh", "api", f"repos/{repo}/git/ref/heads/{expected_branch}",
+          ]))
+          assert current["object"]["sha"] == expected_sha
+          assert current["object"]["type"] == "commit"
+
+          payload = {
+              "version": 1,
+              "project_id": "agent-core",
+              "mission_id": "CODEX110-WINDOWS-NATIVE-SHORTPATH",
+              "issue": 114,
+              "candidate_branch": expected_branch,
+              "candidate_sha": expected_sha,
+              "candidate_digests": expected_digests,
+              "verifier_branch": "agents/g3-independent-verifier-20261119",
+              "verifier_sha": os.environ["GITHUB_SHA"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "check_job": "Independent native code check (SHA pinned)",
+              "checks": list(required),
+              "verdict": "PASS",
+              "accepted": False,
+          }
+          marker = "tel99-g3-bot-proof:v1 "
+          body = marker + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+          prior = json.loads(subprocess.check_output([
+              "gh", "api", f"repos/{repo}/issues/114/comments?per_page=100",
+          ]))
+          if any(comment.get("body") == body and
+                 comment.get("user", {}).get("login") == "github-actions[bot]"
+                 for comment in prior):
+              print("G3 bot evidence already published; idempotent success.")
+          else:
+              subprocess.run([
+                  "gh", "api", "--method", "POST",
+                  f"repos/{repo}/issues/114/comments",
+                  "-f", "body=" + body,
+              ], check=True, capture_output=True)
+              print("G3 bot evidence posted as authenticated GitHub Actions identity.")
+          PY
+
+  reconcile-native:
+    name: G3 verified external proof (read-only)
+    needs: attest-native
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agents/g3-independent-verifier-20261119'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    steps:
+      - name: Checkout pinned proof reader (no write credential)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python for deterministic verification
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Independently verify bot identity, source hashes and GitHub jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B scripts/agents/automation/g3_verify_live.py
+
+      - name: Upload reconciled proof (never auto-accepted)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tel99-g3-114-external-proof
+          path: /tmp/tel99-g3/external-proof.json
+          retention-days: 14
+          if-no-files-found: warn
