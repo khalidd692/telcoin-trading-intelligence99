@@ -32,6 +32,18 @@ def sha256_file(path: pathlib.Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _safe_id(value: str) -> str:
+    """Valide un identifiant utilisé dans un nom de fichier : rejette tout
+    caractère de traversée de chemin."""
+    if not value or not value.strip():
+        raise ValueError("identifiant vide")
+    if any(c in value for c in "/\\:*?\"<>|"):
+        raise ValueError(f"identifiant invalide (caractère interdit): {value!r}")
+    if ".." in value:
+        raise ValueError(f"identifiant invalide (traversée de chemin): {value!r}")
+    return value
+
+
 class ChangeRegistry:
     """Registre des changements applicables avec garde-fous SHA-256."""
 
@@ -46,8 +58,9 @@ class ChangeRegistry:
                       old_sha: str, new_sha: str, description: str,
                       author: str = "KILO-INTEGRATOR") -> None:
         """Enregistre un changement dans le changelog."""
+        safe_change_id = _safe_id(change_id)
         entry = {
-            "change_id": change_id,
+            "change_id": safe_change_id,
             "file": str(pathlib.Path(file_path).resolve().relative_to(self.root)),
             "old_sha256": old_sha,
             "new_sha256": new_sha,
@@ -56,7 +69,7 @@ class ChangeRegistry:
             "applied_at": _now_iso(),
             "status": "applied",
         }
-        path = self.changelog_dir / f"{change_id}.json"
+        path = self.changelog_dir / f"{safe_change_id}.json"
         path.write_text(json.dumps(entry, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8")
 
@@ -83,13 +96,21 @@ class ChangeRegistry:
         Jamais `git reset --hard` : on recopie la sauvegarde sur le fichier
         actuel, préservant l'historique git.
         """
-        entry_path = self.changelog_dir / f"{change_id}.json"
+        safe_change_id = _safe_id(change_id)
+        entry_path = self.changelog_dir / f"{safe_change_id}.json"
         if not entry_path.is_file():
             return False, f"changement introuvable: {change_id}"
         entry = json.loads(entry_path.read_text(encoding="utf-8"))
         file_rel = entry["file"]
+        # Valider que file_rel ne contient pas de traversée de chemin
+        _safe_id(pathlib.Path(file_rel).name)
         file_path = (self.root / file_rel).resolve()
-        backup_name = f"{change_id}_{pathlib.Path(file_rel).name}"
+        # Confinement : le fichier résolu doit rester sous self.root
+        try:
+            file_path.relative_to(self.root)
+        except ValueError:
+            return False, f"chemin de fichier hors périmètre: {file_rel}"
+        backup_name = f"{safe_change_id}_{pathlib.Path(file_rel).name}"
         backup_path = self.backup_dir / backup_name
         if not backup_path.is_file():
             return False, f"sauvegarde introuvable: {backup_path}"

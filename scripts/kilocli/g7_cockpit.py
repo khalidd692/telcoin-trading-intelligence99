@@ -30,6 +30,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_id(value: str) -> str:
+    """Valide un identifiant de worker utilisé dans un nom de fichier : rejette
+    tout caractère de traversée de chemin."""
+    if not value or not value.strip():
+        raise ValueError("identifiant vide")
+    if any(c in value for c in "/\\:*?\"<>|"):
+        raise ValueError(f"identifiant invalide (caractère interdit): {value!r}")
+    if ".." in value:
+        raise ValueError(f"identifiant invalide (traversée de chemin): {value!r}")
+    return value
+
+
 class Cockpit:
     """Registre d'état des workers Kilo."""
 
@@ -38,11 +50,13 @@ class Cockpit:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, worker_id: str) -> pathlib.Path:
-        return self.dir / f"{worker_id}.json"
+        safe = _safe_id(worker_id)
+        return self.dir / f"{safe}.json"
 
     def set_state(self, worker_id: str, state: str,
                   detail: str = "", mission_id: str | None = None) -> None:
         """Définit l'état d'un worker."""
+        _safe_id(worker_id)
         if state not in VALID_STATES:
             raise ValueError(f"état invalide: {state} (valeurs valides: {VALID_STATES})")
         record = {

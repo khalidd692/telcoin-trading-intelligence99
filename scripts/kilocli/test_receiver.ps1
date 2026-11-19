@@ -45,7 +45,7 @@ Write-Host "Test 3 : anti-doublon (doublon refusé)"
 $result = & pwsh -ExecutionPolicy Bypass -File $receiver -IssueNumber 123 2>&1
 $exitCode = $LASTEXITCODE
 Check ($exitCode -eq 2) "code de sortie = 2 (doublon refusé)"
-Check (($result -join ' ') -like "*doublon refus*" -or ($result -join ' ') -like "*Conflit CAS*") "message de refus de doublon ou conflit CAS présent"
+Check (($result -join ' ') -like "*doublon refus*" -or ($result -join ' ') -like "*doublon refusée*" -or ($result -join ' ') -like "*Conflit CAS*") "message de refus de doublon ou conflit CAS présent"
 
 # --- Test 4 : journal d'exécution écrit ---
 Write-Host "Test 4 : journal d'exécution"

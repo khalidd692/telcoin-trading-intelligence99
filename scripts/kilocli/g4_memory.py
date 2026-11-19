@@ -28,6 +28,19 @@ def sha256_file(path: pathlib.Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _safe_id(value: str) -> str:
+    """Valide un identifiant utilisé dans un nom de fichier : rejette tout
+    caractère de traversée de chemin (../, slash, anti-slash, deux-points,
+    astérisque, point d'interrogation, barre verticale, crochets)."""
+    if not value or not value.strip():
+        raise ValueError("identifiant vide")
+    if any(c in value for c in "/\\:*?\"<>|"):
+        raise ValueError(f"identifiant invalide (caractère interdit): {value!r}")
+    if ".." in value:
+        raise ValueError(f"identifiant invalide (traversée de chemin): {value!r}")
+    return value
+
+
 class MemoryStore:
     """Magasin de persistance inter-sessions."""
 
@@ -36,7 +49,8 @@ class MemoryStore:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, session_id: str) -> pathlib.Path:
-        return self.dir / f"{session_id}.json"
+        safe = _safe_id(session_id)
+        return self.dir / f"{safe}.json"
 
     def save(self, session_id: str, state: dict) -> str:
         """Sauvegarde l'état d'une session. Retourne le SHA-256 de l'artefact."""
