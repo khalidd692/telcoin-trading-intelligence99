@@ -1,0 +1,122 @@
+{
+  "generation_runs": [
+    {
+      "mission_id": "integration-app-new-20261119",
+      "verdict": "FAIL",
+      "chosen_model": "kilo-auto/free",
+      "artifacts": [],
+      "checks": [],
+      "provider_calls": 1,
+      "duration_s": 51.234,
+      "reasons": [
+        "kind=code (+1)",
+        "touches_files=2 (+1)",
+        "needs_tools (+0)",
+        "=> medium"
+      ],
+      "reused": false,
+      "attempts": [
+        {
+          "attempt": 1,
+          "verdict": "FAIL",
+          "missing_artifacts": [
+            "tasks.py",
+            "README.md"
+          ],
+          "checks": [],
+          "provider_evidence": {
+            "catalog_sha256": "eaa4d639a409d6b5d4d7cb1a4c33349944ab40628703961844959b870d5f842d",
+            "may_train_on_prompts": true,
+            "http_status": 200,
+            "response_model": "dots-studio/dots-3-note-preview:free",
+            "cost_usd": "0",
+            "response_sha256": "cb9452d44134e02139da935906801cf2b6861440cac96bf59b0fb01fe06ae282"
+          }
+        }
+      ],
+      "artifact_digests": {},
+      "provider": "kilo-auto-free"
+    },
+    {
+      "mission_id": "integration-app-format-repair-20261119",
+      "verdict": "FAIL",
+      "chosen_model": "kilo-auto/free",
+      "artifacts": [
+        "tasks.py"
+      ],
+      "checks": [],
+      "provider_calls": 2,
+      "duration_s": 107.578,
+      "reasons": [
+        "provider error: ProviderError",
+        "kind=code (+1)",
+        "touches_files=2 (+1)",
+        "needs_tools (+0)",
+        "=> medium"
+      ],
+      "reused": false,
+      "attempts": [
+        {
+          "attempt": 1,
+          "verdict": "FAIL",
+          "missing_artifacts": [
+            "README.md"
+          ],
+          "checks": [],
+          "provider_evidence": {
+            "catalog_sha256": "eaa4d639a409d6b5d4d7cb1a4c33349944ab40628703961844959b870d5f842d",
+            "may_train_on_prompts": true,
+            "http_status": 200,
+            "response_model": "dots-studio/dots-3-note-preview:free",
+            "cost_usd": "0",
+            "response_sha256": "da520dcab82158970387ca03bc52d600145394bcb9b4f4487a1dbfb287cdbf57"
+          }
+        },
+        {
+          "attempt": 2,
+          "verdict": "FAIL",
+          "error": "ProviderError"
+        }
+      ],
+      "artifact_digests": {
+        "tasks.py": "75a737c4ea540338ae7848a58fd769de9bb2b96808fab7feafc5804db761244e"
+      },
+      "provider": "kilo-auto-free"
+    }
+  ],
+  "independent_task_code_verification": {
+    "name": "task-app-acceptance",
+    "sandbox_fingerprint": "3579a9ed5580e45ee8e11532f927d6f0cfe277460b06234cefb1f7863cafeded",
+    "checks": [
+      "add creates a new open task",
+      "list preserves the task across processes",
+      "edit persists the new title",
+      "complete persists the done flag",
+      "different database stays isolated",
+      "delete persists removal"
+    ],
+    "artifact_sha256": "75a737c4ea540338ae7848a58fd769de9bb2b96808fab7feafc5804db761244e",
+    "ok": true,
+    "exit": 0,
+    "detail": ""
+  },
+  "original_mission_verdict": "FAIL \u2014 README missing; never promoted to ACCEPTED",
+  "readme_author": "integrator; documentation completed separately",
+  "publication_verification": {
+    "name": "task-app-acceptance",
+    "sandbox_fingerprint": "3579a9ed5580e45ee8e11532f927d6f0cfe277460b06234cefb1f7863cafeded",
+    "checks": [
+      "add creates a new open task",
+      "list preserves the task across processes",
+      "edit persists the new title",
+      "complete persists the done flag",
+      "different database stays isolated",
+      "delete persists removal"
+    ],
+    "artifact_sha256": "f9cdf962a3fdbd44b5167e1571da827733436132064cd9884b700f9f2e39756b",
+    "ok": true,
+    "exit": 0,
+    "detail": ""
+  },
+  "publication_note": "Only CRLF normalized to LF for Git publication; original generated artifact and original FAIL receipts preserved privately."
+}

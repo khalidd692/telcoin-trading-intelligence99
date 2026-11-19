@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "record_type": "read_only_execution_backlog",
+  "created_at": "2026-11-18",
+  "goal": "Finir notre moteur d'agents IA autonomes sans copier-coller inter-environnements",
+  "project": "agent-core",
+  "source_of_truth": "GitHub issue de pilotage, PR et preuves; ce fichier est une photographie initiale, pas un statut live",
+  "owner_roles": {
+    "openhands": "Cloud, orchestration et preuves",
+    "kilo": "Windows, runtime natif, validation",
+    "hermes": "Intelligence, mémoire, modèles, Skills",
+    "owner": "Secrets, permissions, merges, dépenses et production"
+  },
+  "allowed_statuses": [
+    "todo",
+    "in_progress",
+    "in_review",
+    "blocked",
+    "awaiting_human",
+    "accepted"
+  ],
+  "tasks": [
+    {
+      "id": "S-01",
+      "title": "Attester la révocation du jeton OpenHands exposé dans #88",
+      "owner": "owner",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Vérification de la révocation par le propriétaire, aucune valeur de secret publiée"
+      ],
+      "initial_state": "awaiting_human",
+      "notes": "Sécurité : les agents peuvent repérer les fuites sans effectuer la rotation"
+    },
+    {
+      "id": "S-02",
+      "title": "Contrôler protections GitHub et permissions minimales",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Rapport ruleset main+branche produit, CI obligatoire, impossibilité d'écrire sur branches protégées sans accord"
+      ],
+      "initial_state": "todo",
+      "notes": "Séparer audit et changement de permissions propriétaire"
+    },
+    {
+      "id": "S-03",
+      "title": "Comparer #79 et #92 pour un correctif cloud unique sûr",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Diff sur main, tests de vraie API, actions HIGH toujours bloquées; un seul PR candidat, aucune fusion automatique"
+      ],
+      "initial_state": "in_review",
+      "notes": "PR #92 nouvelle, rapporte 747 tests et correction reprise; pas encore prouvée sur main"
+    },
+    {
+      "id": "S-04",
+      "title": "Fiabiliser les mises à jour d'état CAS/fencing et le ledger",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "Deux runners en concurrence -> une conversation au plus; aucun lost update; état récupérable après crash"
+      ],
+      "initial_state": "todo",
+      "notes": "Réutiliser verrou KV existant, ne pas créer deuxième arbiter"
+    },
+    {
+      "id": "S-05",
+      "title": "Verdict métier réellement vérifié pour chaque critère",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "3 rôles PASS mensongers + test échoué => MISSION_ACCEPTED=false; preuve ref/SHA exigée"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas confondre completed et accepted"
+    },
+    {
+      "id": "S-06",
+      "title": "Approbation liée au contenu et protections anti-injection",
+      "owner": "openhands",
+      "priority": "P0",
+      "dependencies": [],
+      "acceptance_checks": [
+        "Issue modifiée après approbation refusée; acteur non autorisé refusé; garde commandes"
+      ],
+      "initial_state": "todo",
+      "notes": "Filtre pull_request existe déjà"
+    },
+    {
+      "id": "Z-01",
+      "title": "Entrée unique de mission dans notre propre programme",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "CLI native exécute une mission bornée et produit fichier+test+preuve, sans ouvrir les trois applications"
+      ],
+      "initial_state": "todo",
+      "notes": "S'appuyer sur bus/router/memory existants; model provider réellement interchangeable"
+    },
+    {
+      "id": "Z-02",
+      "title": "Pont GitHub Kilo Windows sans copier-coller",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "S-04",
+        "S-06"
+      ],
+      "acceptance_checks": [
+        "Issue dirigée vers Kilo -> reçu+ack+résultat sans copier-coller, hors ligne puis reprise sans doublon"
+      ],
+      "initial_state": "todo",
+      "notes": "connected=False tant que le test live échoue ; pas de tunnel ni token Contents write inutile"
+    },
+    {
+      "id": "Z-03",
+      "title": "Pont Hermes de récupération des missions et preuves",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [
+        "S-06"
+      ],
+      "acceptance_checks": [
+        "Hermes récupère mission nouvelle et publie mémoire/plan dans GitHub sans collage manuel; nouvelle session prouvée"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas supposer injection auto d'une issue GitHub"
+    },
+    {
+      "id": "Z-04",
+      "title": "Passation automatique à la tâche suivante",
+      "owner": "openhands",
+      "priority": "P1",
+      "dependencies": [
+        "Z-02",
+        "Z-03",
+        "S-04",
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "Une mission peut parcourir deux chefs et deux étapes avec ack, vérification et nouvelle tâche sans intervention utilisateur"
+      ],
+      "initial_state": "todo",
+      "notes": "Pas de dépendance au PC allumé pour tâches 100% cloud"
+    },
+    {
+      "id": "Z-05",
+      "title": "Mode hors-ligne : reprise des tâches non dépendantes",
+      "owner": "kilo",
+      "priority": "P1",
+      "dependencies": [
+        "Z-02",
+        "Z-04"
+      ],
+      "acceptance_checks": [
+        "48h PC indisponible => cloud non bloquant poursuit, tâche Kilo attend; reprise sans travail doublé"
+      ],
+      "initial_state": "todo",
+      "notes": "Les durées sont des fixtures simulables sans attendre 48h réelles"
+    },
+    {
+      "id": "I-01",
+      "title": "Routeur des modèles gratuits réellement disponibles",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [],
+      "acceptance_checks": [
+        "API gratuite testée, quota/latence et fallback établis ; inconnu => fail closed"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas réactiver modèles locaux"
+    },
+    {
+      "id": "I-02",
+      "title": "Mémoire portable inter-sessions, scoping et restauration",
+      "owner": "hermes",
+      "priority": "P1",
+      "dependencies": [
+        "S-05"
+      ],
+      "acceptance_checks": [
+        "Un fait vérifié écrit en session A, rappelé session B sans collage; tests projets A/B; restauration privée"
+      ],
+      "initial_state": "todo",
+      "notes": "Réutiliser isolation et version memory.py existants, pas de dump privé dans Git public"
+    },
+    {
+      "id": "I-03",
+      "title": "Évaluateur indépendant + Skills avec rollback",
+      "owner": "hermes",
+      "priority": "P2",
+      "dependencies": [
+        "S-05",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "Skill mauvais rejeté; gain sur test protégé; petit échantillon inconclusif; rollback démontré"
+      ],
+      "initial_state": "todo",
+      "notes": "Le modèle proposant ne vérifie pas ses résultats"
+    },
+    {
+      "id": "P-01",
+      "title": "Inventaire des PR et intégration sans conflits",
+      "owner": "openhands",
+      "priority": "P1",
+      "dependencies": [
+        "S-03"
+      ],
+      "acceptance_checks": [
+        "Carte #78/#79/#83/#85/#87/#88/#89/#90/#91/#92; compatibilité et tests sur SHA final"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas merger sans approbation"
+    },
+    {
+      "id": "P-02",
+      "title": "Cockpit / état avec preuves et alertes",
+      "owner": "openhands",
+      "priority": "P2",
+      "dependencies": [
+        "S-05",
+        "Z-04"
+      ],
+      "acceptance_checks": [
+        "Affiche RUNNING/BLOCKED/ACCEPTED sourcés, quota horodaté, alerte externe testée"
+      ],
+      "initial_state": "todo",
+      "notes": "Réutiliser PR #87, pas de seconde UI concurrente"
+    },
+    {
+      "id": "P-03",
+      "title": "Isolation deux projets et sécurité TEL99",
+      "owner": "kilo",
+      "priority": "P2",
+      "dependencies": [
+        "Z-01",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "Tâche nouveau projet B n'accède pas mémoire/data TEL99; tests politiques de branche"
+      ],
+      "initial_state": "todo",
+      "notes": "Aucun ordre financier"
+    },
+    {
+      "id": "F-01",
+      "title": "Démo une mission sans transfert humain",
+      "owner": "kilo",
+      "priority": "P3",
+      "dependencies": [
+        "Z-01",
+        "Z-04",
+        "I-01",
+        "I-02"
+      ],
+      "acceptance_checks": [
+        "Une instruction propriétaire -> livrable exécutable+tests+retour, zéro copier-coller et zéro faux PASS"
+      ],
+      "initial_state": "todo",
+      "notes": "Premier livrable simple puis tâche TEL99 isolée"
+    },
+    {
+      "id": "F-02",
+      "title": "Crash, reprise et compatibilité sans chacun des trois outils",
+      "owner": "openhands",
+      "priority": "P3",
+      "dependencies": [
+        "F-01",
+        "Z-05"
+      ],
+      "acceptance_checks": [
+        "Reprise sans doublon après kill; noyau travaille sans clients Hermes/Kilo/OpenHands"
+      ],
+      "initial_state": "todo",
+      "notes": "Distinguer noyau natif local et cloud nécessitant exécuteur"
+    },
+    {
+      "id": "F-03",
+      "title": "Livraison, guide propriétaire et preuve finale",
+      "owner": "kilo",
+      "priority": "P3",
+      "dependencies": [
+        "F-01",
+        "F-02",
+        "I-03",
+        "P-02",
+        "P-03"
+      ],
+      "acceptance_checks": [
+        "Guide 1 commande, sauvegarde/export, journal PASS/FAIL/BLOCKED, preuves, reste à approuver"
+      ],
+      "initial_state": "todo",
+      "notes": "Ne pas prétendre tout finir si actions humaines sensibles non résolues"
+    }
+  ]
+}

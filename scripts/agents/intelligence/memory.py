@@ -24,8 +24,10 @@ keeps it reviewable and diff-friendly in git.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -119,6 +121,45 @@ class Entry:
         )
 
 
+def _read_project_snapshot(path: pathlib.Path, project: str) -> dict:
+    if not project or project != slug(project):
+        raise ValueError("invalid snapshot project")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, dict) or type(data.get("schema")) is not int
+            or data["schema"] != SCHEMA_VERSION or data.get("project") != project
+            or not isinstance(data.get("entries"), list)
+            or not isinstance(data.get("history"), list)
+            or not all(isinstance(event, dict) for event in data["history"])):
+        raise ValueError("invalid memory snapshot or different project")
+    seen = set()
+    for entry in data["entries"]:
+        if (not isinstance(entry, dict) or entry.get("project") != project
+                or not isinstance(entry.get("id"), str) or entry["id"] in seen
+                or type(entry.get("verified")) is not bool
+                or type(entry.get("version")) is not int or entry["version"] < 1):
+            raise ValueError("invalid or duplicate entry in memory snapshot")
+        Entry.from_dict(entry)
+        seen.add(entry["id"])
+    return data
+
+
+def _write_new_private(path: pathlib.Path, data: dict) -> None:
+    """Publish a complete, owner-only local file without replacing a target."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".memory-", delete=False) as output:
+            tmp_path = pathlib.Path(output.name)
+            json.dump(data, output, indent=2, ensure_ascii=False, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(tmp_path, path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink()
+
+
 class MemoryStore:
     """A file-backed, project-isolated knowledge store."""
 
@@ -141,7 +182,12 @@ class MemoryStore:
         except (OSError, ValueError):
             return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
                     "history": []}
-        data.setdefault("entries", [])
+        if not isinstance(data, dict) or data.get("project") != project:
+            raise ValueError("memory document belongs to a different project or is invalid")
+        entries = data.setdefault("entries", [])
+        if not isinstance(entries, list) or any(
+                not isinstance(entry, dict) or entry.get("project") != project for entry in entries):
+            raise ValueError("memory document contains invalid or foreign entries")
         data.setdefault("history", [])
         return data
 
@@ -164,6 +210,12 @@ class MemoryStore:
         if not isinstance(entry.project, str) or not entry.project.strip():
             raise ValueError("entry project must be a non-empty string")
         data = self._load(entry.project)
+        self._record_entry(data, entry, actor)
+        self._save(entry.project, data)
+        return entry
+
+    @staticmethod
+    def _record_entry(data: dict, entry: Entry, actor: str) -> None:
         previous = [e for e in data["entries"] if e["id"] == entry.id]
         if previous:
             entry.version = max(int(e.get("version", 1)) for e in previous) + 1
@@ -177,8 +229,6 @@ class MemoryStore:
             "id": entry.id,
             "version": entry.version,
         })
-        self._save(entry.project, data)
-        return entry
 
     def supersede(self, project: str, old_id: str, new: Entry, *,
                   actor: str = "agent") -> Entry:
@@ -187,13 +237,17 @@ class MemoryStore:
         The old entry is kept (with ``superseded_by`` set) so the reason a
         belief changed remains auditable.
         """
-        new.supersedes = old_id
-        new.project = project
-        self.record(new, actor=actor)
+        if new.project != project:
+            raise ValueError("a replacement entry must belong to the same project")
+        if new.id == old_id:
+            raise ValueError("a replacement entry needs a distinct id")
         data = self._load(project)
-        for e in data["entries"]:
-            if e["id"] == old_id:
-                e["superseded_by"] = new.id
+        old = next((entry for entry in data["entries"] if entry["id"] == old_id), None)
+        if old is None:
+            raise ValueError("the entry to replace does not exist")
+        new.supersedes = old_id
+        old["superseded_by"] = new.id
+        self._record_entry(data, new, actor)
         data["history"].append({
             "at": utcnow_iso(),
             "actor": actor,
@@ -278,6 +332,19 @@ class MemoryStore:
                 scored.append((score, entry))
         scored.sort(key=lambda pair: (-pair[0], pair[1].id))
         return [entry for _, entry in scored[:limit]]
+
+    def export_project(self, project: str, destination: str | pathlib.Path) -> None:
+        """Write one existing project document, including its provenance and history."""
+        path = pathlib.Path(destination)
+        snapshot = _read_project_snapshot(self._path(project), project)
+        _write_new_private(path, snapshot)
+
+    def restore_project(self, project: str, source: str | pathlib.Path) -> None:
+        """Restore an operator-provided snapshot into an empty project slot."""
+        data = _read_project_snapshot(pathlib.Path(source), project)
+        destination = self._path(project)
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _write_new_private(destination, data)
 
     def history(self, project: str) -> list[dict]:
         return self._load(project)["history"]

@@ -117,17 +117,19 @@ def cmd_improve(args) -> int:
         min_delta=args.min_delta,
     )
     print(json.dumps(comparison.to_dict(), indent=2, ensure_ascii=False))
+    if args.measured_out:
+        try:
+            improvement.write_evaluation_report(args.measured_out, comparison, outcomes)
+        except FileExistsError:
+            print("evaluation output already exists", file=sys.stderr)
+            return 2
+        print(f"wrote evaluation report to {args.measured_out}")
     if args.record:
         store = _store(args)
         entry_id = improvement.apply_verdict(
             comparison, store, args.project or "common"
         )
         print(f"recorded verdict as {entry_id}")
-    if not args.measured_out:
-        pass
-    else:
-        improvement.write_measured_quality(args.measured_out, outcomes)
-        print(f"wrote measured quality to {args.measured_out}")
     return 0 if comparison.verdict != improvement.REJECT else 1
 
 
@@ -183,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-delta", type=float, default=0.0)
     p.add_argument("--record", action="store_true")
     p.add_argument("--project", default="")
-    p.add_argument("--measured-out", default="")
+    p.add_argument("--measured-out", default="", help="new file for a review-only evaluation report")
     p.set_defaults(func=cmd_improve)
 
     p = sub.add_parser("demo", help="run the end-to-end demonstration")

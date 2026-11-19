@@ -1,0 +1,25 @@
+{
+  "utc": "2026-11-19T20:40:01.928331+00:00",
+  "command": "python -B tests/run_autonomy_acceptance.py --sandbox-image docker.io/library/python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+  "tests_run": 381,
+  "failures": [],
+  "errors": [],
+  "skipped": [
+    {
+      "test": "test_agent_protocol.OpenHandsAdapterTests.test_agent_server_reachable",
+      "reason": "set TEL99_LIVE_PROBES=1 to run live probes"
+    },
+    {
+      "test": "test_agent_protocol.OpenHandsAdapterTests.test_conversation_route_is_live",
+      "reason": "set TEL99_LIVE_PROBES=1 to run live probes"
+    },
+    {
+      "test": "test_agent_protocol.OpenHandsAdapterTests.test_quota_readable",
+      "reason": "set TEL99_LIVE_PROBES=1 to run live probes"
+    }
+  ],
+  "success": true,
+  "docker_image": "docker.io/library/python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+  "log_sha256": "ff0cf03b756e16754a14b6359d35cde2d64f01c476fb1b6191b4159609fae7c8",
+  "network_model_calls": 0
+}

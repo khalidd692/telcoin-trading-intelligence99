@@ -1,0 +1,21 @@
+{
+  "reviewer": "independent Codex review subagent",
+  "scope": "runtime, restricted free specialist, state/approval/STOP/regression tests, sanitized proof documents",
+  "independent_targeted_tests": 31,
+  "failures": 0,
+  "errors": 0,
+  "command": "python -B -m unittest tests.test_autonomy_runtime tests.test_kilo_executor tests.test_kilo_process_control tests.test_autonomy_review_regressions -v",
+  "initial_defects_fixed": [
+    "stale dependency accepted against different contract",
+    "external status misleading IDLE",
+    "session budget ignored between tasks",
+    "integrity error misclassified BUSY",
+    "CLI source failure returned exit0"
+  ],
+  "remaining_limits": [
+    "heartbeat freshness is not PID liveness",
+    "three prompt-role identities supported; not twelve connected Agent Manager sessions",
+    "verifier independently checks artifact acceptance hash, not raw provider HTTP attestation"
+  ],
+  "overall": "PARTIEL; no approval for main merge or broad G0-G7 acceptance"
+}
