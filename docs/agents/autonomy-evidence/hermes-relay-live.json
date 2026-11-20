@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-19T23:41:05Z",
+ "generated_at": "2026-11-20T00:25:13Z",
  "owner": "HERMES (failover lead, mandat GO issue #67 commentaire 7024804657)",
  "branch": "hermes/relay-github-adapter-20261120",
  "base_pr": 124,
@@ -14,17 +14,17 @@
   "local_codex.exclusive/heartbeat (verrous + heartbeat #118/#119)"
  ],
  "new_files_sha256": {
-  "hermes_executor.py": "e00fa98f7538ba874ae24a1fc9eed247ba52de57bb9ae2325b1250f5e6642b71",
-  "hermes_verifier.py": "b60cc942b915c04227aef93ee2db3719ebfb27093081405b9757fc8da31274e2",
-  "github_mission_source.py": "9a3de400ce02e2f39dc4bb28a2eb2ae30c15e68bc944f8a4a53dcdbd31fb8917",
-  "hermes_github_adapter.py": "50b5dd5baae167614e6c6307115f88f828738d7fd64850ac9e8c52c7699cf7cc"
+  "hermes_executor.py": "2cf690ca33935ba928d67611d266f10c83c18bf39c1237d2172b7d35ec958817",
+  "hermes_verifier.py": "88c788f8ff97569aa861f538ca1c09ebb92f2855862bca4b83113f42251c5c69",
+  "github_mission_source.py": "8a89a40ce580707364ca35279497dd7eae5bcf569c8258d7e1733cebd8455fdd",
+  "hermes_github_adapter.py": "afaba5c272d5308645cea1dccc37637130b35158c67ae3853a2860e6e26e09f3"
  },
  "tests": {
-  "test_hermes_relay.py": "38/38",
+  "test_hermes_relay.py": "50/50",
   "test_autonomy_runtime.py": "14/14",
   "test_agent_state_cas.py": "7/7",
   "test_kilo_executor.py": "8/8",
-  "total": "67/67",
+  "total": "79/79",
   "model_calls_in_tests": 0
  },
  "approvals": {
@@ -253,5 +253,45 @@
   "2 modèles gratuits vérifiés appelables; pas de repli payant ni de modèle local",
   "les approbations de démonstration sont publiées par Hermes via le gh authentifié du propriétaire sous mandat GO explicite — le propriétaire peut révoquer/STOP"
  ],
- "post_hardening_live_check": "run --once idempotent après durcissement: exit 2 (C AWAITING_HUMAN), 8 événements GitHub inchangés, aucun repost, scan réel exercé"
+ "post_hardening_live_check": "run --once idempotent après durcissement: exit 2 (C AWAITING_HUMAN), 8 événements GitHub inchangés, aucun repost, scan réel exercé",
+ "phase2": {
+  "mandate": "GO phase 2 propriétaire (chat 2026-11-20) + revue coordination 7025896568",
+  "commit": "c0638f1f6ef72bec1e211ca1fad0b18057f00322",
+  "fixes": {
+   "pagination": "traversée complète bornée 100 pages, cap sur page pleine -> ValueError fail-closed; existing_events même traversée; tests 350 commentaires (mission page 4 admise, événement page 4 récupéré) + cap",
+   "strict_cost": "estimated==0.0 ET actual==0.0 exigés; None (inconnu) refusé COST_UNKNOWN_OR_NONZERO_REFUSED (executor+vérificateur); tests",
+   "approval_boundary": "approval.origin delegated-mandate (scope synthétique structurel, worker sans outils) vs owner-direct (artefact local owner-approvals lu-only, anti-traversal); propositions backlog jamais admises; tests"
+  },
+  "bounded_session_live": {
+   "launch": "un seul démarrage borné --seconds 7200 --max-tasks 5 (PID 29944, proc_607226599678)",
+   "polls": "STATE=IDLE multi-polls 10s; file en attente (A/B ACCEPTED, C AWAITING_HUMAN, aucune nouvelle approbation depuis la démo)",
+   "stop_test": "stop.request -> heartbeat STOPPED 00:24:00Z, processus sorti, rapport final publié dans le log; AUCUNE réexécution",
+   "restart_test": "stop.request archivé (ack opérateur), run --once: exit 2 honnête, états inchangés, mémoire rappelée 2/2, 3 sessions relay-live (0 nouvel appel modèle), 8 événements GitHub (0 republication)",
+   "cost": "0 USD — 0 appel modèle pendant toute la session phase 2 + STOP + restart",
+   "budget": "plafond 5 slots configuré et testé unitairement (session_executed, poll max_tasks); non atteint en live (0 nouvelle mission admissible)"
+  },
+  "backlog_proposals": {
+   "I-02": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7026218807",
+   "I-03": "https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7026219424",
+   "note": "PROPOSED via propose (dédup CAS); approbation propriétaire requise; tâches productives hors contrat synthétique -> flux dev sur autorisation humaine, jamais auto-approbation IA"
+  },
+  "validation_matrix": {
+   "1_demarrage_unique": "PASS live",
+   "2_detection_nouvelles_missions": "mécanisme PASS tests (pagination>300, chaîne, sélection); LIVE en attente (aucune nouvelle approbation — non fabriquée)",
+   "3_specialistes": "PASS démo (analyst/dev) + gate contrat; pas de nouvelle mission live",
+   "4_execution_sans_intervention": "PASS démo A->B; pas de nouvelle mission live",
+   "5_publication_resultats": "PASS démo (8 événements); session phase 2: 0 nouveau (rien à publier) + 2 propositions",
+   "6_anti_doublons_restart": "PASS live (états/événements/sessions inchangés)",
+   "7_stop_reel": "PASS live (STOPPED, processus sorti)",
+   "8_plafonds": "PASS configuré+testé (5 slots, 7200s); STOP live à ~2.5min; budget non atteint",
+   "9_cout_nul": "PASS live (0 appel modèle session phase 2; démo actual 0.0)",
+   "10_restart_memoire": "PASS live (rappel 2/2)"
+  },
+  "independent_review_phase2": {
+   "delegation_id": "deleg_41d713f0",
+   "subagent_id": "sa-0-75c69b25",
+   "verdict": "EN_ATTENDU (addendum publié à réception)"
+  },
+  "queue_status": "WAITING_OWNER_APPROVALS — aucune nouvelle mission approuvée sur GitHub depuis la démo; propositions I-02/I-03 en attente; C jamais rejouée automatiquement"
+ }
 }
