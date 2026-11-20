@@ -1,7 +1,7 @@
 {
-  "generated_at": 1795123981,
-  "observations": 498,
-  "valid_observations": 486,
+  "generated_at": 1795140830,
+  "observations": 499,
+  "valid_observations": 487,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 444,
-              "mean_pct": 0.25548
+              "count": 446,
+              "mean_pct": 0.24538
             }
           }
         }
@@ -121,8 +121,23 @@
       "mean_pct": null,
       "positive_fraction": null,
       "rsi_method": "wilder_rma_14_sma_seed",
-      "by_rsi_method": {},
-      "by_outcome_method": {}
+      "by_rsi_method": {
+        "legacy_or_unknown": {
+          "count": 2,
+          "mean_pct": 0.48577,
+          "positive_fraction": 1.0
+        }
+      },
+      "by_outcome_method": {
+        "closed_candle_time_v2": {
+          "by_rsi_method": {
+            "legacy_or_unknown": {
+              "count": 2,
+              "mean_pct": 0.48577
+            }
+          }
+        }
+      }
     }
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
@@ -276,10 +291,10 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 5,
+        "episodes": 6,
         "detected": 2,
         "missed": 2,
-        "unknown": 1,
+        "unknown": 2,
         "detection_fraction_known": 0.5,
         "late_alerts": 5,
         "median_lead_minutes": 42.1,
@@ -317,9 +332,9 @@
       }
     },
     "false_positives": {
-      "count": 25,
-      "evaluable": 41,
-      "pending": 1,
+      "count": 26,
+      "evaluable": 42,
+      "pending": 0,
       "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
