@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-20T00:25:13Z",
+ "generated_at": "2026-11-20T00:30:52Z",
  "owner": "HERMES (failover lead, mandat GO issue #67 commentaire 7024804657)",
  "branch": "hermes/relay-github-adapter-20261120",
  "base_pr": 124,
@@ -17,14 +17,14 @@
   "hermes_executor.py": "2cf690ca33935ba928d67611d266f10c83c18bf39c1237d2172b7d35ec958817",
   "hermes_verifier.py": "88c788f8ff97569aa861f538ca1c09ebb92f2855862bca4b83113f42251c5c69",
   "github_mission_source.py": "8a89a40ce580707364ca35279497dd7eae5bcf569c8258d7e1733cebd8455fdd",
-  "hermes_github_adapter.py": "afaba5c272d5308645cea1dccc37637130b35158c67ae3853a2860e6e26e09f3"
+  "hermes_github_adapter.py": "052b1225328f9b0ffa36c8c92ca261243280e203230f96d9a96f6ef183f554d6"
  },
  "tests": {
-  "test_hermes_relay.py": "50/50",
+  "test_hermes_relay.py": "53/53",
   "test_autonomy_runtime.py": "14/14",
   "test_agent_state_cas.py": "7/7",
   "test_kilo_executor.py": "8/8",
-  "total": "79/79",
+  "total": "82/82",
   "model_calls_in_tests": 0
  },
  "approvals": {
@@ -290,8 +290,16 @@
   "independent_review_phase2": {
    "delegation_id": "deleg_41d713f0",
    "subagent_id": "sa-0-75c69b25",
-   "verdict": "EN_ATTENDU (addendum publié à réception)"
+   "duration_s": 327.46,
+   "verdict": "SUPPORT",
+   "tests_rejoues": "79/79 (audit avant corrections R1/R2)",
+   "reserves_traitees": {
+    "R1": "poll_budget câblé: cap dur intra-poll (min(20, max_tasks+terminaux)), budget session inter-polls; 2 tests dont main --max-tasks 1",
+    "R2": "put_cas vérifié + flag cas_conflict; fenêtre at-least-once bornée documentée; 1 test dédup"
+   },
+   "verdict_file": "docs/agents/autonomy-evidence/hermes-relay-phase2-review.json"
   },
-  "queue_status": "WAITING_OWNER_APPROVALS — aucune nouvelle mission approuvée sur GitHub depuis la démo; propositions I-02/I-03 en attente; C jamais rejouée automatiquement"
+  "queue_status": "WAITING_OWNER_APPROVALS — aucune nouvelle mission approuvée sur GitHub depuis la démo; propositions I-02/I-03 en attente; C jamais rejouée automatiquement",
+  "commit_final": "EN_ATTENDU_COMMIT"
  }
 }

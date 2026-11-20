@@ -98,6 +98,19 @@ def session_executed(states, session_start):
     return done
 
 
+def poll_budget(states, max_tasks):
+    """Hard intra-poll cap (review R1): session budget + terminal skips.
+
+    run_queue counts idempotent terminal skips against max_tasks; adding the
+    current terminal count keeps the intra-poll NEW-execution bound equal to
+    max_tasks, while session_executed caps the total across polls. Bounded by
+    the engine's 20-mission registry limit.
+    """
+    terminal = sum(1 for s in states if isinstance(s, dict)
+                   and s.get("status") in {"ACCEPTED", "REJECTED", "BLOCKED", "AWAITING_HUMAN"})
+    return min(20, max_tasks + terminal)
+
+
 def build_proposal_body(tasks):
     """Backlog -> PROPOSED events: never an approval, never executable."""
     payload = {"proposal": PROPOSAL_MARKER, "status": "PROPOSED",
@@ -300,8 +313,12 @@ def main(argv=None):
             print(json.dumps({"dry_run": True, "tasks": [t["id"] for t in tasks]}))
             return 0
         url = publish_comment(REPO, args.issue, body)
-        runtime.store.put_cas(key, {"url": url, "tasks": [t["id"] for t in tasks], "at": time.time()}, None)
-        print(json.dumps({"proposed": [t["id"] for t in tasks], "url": url}))
+        recorded = runtime.store.put_cas(key, {"url": url, "tasks": [t["id"] for t in tasks], "at": time.time()}, None)
+        # R2: on CAS conflict a concurrent propose already recorded its own URL;
+        # our POST may duplicate the PROPOSED comment (bounded impact: proposals
+        # are never executable nor admitted as approvals). Flagged for audit.
+        print(json.dumps({"proposed": [t["id"] for t in tasks], "url": url,
+                          "cas_conflict": not recorded}))
         return 0
     if not args.issue or not args.mandate_comment:
         parser.error("run requires --issue and --mandate-comment")
@@ -329,7 +346,8 @@ def main(argv=None):
     failed = False
     with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
         while not runtime.stopped() and time.monotonic() < deadline:
-            failed = not runtime.poll(source) or failed
+            states = [runtime.store.get(k) for k in runtime.store.keys("kilo-local")]
+            failed = not runtime.poll(source, max_tasks=poll_budget(states, args.max_tasks)) or failed
             pub.sync()
             executed = session_executed(
                 [runtime.store.get(k) for k in runtime.store.keys("kilo-local")], session_start)

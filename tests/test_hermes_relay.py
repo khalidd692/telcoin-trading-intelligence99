@@ -558,5 +558,53 @@ class Phase2Tests(unittest.TestCase):
         self.assertEqual(reader("HERMES-RELAY-X")["channel"], "owner-local")
 
 
+class ReviewR1R2Tests(unittest.TestCase):
+    """Réserves R1/R2 de la revue indépendante phase 2 (sa-0-75c69b25)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_poll_budget_helper(self):
+        term = [{"id": f"T{i}", "status": "ACCEPTED"} for i in range(3)]
+        self.assertEqual(hga.poll_budget(term, 5), 8)
+        self.assertEqual(hga.poll_budget(term, 20), 20)  # engine registry cap
+        self.assertEqual(hga.poll_budget([], 1), 1)
+        self.assertEqual(hga.poll_budget([{"id": "R", "status": "RUNNING"}], 1), 1)
+
+    def test_main_wiring_hard_intra_poll_cap(self):
+        a = mission("HERMES-RELAY-R1-A")
+        b = mission("HERMES-RELAY-R1-B")
+        payload = {"missions": [a, b], "approvals": seal([a, b]), "sources": {}}
+        class StubExec:
+            def __init__(self, **kw):
+                pass
+            def execute(self, m):
+                return ok_result(m)
+        with mock.patch.object(hga, "github_source", return_value=payload), \
+             mock.patch.object(hga, "HermesExecutor", StubExec):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--once",
+                             "--max-tasks", "1", "--no-publish", "--seconds", "60"])
+        self.assertEqual(code, 0)
+        states = list((self.root / "ledger" / "kilo-local").glob("*.json"))
+        self.assertEqual(len(states), 1)  # hard cap intra-poll: 1 seule exécution
+
+    def test_propose_dedup_via_main(self):
+        bl = self.root / "backlog.json"
+        bl.write_text(json.dumps({"tasks": [
+            {"id": "I-02", "owner": "hermes", "initial_state": "todo", "title": "memoire"}]}))
+        published = []
+        with mock.patch.object(hga, "publish_comment",
+                               side_effect=lambda repo, issue, body: published.append(body) or "u1"):
+            code1 = hga.main(["propose", "--state", str(self.root), "--issue", "94",
+                              "--backlog", str(bl), "--task", "I-02"])
+            code2 = hga.main(["propose", "--state", str(self.root), "--issue", "94",
+                              "--backlog", str(bl), "--task", "I-02"])
+        self.assertEqual((code1, code2), (0, 0))
+        self.assertEqual(len(published), 1)  # dédup CAS: pas de seconde publication
+
+
 if __name__ == "__main__":
     unittest.main()
