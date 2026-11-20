@@ -179,10 +179,10 @@ class Runtime(Supervisor):
         except Blocked as exc:
             self.observe(STATE="BUSY" if "superviseur" in str(exc) and "cette file" in str(exc) else "BLOCKED",
                          BLOCKER=type(exc).__name__)
-    def poll(self,source):
+    def poll(self,source,max_tasks=20):
         try:
             data=source()
-            self.run_queue(data["missions"],data["approvals"])
+            self.run_queue(data["missions"],data["approvals"],max_tasks=max_tasks)
             return self.live["STATE"] not in {"BLOCKED","BUSY"}
         except (OSError,ValueError,KeyError):
             self.observe(STATE="BLOCKED",BLOCKER="SOURCE_UNAVAILABLE_OR_INVALID");return False

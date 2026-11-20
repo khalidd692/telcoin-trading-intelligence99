@@ -198,7 +198,7 @@ class ExecutorTests(unittest.TestCase):
             return row
         exe = HermesExecutor(root=self.root, cli_command=[sys.executable, str(self.ok)],
                              usage_reader=paid)
-        with self.assertRaisesRegex(ExecutorUnavailable, "NONZERO_COST_REFUSED"):
+        with self.assertRaisesRegex(ExecutorUnavailable, "COST_UNKNOWN_OR_NONZERO_REFUSED"):
             exe.execute(mission())
 
     def test_missing_session_refused(self):
@@ -438,6 +438,124 @@ class TimeoutFailClosedTests(unittest.TestCase):
                                    side_effect=subprocess.TimeoutExpired("gh", 60)):
                 self.assertFalse(r.poll(lambda: gms.github_source("x/y", 94, 67, MANDATE)))
             self.assertEqual(r.status()["state"], "BLOCKED")
+
+
+class Phase2Tests(unittest.TestCase):
+    """GO phase 2 : pagination >300, coût strictement nul, frontière d'approbation."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_pagination_beyond_300_admits_late_mission(self):
+        m = mission("HERMES-RELAY-LATE-320")
+        comments = [{"id": i, "user": {"login": "khalidd692"}, "body": f"noise {i}"}
+                    for i in range(350)]
+        comments[320] = approval_comment(m, cid=320)
+        def fetcher(ep):
+            page = int(ep.rsplit("page=", 1)[1])
+            return comments[(page - 1) * 100:page * 100]
+        traversed = gms.fetch_comments("x/y", 94, fetcher=fetcher)
+        self.assertEqual(len(traversed), 350)
+        data = gms.parse_approvals(traversed, mandate_comment_id=MANDATE)
+        self.assertEqual([x["id"] for x in data["missions"]], [m["id"]])
+
+    def test_pagination_cap_fail_closed(self):
+        def fetcher(ep):
+            return [{"id": 1, "user": {"login": "khalidd692"}, "body": "x"}] * 100
+        with self.assertRaises(ValueError):
+            gms.fetch_comments("x/y", 94, fetcher=fetcher)
+
+    def test_existing_events_sees_late_pages(self):
+        body = event_body("M-LATE", "ACCEPTED", {"contract_sha256": "z"}, issue=94)
+        comments = [{"id": i, "body": "noise"} for i in range(310)]
+        comments[305] = {"id": 305, "body": body, "html_url": "u-late"}
+        def fetcher(ep):
+            page = int(ep.rsplit("page=", 1)[1])
+            return comments[(page - 1) * 100:page * 100]
+        found = hga.existing_events("x/y", 94, fetcher=fetcher)
+        self.assertIsNotNone(found)
+        self.assertEqual(found[("M-LATE", "ACCEPTED")], "u-late")
+
+    def test_executor_unknown_actual_cost_refused(self):
+        fake = self.root / "fake_ok.py"
+        fake.write_text(FAKE_OK)
+        def unknown(home, sid):
+            row = usage_stub(home, sid)
+            row["actual_cost_usd"] = None  # coût réel INCONNU != preuve de zéro
+            return row
+        exe = HermesExecutor(root=self.root, cli_command=[sys.executable, str(fake)],
+                             usage_reader=unknown)
+        with self.assertRaisesRegex(ExecutorUnavailable, "COST_UNKNOWN_OR_NONZERO_REFUSED"):
+            exe.execute(mission())
+
+    def test_verifier_unknown_actual_cost_not_ok(self):
+        res = ok_result()
+        res["provider_evidence"]["actual_cost_usd"] = None
+        self.assertFalse(hermes_verifier.verify(mission(), res)["ok"])
+
+    def _with_origin(self, comment, origin):
+        payload = json.loads(gms.BLOCK_RE.search(comment["body"]).group(1))
+        payload["approval"]["origin"] = origin
+        comment["body"] = ("```hermes-mission/v1\n"
+                           + json.dumps(payload, ensure_ascii=True) + "\n```")
+        return comment
+
+    def test_owner_direct_requires_local_artifact(self):
+        m = mission("HERMES-RELAY-OD")
+        c = self._with_origin(approval_comment(m), "owner-direct")
+        self.assertEqual(gms.parse_approvals([c], mandate_comment_id=MANDATE)["missions"], [])
+        bad = lambda mid: {"approved_by": "khalidd692", "channel": "owner-local",
+                           "mission_sha256": "0" * 64}
+        self.assertEqual(gms.parse_approvals([c], mandate_comment_id=MANDATE,
+                                             owner_approval_reader=bad)["missions"], [])
+        good = lambda mid: {"approved_by": "khalidd692", "channel": "owner-local",
+                            "mission_sha256": fingerprint(m)}
+        data = gms.parse_approvals([c], mandate_comment_id=MANDATE,
+                                   owner_approval_reader=good)
+        self.assertEqual([x["id"] for x in data["missions"]], [m["id"]])
+
+    def test_invalid_origin_ignored(self):
+        c = self._with_origin(approval_comment(mission()), "self-granted")
+        self.assertEqual(gms.parse_approvals([c], mandate_comment_id=MANDATE)["missions"], [])
+
+    def test_delegated_origin_explicit_ok(self):
+        c = self._with_origin(approval_comment(mission()), "delegated-mandate")
+        self.assertEqual(len(gms.parse_approvals([c], mandate_comment_id=MANDATE)["missions"]), 1)
+
+    def test_proposal_never_admitted(self):
+        body = hga.build_proposal_body([{"id": "I-02", "title": "memoire"}])
+        c = {"id": 1, "user": {"login": "khalidd692"}, "body": body}
+        self.assertIn("PROPOSED", body)
+        self.assertEqual(gms.parse_approvals([c], mandate_comment_id=MANDATE)["missions"], [])
+
+    def test_session_executed_counts_only_fresh(self):
+        now = time.time()
+        states = [{"id": "OLD", "status": "ACCEPTED", "at": now - 100},
+                  {"id": "NEW", "status": "ACCEPTED", "at": now + 1},
+                  {"id": "ACKED", "status": "ACK", "at": now + 1},
+                  {"id": "RUN", "status": "RUNNING", "at": now + 1}]
+        self.assertEqual(hga.session_executed(states, now), {"NEW", "RUN"})
+
+    def test_poll_max_tasks_passthrough(self):
+        calls = []
+        r = Runtime(self.root, executor=lambda m: (calls.append(m["id"]), ok_result(m))[1])
+        a = mission("HERMES-RELAY-MT-A")
+        b = mission("HERMES-RELAY-MT-B")
+        r.poll(lambda: {"missions": [a, b], "approvals": seal([a, b])}, max_tasks=1)
+        self.assertEqual(calls, [a["id"]])
+        self.assertEqual(list(r.status()["missions"]), [a["id"]])
+
+    def test_owner_approval_reader_read_only_and_bounded(self):
+        reader = hga.owner_approval_reader_for(self.root)
+        self.assertIsNone(reader("ABSENT"))
+        self.assertIsNone(reader("../escape"))
+        d = self.root / "owner-approvals"
+        d.mkdir()
+        (d / "HERMES-RELAY-X.json").write_text(json.dumps(
+            {"approved_by": "khalidd692", "channel": "owner-local", "mission_sha256": "a" * 64}))
+        self.assertEqual(reader("HERMES-RELAY-X")["channel"], "owner-local")
 
 
 if __name__ == "__main__":

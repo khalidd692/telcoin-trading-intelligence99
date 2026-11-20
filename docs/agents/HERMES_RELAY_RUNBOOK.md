@@ -68,6 +68,42 @@ Les événements publiés par le relais (`hermes-relay-event/v1`) ne sont jamais
   ré-admission d'un événement dupliqué.
 - STOP : fichier `stop.request` ; le worker est tué, aucun replay automatique.
 
+## Phase 2 — sessions bornées et frontière d'approbation (GO 2026-11-20)
+
+- **Pagination complète bornée** : `fetch_comments` traverse jusqu'à 100 pages
+  (10 000 commentaires) ; cap atteint sur page pleine → `ValueError` fail-closed
+  (jamais de file tronquée silencieusement). Le scan anti-duplication
+  `existing_events` utilise la même traversée. Tests >300 commentaires inclus.
+- **Coût strictement nul** : `estimated_cost_usd == 0.0` ET `actual_cost_usd == 0.0`
+  exigés (executor + vérificateur). Un coût réel INCONNU (`None`) est REFUSÉ
+  (`COST_UNKNOWN_OR_NONZERO_REFUSED`) — inconnu ≠ preuve de zéro.
+- **Frontière d'approbation** (`approval.origin`) :
+  - `delegated-mandate` (défaut, rétro-compatible démo) : publiées via le gh
+    authentifié du propriétaire sous mandat GO épinglé ; **structurellement
+    limitées aux missions texte synthétiques** (contrat engine + worker sans
+    outils) — aucune permission nouvelle, aucune opération sensible possible.
+  - `owner-direct` : exige en plus un artefact local
+    `<state>/owner-approvals/<mission_id>.json`
+    `{approved_by: khalidd692, channel: owner-local, mission_sha256: <fingerprint>}`
+    que l'adaptateur **lit seulement, n'écrit jamais**. Limite résiduelle assumée :
+    même compte utilisateur sur la machine — la séparation est procédurale et
+    auditée ; une séparation cryptographique exigerait un canal/credential
+    réservé au propriétaire (hors périmètre actuel).
+  - Les modifications productives (code, permissions, sensible) restent hors du
+    contrat synthétique : elles passent par le flux dev normal (branche isolée,
+    tests, revue, PR brouillon) sur autorisation humaine explicite, jamais par
+    auto-approbation IA dans la file.
+- **Backlog → propositions** : `hermes_github_adapter.py propose --state <s>
+  --issue 94 [--task I-02] [--backlog chemin] [--no-publish]` publie des
+  événements `hermes-relay-proposal/v1` (PROPOSED, jamais exécutables, jamais
+  réadmis comme approbations). Dédup CAS par ensemble de tâches.
+- **Session bornée** : `run --seconds 1..7200 --max-tasks 1..20`. Le budget de
+  session compte les missions ayant consommé un slot d'exécution (transitions
+  fraîches au-delà de ACK) ; atteint → arrêt propre `SESSION_BUDGET_REACHED`.
+  STOP : `stop --state <s>` puis acknowledging au prochain lancement = retirer
+  `stop.request` (action opérateur explicite ; archiver le fichier avant).
+  1 worker principal séquentiel (engine) ; sous-agents Hermes ≤ 2 en parallèle.
+
 ## Preuves live (2026-11-19/20)
 
 `docs/agents/autonomy-evidence/hermes-relay-live.json` — sessions Hermes réelles, SHA-256 des

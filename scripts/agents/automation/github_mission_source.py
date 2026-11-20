@@ -27,9 +27,14 @@ except ImportError:  # flat script execution
 APPROVERS = {"khalidd692"}
 MARKER = "hermes-mission/v1"
 EVENT_MARKER = "hermes-relay-event/v1"
+PROPOSAL_MARKER = "hermes-relay-proposal/v1"
 BLOCK_RE = re.compile(r"```" + re.escape(MARKER) + r"\s*\n(.*?)\n```", re.DOTALL)
-MAX_PAGES = 3
+# Full bounded traversal (review point 1): 100 pages x 100 = 10 000 comments.
+# Hitting the cap on a full page fails closed instead of silently dropping
+# newer mandates/approvals from the queue.
+MAX_PAGES = 100
 MAX_MISSIONS = 20
+ORIGINS = {"delegated-mandate", "owner-direct"}
 
 
 def default_fetcher(endpoint):
@@ -54,6 +59,8 @@ def fetch_comments(repo, issue, *, fetcher=None, max_pages=MAX_PAGES):
         comments.extend(data)
         if len(data) < 100:
             break
+        if page == max_pages:
+            raise ValueError("pagination cap reached; refusing to truncate the queue")
     return comments
 
 
@@ -74,13 +81,13 @@ def _expiry_ok(approval, now):
     return expiry.replace(tzinfo=timezone.utc) > now
 
 
-def parse_approvals(comments, *, mandate_comment_id, now=None):
+def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_reader=None):
     now = now or datetime.now(timezone.utc)
     missions, approvals, sources = [], {}, {}
     for comment in comments:
         login = (comment.get("user") or {}).get("login", "")
         body = comment.get("body") or ""
-        if login not in APPROVERS or EVENT_MARKER in body:
+        if login not in APPROVERS or EVENT_MARKER in body or PROPOSAL_MARKER in body:
             continue
         match = BLOCK_RE.search(body)
         if not match:
@@ -106,6 +113,25 @@ def parse_approvals(comments, *, mandate_comment_id, now=None):
         digest = fingerprint(mission)
         if approval.get("mission_sha256") != digest:
             continue
+        # Review point 3: distinguish AI-delegated approval from a distinct
+        # human approval. Missing origin stays backward-compatible with the
+        # validated synthetic demo and is treated as delegated-mandate.
+        origin = approval.get("origin", "delegated-mandate")
+        if origin not in ORIGINS:
+            continue
+        if origin == "owner-direct":
+            # Requires a local owner artifact the adapter only READS (never
+            # writes): approval distinct from the agent that proposes/executes.
+            artifact = owner_approval_reader(mid) if owner_approval_reader else None
+            if (not isinstance(artifact, dict)
+                    or artifact.get("approved_by") not in APPROVERS
+                    or artifact.get("channel") != "owner-local"
+                    or artifact.get("mission_sha256") != digest):
+                continue
+        # delegated-mandate is structurally confined to synthetic text missions:
+        # validate_contract (project=synthetic, synthetic_data=true, fixed roles)
+        # plus the tool-less worker forbid productive changes, permission grants
+        # and sensitive operations. An AI cannot self-approve beyond that scope.
         try:
             validate_contract(mission, {mid: digest})
         except (ValueError, TypeError):
@@ -116,7 +142,8 @@ def parse_approvals(comments, *, mandate_comment_id, now=None):
     return {"missions": missions[:MAX_MISSIONS], "approvals": approvals, "sources": sources}
 
 
-def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=None):
+def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=None,
+                  owner_approval_reader=None):
     """Return the ``{"missions": [...], "approvals": {...}}`` poll payload.
 
     Raises OSError/ValueError on GitHub failure or invalid mandate so the
@@ -125,4 +152,5 @@ def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=Non
     fetcher = fetcher or default_fetcher
     fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher)
     comments = fetch_comments(repo, issue, fetcher=fetcher)
-    return parse_approvals(comments, mandate_comment_id=mandate_comment_id)
+    return parse_approvals(comments, mandate_comment_id=mandate_comment_id,
+                           owner_approval_reader=owner_approval_reader)

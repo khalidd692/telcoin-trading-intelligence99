@@ -183,8 +183,10 @@ class HermesExecutor:
             raise ExecutorUnavailable("HERMES_COST_EVIDENCE_UNAVAILABLE")
         if usage.get("model") != self.model or usage.get("billing_provider") != self.provider:
             raise ExecutorUnavailable("HERMES_MODEL_IDENTITY_MISMATCH")
-        if usage.get("estimated_cost_usd") != 0.0 or usage.get("actual_cost_usd") not in (0.0, None):
-            raise ExecutorUnavailable("NONZERO_COST_REFUSED")
+        # Review point 2: strictly zero cost. An UNKNOWN actual cost (None) is
+        # NOT proof of zero and is refused, exactly like a nonzero cost.
+        if usage.get("estimated_cost_usd") != 0.0 or usage.get("actual_cost_usd") != 0.0:
+            raise ExecutorUnavailable("COST_UNKNOWN_OR_NONZERO_REFUSED")
         artifact = stdout_text.strip()
         if not 1 <= len(artifact.encode("utf-8")) <= 65536:
             raise ExecutorUnavailable("HERMES_ARTIFACT_OUT_OF_BOUNDS")

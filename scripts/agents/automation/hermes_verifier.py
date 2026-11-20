@@ -29,7 +29,7 @@ try:
         {'name': 'artifact-sha256', 'ok': actual == mission.get('expected_sha256') == result.get('sha256')},
         {'name': 'specialist-identity', 'ok': result.get('specialist_id') == role and role in ('tel99-dev', 'tel99-analyst', 'tel99-verifier')},
         {'name': 'hermes-session-evidence', 'ok': re.fullmatch(r'local-[0-9a-f]{64}', str(result.get('session_id', ''))) is not None and evidence.get('session_id') == result.get('session_id') and evidence.get('exit_code') == 0 and isinstance(evidence.get('api_call_count'), int) and evidence.get('api_call_count') >= 1},
-        {'name': 'zero-cost-evidence', 'ok': evidence.get('estimated_cost_usd') == 0.0 and evidence.get('actual_cost_usd') in (0.0, None) and evidence.get('model') in FREE and evidence.get('billing_provider') == 'nous' and result.get('model') == evidence.get('model')},
+        {'name': 'zero-cost-evidence', 'ok': evidence.get('estimated_cost_usd') == 0.0 and evidence.get('actual_cost_usd') == 0.0 and evidence.get('model') in FREE and evidence.get('billing_provider') == 'nous' and result.get('model') == evidence.get('model')},
     ]
     print(json.dumps({'ok': all(c['ok'] for c in checks), 'checks': checks, 'artifact_sha256': actual, 'verifier': 'hermes-fixed-subprocess-v1'}))
 except Exception:
