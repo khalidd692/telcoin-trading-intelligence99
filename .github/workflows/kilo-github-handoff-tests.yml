@@ -1,0 +1,42 @@
+name: Kilo GitHub handoff
+on:
+  pull_request:
+    branches:
+      - hermes/relay-github-adapter-20261120
+    paths:
+      - '.github/workflows/kilo-github-handoff-tests.yml'
+      - 'scripts/agents/automation/**'
+      - 'start-agents.ps1'
+      - 'tests/test_kilo*'
+      - 'tests/test_start_agents.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows offline handoff tests
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      POWERSHELL_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify claims, publication, restart and STOP
+        run: >-
+          python -B -m unittest -v
+          tests.test_kilo_github_handoff
+          tests.test_autonomy_runtime
+          tests.test_kilo_executor
+          tests.test_kilo_process_control
+          tests.test_agent_state_cas
+          tests.test_hermes_relay
+      - name: Verify PowerShell entry point
+        shell: pwsh
+        run: ./tests/test_start_agents.ps1

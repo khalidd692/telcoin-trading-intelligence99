@@ -29,6 +29,10 @@ class ExecutorUnavailable(RuntimeError):
     """A provider, quota or contract block. No paid fallback is attempted."""
 
 
+class ProviderRateLimited(ExecutorUnavailable):
+    """The free gateway returned HTTP 429."""
+
+
 def _role(mission):
     return mission.get('specialist') or mission.get('assigned_to') or mission.get('role')
 
@@ -55,6 +59,8 @@ class Executor:
                 prompt=objective,
             )
         except ProviderError as exc:
+            if str(exc) == "provider HTTP 429":
+                raise ProviderRateLimited("Kilo free provider HTTP 429") from exc
             # ProviderError is sanitised by the native provider; do not leak arbitrary
             # exceptions from implementations into the durable ledger.
             raise ExecutorUnavailable('Kilo free provider unavailable; no fallback') from exc
@@ -135,6 +141,9 @@ def main(argv=None):
         result = Executor().execute(payload)
         print(json.dumps(result, ensure_ascii=True), flush=True)
         return 0
+    except ProviderRateLimited:
+        print(json.dumps({'status': 'BLOCKED', 'reason': 'BLOCKED_PROVIDER_RATE_LIMIT'}), flush=True)
+        return 5
     except (ExecutorUnavailable, ValueError, TypeError, KeyError):
         print(json.dumps({'status': 'BLOCKED', 'reason': 'KILO_FREE_UNAVAILABLE_OR_INVALID_CONTRACT'}), flush=True)
         return 4
