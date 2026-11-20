@@ -14,17 +14,17 @@
   "local_codex.exclusive/heartbeat (verrous + heartbeat #118/#119)"
  ],
  "new_files_sha256": {
-  "hermes_executor.py": "c15b57cc74f72ccbaf11e6140a172e2a29cb84c8cefad58b4ae3e8facb1b4d9b",
+  "hermes_executor.py": "e00fa98f7538ba874ae24a1fc9eed247ba52de57bb9ae2325b1250f5e6642b71",
   "hermes_verifier.py": "b60cc942b915c04227aef93ee2db3719ebfb27093081405b9757fc8da31274e2",
   "github_mission_source.py": "9a3de400ce02e2f39dc4bb28a2eb2ae30c15e68bc944f8a4a53dcdbd31fb8917",
-  "hermes_github_adapter.py": "fd924af383d7954307caaf4e2cc65f38058943fbf865ff1b16049642da779841"
+  "hermes_github_adapter.py": "50b5dd5baae167614e6c6307115f88f828738d7fd64850ac9e8c52c7699cf7cc"
  },
  "tests": {
-  "test_hermes_relay.py": "33/33",
+  "test_hermes_relay.py": "38/38",
   "test_autonomy_runtime.py": "14/14",
   "test_agent_state_cas.py": "7/7",
   "test_kilo_executor.py": "8/8",
-  "total": "62/62",
+  "total": "67/67",
   "model_calls_in_tests": 0
  },
  "approvals": {
@@ -237,7 +237,14 @@
   "verdict": "SUPPORT",
   "reserves": "F1/F2: timeouts gh (subprocess.TimeoutExpired) non couverts par le fail-closed documenté, reproduits en isolation par le vérificateur, fail-safe au redémarrage",
   "corrections_appliquees_par_auteur": "default_fetcher et publish_comment convertissent TimeoutExpired en OSError (fail-closed SOURCE_UNAVAILABLE / retry publication) + 3 tests de régression TimeoutFailClosedTests",
-  "verdict_file": "docs/agents/autonomy-evidence/hermes-relay-independent-review.json"
+  "verdict_file": "docs/agents/autonomy-evidence/hermes-relay-independent-review.json",
+  "reserves_traitees": {
+   "F1_F2": "timeouts gh -> OSError fail-closed (commit 0d6035ea) + 3 tests",
+   "F3": "scan pré-publication des événements GitHub existants (existing_events): recovery sans repost si crash entre POST et CAS; scan indisponible -> publication différée, jamais de blind-post; 3 tests; fenêtre résiduelle at-least-once documentée (EVENT_MARKER empêche toute ré-admission)",
+   "F4": "put_cas vérifié (publication) + journal marqué avant append (pas de ligne dupliquée); 1 test restart",
+   "F5": "HermesExecutor._validate re-vérifie le format d'id (anti-traversal en appel direct); 1 test",
+   "F6": "accepté par design: ancre de confiance = compte owner authentifié + mandat épinglé (contenu du mandat non gate); cost_status non gate, actual None autorisé (spec estimated/actual)"
+  }
  },
  "limits": [
   "PC allumé requis (local_requires_pc_on=true); aucun service permanent installé",
@@ -245,5 +252,6 @@
   "quota fair-share Nous non mesuré globalement (INCONNU); cooldown 429 borné 60..3600s",
   "2 modèles gratuits vérifiés appelables; pas de repli payant ni de modèle local",
   "les approbations de démonstration sont publiées par Hermes via le gh authentifié du propriétaire sous mandat GO explicite — le propriétaire peut révoquer/STOP"
- ]
+ ],
+ "post_hardening_live_check": "run --once idempotent après durcissement: exit 2 (C AWAITING_HUMAN), 8 événements GitHub inchangés, aucun repost, scan réel exercé"
 }

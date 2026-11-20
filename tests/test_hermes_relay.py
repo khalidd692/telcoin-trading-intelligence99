@@ -349,6 +349,73 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue((self.root / "relay-events.jsonl").exists())
 
 
+class ReviewHardeningTests(unittest.TestCase):
+    """Réserves F3/F4/F5 de la revue indépendante SUPPORT (sa-0-4cb76064)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.published = []
+
+    def fake_publisher(self, body):
+        self.published.append(body)
+        return f"https://github.com/fake#{len(self.published)}"
+
+    def test_f5_executor_rejects_bad_id_direct_call(self):
+        exe = HermesExecutor(root=self.root, cli_command=[sys.executable, "unused"],
+                             usage_reader=usage_stub)
+        with self.assertRaisesRegex(ExecutorUnavailable, "Invalid mission id"):
+            exe.execute(mission(i="../escape"))
+
+    def test_f3_scan_recovers_existing_event_without_repost(self):
+        r, _ = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
+                             scan=lambda: {("HERMES-RELAY-TEST-A", "ACK"): "https://github.com/existing#1"})
+        a = mission()
+        r.claim(a)
+        r.inbox.receive({"request_id": a["id"]})
+        self.assertEqual(self.published, [])  # no duplicate POST
+        rec = r.store.get("hermes-relay-published/HERMES-RELAY-TEST-A/ACK")
+        self.assertIsNotNone(rec)
+        self.assertTrue(rec["recovered"])
+        self.assertEqual(rec["url"], "https://github.com/existing#1")
+
+    def test_f3_scan_unavailable_defers_publication(self):
+        state = {"down": True}
+        r, pub = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
+                               scan=lambda: None if state["down"] else {})
+        a = mission()
+        r.claim(a)
+        r.inbox.receive({"request_id": a["id"]})
+        r.save(a, "ACCEPTED", result=ok_result(a))
+        pub.sync()
+        self.assertEqual(self.published, [])  # never blind-post while scan is down
+        state["down"] = False
+        pub.sync()
+        self.assertEqual(len(self.published), 2)
+
+    def test_f3_existing_events_parses_and_fail_closed(self):
+        body = event_body("M1", "ACK", {"contract_sha256": "x"}, issue=94)
+        comments = [{"id": 1, "body": body, "html_url": "u1"}, {"id": 2, "body": "no block"}]
+        found = hga.existing_events("x/y", 94, fetcher=lambda ep: comments)
+        self.assertIsNotNone(found)
+        self.assertEqual(found[("M1", "ACK")], "u1")
+        def boom(ep):
+            raise OSError("down")
+        self.assertIsNone(hga.existing_events("x/y", 94, fetcher=boom))
+
+    def test_f4_journal_no_duplicate_lines_after_restart(self):
+        r, pub = build_runtime(self.root, issue=94, publisher=self.fake_publisher)
+        a = mission()
+        r.claim(a)
+        r.save(a, "ACCEPTED", result=ok_result(a))
+        pub.sync()
+        r2, pub2 = build_runtime(self.root, issue=94, publisher=self.fake_publisher)
+        pub2.sync()
+        lines = (self.root / "relay-events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 1)
+
+
 class TimeoutFailClosedTests(unittest.TestCase):
     """Review indépendante F1/F2 : tout timeout gh doit rester fail-closed."""
 

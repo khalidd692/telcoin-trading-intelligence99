@@ -28,11 +28,38 @@ from local_codex import exclusive, heartbeat
 from protocol.handoff import Inbox
 from hermes_executor import HermesExecutor, FREE_MODELS
 from hermes_verifier import verify as hermes_verify
-from github_mission_source import github_source, EVENT_MARKER
+from github_mission_source import github_source, EVENT_MARKER, fetch_comments
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
 TERMINAL_PUBLISH = {"ACCEPTED", "REJECTED", "BLOCKED", "AWAITING_HUMAN"}
 PAST_ACK = {"RUNNING", "WORKER_EXITED"} | TERMINAL_PUBLISH
+EVENT_BLOCK_RE = re.compile(r"```" + re.escape(EVENT_MARKER) + r"\s*\n(.*?)\n```", re.DOTALL)
+
+
+def existing_events(repo, issue, *, fetcher=None):
+    """Scan GitHub for already-published relay events (review F3 hardening).
+
+    Returns {(mission_id, status): html_url}, or None when the scan is
+    unavailable so the caller skips publication and retries later instead of
+    blind-posting a possible duplicate after a crash between POST and CAS.
+    """
+    try:
+        comments = fetch_comments(repo, issue, fetcher=fetcher)
+    except (OSError, ValueError):
+        return None
+    found = {}
+    for comment in comments:
+        match = EVENT_BLOCK_RE.search(comment.get("body") or "")
+        if not match:
+            continue
+        try:
+            event = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if (event.get("event") == EVENT_MARKER and event.get("mission_id")
+                and event.get("status")):
+            found[(event["mission_id"], event["status"])] = comment.get("html_url", "")
+    return found
 
 
 def publish_comment(repo, issue, body, *, publisher=None):
@@ -86,12 +113,13 @@ class AckInbox(Inbox):
 
 
 class Publisher:
-    def __init__(self, runtime, repo, issue, *, publisher=None, enabled=True):
+    def __init__(self, runtime, repo, issue, *, publisher=None, enabled=True, scan=None):
         self.r = runtime
         self.repo = repo
         self.issue = issue
         self.publisher = publisher
         self.enabled = enabled
+        self.scan = scan  # callable -> {(mid, phase): url} | None (F3 hardening)
 
     def _key(self, mid, phase):
         return f"hermes-relay-published/{mid}/{phase}"
@@ -102,11 +130,22 @@ class Publisher:
             return
         if not self.enabled:
             return
+        if self.scan is not None:
+            events = self.scan()
+            if events is None:
+                return  # scan unavailable: retry later, never blind-post
+            recovered = events.get((mid, phase))
+            if recovered:
+                # Already on GitHub (e.g. crash between POST and CAS): record, don't repost.
+                self.r.store.put_cas(key, {"phase": phase, "url": recovered,
+                                           "at": time.time(), "recovered": True}, None)
+                return
         try:
             url = publish_comment(self.repo, self.issue, body, publisher=self.publisher)
         except (OSError, ValueError):
             return  # GitHub outage: durable state kept, publication retried later
-        self.r.store.put_cas(key, {"phase": phase, "url": url, "at": time.time()}, None)
+        if not self.r.store.put_cas(key, {"phase": phase, "url": url, "at": time.time()}, None):
+            return  # CAS conflict (F4): another writer recorded it; dedupe stays intact
 
     def ack(self, mid):
         claim = self.r.store.get(f"kilo-claims/{mid}") or {}
@@ -136,6 +175,10 @@ class Publisher:
         status = state.get("status")
         if old.get("status") == status:
             return
+        # Mark first (F4): a CAS conflict means another writer journaled it;
+        # appending only after a successful mark prevents duplicate lines.
+        if not self.r.store.put_cas(key, {"status": status}, old or None):
+            return
         row = {"mission_id": mid, "status": status, "at": time.time(),
                "contract_sha256": state.get("contract_sha256"),
                "reason": state.get("reason")}
@@ -145,16 +188,15 @@ class Publisher:
             row["session_id"] = result.get("session_id")
         with (self.r.root / "relay-events.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(row, ensure_ascii=True) + "\n")
-        self.r.store.put_cas(key, {"status": status}, old or None)
 
 
 def build_runtime(state, *, model=FREE_MODELS[0], cli_exe=None, issue=None,
-                  publisher=None, publish=True):
+                  publisher=None, publish=True, scan=None):
     executor = HermesExecutor(root=state, model=model,
                               cli_command=[cli_exe] if cli_exe else None)
     # Runtime expects a callable executor, not an object: bind .execute.
     runtime = Runtime(state, executor=executor.execute, verifier=hermes_verify)
-    pub = Publisher(runtime, REPO, issue, publisher=publisher, enabled=publish)
+    pub = Publisher(runtime, REPO, issue, publisher=publisher, enabled=publish, scan=scan)
     runtime.inbox = AckInbox("hermes-windows", store=runtime.store, on_ack=pub.ack)
     return runtime, pub
 
@@ -173,8 +215,9 @@ def main(argv=None):
     parser.add_argument("--cli-exe")
     parser.add_argument("--no-publish", action="store_true")
     args = parser.parse_args(argv)
+    scan = (lambda: existing_events(REPO, args.issue)) if (args.issue and not args.no_publish) else None
     runtime, pub = build_runtime(args.state, model=args.model, cli_exe=args.cli_exe,
-                                 issue=args.issue, publish=not args.no_publish)
+                                 issue=args.issue, publish=not args.no_publish, scan=scan)
     if args.action == "stop":
         (runtime.root / "stop.request").touch()
         print("STOP requested")

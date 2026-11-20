@@ -111,6 +111,10 @@ class HermesExecutor:
     def _validate(self, mission):
         specialist = _role(mission)
         objective = mission.get("objective")
+        # Defense in depth (review F5): the engine validates the id upstream,
+        # but a direct call must not allow path traversal via file names.
+        if not re.fullmatch(r"[a-zA-Z0-9-]{1,48}", str(mission.get("id", ""))):
+            raise ExecutorUnavailable("Invalid mission id")
         if (mission.get("synthetic_data") is not True or specialist not in ROLES
                 or mission.get("project") != "synthetic"
                 or not isinstance(objective, str) or not 1 <= len(objective) <= 4000

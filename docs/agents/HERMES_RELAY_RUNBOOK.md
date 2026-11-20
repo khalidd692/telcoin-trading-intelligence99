@@ -61,6 +61,11 @@ Les événements publiés par le relais (`hermes-relay-event/v1`) ne sont jamais
   Jamais de second appel modèle. Réconciliation humaine requise (nouvelle mission ou reset explicite).
 - Crash après WORKER_EXITED → reprise de la vérification sans nouvel appel worker.
 - ACK/publications : dédup CAS durable par mission/phase ; un redémarrage ne republie rien.
+  Durcissement F3 : avant tout POST, scan des événements déjà publiés sur GitHub
+  (`existing_events`) — recovery sans repost si crash entre POST et CAS ; scan
+  indisponible → publication différée (jamais de blind-post). Fenêtre résiduelle
+  at-least-once assumée : le marqueur `hermes-relay-event/v1` empêche toute
+  ré-admission d'un événement dupliqué.
 - STOP : fichier `stop.request` ; le worker est tué, aucun replay automatique.
 
 ## Preuves live (2026-11-19/20)
