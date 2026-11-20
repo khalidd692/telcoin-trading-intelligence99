@@ -8,13 +8,13 @@ owner mandate comment, (3) an explicit expiry and (4) a content fingerprint.
 ``seal()``/``fingerprint()`` remain fingerprints, not signatures: the trust
 anchor is the authenticated owner account plus the pinned mandate.
 
-Only ``owner=hermes`` synthetic missions are admitted here; ``owner=kilo``
-contracts keep their existing transport. Published relay events carry a
-distinct marker and are never re-admitted (no feedback loop).
+The default profile admits Hermes contracts. The Kilo transport selects its
+own marker and supplies only comments from its pinned issue and owner.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -38,14 +38,24 @@ ORIGINS = {"delegated-mandate", "owner-direct"}
 
 
 def default_fetcher(endpoint):
+    return gh_json(endpoint)
+
+
+def gh_json(endpoint, *, body=None, timeout=60):
+    command = ["gh", "api", "--hostname", "github.com", endpoint]
+    payload = None
+    if body is not None:
+        command.extend(["--method", "POST", "--input", "-"])
+        payload = json.dumps({"body": body})
     try:
-        completed = subprocess.run(["gh", "api", endpoint], capture_output=True,
-                                   text=True, timeout=60, check=False)
+        completed = subprocess.run(command, input=payload, capture_output=True,
+                                   env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+                                   encoding="utf-8", timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
         # Fail-closed to the engine's SOURCE_UNAVAILABLE path (review F1).
         raise OSError("gh api timeout") from exc
     if completed.returncode != 0:
-        raise OSError(f"gh api unavailable: {completed.stderr.strip()[:200]}")
+        raise OSError("gh api unavailable")
     return json.loads(completed.stdout)
 
 
@@ -73,7 +83,7 @@ def fetch_mandate(repo, issue, comment_id, *, fetcher=None):
     return comment
 
 
-def _expiry_ok(approval, now):
+def approval_is_current(approval, now):
     try:
         expiry = datetime.strptime(approval["expires_at"], "%Y-%m-%dT%H:%M:%SZ")
     except (KeyError, TypeError, ValueError):
@@ -81,34 +91,62 @@ def _expiry_ok(approval, now):
     return expiry.replace(tzinfo=timezone.utc) > now
 
 
-def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_reader=None):
+def fenced_json(body, marker):
+    """Read one exact fenced JSON object and reject ambiguous duplicate keys."""
+    if not isinstance(body, str):
+        return None
+    match = re.fullmatch(r"```" + re.escape(marker) + r"\r?\n(.*?)\r?\n```",
+                         body.strip(), re.DOTALL)
+    if match is None:
+        return None
+
+    def unique_keys(pairs):
+        obj = dict(pairs)
+        if len(obj) != len(pairs):
+            raise ValueError("duplicate keys")
+        return obj
+
+    try:
+        data = json.loads(match[1], object_pairs_hook=unique_keys)
+    except (ValueError, RecursionError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def parse_approvals(comments, *, mandate_comment_id, now=None,
+                    owner_approval_reader=None, owner="hermes"):
     now = now or datetime.now(timezone.utc)
-    missions, approvals, sources = [], {}, {}
+    strict = owner == "kilo"
+    missions, approvals, sources, conflicts = [], {}, {}, set()
     for comment in comments:
         login = (comment.get("user") or {}).get("login", "")
         body = comment.get("body") or ""
-        if login not in APPROVERS or EVENT_MARKER in body or PROPOSAL_MARKER in body:
+        if (login not in APPROVERS or not isinstance(body, str)
+                or EVENT_MARKER in body or PROPOSAL_MARKER in body):
             continue
-        match = BLOCK_RE.search(body)
-        if not match:
-            continue
-        try:
-            payload = json.loads(match.group(1))
-        except ValueError:
+        if strict:
+            payload = fenced_json(body, "kilo-mission/v1")
+        else:
+            match = BLOCK_RE.search(body)
+            try:
+                payload = json.loads(match[1]) if match else None
+            except (ValueError, RecursionError):
+                continue
+        if not isinstance(payload, dict):
             continue
         mission, approval = payload.get("mission"), payload.get("approval")
         if not isinstance(mission, dict) or not isinstance(approval, dict):
             continue
-        if mission.get("owner") != "hermes":
+        if mission.get("owner") != owner:
             continue
         if approval.get("approver") != login:
             continue
         if approval.get("mandate_comment_id") != mandate_comment_id:
             continue
-        if not _expiry_ok(approval, now):
+        if not approval_is_current(approval, now):
             continue
         mid = mission.get("id")
-        if not isinstance(mid, str) or mid in approvals:
+        if not isinstance(mid, str):
             continue
         digest = fingerprint(mission)
         if approval.get("mission_sha256") != digest:
@@ -136,9 +174,19 @@ def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_re
             validate_contract(mission, {mid: digest})
         except (ValueError, TypeError):
             continue
+        if mid in approvals:
+            if strict and approvals[mid] != digest:
+                conflicts.add(mid)
+            continue
         missions.append(mission)
         approvals[mid] = digest
         sources[mid] = comment.get("id")
+    if conflicts:
+        missions = [mission for mission in missions if mission["id"] not in conflicts]
+        for mid in conflicts:
+            del approvals[mid], sources[mid]
+    if strict and len(missions) > MAX_MISSIONS:
+        raise ValueError("too many eligible Kilo missions for the bounded queue")
     return {"missions": missions[:MAX_MISSIONS], "approvals": approvals, "sources": sources}
 
 

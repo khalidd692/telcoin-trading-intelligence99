@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys, time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from local_codex import Supervisor, exclusive, Blocked, heartbeat, heartbeat_status
+from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat, heartbeat_status
 from protocol.handoff import Inbox, verify_mission
 from protocol.store import FileStore
 from intelligence.memory import MemoryStore, Entry
@@ -36,12 +36,14 @@ def validate_contract(m,approvals):
     return True
 
 class Runtime(Supervisor):
-    def __init__(self,root,executor=None,verifier=None):
+    def __init__(self,root,executor=None,verifier=None,*,before_execute=None):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
         self.executor=executor or self.execute_worker
         self.verifier=verifier or self.verify_worker
+        self.before_execute = before_execute
+        self.quota_exhausted = False
     def state(self,m):
         key=f"kilo-local/{m['id']}"
         path=self.store._path(key)
@@ -83,6 +85,8 @@ class Runtime(Supervisor):
                         p.kill();p.wait(timeout=10)
                         raise Blocked("worker stopped or timed out; no automatic replay")
                     time.sleep(.1)
+                if p.returncode == 5:
+                    raise QuotaBlocked("Kilo free provider HTTP 429")
                 if p.returncode:raise Blocked("free specialist unavailable; no fallback")
             finally:
                 if p.poll() is None:p.kill();p.wait(timeout=10)
@@ -112,17 +116,30 @@ class Runtime(Supervisor):
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
         if saved.get("status")!="WORKER_EXITED":
-            if not self.claim(m):
-                self.save(m,"AWAITING_HUMAN",reason="existing claim requires reconciliation")
-                return
-            ack=self.inbox.receive({"request_id":m["id"]})
-            if not ack["accepted"]:
-                self.save(m,"AWAITING_HUMAN",reason="existing ACK requires reconciliation");return
-            self.save(m,"ACK",execution_status="NOT_STARTED")
+            if self.before_execute is None or saved.get("status") != "ACK":
+                if not self.claim(m):
+                    self.save(m,"AWAITING_HUMAN",reason="existing claim requires reconciliation")
+                    return
+                ack=self.inbox.receive({"request_id":m["id"]})
+                if not ack["accepted"]:
+                    self.save(m,"AWAITING_HUMAN",reason="existing ACK requires reconciliation");return
+                saved = self.save(m,"ACK",execution_status="NOT_STARTED")
+            if self.before_execute is not None:
+                claim = self.store.get(f"kilo-claims/{m['id']}")
+                if (not isinstance(claim, dict) or claim.get("contract_sha256") != fingerprint(m)
+                        or not self.inbox.seen(m["id"])):
+                    self.save(m, "AWAITING_HUMAN", reason="missing or mismatched claim or local ACK")
+                    return
+                if not self.before_execute(m, saved):
+                    return
             if self.stopped():self.save(m,"AWAITING_HUMAN",reason="STOP after claim");return
             if self.expired():self.save(m,"AWAITING_HUMAN",reason="session deadline after claim");return
             self.save(m,"RUNNING")
             try:result=self.executor(m)
+            except QuotaBlocked:
+                self.quota_exhausted = True
+                self.save(m, "BLOCKED", reason="BLOCKED_PROVIDER_RATE_LIMIT")
+                return
             except Exception as exc:
                 self.save(m,"BLOCKED",reason=type(exc).__name__);return
             saved=self.save(m,"WORKER_EXITED",result=result)
@@ -130,9 +147,11 @@ class Runtime(Supervisor):
             verified=self.verifier(m,saved["result"])
         except Exception as exc:
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable",error=type(exc).__name__);return
-        if verified.get("unavailable"):
+        if not isinstance(verified, dict) or verified.get("unavailable"):
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable");return
-        ok=verified.get("ok") is True and bool(verified.get("checks"))
+        checks = verified.get("checks")
+        ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
+              and all(isinstance(check, dict) and check.get("ok") is True for check in checks))
         verdict=verify_mission(conversation_finished=True,roles={m["specialist"]:{"reported":True}},
              acceptance_checks=[{"id":"independent-text-contract","command":"fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
@@ -162,18 +181,20 @@ class Runtime(Supervisor):
                     except (ValueError,TypeError):
                         invalid=True
                 pending=sorted(by_id.values(),key=lambda m:(str(m.get("priority","P9")),m["id"]))
-                while pending and count<max_tasks and not self.stopped() and not self.expired():
+                while pending and count<max_tasks and not self.stopped() and not self.expired() and not self.quota_exhausted:
                     progressed=False
                     for m in list(pending):
                         try:validate_contract(m,approvals)
                         except (ValueError,TypeError):pending.remove(m);continue
-                        if any(d not in by_id or self.state(by_id[d]).get("status")!="ACCEPTED"
-                               or self.state(by_id[d]).get("contract_sha256")!=fingerprint(by_id[d])
-                               for d in m["dependencies"]):
+                        recovering = (self.before_execute is not None
+                                      and self.state(m).get("status") in {"RUNNING", "WORKER_EXITED"})
+                        if not recovering and any(d not in by_id or self.state(by_id[d]).get("status")!="ACCEPTED"
+                                                  or self.state(by_id[d]).get("contract_sha256")!=fingerprint(by_id[d])
+                                                  for d in m["dependencies"]):
                             continue
                         self._process(m,approvals)
                         pending.remove(m);count+=1;progressed=True
-                        if self.stopped() or self.expired() or count>=max_tasks:break
+                        if self.stopped() or self.expired() or self.quota_exhausted or count>=max_tasks:break
                     if not progressed:break
                 self.observe(STATE="STOPPED" if self.stopped() else "BLOCKED" if invalid else "IDLE",ACTIVE_TASK=None)
         except Blocked as exc:
@@ -220,14 +241,24 @@ def main(argv=None):
         raw=a.registry.read_bytes()
         if hashlib.sha256(raw).hexdigest()!=a.registry_sha256:raise ValueError("registry changed")
         return json.loads(raw)
-    failed=False
-    with exclusive(r.root/"session.lock"), heartbeat(r):
-        while not r.stopped() and time.monotonic()<deadline:
-            failed=not r.poll(source) or failed
-            if a.once:break
-            until=min(deadline,time.monotonic()+10)
-            while not r.stopped() and time.monotonic()<until:time.sleep(.1)
+    failed = run_session(r, lambda: r.poll(source), once=a.once)
     report=r.status()
     print(json.dumps(report))
     return 2 if failed or any(m["status"] in {"BLOCKED","REJECTED","AWAITING_HUMAN"} for m in report["missions"].values()) else 0
+
+
+def run_session(runtime, poll, *, once=False):
+    """Run a bounded source poll using the existing lock and heartbeat."""
+    failed = False
+    with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
+        while not (runtime.stopped() or runtime.expired() or runtime.quota_exhausted):
+            failed = not poll() or failed
+            if once or runtime.quota_exhausted:
+                break
+            until = min(runtime.deadline, time.monotonic() + 10)
+            while not runtime.stopped() and time.monotonic() < until:
+                time.sleep(.1)
+    return failed
+
+
 if __name__=="__main__":sys.exit(main())
