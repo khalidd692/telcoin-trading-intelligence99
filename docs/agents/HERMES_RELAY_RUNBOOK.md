@@ -186,3 +186,14 @@ Les commentaires GitHub [mission A](https://github.com/khalidd692/telcoin-tradin
 ## Qualification Qwen4 — priorité après A/B
 
 Cette branche donne `qwen/qwen4-max:free` comme **préférence pour les nouvelles sessions** (ancienne session LongCat inchangée). Le modèle n’est pas encore déclaré qualifié de bout en bout : avant promotion dans la branche principale, exécuter un mandat synthétique neuf et borné, inspecter `session_model_usage` et la vérification indépendante ; zéro coût estimé ET réel obligatoire. Le fournisseur, le modèle réellement utilisé, la durée, le quota et le statut seront consignés dans une nouvelle preuve GitHub. Aucun nouveau superviseur, aucune fusion automatique, aucune dépense ni ordre de trading.
+
+
+## Diagnostic Windows sans calcul SHA PowerShell (issue #137, PR dédiée)
+
+Le relais accepte désormais `preflight` : il récupère le mandat avec **son propre lecteur GitHub UTF-8**, calcule la vraie empreinte SHA-256, vérifie les admissions `hermes-mission/v1` puis affiche les identifiants de mission et leur empreinte. Ce mode n'instancie pas le superviseur, ne crée pas d'état, ne publie aucun commentaire et **n'appelle aucun modèle**.
+
+```powershell
+python -B scripts/agents/automation/hermes_github_adapter.py preflight --state "$env:LOCALAPPDATA\hermes-tel99\autonomous\recipe-20261121-AB" --issue 94 --mandate-issue 67 --mandate-comment 7024804657
+```
+
+Le retour `preflight=OK` avec `mandate_sha256` évite le calcul PowerShell incorrect lié à la sérialisation Unicode. En cas de panne GitHub ou d'empreinte épinglée incorrecte, `preflight=BLOCKED` et `error/detail` donnent la cause exacte ; aucune mission n'est exécutée. L'action `run` conserve l'obligation du hash épinglé fourni par l'opérateur ; ce changement ne contourne pas l'approbation.
