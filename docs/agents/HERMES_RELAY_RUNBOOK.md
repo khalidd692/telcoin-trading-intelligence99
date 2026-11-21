@@ -47,8 +47,8 @@ Les événements publiés par le relais (`hermes-relay-event/v1`) ne sont jamais
 
 ## Quotas / coûts
 
-- Modèles autorisés : `meituan/longcat-2.5:free`, `upstage/solar-mini4:free` (provider `nous`).
-  Aucun modèle local, aucun repli payant.
+- **Modèle préféré depuis la branche Qwen4** : `qwen/qwen4-max:free` (provider `nous`), déjà joignable lors d’une sonde manuelle Windows. `meituan/longcat-2.5:free` et `upstage/solar-mini4:free` restent sélectionnables. **Aucune bascule automatique en cas de 429** et aucun repli payant.
+- **Important :** la sonde Qwen répondant « OK » ne prouve pas encore son coût nul pour le worker. Le worker exige pour chaque session réelle une identité `model`/`billing_provider` exacte ET `estimated_cost_usd == actual_cost_usd == 0.0` dans la base Hermes ; sinon la mission est bloquée. Confirmer une session Qwen réussie et la persister avant de déclarer le modèle qualifié en production.
 - Preuve de coût : ligne `session_model_usage` de `state.db` (lecture seule) — estimated/actual
   cost_usd doit être 0 ; sinon `NONZERO_COST_REFUSED`.
 - 429/quota → `BLOCKED_PROVIDER_RATE_LIMIT`, checkpoint BLOCKED durable, cooldown borné
@@ -172,3 +172,17 @@ Recette live (à exécuter **uniquement** sur approbation explicite du propriét
 artefacts, commentaires GitHub d'approbation/ACK/résultat, coût 0 attesté, rappel mémoire 2/2,
 sonde crash/reprise sans doublon. Tests offline : `tests/test_hermes_relay.py` 61/61 +
 régressions moteur 14/14, CAS 7/7, kilo executor 8/8 = **90/90** (2026-11-21).
+
+
+## Recette réelle #123 — 21/11/2026, 21:39 UTC (branche #135)
+
+Les commentaires GitHub [mission A](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069311118) et [mission B](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069311451) ont été admis depuis Windows sur le **même état durable** `recipe-20261121-AB`. Sessions Hermes réelles LongCat 2.5 Free et vérification indépendante fixe :
+
+- A : [ACK](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069625064) → [ACCEPTED](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069631309), session `local-3139741921003cb68e6b35387e61ef623a8c1517b56431e4cdb6f7de17e29e62`.
+- B : [ACK](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069628348) → [ACCEPTED](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069631966), session `local-5e538a446c010b0cac78b968f64f1d7280fbc2baa58670c325e242e6884e9c86`.
+- Deux verdicts indépendants `MISSION_ACCEPTED`, cinq contrôles réussis chacun, dont coût nul attesté par les relevés de session locaux ; code de sortie relais 0 ; session arrêtée après deux exécutions autorisées.
+- **Restant à prouver :** reprise `--once` sur cet état exact sans doublon de publication ni nouvel appel modèle, puis deux **nouvelles issues GitHub** avec modifications de code, PR brouillons et revue indépendante. Les tâches A/B sont des commentaires synthétiques texte, pas des issues de développement.
+
+## Qualification Qwen4 — priorité après A/B
+
+Cette branche donne `qwen/qwen4-max:free` comme **préférence pour les nouvelles sessions** (ancienne session LongCat inchangée). Le modèle n’est pas encore déclaré qualifié de bout en bout : avant promotion dans la branche principale, exécuter un mandat synthétique neuf et borné, inspecter `session_model_usage` et la vérification indépendante ; zéro coût estimé ET réel obligatoire. Le fournisseur, le modèle réellement utilisé, la durée, le quota et le statut seront consignés dans une nouvelle preuve GitHub. Aucun nouveau superviseur, aucune fusion automatique, aucune dépense ni ordre de trading.
