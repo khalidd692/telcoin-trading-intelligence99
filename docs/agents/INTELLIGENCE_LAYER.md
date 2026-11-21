@@ -62,11 +62,11 @@ python -m scripts.agents.intelligence.cli recall --project tel99 --query "guard 
 ## 3. Boucle d'amélioration contrôlée
 
 `improvement.compare` compare un candidat à une base **sur les seules tâches
-exécutées par les deux** (un candidat ne peut pas gagner en sautant les tâches
-difficiles). Le candidat n'est **conservé** que s'il progresse sans régression.
-Le verdict est écrit en mémoire (`procedure` si adopté, `error` si rejeté), et
-le taux mesuré est écrit dans `memory/measured_quality.json` — **que le routeur
-relit**. La boucle est donc fermée : ce qui est mesuré change les choix suivants.
+exécutées par les deux**. Une paire incomplète rend l'évaluation inconclusive.
+`KEEP` enregistre une proposition à vérifier indépendamment. La CLI peut
+exporter les taux et le verdict avec `--measured-out` vers un nouveau fichier.
+Le routeur continue de lire son fichier de mesures approuvées
+`memory/measured_quality.json`. Il ignore le format du rapport d'évaluation.
 
 ## 4. Démonstration (preuve)
 
@@ -74,30 +74,36 @@ relit**. La boucle est donc fermée : ce qui est mesuré change les choix suivan
 python -m scripts.agents.intelligence.cli demo
 ```
 
-Résultat mesuré le 15/11/2026 (voir la PR) :
+Pour utiliser un répertoire mémoire préparé et isolé, placez
+`--memory-root /chemin/vers/memoire` avant `demo`. Le rapport est alors archivé
+dans le sous-répertoire `evaluations/` de cette mémoire.
+
+Le tableau décrit la démonstration hors ligne actuelle. La mesure historique
+du 15 novembre reste documentée dans l’historique de ce fichier.
 
 | Étape | Résultat |
 |---|---|
 | 1. Choisir un modèle | `openhands/deepseek-v4.1-flash` (moyen) ; `gpt-5.6` refusé (coût inconnu) |
 | 2. Retrouver une connaissance | entrée `guard-git-value-options` (vérifiée) |
 | 3. L'utiliser sur une tâche neuve | `git -C … push` → **BLOCKED** par la règle rappelée |
-| 4. Mesurer avant/après | garde actuel **65 %** → proposition **100 %** (**+35 %**, 0 régression) |
-| 5. Enregistrer | verdict `keep` + `measured_quality.json` |
+| 4. Mesurer avant/après | comportement historique pré-#71 **65 %** → garde durci **100 %** (**+35 points**, 0 régression sur le jeu de la démo) |
+| 5. Enregistrer | proposition `keep` et rapport dans `memory/evaluations/` |
 
-Le « avant » est le garde **réellement présent dans cette branche**, exécuté via
-son propre `decide()`. Le « après » est une **proposition** qui ajoute trois
-règles (options git à valeur, arguments de wrapper, `find` destructif) — les
-mêmes règles validées dans la PR #71 (commit `62f0c00`). Rien n'est simulé.
+La démo reproduit le comportement du filtre historique avant #71, puis évalue
+la fonction `decide()` du garde durci déjà présent sur le même jeu étiqueté.
+Celui-ci couvre notamment les options git avec valeur, les arguments de wrapper
+et les actions destructives de `find`. Le rapport archive ce résultat comme
+proposition à examiner. [Durcissement #71](https://github.com/khalidd692/telcoin-trading-intelligence99/pull/71)
 
 ## Limites honnêtes
 
 - **Aucun appel LLM réel** n'est fait ici : la couche est déterministe et hors
-  ligne. Les taux de qualité du catalogue sont des **priors**, pas des mesures ;
-  seul `measured_quality.json` contient une mesure.
+  ligne. Les taux de qualité du catalogue sont des **priors**. Les résultats de
+  la démonstration figurent dans son rapport d'évaluation.
 - **Aucun modèle n'est `verified`** dans cet environnement : le routeur refuse
   donc un run réel (fail-closed). C'est voulu, pas un défaut.
-- La proposition de durcissement du garde est mesurée **hors** du garde réel ;
-  l'appliquer au garde est l'objet de la PR #71.
+- La démo mesure un jeu étiqueté du dépôt. L’attestation du jeu réservé et la
+  preuve de retour arrière d’un Skill déployé restent à établir dans I-03.
 - La mémoire est un JSON sur disque, pas une base : pas d'index sémantique
   vectoriel à ce stade.
 
