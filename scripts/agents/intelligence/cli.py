@@ -135,7 +135,7 @@ def cmd_improve(args) -> int:
 
 def cmd_demo(args) -> int:
     from intelligence import demo
-    return demo.run(dry_run=args.dry_run)
+    return demo.run(dry_run=args.dry_run, memory_root=args.memory_root)
 
 
 def build_parser() -> argparse.ArgumentParser:
