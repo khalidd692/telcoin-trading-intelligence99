@@ -114,6 +114,10 @@ class RouterTests(unittest.TestCase):
         self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(dict(variant, model="-override")))
         self.assert_blocked("BLOCKED_MODEL", self.start, live=snapshot(dict(variant, availabilityNux={"message": "no access"})))
 
+    def test_catalog_accepts_the_hyphenated_app_server_label(self):
+        visible = dict(SOL, displayName="GPT-6.2-Sol")
+        self.assertEqual(self.start("coding", live=snapshot(visible)).attempt["model"], SOL["model"])
+
     def test_confirmed_debug_failure_escalates_to_astra_then_extra_high(self):
         first = self.start("debug")
         self.assertRaises(ValueError, self.finish, first, "tests_failed")
@@ -295,7 +299,7 @@ class RouterTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
-    def test_ndjson_transport_with_a_local_child_process(self):
+    def read_from_child(self, before_catalog="pass"):
         replies = {
             "initialize": {},
             "account/read": {"account": {"type": "chatgpt", "planType": "plus"}},
@@ -311,6 +315,8 @@ for line in sys.stdin:
     msg = json.loads(line)
     method = msg["method"]
     assert method == next(expected), method
+    if method == "model/list":
+        {before_catalog}
     if "id" in msg:
         print(json.dumps({{"method": "metadata/notification"}}))
         print(json.dumps({{"id": msg["id"], "result": replies[method]}}))
@@ -322,9 +328,81 @@ for line in sys.stdin:
             return spawn([sys.executable, "-u", "-c", script], **kwargs)
 
         with patch.object(router.subprocess, "Popen", side_effect=simulate):
-            result = router.read_snapshot("codex.exe", ".", None)
+            return router.read_snapshot("codex.exe", ".", None)
+
+    def test_ndjson_transport_with_a_local_child_process(self):
+        result = self.read_from_child(
+            'for _ in range(40): print(json.dumps({"method":"metadata/notification"}))')
         self.assertEqual(result.models, (LUNA,))
         self.assertEqual(result.limits, quota())
+
+    def test_oversized_response_blocks_discovery_before_any_quota_use(self):
+        with self.assertRaisesRegex(router.RouteBlocked, "size limit") as exc:
+            self.read_from_child(
+                'print(json.dumps({"method":"metadata/notification","params":"x" * (1024 * 1024)}))')
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+
+    def test_non_object_json_rpc_frame_blocks_discovery(self):
+        with self.assertRaisesRegex(router.RouteBlocked, "not a JSON object") as exc:
+            self.read_from_child('print("[" * 3000 + "null" + "]" * 3000)')
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+
+    @patch.object(router, "_app_server")
+    def test_catalog_page_cannot_exceed_the_requested_entry_limit(self, mock_server):
+        request = mock_server.return_value.__enter__.return_value
+        request.side_effect = (
+            {"account": {"type": "chatgpt", "planType": "plus"}},
+            {"data": [LUNA] * 51, "nextCursor": None},
+            quota(),
+        )
+        with self.assertRaises(router.RouteBlocked) as exc:
+            router.read_snapshot("codex.exe", ".", {})
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+        self.assertEqual(request.call_count, 2)
+
+    @patch.object(router, "_app_server")
+    def test_catalog_rejects_oversized_cursor_before_requesting_another_page(self, mock_server):
+        request = mock_server.return_value.__enter__.return_value
+        request.side_effect = (
+            {"account": {"type": "chatgpt", "planType": "plus"}},
+            {"data": [LUNA], "nextCursor": "a" * 8192},
+            {"data": [], "nextCursor": None},
+            quota(),
+        )
+        with self.assertRaisesRegex(router.RouteBlocked, "Invalid Codex catalog cursor"):
+            router.read_snapshot("codex.exe", ".", {})
+        self.assertEqual(request.call_count, 2)
+
+    def test_metadata_deadline_stops_a_blocking_write_to_the_child(self):
+        script = (
+            "import json, sys, time\n"
+            "msg = json.loads(sys.stdin.readline())\n"
+            "print(json.dumps({'id': msg['id'], 'result': {}}), flush=True)\n"
+            "time.sleep(2)\n"
+        )
+        spawn = subprocess.Popen
+        initialized = False
+        started = time.monotonic()
+        with (
+            patch.object(router, "METADATA_TIMEOUT_SECONDS", 0.5, create=True),
+            patch.object(router.subprocess, "Popen",
+                         side_effect=lambda argv, **kwargs: spawn([sys.executable, "-u", "-c", script], **kwargs)),
+            self.assertRaises(router.RouteBlocked) as exc,
+        ):
+            with router._app_server("codex.exe", ".", None) as request:
+                initialized = True
+                request("model/list", {"cursor": "a" * (1024 * 1024)})
+        self.assertTrue(initialized)
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+        self.assertLess(time.monotonic() - started, 1.5)
+
+    def test_metadata_teardown_does_not_wait_for_inherited_stdout(self):
+        started = time.monotonic()
+        result = self.read_from_child(
+            'import subprocess; subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])'
+        )
+        self.assertEqual(result.models, (LUNA,))
+        self.assertLess(time.monotonic() - started, 1.5)
 
     @patch.object(router, "_app_server")
     def test_metadata_only_discovery_paginates_then_reads_quota(self, mock_server):
