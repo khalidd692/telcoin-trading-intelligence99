@@ -5,6 +5,7 @@ independent verifier, engine resume semantics with owner=hermes, and
 idempotent GitHub publication. No network, no model call, no paid provider.
 """
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -66,6 +67,58 @@ def approval_comment(m, login="khalidd692", cid=1, expires_in=3600,
     body = ("Approbation synthétique.\n```hermes-mission/v1\n"
             + json.dumps(payload, ensure_ascii=True) + "\n```")
     return {"id": cid, "user": {"login": login}, "body": body}
+
+
+class PreflightTests(unittest.TestCase):
+    """Read-only preflight must not create state, call a model or publish."""
+
+    def test_utf8_mandate_hash_and_admissions_without_runtime(self):
+        with tempfile.TemporaryDirectory() as root:
+            m = mission()
+            mandate = {"user": {"login": "khalidd692"}, "body": "GO propriétaire: été ✅"}
+            expected_sha = hashlib.sha256(mandate["body"].encode("utf-8")).hexdigest()
+            with mock.patch.object(hga, "default_fetcher", return_value=mandate), \
+                 mock.patch.object(hga, "github_source", return_value={
+                     "missions": [m], "approvals": seal([m])}) as source, \
+                 mock.patch.object(hga, "build_runtime",
+                                   side_effect=AssertionError("preflight must not start runtime")), \
+                 mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                result = hga.main(["preflight", "--state", root, "--issue", "94",
+                                   "--mandate-comment", str(MANDATE)])
+            self.assertEqual(result, 0)
+            data = json.loads(output.getvalue())
+            self.assertEqual(data["preflight"], "OK")
+            self.assertEqual(data["mandate_sha256"], expected_sha)
+            self.assertEqual(data["missions"][0]["id"], m["id"])
+            self.assertEqual(source.call_args.kwargs["mandate_sha256"], expected_sha)
+            self.assertFalse(Path(root, "ledger").exists())
+
+    def test_pinned_mandate_mismatch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            mandate = {"user": {"login": "khalidd692"}, "body": "modified"}
+            with mock.patch.object(hga, "default_fetcher", return_value=mandate), \
+                 mock.patch.object(hga, "github_source",
+                                   side_effect=AssertionError("must not fetch contracts")), \
+                 mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                code = hga.main(["preflight", "--state", root, "--issue", "94",
+                                 "--mandate-comment", str(MANDATE),
+                                 "--mandate-sha256", "0" * 64])
+            self.assertEqual(code, 2)
+            self.assertIn("does not match", output.getvalue())
+            self.assertFalse(Path(root, "ledger").exists())
+
+    def test_github_failure_reports_exact_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            with mock.patch.object(hga, "default_fetcher",
+                                   side_effect=OSError("github unavailable")), \
+                 mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                code = hga.main(["preflight", "--state", root, "--issue", "94",
+                                 "--mandate-comment", str(MANDATE)])
+            self.assertEqual(code, 2)
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["preflight"], "BLOCKED")
+            self.assertEqual(report["error"], "OSError")
+            self.assertIn("github unavailable", report["detail"])
 
 
 class SourceTests(unittest.TestCase):
