@@ -88,3 +88,26 @@ pwsh -NoProfile -File .\tests\test_start_agents.ps1
 | F-03 | Guide de reprise disponible. Livraison finale `WAITING_F01_F02_I03_P02_P03`. |
 
 Le périmètre de recette correspond au fournisseur natif texte de #124. L’intégration aux sessions de l’Agent Manager, un CAS multi-machine, l’attestation de l’artefact Windows sur GitHub et la preuve métier S-05 restent à vérifier.
+
+## Recette sur deux issues distinctes
+
+Le mode `-Campaign` réutilise le superviseur, la mémoire et le fournisseur natif de cette pile. Une session sonde la liste des issues GitHub et peut démarrer avant la création des deux issues. Chaque issue reçoit ses propres ACK, EVIDENCE et RESULT. La seconde attend le RESULT de la première si son contrat la déclare comme dépendance. Chaque RESULT accepté référence une PR brouillon qui ne contient que l’artefact texte approuvé. La base est la branche de la PR #127, épinglée à son SHA.
+
+1. Préparer deux contrats texte synthétiques distincts, avec A analyste et B dev. Inscrire l’identifiant de A dans `dependencies` de B. Calculer les empreintes comme indiqué ci-dessus. Vérifier que le profil GitHub CLI retourne l’identité prévue et que le catalogue officiel Kilo est joignable avant d’admettre une mission. Les appels réels exigent une preuve de coût nul.
+2. Publier le mandat sur #123 ou dans une issue de contrôle dédiée. Remplacer les valeurs entre chevrons dans l’exemple, puis épingler le SHA-256 du corps exact du commentaire comme pour la file à une issue. L’heure d’échéance est en UTC. Le mode réutilise un label existant réservé à la recette. Ne pas utiliser les labels des autres files autonomes.
+3. Démarrer une fois l’exécuteur. Créer ensuite deux issues ouvertes distinctes avec le label prévu. Chaque corps contient une ligne exacte `kilo-campaign: <ID_DU_MANDAT>`. Dans chacune, publier un commentaire `kilo-mission/v1` avec son contrat, son empreinte et les champs d’accord de la recette précédente. Ajouter `"issue": <NUMÉRO_DE_CETTE_ISSUE>` dans `approval`. GitHub horodate à la seconde. Créer les issues et publier les accords à un instant strictement postérieur à l’horodatage du mandat.
+4. Comparer les deux ACK, les sorties du vérificateur, les deux PR brouillon et les deux RESULT. Arrêter et relancer avec le même état. Une sortie worker persistée reprend à la vérification. Si seul RUNNING est durable, réconcilier le résultat avant tout rejeu. Un POST de PR indéterminé est rapproché en lecture et peut demander une réconciliation si GitHub ne retourne aucune PR correspondante.
+
+~~~text
+```kilo-campaign/v1
+{"repo":"khalidd692/telcoin-trading-intelligence99","issue":123,"label":"enhancement","expires_at":"<ÉCHÉANCE_UTC>","base":"codex/kilo-cloud-handoff-20261120","base_sha":"a903ebc45c0217ca7e0df527388f21b449cd3215","contracts":{"<ID_A>":"<EMPREINTE_A>","<ID_B>":"<EMPREINTE_B>"}}
+```
+~~~
+
+~~~powershell
+.\start-agents.ps1 -Action START -Campaign -GitHubIssue 123 -MandateComment $MandateId -MandateSha256 $MandateSha -Seconds 300
+.\start-agents.ps1 -Action STATUS -Campaign -GitHubIssue 123 -MandateComment $MandateId
+.\start-agents.ps1 -Action STOP -Campaign -GitHubIssue 123 -MandateComment $MandateId
+~~~
+
+Le même mode est accessible sous Linux depuis `scripts/agents/automation/kilo_github_adapter.py` avec les options `run --campaign --issue 123 --mandate-comment … --mandate-sha256 … --state …`. Garder un seul état durable par campagne. Le fournisseur gratuit Kilo peut être indisponible ou limiter les appels. La campagne arrête la session sur HTTP 429 et conserve les claims. Le catalogue historique et les essais hors ligne ne démontrent pas la disponibilité actuelle. La recette publique est limitée aux fichiers texte synthétiques de preuve.

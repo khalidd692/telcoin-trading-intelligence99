@@ -46,10 +46,13 @@ class Runtime(Supervisor):
         self.quota_exhausted = False
     def state(self,m):
         key=f"kilo-local/{m['id']}"
-        path=self.store._path(key)
-        value=self.store.get(key)
-        if path.exists() and not isinstance(value,dict):raise Blocked("corrupt checkpoint")
-        return value or {}
+        try:
+            value = self.store.read(key, default={})
+        except (OSError, ValueError) as exc:
+            raise Blocked("corrupt checkpoint") from exc
+        if not isinstance(value, dict):
+            raise Blocked("corrupt checkpoint")
+        return value
     def save(self,m,status,**details):
         old=self.state(m)
         value={**old,"id":m["id"],"project":m["project"],"status":status,

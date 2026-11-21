@@ -240,10 +240,13 @@ class Supervisor:
 
     def state(self, mission):
         key = f"codex-local/{mission['id']}"
-        value = self.store.get(key)
-        if value is None and (self.store.root / f"{key}.json").exists():
+        try:
+            value = self.store.read(key, default={})
+        except (OSError, ValueError) as exc:
+            raise Blocked(f"Checkpoint illisible pour {mission['id']}") from exc
+        if not isinstance(value, dict):
             raise Blocked(f"Checkpoint illisible pour {mission['id']}")
-        return value or {}
+        return value
 
     def run(self, missions, blockers=None, dependency_proofs=None):
         blockers = blockers or {}

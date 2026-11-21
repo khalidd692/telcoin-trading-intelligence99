@@ -1,6 +1,7 @@
 import hashlib, json, multiprocessing, tempfile, unittest
 from pathlib import Path
-from scripts.agents.automation.autonomy_runtime import Runtime, seal, validate_contract
+from unittest.mock import patch
+from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, seal, validate_contract
 
 def mission(i="demo-a", **kw):
     m=dict(id=i,project="synthetic",owner="kilo",priority="P0",dependencies=[],
@@ -38,6 +39,30 @@ class RuntimeTests(unittest.TestCase):
     def test_lost_ack_no_duplicate(self):
         a=mission(); self.r.run_queue([a],seal([a])); self.r.run_queue([a],seal([a]))
         self.assertEqual(self.calls,[a["id"]])
+    def test_checkpoint_created_after_missing_read_is_not_corrupt(self):
+        a = mission()
+        path = self.r.store._path(f"kilo-local/{a['id']}")
+        path.parent.mkdir(parents=True)
+        original_read = self.r.store._read
+
+        def read_then_create(path, *args, **kwargs):
+            value = original_read(path, *args, **kwargs)
+            path.write_text('{"status":"ACK"}', encoding="utf-8")
+            return value
+
+        with patch.object(self.r.store, "_read", side_effect=read_then_create):
+            self.assertEqual(self.r.state(a), {})
+        self.assertEqual(self.r.state(a), {"status": "ACK"})
+
+    def test_malformed_and_null_checkpoints_fail_closed(self):
+        a = mission()
+        path = self.r.store._path(f"kilo-local/{a['id']}")
+        path.parent.mkdir(parents=True)
+        for invalid in ("null", "{", "[]"):
+            with self.subTest(invalid=invalid):
+                path.write_text(invalid, encoding="utf-8")
+                with self.assertRaisesRegex(Blocked, "corrupt checkpoint"):
+                    self.r.state(a)
     def test_two_process_claim(self):
         ctx=multiprocessing.get_context("spawn"); q=ctx.Queue()
         ps=[ctx.Process(target=race,args=(str(self.root),q)) for _ in range(2)]

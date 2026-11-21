@@ -16,11 +16,13 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
 
 from protocol import bus as bus_mod  # noqa: E402
+from protocol import store as store_mod  # noqa: E402
 from protocol.bus import Bus  # noqa: E402
 from protocol.store import CASConflict, FileStore  # noqa: E402
 
@@ -59,6 +61,25 @@ class CompareAndSetTests(unittest.TestCase):
         self.assertFalse(self.store.put_cas("k/one", {"v": 3}, {"v": 1}))
         self.assertEqual(self.store.get("k/one"), {"v": 2})
 
+    def test_windows_read_and_replace_share_the_cas_lock(self):
+        key = "k/one"
+        self.store.put(key, {"v": 1})
+        locks = []
+
+        class WindowsLock:
+            LK_LOCK = 1
+            LK_UNLCK = 2
+
+            @staticmethod
+            def locking(descriptor, operation, size):
+                locks.append(operation)
+
+        with patch.object(store_mod, "fcntl", None), patch.object(store_mod, "msvcrt", WindowsLock):
+            self.assertEqual(self.store.get(key), {"v": 1})
+            self.store.put(key, {"v": 2})
+            self.assertTrue(self.store.put_cas(key, {"v": 3}, {"v": 2}))
+        self.assertEqual(locks, [WindowsLock.LK_LOCK, WindowsLock.LK_UNLCK] * 3)
+
     def test_save_mission_cas_refuses_stale(self):
         bus = Bus(store=self.store)
         record = _open(bus)
@@ -87,6 +108,7 @@ class LostUpdateTests(unittest.TestCase):
             pr.start()
         for pr in procs:
             pr.join(timeout=30)
+        for pr in procs:
             self.assertEqual(pr.exitcode, 0)
         final = Bus(store=FileStore(self.tmp.name)).load_mission("msn-contend-0001")
         # Every increment survived: the CAS loop lost nothing.

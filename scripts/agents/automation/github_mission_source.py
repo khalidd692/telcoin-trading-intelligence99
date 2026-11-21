@@ -41,14 +41,17 @@ def default_fetcher(endpoint):
     return gh_json(endpoint)
 
 
-def gh_json(endpoint, *, body=None, timeout=60):
+def gh_json(endpoint, *, body=None, timeout=60, method="GET", payload=None):
     command = ["gh", "api", "--hostname", "github.com", endpoint]
-    payload = None
     if body is not None:
-        command.extend(["--method", "POST", "--input", "-"])
-        payload = json.dumps({"body": body})
+        method, payload = "POST", {"body": body}
+    if method != "GET":
+        command.extend(["--method", method])
+    if payload is not None:
+        command.extend(["--input", "-"])
     try:
-        completed = subprocess.run(command, input=payload, capture_output=True,
+        completed = subprocess.run(command, input=json.dumps(payload) if payload is not None else None,
+                                   capture_output=True,
                                    env={**os.environ, "GH_PROMPT_DISABLED": "1"},
                                    encoding="utf-8", timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
@@ -61,17 +64,20 @@ def gh_json(endpoint, *, body=None, timeout=60):
 
 def fetch_comments(repo, issue, *, fetcher=None, max_pages=MAX_PAGES):
     fetcher = fetcher or default_fetcher
-    comments = []
+    return fetch_pages(f"repos/{repo}/issues/{issue}/comments?per_page=100",
+                       fetcher=fetcher, max_pages=max_pages)
+
+
+def fetch_pages(endpoint, *, fetcher, max_pages=MAX_PAGES):
+    rows = []
     for page in range(1, max_pages + 1):
-        data = fetcher(f"repos/{repo}/issues/{issue}/comments?per_page=100&page={page}")
+        data = fetcher(f"{endpoint}&page={page}")
         if not isinstance(data, list):
-            raise ValueError("unexpected GitHub comments payload")
-        comments.extend(data)
+            raise ValueError("unexpected GitHub list payload")
+        rows.extend(data)
         if len(data) < 100:
-            break
-        if page == max_pages:
-            raise ValueError("pagination cap reached; refusing to truncate the queue")
-    return comments
+            return rows
+    raise ValueError("pagination cap reached; refusing to truncate the queue")
 
 
 def fetch_mandate(repo, issue, comment_id, *, fetcher=None):
