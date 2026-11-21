@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -83,6 +84,29 @@ class HistoricalReadOnlyTests(unittest.TestCase):
         path.write_text(json.dumps(row), encoding="utf-8")
         result = audit_module.audit(self.state)
         self.assertFalse(result["ab_existing_acceptance_verified_from_local_checkpoints"])
+
+    def test_qwen_billing_db_matches_exact_session_but_c_remains_rejected(self):
+        self.setup_ab()
+        self.checkpoint(audit_module.MISSION_C, "REJECTED", model=audit_module.QWEN_MODEL)
+        db = self.state / "state.db"
+        with sqlite3.connect(db) as con:
+            con.execute("CREATE TABLE session_model_usage (session_id TEXT, model TEXT, "
+                        "billing_provider TEXT, estimated_cost_usd REAL, "
+                        "actual_cost_usd REAL, cost_status TEXT, last_seen INTEGER)")
+            con.execute("INSERT INTO session_model_usage VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ("local-" + "a"*64, audit_module.QWEN_MODEL, "nous", 0.0,
+                         0.0, "confirmed", 1))
+        report = audit_module.audit(self.state, billing_db=db)
+        self.assertEqual(report["c_billing_db_readonly"]["status"], "VERIFIED_ZERO_IN_LOCAL_DB")
+        self.assertEqual(report["c_historical_status"], "REJECTED")
+        self.assertFalse(report["c_reconciliation_authorised"])
+
+    def test_missing_billing_db_does_not_create_one(self):
+        self.setup_ab()
+        path = self.state / "not-created.db"
+        report = audit_module.audit(self.state, billing_db=path)
+        self.assertEqual(report["c_billing_db_readonly"]["status"], "NOT_VERIFIED")
+        self.assertFalse(path.exists())
 
     def test_malformed_checkpoint_fails_closed(self):
         self.setup_ab()
