@@ -1,0 +1,397 @@
+{
+  "baseline_revision": "011a23f0fd75ffa11e97818ca4935486ccbe36e1",
+  "candidate_revision": "d2206a108415ff82402257e4f525414c2c44891c",
+  "platform": "linux",
+  "method": "Native subprocess argv without a shell. PR #133 retains stdin via native transport.",
+  "scores": {
+    "baseline": {
+      "file": 0,
+      "stdin": 5
+    },
+    "candidate": {
+      "file": 8,
+      "stdin": 5
+    }
+  },
+  "file_cases": 8,
+  "stdin_cases": 5,
+  "findings": {
+    "file-basic-relative-utf8": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/r\u00e9vision d\u2019\u00e9tape.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "file-resume-absolute-utf8-bom": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input <fixture>/\u00e9tat des preuves.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 2,
+          "checks": [
+            "relecture",
+            "visa"
+          ],
+          "cost": 2,
+          "reused": [
+            "\u00e9preuve PDF"
+          ],
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "file-exactly-64-kib": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/fronti\u00e8re 64 Kio.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "file-over-64-kib": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/plus de 64 Kio.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Contract exceeds 64 KiB."
+        },
+        "stderr": ""
+      }
+    },
+    "file-missing": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/absent.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "[Errno 2] No such file or directory: 'fichiers d\u2019entr\u00e9e/absent.json'"
+        },
+        "stderr": ""
+      }
+    },
+    "file-directory": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "[Errno 21] Is a directory: 'fichiers d\u2019entr\u00e9e'"
+        },
+        "stderr": ""
+      }
+    },
+    "file-malformed-replan": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/document incomplet.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Expecting value: line 1 column 13 (char 12)"
+        },
+        "stderr": ""
+      }
+    },
+    "file-invalid-utf8": {
+      "baseline": {
+        "success": false,
+        "exit_code": 2,
+        "result": "",
+        "stderr": "usage: base_plan_checks.py [-h] [--replan]\nbase_plan_checks.py: error: unrecognized arguments: --input fichiers d\u2019entr\u00e9e/document illisible.json\n"
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "'utf-8' codec can't decode byte 0x80 in position 22: invalid start byte"
+        },
+        "stderr": ""
+      }
+    },
+    "stdin-previous-plan": {
+      "baseline": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "stdin-previous-replan": {
+      "baseline": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 2,
+          "checks": [
+            "relecture",
+            "visa"
+          ],
+          "cost": 2,
+          "reused": [
+            "\u00e9preuve PDF"
+          ],
+          "status": "planned"
+        },
+        "stderr": ""
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 2,
+          "checks": [
+            "relecture",
+            "visa"
+          ],
+          "cost": 2,
+          "reused": [
+            "\u00e9preuve PDF"
+          ],
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "stdin-exactly-64-kib": {
+      "baseline": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 0,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "relecture",
+            "visa",
+            "\u00e9preuve PDF"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "stderr": ""
+      }
+    },
+    "stdin-over-64-kib": {
+      "baseline": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Contract exceeds 64 KiB."
+        },
+        "stderr": ""
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Contract exceeds 64 KiB."
+        },
+        "stderr": ""
+      }
+    },
+    "stdin-malformed": {
+      "baseline": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Expecting value: line 1 column 13 (char 12)"
+        },
+        "stderr": ""
+      },
+      "candidate": {
+        "success": true,
+        "exit_code": 2,
+        "result": {
+          "status": "invalid",
+          "reason": "Expecting value: line 1 column 13 (char 12)"
+        },
+        "stderr": ""
+      }
+    }
+  },
+  "candidate_planner_sha256": "edb59ff49cc67499656be865ca733591f2ff21e0ab38236d796376e412326df2",
+  "comparison": {
+    "decided_at": "2026-11-21T15:28:01Z",
+    "baseline": "baseline",
+    "candidate": "candidate",
+    "baseline_rate": 0.38461538461538464,
+    "candidate_rate": 1.0,
+    "delta": 0.6153846153846154,
+    "verdict": "keep",
+    "task_count": 13,
+    "per_task": [
+      {
+        "task_id": "file-basic-relative-utf8",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-directory",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-exactly-64-kib",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-invalid-utf8",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-malformed-replan",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-missing",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-over-64-kib",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "file-resume-absolute-utf8-bom",
+        "baseline": false,
+        "candidate": true
+      },
+      {
+        "task_id": "stdin-exactly-64-kib",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "task_id": "stdin-malformed",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "task_id": "stdin-over-64-kib",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "task_id": "stdin-previous-plan",
+        "baseline": true,
+        "candidate": true
+      },
+      {
+        "task_id": "stdin-previous-replan",
+        "baseline": true,
+        "candidate": true
+      }
+    ],
+    "reasons": [
+      "candidate improves +61.54% with no regression"
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-"""Plan or resume verification under an estimated budget. Read one JSON request on stdin."""
+"""Plan or resume verification under an estimated budget. Read one JSON request."""
 import argparse
 import json
 import sys
@@ -95,14 +95,19 @@ def replan_checks(request):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--replan", action="store_true", help="Plan from verified passes and remaining budget.")
+    parser.add_argument("--input", metavar="PATH", help="Read a JSON file instead of stdin.")
     args = parser.parse_args()
     try:
-        payload = sys.stdin.buffer.read(65537)
+        if args.input is None:
+            payload = sys.stdin.buffer.read(65537)
+        else:
+            with open(args.input, "rb") as contract_file:
+                payload = contract_file.read(65537)
         if len(payload) > 65536:
             raise ValueError("Contract exceeds 64 KiB.")
         plan = replan_checks if args.replan else plan_checks
         result = plan(json.loads(payload))
-    except (ValueError, RecursionError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         print(json.dumps({"status": "invalid", "reason": str(error)}))
         return 2
     print(json.dumps(result, sort_keys=True))
