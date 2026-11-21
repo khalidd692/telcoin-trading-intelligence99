@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795227734,
-  "observations": 508,
-  "valid_observations": 494,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795244167,
+  "observations": 509,
+  "valid_observations": 495,
+  "latest_decision": "INVALIDATION",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 448,
-              "mean_pct": 0.23891
+              "count": 449,
+              "mean_pct": 0.23486
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 28,
-              "mean_pct": -2.67397
+              "count": 36,
+              "mean_pct": -2.87242
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795058841,
-      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795061260,
       "previous_decision": "ATTENDRE",
@@ -290,6 +280,46 @@
       "data_valid": false,
       "changed_factors": [],
       "event": null
+    },
+    {
+      "observed_at": 1795244167,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "INVALIDATION",
+      "data_valid": true,
+      "changed_factors": [
+        "+ reclaim",
+        "+ structure",
+        "+ zone"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:INVALIDATION:1795233600",
+        "market": "KRAKEN:TELUSD",
+        "type": "INVALIDATION",
+        "decision": "INVALIDATION",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001365,
+        "price_at": 1795233600,
+        "candle_closed_at": 1795233600,
+        "snapshot_at": 1795244119.126399,
+        "data_valid": true,
+        "watch": null,
+        "invalidation": {
+          "level": 0.001387,
+          "unit": "4h"
+        },
+        "factors": [
+          "structure",
+          "reclaim",
+          "zone"
+        ],
+        "blockers": [
+          "Cl\u00f4ture 4 h sous le support structurel."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -299,10 +329,10 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 6,
+        "episodes": 7,
         "detected": 2,
         "missed": 2,
-        "unknown": 2,
+        "unknown": 3,
         "detection_fraction_known": 0.5,
         "late_alerts": 5,
         "median_lead_minutes": 42.1,
