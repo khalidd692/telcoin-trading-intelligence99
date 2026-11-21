@@ -197,3 +197,43 @@ python -B scripts/agents/automation/hermes_github_adapter.py preflight --state "
 ```
 
 Le retour `preflight=OK` avec `mandate_sha256` évite le calcul PowerShell incorrect lié à la sérialisation Unicode. En cas de panne GitHub ou d'empreinte épinglée incorrecte, `preflight=BLOCKED` et `error/detail` donnent la cause exacte ; aucune mission n'est exécutée. L'action `run` conserve l'obligation du hash épinglé fourni par l'opérateur ; ce changement ne contourne pas l'approbation.
+
+
+## P0 sécurité — incident C du 21 novembre 2026 : ne jamais relancer le runner ancien (#141)
+
+Le `p0_live_finish_20261121.py` de la PR #140 tentait **à tort** de lancer
+`HERMES-QWEN4-20261121-C` dans l'état `recipe-20261121-AB`, alors que
+[l'autorisation propriétaire de C](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069711649)
+imposait un dossier d'état **séparé**. La session réelle a produit `OK`, mais
+la mission a été [publiée REJECTED](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/94#issuecomment-7069759046).
+Le correctif d'allowlist du vérificateur à `d2854a47` ne modifie pas cette histoire.
+
+**Le runner a été retiré dans la PR brouillon #141** : le même chemin de fichier
+correspond désormais à un outil d'**inspection historique en lecture seule**.
+Il n'appelle ni relais, ni Hermes, ni GitHub et ne touche à aucun état durable.
+
+```powershell
+python -B scripts/agents/automation/p0_live_finish_20261121.py
+```
+
+L'inspection contrôle, dans les checkpoints A/B/C existants, les empreintes
+de contrat A/B/C approuvées, l'identité et la session, le SHA de l'artefact,
+le modèle, le résultat du vérificateur indépendant et les coûts **déclarés
+dans le checkpoint**. Elle tente également de lire la ligne de la session C
+dans `%USERPROFILE%\AppData\Local\hermes\state.db` (ou le dossier
+`HERMES_HOME` si configuré), en mode SQLite `mode=ro` : absence de base,
+de ligne de session ou montant inconnu = `NOT_VERIFIED`.
+
+Un `VERIFIED_ZERO_IN_LOCAL_DB` ne **réhabilite pas** une mission exécutée
+hors du périmètre de son autorisation. C demeure `REJECTED`, aucun verdict
+historique n'est modifié ni aucune nouvelle mission lancée. La relecture d'un
+checkpoint ne prouve **pas** à elle seule une vraie reprise après crash, ni
+l'absence de POST en double.
+
+**Prochaines preuves à obtenir distinctement** : récupérer tout correctif
+local Codex non poussé ; faire vérifier #141 indépendamment ; constater
+l'absence de doublons lors d'une reprise explicitement autorisée et
+instrumentée ; puis prouver le traitement de deux nouvelles issues GitHub
+avec admission authentifiée et **exécuteur outillé** qui ouvre réellement des
+PR brouillons. Les issues #137/#138 ne sont pas en elles-mêmes des contrats
+`hermes-mission/v1` ni une preuve d'exécution par le superviseur.
