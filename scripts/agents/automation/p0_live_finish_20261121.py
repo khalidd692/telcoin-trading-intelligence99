@@ -1,158 +1,139 @@
-"""Bounded P0 live closure: replay A/B idempotently, qualify Qwen4 on C.
+"""Read-only audit of the historical A/B/C Hermes recipe (#138).
 
-Use the existing Hermes relay and #124 supervisor only. No new supervisor,
-no code-editing worker, no automatic merge, no paid model fallback. Runs on
-the owner's Windows PC because the runtime and Hermes usage DB are local.
+This replaces the retired "live finish" runner. In particular, it cannot
+start Hermes, invoke the relay, claim/replay a mission, publish to GitHub, or
+rewrite a terminal verdict. The approved C mission required *separate* state;
+C was in fact executed inside the A/B state and remains REJECTED. A later
+model allowlist fix does not retroactively authorise or accept C.
+
+Read-only audit != demonstrated live idempotent restart or verified billing.
+Use an isolated worktree for subsequent code changes and independently review
+any future recovery procedure. No automatic retry/fallback is implemented.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
-import shutil
-import subprocess
 import sys
-from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from autonomy_runtime import Runtime
-from github_mission_source import default_fetcher, fetch_comments, github_source
-from hermes_github_adapter import EVENT_BLOCK_RE, REPO
-
-MANDATE_ID = 7024804657
 MISSION_A = "HERMES-LIVE-20261121-A"
 MISSION_B = "HERMES-LIVE-20261121-B"
 MISSION_C = "HERMES-QWEN4-20261121-C"
-MODEL = "qwen/qwen4-max:free"
-STATE = Path(os.environ["LOCALAPPDATA"]) / "hermes-tel99" / "autonomous" / "recipe-20261121-AB"
-ROOT = Path(__file__).resolve().parents[3]
-ADAPTER = ROOT / "scripts" / "agents" / "automation" / "hermes_github_adapter.py"
+MISSIONS = (MISSION_A, MISSION_B, MISSION_C)
+QWEN_MODEL = "qwen/qwen4-max:free"
+EXPECTED_ARTIFACT_SHA256 = hashlib.sha256(b"OK").hexdigest()
 
 
-def event_counts():
-    counts = Counter()
-    for comment in fetch_comments(REPO, 94):
-        if not isinstance(comment, dict):
-            continue
-        match = EVENT_BLOCK_RE.search(comment.get("body") or "")
-        if not match:
-            continue
-        try:
-            event = json.loads(match.group(1))
-        except ValueError:
-            continue
-        if event.get("mission_id") in {MISSION_A, MISSION_B, MISSION_C}:
-            counts[(event["mission_id"], event.get("status"))] += 1
-    return counts
+def default_state() -> Path:
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        raise ValueError("LOCALAPPDATA missing; pass --state explicitly")
+    return Path(local) / "hermes-tel99" / "autonomous" / "recipe-20261121-AB"
 
 
-def accepted(runtime, mission):
-    return runtime.state(mission).get("status") == "ACCEPTED"
-
-
-def check_cost(runtime, mission):
-    result = (runtime.state(mission).get("result") or {})
-    cost = result.get("provider_evidence") or {}
-    if (result.get("model") != MODEL or cost.get("model") != MODEL
-            or cost.get("billing_provider") != "nous"
-            or cost.get("estimated_cost_usd") != 0.0
-            or cost.get("actual_cost_usd") != 0.0
-            or not result.get("session_id")):
-        raise RuntimeError("QWEN_COST_OR_MODEL_NOT_VERIFIED; do not retry BLOCKED mission")
-    return {"model": result["model"],
-            "session_id": result["session_id"],
-            "estimated_cost_usd": cost["estimated_cost_usd"],
-            "actual_cost_usd": cost["actual_cost_usd"],
-            "artifact_sha256": result["sha256"]}
-
-
-def run_once(sha, exe):
-    cmd = [sys.executable, "-B", str(ADAPTER), "run",
-           "--state", str(STATE), "--issue", "94",
-           "--mandate-issue", "67", "--mandate-comment", str(MANDATE_ID),
-           "--mandate-sha256", sha, "--model", MODEL,
-           "--cli-exe", exe, "--once", "--seconds", "570",
-           "--max-tasks", "1"]
-    return subprocess.run(cmd, check=False, cwd=ROOT).returncode
-
-
-def main():
-    if (STATE / "stop.request").exists():
-        raise RuntimeError("STOP_REQUESTED: no replay or new worker")
-    exe = shutil.which("hermes")
-    if not exe:
-        raise RuntimeError("Hermes CLI not found")
-    mandate = default_fetcher(f"repos/{REPO}/issues/comments/{MANDATE_ID}")
-    if (mandate.get("user") or {}).get("login") != "khalidd692":
-        raise RuntimeError("Mandate not owner-authored")
-    sha = hashlib.sha256((mandate.get("body") or "").encode("utf-8")).hexdigest()
-    payload = github_source(REPO, 94, 67, MANDATE_ID, mandate_sha256=sha)
-    by_id = {m["id"]: m for m in payload["missions"]}
-    if not {MISSION_A, MISSION_B, MISSION_C}.issubset(by_id):
-        raise RuntimeError("Missing authenticated or unexpired A/B/C approvals")
-
-    runtime = Runtime(STATE)
-    if not accepted(runtime, by_id[MISSION_A]) or not accepted(runtime, by_id[MISSION_B]):
-        raise RuntimeError("Previous A/B state is not ACCEPTED: no execution")
-    before = event_counts()
-    for key in ((MISSION_A, "ACK"), (MISSION_A, "ACCEPTED"),
-                (MISSION_B, "ACK"), (MISSION_B, "ACCEPTED")):
-        if before[key] != 1:
-            raise RuntimeError(f"Expected exactly one prior A/B event: {key}={before[key]}")
-
-    print("A/B VERIFIED. Python-computed mandate SHA:", sha, flush=True)
-    if not accepted(runtime, by_id[MISSION_C]):
-        print("Qualifying Qwen on one new synthetic text mission C", flush=True)
-        first = run_once(sha, exe)
-        if first:
-            raise RuntimeError(f"QWEN_RUN_BLOCKED exit={first}; preserve state; no retry")
-
-    runtime = Runtime(STATE)
-    if not accepted(runtime, by_id[MISSION_C]):
-        raise RuntimeError("C did not reach ACCEPTED; preserve checkpoint")
-    qwen = check_cost(runtime, by_id[MISSION_C])
-    after_first = event_counts()
-    for key in ((MISSION_A, "ACK"), (MISSION_A, "ACCEPTED"),
-                (MISSION_B, "ACK"), (MISSION_B, "ACCEPTED"),
-                (MISSION_C, "ACK"), (MISSION_C, "ACCEPTED")):
-        if after_first[key] != 1:
-            raise RuntimeError(f"Expected exactly one event after C: {key}={after_first[key]}")
-
-    # Re-run on the same durable state to prove no new Hermes session nor POST.
-    second = run_once(sha, exe)
-    if second:
-        raise RuntimeError(f"IDEMPOTENT_REPLAY_BLOCKED exit={second}")
-    final_runtime = Runtime(STATE)
-    if not all(accepted(final_runtime, by_id[mid]) for mid in
-               (MISSION_A, MISSION_B, MISSION_C)):
-        raise RuntimeError("One accepted state changed during replay")
-    if check_cost(final_runtime, by_id[MISSION_C])["session_id"] != qwen["session_id"]:
-        raise RuntimeError("Replay changed Qwen session ID")
-    after_second = event_counts()
-    if after_second != after_first:
-        raise RuntimeError("Replay published an unexpected or duplicate GitHub event")
-
-    receipt = {
-        "status": "LIVE_SYNTHETIC_A_B_C_ACCEPTED",
-        "at_utc": datetime.now(timezone.utc).isoformat(),
-        "mandate_sha256": sha,
-        "missions": [MISSION_A, MISSION_B, MISSION_C],
-        "zero_duplicate_post": True,
-        "qwen": qwen,
-        "note": "Synthetic text only, not 2 real code issues, not cloud PC-off."
+def read_mission(state: Path, mission_id: str) -> dict:
+    """Inspect a single checkpoint; never initialise Runtime or FileStore."""
+    checkpoint = state / "ledger" / "kilo-local" / (mission_id + ".json")
+    try:
+        raw = checkpoint.read_bytes()
+    except FileNotFoundError:
+        return {"id": mission_id, "status": "MISSING"}
+    if len(raw) > 1_000_000:
+        raise ValueError(f"oversized checkpoint for {mission_id}")
+    value = json.loads(raw.decode("utf-8"))
+    if not isinstance(value, dict) or value.get("id") != mission_id:
+        raise ValueError(f"invalid checkpoint identity for {mission_id}")
+    status = value.get("status")
+    if status not in {"ACCEPTED", "REJECTED", "BLOCKED", "AWAITING_HUMAN",
+                      "ACK", "RUNNING", "WORKER_EXITED", "STOPPED"}:
+        raise ValueError(f"unrecognised checkpoint status for {mission_id}")
+    verification = value.get("verification") or {}
+    checks = verification.get("checks") or []
+    if not isinstance(verification, dict) or not isinstance(checks, list):
+        raise ValueError(f"invalid verifier report for {mission_id}")
+    result = value.get("result") or {}
+    if not isinstance(result, dict):
+        raise ValueError(f"invalid worker result for {mission_id}")
+    evidence = result.get("provider_evidence") or {}
+    if not isinstance(evidence, dict):
+        raise ValueError(f"invalid provider evidence for {mission_id}")
+    artifact = result.get("artifact")
+    actual_artifact_sha = (hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+                           if isinstance(artifact, str) else None)
+    artifact_ok = (actual_artifact_sha == EXPECTED_ARTIFACT_SHA256
+                   and result.get("sha256") == EXPECTED_ARTIFACT_SHA256)
+    checks_ok = (len(checks) >= 5 and all(
+        isinstance(x, dict) and x.get("ok") is True for x in checks))
+    cost_verified = (evidence.get("model") == result.get("model")
+                     and evidence.get("billing_provider") == "nous"
+                     and evidence.get("estimated_cost_usd") == 0.0
+                     and evidence.get("actual_cost_usd") == 0.0
+                     and evidence.get("session_id") == result.get("session_id")
+                     and isinstance(evidence.get("api_call_count"), int)
+                     and evidence["api_call_count"] >= 1)
+    return {
+        "id": mission_id,
+        "status": status,
+        "contract_sha256": value.get("contract_sha256"),
+        "artifact_sha256_matches": artifact_ok,
+        "independent_verification_recorded": verification.get("ok") is True and checks_ok,
+        "model": result.get("model"),
+        "session_id": result.get("session_id"),
+        "provider_cost_evidence_present_and_zero": cost_verified,
+        "estimated_cost_usd": evidence.get("estimated_cost_usd"),
+        "actual_cost_usd": evidence.get("actual_cost_usd"),
     }
-    file = STATE / "p0-live-qwen-receipt.json"
-    file.write_text(json.dumps(receipt, indent=2, ensure_ascii=True), encoding="utf-8")
-    print(json.dumps(receipt, indent=2, ensure_ascii=True), flush=True)
-    return 0
+
+
+def audit(state: Path) -> dict:
+    if not state.is_dir():
+        raise ValueError("state directory not found; no mission executed")
+    snapshots = {mission_id: read_mission(state, mission_id) for mission_id in MISSIONS}
+    ab_pass = all(
+        snapshots[mid]["status"] == "ACCEPTED"
+        and snapshots[mid]["artifact_sha256_matches"]
+        and snapshots[mid]["independent_verification_recorded"]
+        and snapshots[mid]["provider_cost_evidence_present_and_zero"]
+        for mid in (MISSION_A, MISSION_B)
+    )
+    c = snapshots[MISSION_C]
+    # Do not reinterpret/rewrite REJECTED even if stored cost evidence is zero.
+    return {
+        "mode": "READ_ONLY_HISTORICAL_AUDIT",
+        "ab_existing_acceptance_verified_from_local_checkpoints": ab_pass,
+        "c_historical_status": c["status"],
+        "c_currently_accepted": False if c["status"] == "REJECTED" else c["status"] == "ACCEPTED",
+        "c_expected_model": QWEN_MODEL,
+        "c_wrong_state_scope": c["status"] != "MISSING",  # C required separate state.
+        "c_reconciliation_authorised": False,
+        "live_replay_without_duplicate_calls_proven": False,
+        "github_ack_publication_counts_checked": False,
+        "local_worker_invoked": False,
+        "github_posts_made": False,
+        "missions": snapshots,
+        "next": "Preserve C verdict, independently inspect session billing and scope; "
+                "separately authorise any new mission and verify true replay.",
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--state", type=Path,
+                        help="Existing recipe state; defaults to LOCALAPPDATA path")
+    args = parser.parse_args(argv)
+    try:
+        state = args.state if args.state is not None else default_state()
+        report = audit(state)
+        print(json.dumps(report, ensure_ascii=True, sort_keys=True))
+        return 0 if report["ab_existing_acceptance_verified_from_local_checkpoints"] else 2
+    except (OSError, ValueError, UnicodeError, TypeError, KeyError) as exc:
+        print(json.dumps({"mode": "READ_ONLY_HISTORICAL_AUDIT", "status": "BLOCKED",
+                          "reason": str(exc)[:250]}, ensure_ascii=True))
+        return 2
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except (OSError, ValueError, RuntimeError, KeyError) as exc:
-        print(json.dumps({"status": "BLOCKED", "reason": str(exc)[:400]},
-                         ensure_ascii=True), flush=True)
-        sys.exit(2)
+    sys.exit(main())
