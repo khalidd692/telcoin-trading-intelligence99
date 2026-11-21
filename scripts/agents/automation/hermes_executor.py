@@ -27,7 +27,11 @@ from pathlib import Path
 # Only models whose free access was verified callable in this environment.
 # Several models of one provider can share the same fair-share limit: a 429
 # therefore arms a provider cooldown instead of silently trying another model.
-FREE_MODELS = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+# Qwen4 Max Free answered a live Nous probe on Windows. Production zero-cost
+# qualification is still enforced per real session below; if usage is missing,
+# nonzero or from a different model/provider, the mission is BLOCKED.
+# Legacy free models remain selectable explicitly; never fallback automatically.
+FREE_MODELS = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 ROLES = frozenset({"tel99-dev", "tel99-analyst", "tel99-verifier"})
 SESSION_RE = re.compile(r"session_id:\s*(local-[0-9a-f]{64})")
 RATE_LIMIT_RE = re.compile(r"429|too many requests|rate[ -]?limit|fair[ -]?share|quota", re.IGNORECASE)
