@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -25,6 +26,23 @@ MISSION_C = "HERMES-QWEN4-20261121-C"
 MISSIONS = (MISSION_A, MISSION_B, MISSION_C)
 QWEN_MODEL = "qwen/qwen4-max:free"
 EXPECTED_ARTIFACT_SHA256 = hashlib.sha256(b"OK").hexdigest()
+EXPECTED_CONTRACTS = {
+    MISSION_A: "597576eaa2ec84b3311df4186fe11eecf7f3ecc154a916c16f9b105a405e7d58",
+    MISSION_B: "450bb0f2b524dba38e875ea26cd6ae461cc26747c42610afdf79b1f03a22d8e3",
+    MISSION_C: "1ce10da1e79b71aa8354f78552a4b59c0fe99f8139956d346c84e01d3590b617",
+}
+EXPECTED_MODELS = {
+    MISSION_A: "meituan/longcat-2.5:free",
+    MISSION_B: "meituan/longcat-2.5:free",
+    MISSION_C: QWEN_MODEL,
+}
+EXPECTED_ROLES = {
+    MISSION_A: "tel99-analyst", MISSION_B: "tel99-dev", MISSION_C: "tel99-analyst",
+}
+REQUIRED_CHECKS = frozenset({
+    "synthetic-contract", "artifact-sha256", "specialist-identity",
+    "hermes-session-evidence", "zero-cost-evidence",
+})
 
 
 def default_state() -> Path:
@@ -65,8 +83,14 @@ def read_mission(state: Path, mission_id: str) -> dict:
                            if isinstance(artifact, str) else None)
     artifact_ok = (actual_artifact_sha == EXPECTED_ARTIFACT_SHA256
                    and result.get("sha256") == EXPECTED_ARTIFACT_SHA256)
-    checks_ok = (len(checks) >= 5 and all(
-        isinstance(x, dict) and x.get("ok") is True for x in checks))
+    check_names = {x.get("name") for x in checks if isinstance(x, dict)}
+    checks_ok = (check_names == REQUIRED_CHECKS
+                 and len(checks) == len(REQUIRED_CHECKS)
+                 and all(isinstance(x, dict) and x.get("ok") is True for x in checks))
+    session_id = result.get("session_id")
+    specialist_ok = (result.get("specialist_id") == EXPECTED_ROLES[mission_id]
+                     and isinstance(session_id, str)
+                     and re.fullmatch(r"local-[0-9a-f]{64}", session_id) is not None)
     cost_verified = (evidence.get("model") == result.get("model")
                      and evidence.get("billing_provider") == "nous"
                      and evidence.get("estimated_cost_usd") == 0.0
@@ -77,10 +101,16 @@ def read_mission(state: Path, mission_id: str) -> dict:
     return {
         "id": mission_id,
         "status": status,
-        "contract_sha256": value.get("contract_sha256"),
+        "contract_sha256_matches_original_approval": (
+            value.get("contract_sha256") == EXPECTED_CONTRACTS[mission_id]),
         "artifact_sha256_matches": artifact_ok,
-        "independent_verification_recorded": verification.get("ok") is True and checks_ok,
+        "specialist_and_session_identity_match": specialist_ok,
+        "independent_verification_recorded": (
+            verification.get("ok") is True and checks_ok
+            and verification.get("verifier") == "hermes-fixed-subprocess-v1"
+            and (value.get("verdict") or {}).get("validated") is True),
         "model": result.get("model"),
+        "model_matches_original_execution": result.get("model") == EXPECTED_MODELS[mission_id],
         "session_id": result.get("session_id"),
         "provider_cost_evidence_present_and_zero": cost_verified,
         "estimated_cost_usd": evidence.get("estimated_cost_usd"),
@@ -94,7 +124,10 @@ def audit(state: Path) -> dict:
     snapshots = {mission_id: read_mission(state, mission_id) for mission_id in MISSIONS}
     ab_pass = all(
         snapshots[mid]["status"] == "ACCEPTED"
+        and snapshots[mid]["contract_sha256_matches_original_approval"]
         and snapshots[mid]["artifact_sha256_matches"]
+        and snapshots[mid]["specialist_and_session_identity_match"]
+        and snapshots[mid]["model_matches_original_execution"]
         and snapshots[mid]["independent_verification_recorded"]
         and snapshots[mid]["provider_cost_evidence_present_and_zero"]
         for mid in (MISSION_A, MISSION_B)
