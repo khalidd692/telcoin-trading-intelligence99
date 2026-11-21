@@ -1,8 +1,8 @@
 {
-  "generated_at": 1795273200,
-  "observations": 512,
-  "valid_observations": 497,
-  "latest_decision": "ALERTE PR\u00c9COCE",
+  "generated_at": 1795282310,
+  "observations": 513,
+  "valid_observations": 498,
+  "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 451,
-              "mean_pct": 0.08394
+              "count": 452,
+              "mean_pct": 0.08469
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 52,
-              "mean_pct": -3.40391
+              "count": 60,
+              "mean_pct": -3.48475
             }
           }
         }
@@ -159,14 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795120961,
-      "previous_decision": "ATTENDRE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [],
-      "event": null
-    },
     {
       "observed_at": 1795122221,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -355,6 +347,17 @@
           "Confirmation : v\u00e9rification manuelle n\u00e9cessaire (cotation, frais personnels, spread et profondeur du carnet)."
         ]
       }
+    },
+    {
+      "observed_at": 1795282310,
+      "previous_decision": "ALERTE PR\u00c9COCE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ volume",
+        "\u2212 zone"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
