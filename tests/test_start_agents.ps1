@@ -29,7 +29,12 @@ try {
         '-MandateComment', '7100000001', '-MandateSha256', $pin)
     Assert-LauncherExit 0 '"state": "STOPPED"' @('-Action', 'RUN', '-Registry', $registry, '-RegistrySha256', $sha,
         '-State', (Join-Path $directory 'local'), '-Once')
-    Write-Output '7/7 PowerShell launcher checks passed without GitHub or Kilo network access.'
+    Assert-LauncherExit 1 'Campaign requires' @('-Action', 'START', '-Campaign', '-State', $state)
+    Assert-LauncherExit 0 'STOP requested' @('-Action', 'STOP', '-GitHubIssue', '123', '-Campaign',
+        '-State', (Join-Path $directory 'campaign'))
+    Assert-LauncherExit 2 'STOP remains set' @('-Action', 'START', '-GitHubIssue', '123', '-Campaign',
+        '-State', (Join-Path $directory 'campaign'), '-MandateComment', '7100000001', '-MandateSha256', $pin)
+    Write-Output '10/10 PowerShell launcher checks passed without GitHub or Kilo network access.'
 }
 finally {
     Remove-Item -LiteralPath $directory -Recurse -Force

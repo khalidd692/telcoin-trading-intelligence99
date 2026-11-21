@@ -8,6 +8,7 @@ param(
  [ValidateRange(1,2147483647)][int]$GitHubIssue,
  [long]$MandateComment,
  [string]$MandateSha256,
+ [switch]$Campaign,
  [ValidateRange(1,3600)][int]$Seconds=300,
  [switch]$Once
 )
@@ -19,8 +20,17 @@ if (-not $Python) {
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'Python executable missing' }
 if ($Action -eq 'START') { $Action='RUN' }
+if ($Campaign -and (-not $GitHubIssue -or ($MandateComment -le 0 -and -not $State))) {
+ throw 'Campaign requires -GitHubIssue and either -MandateComment or -State'
+}
 if (-not $State) {
- $name=if ($GitHubIssue) { "kilo-github-$GitHubIssue" } else { 'kilo' }
+ $name=if ($Campaign) {
+  "kilo-campaign-$GitHubIssue-$MandateComment"
+ } elseif ($GitHubIssue) {
+  "kilo-github-$GitHubIssue"
+ } else {
+  'kilo'
+ }
  $State=Join-Path $PSScriptRoot ".tel99-automation-state/$name"
 }
 $script=if ($GitHubIssue) { 'kilo_github_adapter.py' } else { 'autonomy_runtime.py' }
@@ -33,6 +43,7 @@ if ($Action -eq 'RUN') {
    throw 'START with -GitHubIssue requires -MandateComment and -MandateSha256'
   }
   $argv+=@('--issue',"$GitHubIssue",'--mandate-comment',"$MandateComment",'--mandate-sha256',$MandateSha256)
+  if ($Campaign) { $argv+='--campaign' }
  } else {
   if ($MandateComment -or $MandateSha256) { throw 'A GitHub mandate requires -GitHubIssue' }
   if (-not $Registry -or $RegistrySha256 -cnotmatch '^[0-9a-f]{64}$') {
