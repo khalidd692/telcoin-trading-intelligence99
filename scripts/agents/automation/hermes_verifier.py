@@ -12,11 +12,13 @@ import json
 import subprocess
 import sys
 
-FREE_MODELS = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+# Independent verifier allowlist: explicitly pin the same reviewed free-model
+# policy as HermesExecutor; no imports of executor or specialist-supplied rules.
+FREE_MODELS = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 
 _VERIFY_CODE = r'''
 import hashlib, json, re, sys
-FREE = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+FREE = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 try:
     payload = json.loads(sys.stdin.buffer.read(100000))
     mission, result = payload['mission'], payload['result']
