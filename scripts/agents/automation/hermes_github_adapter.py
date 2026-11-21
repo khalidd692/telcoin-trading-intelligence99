@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from autonomy_runtime import Runtime
-from local_codex import exclusive, heartbeat
+from local_codex import exclusive, heartbeat, Blocked
 from protocol.handoff import Inbox
 from hermes_executor import HermesExecutor, FREE_MODELS
 from hermes_verifier import verify as hermes_verify
@@ -42,9 +42,12 @@ EVENT_BLOCK_RE = re.compile(r"```" + re.escape(EVENT_MARKER) + r"\s*\n(.*?)\n```
 def existing_events(repo, issue, *, fetcher=None):
     """Scan GitHub for already-published relay events (review F3 hardening).
 
-    Returns {(mission_id, status): html_url}, or None when the scan is
-    unavailable so the caller skips publication and retries later instead of
-    blind-posting a possible duplicate after a crash between POST and CAS.
+    Returns {(mission_id, status): {"url": html_url, "contract_sha256": sha}},
+    or None when the scan is unavailable so the caller skips publication and
+    retries later instead of blind-posting a possible duplicate after a crash
+    between POST and CAS. The contract fingerprint is returned so a same-id
+    re-approval with different content is never mistaken for a crash recovery
+    (réserve #126-4).
     """
     try:
         comments = fetch_comments(repo, issue, fetcher=fetcher)
@@ -52,6 +55,8 @@ def existing_events(repo, issue, *, fetcher=None):
         return None
     found = {}
     for comment in comments:
+        if not isinstance(comment, dict):
+            continue
         match = EVENT_BLOCK_RE.search(comment.get("body") or "")
         if not match:
             continue
@@ -61,7 +66,12 @@ def existing_events(repo, issue, *, fetcher=None):
             continue
         if (event.get("event") == EVENT_MARKER and event.get("mission_id")
                 and event.get("status")):
-            found[(event["mission_id"], event["status"])] = comment.get("html_url", "")
+            found[(event["mission_id"], event["status"])] = {
+                "url": comment.get("html_url", ""),
+                # Reserve: bind the recovery to the approved contract content,
+                # not only to the (mission_id, phase) pair.
+                "contract_sha256": event.get("contract_sha256"),
+            }
     return found
 
 
@@ -130,7 +140,8 @@ def publish_comment(repo, issue, body, *, publisher=None):
     try:
         completed = subprocess.run(
             ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{issue}/comments", "--input", "-"],
-            input=payload, capture_output=True, text=True, timeout=60, check=False)
+            input=payload, capture_output=True, text=True, encoding="utf-8",
+            timeout=60, check=False)
     except subprocess.TimeoutExpired as exc:
         # Durable state is already claimed; publication is retried later (review F2).
         raise OSError("gh publish timeout") from exc
@@ -180,12 +191,12 @@ class Publisher:
         self.issue = issue
         self.publisher = publisher
         self.enabled = enabled
-        self.scan = scan  # callable -> {(mid, phase): url} | None (F3 hardening)
+        self.scan = scan  # callable -> {(mid, phase): {"url","contract_sha256"}} | None
 
     def _key(self, mid, phase):
         return f"hermes-relay-published/{mid}/{phase}"
 
-    def _publish_once(self, mid, phase, body):
+    def _publish_once(self, mid, phase, body, state):
         key = self._key(mid, phase)
         if self.r.store.get(key) is not None:
             return
@@ -196,11 +207,20 @@ class Publisher:
             if events is None:
                 return  # scan unavailable: retry later, never blind-post
             recovered = events.get((mid, phase))
+            if isinstance(recovered, str):  # forme historique (url seule)
+                recovered = {"url": recovered, "contract_sha256": None}
             if recovered:
-                # Already on GitHub (e.g. crash between POST and CAS): record, don't repost.
-                self.r.store.put_cas(key, {"phase": phase, "url": recovered,
-                                           "at": time.time(), "recovered": True}, None)
-                return
+                # Réserve #126-4: ne récupérer que si l'empreinte du contrat
+                # correspond. Une empreinte absente n'est pas une preuve ->
+                # fail-closed, on publie (le marqueur anti-boucle évite la
+                # ré-admission d'un événement dupliqué).
+                state_sha = state.get("contract_sha256") if isinstance(state, dict) else None
+                rec_sha = recovered.get("contract_sha256")
+                if state_sha and rec_sha and state_sha == rec_sha:
+                    self.r.store.put_cas(key, {"phase": phase, "url": recovered["url"],
+                                               "at": time.time(), "recovered": True}, None)
+                    return
+                # otherwise fall through: the new approval must be published.
         try:
             url = publish_comment(self.repo, self.issue, body, publisher=self.publisher)
         except (OSError, ValueError):
@@ -213,7 +233,8 @@ class Publisher:
         source = self.r.store.get(f"hermes-relay-source/{mid}") or {}
         self._publish_once(mid, "ACK", event_body(
             mid, "ACK", {"contract_sha256": claim.get("contract_sha256")},
-            issue=self.issue, comment_id=source.get("comment_id")))
+            issue=self.issue, comment_id=source.get("comment_id")),
+            {"contract_sha256": claim.get("contract_sha256")})
 
     def sync(self):
         for key in self.r.store.keys("kilo-local"):
@@ -225,10 +246,10 @@ class Publisher:
             source = self.r.store.get(f"hermes-relay-source/{mid}") or {}
             if status in PAST_ACK:
                 self._publish_once(mid, "ACK", event_body(
-                    mid, "ACK", state, issue=self.issue, comment_id=source.get("comment_id")))
+                    mid, "ACK", state, issue=self.issue, comment_id=source.get("comment_id")), state)
             if status in TERMINAL_PUBLISH:
                 self._publish_once(mid, status, event_body(
-                    mid, status, state, issue=self.issue, comment_id=source.get("comment_id")))
+                    mid, status, state, issue=self.issue, comment_id=source.get("comment_id")), state)
 
     def _journal(self, mid, state):
         key = f"hermes-relay-journal/{mid}"
@@ -236,10 +257,10 @@ class Publisher:
         status = state.get("status")
         if old.get("status") == status:
             return
-        # Mark first (F4): a CAS conflict means another writer journaled it;
-        # appending only after a successful mark prevents duplicate lines.
-        if not self.r.store.put_cas(key, {"status": status}, old or None):
-            return
+        # Append BEFORE the mark (réserve #126-5): a crash between the two
+        # leaves an auditable at-least-once line instead of a lost event; the
+        # CAS mark then dedupes the normal case (F4). A duplicate line after a
+        # crash is deliberate and auditable, never a silently lost transition.
         row = {"mission_id": mid, "status": status, "at": time.time(),
                "contract_sha256": state.get("contract_sha256"),
                "reason": state.get("reason")}
@@ -249,6 +270,7 @@ class Publisher:
             row["session_id"] = result.get("session_id")
         with (self.r.root / "relay-events.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(row, ensure_ascii=True) + "\n")
+        self.r.store.put_cas(key, {"status": status}, old or None)
 
 
 def build_runtime(state, *, model=FREE_MODELS[0], cli_exe=None, issue=None,
@@ -269,6 +291,7 @@ def main(argv=None):
     parser.add_argument("--issue", type=int)
     parser.add_argument("--mandate-issue", type=int, default=67)
     parser.add_argument("--mandate-comment", type=int)
+    parser.add_argument("--mandate-sha256", help="content SHA-256 of the pinned mandate comment")
     parser.add_argument("--seconds", type=int, default=600)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=20)
@@ -312,8 +335,23 @@ def main(argv=None):
         if args.no_publish:
             print(json.dumps({"dry_run": True, "tasks": [t["id"] for t in tasks]}))
             return 0
-        url = publish_comment(REPO, args.issue, body)
-        recorded = runtime.store.put_cas(key, {"url": url, "tasks": [t["id"] for t in tasks], "at": time.time()}, None)
+        # Réserve: proposer sous le verrou de session — deux propositions
+        # concurrentes ne doivent pas publier toutes les deux avant le CAS.
+        try:
+            with exclusive(runtime.root / "session.lock"):
+                if runtime.store.get(key) is not None:
+                    print(json.dumps({"already_proposed": True,
+                                      "url": (runtime.store.get(key) or {}).get("url")}))
+                    return 0
+                url = publish_comment(REPO, args.issue, body)
+                recorded = runtime.store.put_cas(key, {"url": url, "tasks": [t["id"] for t in tasks], "at": time.time()}, None)
+        except Blocked:
+            # verrou non bloquant détenu par un autre propose : already_proposed
+            print(json.dumps({"already_proposed": True, "reason": "lock_held"}))
+            return 0
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"proposed": [], "error": type(exc).__name__}))
+            return 1
         # R2: on CAS conflict a concurrent propose already recorded its own URL;
         # our POST may duplicate the PROPOSED comment (bounded impact: proposals
         # are never executable nor admitted as approvals). Flagged for audit.
@@ -337,7 +375,8 @@ def main(argv=None):
 
     def source():
         payload = github_source(REPO, args.issue, args.mandate_issue, args.mandate_comment,
-                                owner_approval_reader=reader)
+                                owner_approval_reader=reader,
+                                mandate_sha256=args.mandate_sha256)
         for mid, comment_id in (payload.get("sources") or {}).items():
             runtime.store.put(f"hermes-relay-source/{mid}",
                               {"comment_id": comment_id, "issue": args.issue})
@@ -346,9 +385,16 @@ def main(argv=None):
     failed = False
     with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
         while not runtime.stopped() and time.monotonic() < deadline:
-            states = [runtime.store.get(k) for k in runtime.store.keys("kilo-local")]
-            failed = not runtime.poll(source, max_tasks=poll_budget(states, args.max_tasks)) or failed
-            pub.sync()
+            try:
+                states = [runtime.store.get(k) for k in runtime.store.keys("kilo-local")]
+                failed = not runtime.poll(source, max_tasks=poll_budget(states, args.max_tasks)) or failed
+                pub.sync()
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, Blocked) as exc:
+                # Réserve #126-2: un incident inattendu doit être fail-closed
+                # (BLOCKED), jamais une boucle morte ni un repli payant.
+                runtime.observe(STATE="BLOCKED", BLOCKER=type(exc).__name__)
+                failed = True
+                break
             executed = session_executed(
                 [runtime.store.get(k) for k in runtime.store.keys("kilo-local")], session_start)
             if len(executed) >= args.max_tasks:

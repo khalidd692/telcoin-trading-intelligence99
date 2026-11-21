@@ -1,4 +1,4 @@
-# RUNBOOK — Relais Hermes GitHub → superviseur #124 (branche hermes/relay-github-adapter-20261120)
+# RUNBOOK — Relais Hermes GitHub → superviseur #124 (branche hermes/relay-two-mission-20261121)
 
 Statut : **TESTÉ + DÉMO LIVE RÉUSSIE** (2 missions synthétiques enchaînées automatiquement,
 reprise sans doublon). Pas un service permanent : chaque exécution est bornée et lancée explicitement.
@@ -104,9 +104,71 @@ Les événements publiés par le relais (`hermes-relay-event/v1`) ne sont jamais
   `stop.request` (action opérateur explicite ; archiver le fichier avant).
   1 worker principal séquentiel (engine) ; sous-agents Hermes ≤ 2 en parallèle.
 
+## Durciment fiabilité — sept corrections (#126-1 .. #126-7, audit lecture seule 2026-11-21)
+
+1. **#126-1 encodage gh** : `default_fetcher` et `publish_comment` fixent
+   `encoding="utf-8"` (sous Windows cp1252, `UnicodeDecodeError`/`json.loads(None)`
+   faisait planter le relais au lieu du fail-closed). Test
+   `test_gh_calls_pin_utf8_encoding`.
+2. **#126-2 boucle principale protégée** : `run` encapsule poll/sync dans un
+   `try/except` (OSError, ValueError, KeyError, TypeError, AttributeError,
+   Blocked) → `observe(BLOCKED, BLOCKER=...)`, sortie 2 ; jamais de boucle morte
+   ni de repli payant. Tests `test_main_loop_unexpected_error_fail_closed` et
+   `test_main_loop_attribute_error_fail_closed`.
+3. **#126-3 propose verrouillé** : la publication PROPOSED passe sous
+   `exclusive(session.lock)` (verrou non bloquant) avec re-check CAS avant le
+   POST ; `Blocked` → `already_proposed`, échec publication → sortie 1 propre.
+   Tests `test_propose_dedup_via_main`, `test_propose_concurrent_single_publication`,
+   `test_propose_publish_failure_returns_error`.
+4. **#126-4 recovery liée au contrat** : `existing_events` renvoie
+   `{url, contract_sha256}` ; une ré-approbation d'un même `mid` avec un contrat
+   différent n'est plus enregistrée comme « recovered » mais publiée. Une
+   empreinte absente n'est pas une preuve : **fail-closed**, on publie (le
+   marqueur anti-boucle évite la ré-admission). Tests
+   `test_f3_scan_recovers_existing_event_without_repost`,
+   `test_f3_scan_same_id_different_contract_is_not_swallowed`,
+   `test_contractless_recovered_event_is_published_fail_closed`.
+5. **#126-5 journal durable** : la ligne `relay-events.jsonl` est appendue AVANT le
+   marqueur CAS (append-before-mark) : un crash entre les deux laisse une ligne
+   auditable plutôt qu'une transition perdue. Test
+   `test_journal_appends_before_cas_mark`.
+6. **#126-6 mandat épinglé en contenu** : `--mandate-sha256` (SHA-256 du corps du
+   commentaire mandat) vérifié dans `fetch_mandate` ; sans l'option, le
+   comportement historique (auteur seul) est conservé. Tests
+   `test_mandate_content_pinned_by_sha256` et
+   `test_main_wires_mandate_sha256_into_source`.
+7. **#126-7 JSON durci** : `parse_approvals` rejette les clés dupliquées
+   (`object_pairs_hook=_unique_keys`). Test `test_duplicate_json_key_rejected`.
+
+## Recette — deux missions synthétiques A puis B (#123)
+
+Recette hors ligne, sans appel modèle (fixtures + publisher injecté) :
+`tests/test_hermes_relay.py::TwoMissionRecipeTests::test_recipe_a_then_b_end_to_end_and_idempotent`
+— admission GitHub authentifiée (auteur, mandat, expiration, fingerprint) de deux
+missions distinctes, ACK A puis ACK B, ACCEPTED A puis ACCEPTED B, exécution A avant B
+(dépendance CAS), 2 entrées mémoire, puis second run sur le même état : 0 réexécution,
+0 publication supplémentaire. Aucun copier-coller humain.
+
+Recette live (à exécuter **uniquement** sur approbation explicite du propriétaire) :
+
+1. Épingler le mandat : publier le mandat borné sur #67, puis calculer
+   `SHA-256` du corps du commentaire (`gh api .../issues/comments/<id> --jq .body`).
+2. Publier deux commentaires `hermes-mission/v1` distincts sur #94 (A puis B, B
+   dépend de A), approuvés par `khalidd692`, `mandate_comment_id` = mandat,
+   `expires_at` futur, `mission_sha256` = fingerprint du contrat.
+3. Démarrer **une seule fois** le relais borné :
+   `python -B scripts/agents/automation/hermes_github_adapter.py run --state <state>
+   --issue 94 --mandate-issue 67 --mandate-comment <id> --mandate-sha256 <sha>
+   --seconds 570 --max-tasks 5 --cli-exe <hermes.exe>`
+4. Contrôler : 2 ACK distincts + 2 ACCEPTED sur #94, `status` = ACCEPTED/ACCEPTED,
+   2 entrées mémoire, coût 0.
+5. Interruption/reprise : `stop`, archiver `stop.request`, relancer `--once` →
+   aucun doublon (vérifié live sur la démo C).
+6. STOP : ne jamais rejouer automatiquement une mission `AWAITING_HUMAN`.
+
 ## Preuves live (2026-11-19/20)
 
 `docs/agents/autonomy-evidence/hermes-relay-live.json` — sessions Hermes réelles, SHA-256 des
 artefacts, commentaires GitHub d'approbation/ACK/résultat, coût 0 attesté, rappel mémoire 2/2,
-sonde crash/reprise sans doublon. Tests offline : `tests/test_hermes_relay.py` 30/30 +
-régressions moteur 14/14, CAS 7/7, kilo executor 8/8.
+sonde crash/reprise sans doublon. Tests offline : `tests/test_hermes_relay.py` 61/61 +
+régressions moteur 14/14, CAS 7/7, kilo executor 8/8 = **90/90** (2026-11-21).

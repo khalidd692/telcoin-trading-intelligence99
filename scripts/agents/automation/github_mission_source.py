@@ -14,6 +14,7 @@ distinct marker and are never re-admitted (no feedback loop).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -40,7 +41,7 @@ ORIGINS = {"delegated-mandate", "owner-direct"}
 def default_fetcher(endpoint):
     try:
         completed = subprocess.run(["gh", "api", endpoint], capture_output=True,
-                                   text=True, timeout=60, check=False)
+                                   text=True, encoding="utf-8", timeout=60, check=False)
     except subprocess.TimeoutExpired as exc:
         # Fail-closed to the engine's SOURCE_UNAVAILABLE path (review F1).
         raise OSError("gh api timeout") from exc
@@ -64,12 +65,27 @@ def fetch_comments(repo, issue, *, fetcher=None, max_pages=MAX_PAGES):
     return comments
 
 
-def fetch_mandate(repo, issue, comment_id, *, fetcher=None):
+def _unique_keys(pairs):
+    """Reject ambiguous duplicate JSON keys (defence in depth, owner=hermes)."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError("duplicate JSON key")
+        obj[key] = value
+    return obj
+
+
+def fetch_mandate(repo, issue, comment_id, *, fetcher=None, mandate_sha256=None):
     fetcher = fetcher or default_fetcher
     # Single issue comments live under issues/comments/{id} (no issue number).
     comment = fetcher(f"repos/{repo}/issues/comments/{comment_id}")
     if not isinstance(comment, dict) or (comment.get("user") or {}).get("login") not in APPROVERS:
         raise ValueError("mandate comment is not owner-authored")
+    # Reserve F6: the mandate is pinned by content, not only by author/id.
+    if mandate_sha256 is not None:
+        digest = hashlib.sha256((comment.get("body") or "").encode("utf-8")).hexdigest()
+        if digest != mandate_sha256:
+            raise ValueError("mandate content does not match the pinned sha256")
     return comment
 
 
@@ -93,7 +109,7 @@ def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_re
         if not match:
             continue
         try:
-            payload = json.loads(match.group(1))
+            payload = json.loads(match.group(1), object_pairs_hook=_unique_keys)
         except ValueError:
             continue
         mission, approval = payload.get("mission"), payload.get("approval")
@@ -143,14 +159,15 @@ def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_re
 
 
 def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=None,
-                  owner_approval_reader=None):
+                  owner_approval_reader=None, mandate_sha256=None):
     """Return the ``{"missions": [...], "approvals": {...}}`` poll payload.
 
     Raises OSError/ValueError on GitHub failure or invalid mandate so the
     engine's ``poll`` fail-closes to BLOCKED (SOURCE_UNAVAILABLE_OR_INVALID).
     """
     fetcher = fetcher or default_fetcher
-    fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher)
+    fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher,
+                  mandate_sha256=mandate_sha256)
     comments = fetch_comments(repo, issue, fetcher=fetcher)
     return parse_approvals(comments, mandate_comment_id=mandate_comment_id,
                            owner_approval_reader=owner_approval_reader)
