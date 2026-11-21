@@ -30,7 +30,7 @@ from protocol.handoff import Inbox
 from hermes_executor import HermesExecutor, FREE_MODELS
 from hermes_verifier import verify as hermes_verify
 from github_mission_source import (
-    github_source, EVENT_MARKER, PROPOSAL_MARKER, fetch_comments,
+    github_source, default_fetcher, EVENT_MARKER, PROPOSAL_MARKER, fetch_comments,
 )
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
@@ -286,7 +286,7 @@ def build_runtime(state, *, model=FREE_MODELS[0], cli_exe=None, issue=None,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["run", "status", "stop", "propose"])
+    parser.add_argument("action", choices=["run", "status", "stop", "propose", "preflight"])
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--issue", type=int)
     parser.add_argument("--mandate-issue", type=int, default=67)
@@ -301,6 +301,38 @@ def main(argv=None):
     parser.add_argument("--backlog", type=Path)
     parser.add_argument("--task")
     args = parser.parse_args(argv)
+    if args.action == "preflight":
+        # No Runtime instance, no writable state, no worker invocation,
+        # no publication. The source itself authenticates the mandate and
+        # mission approvals; pin the exact UTF-8 body returned by gh api.
+        if not args.issue or not args.mandate_comment:
+            parser.error("preflight requires --issue and --mandate-comment")
+        try:
+            mandate = default_fetcher(
+                f"repos/{REPO}/issues/comments/{args.mandate_comment}")
+            if (not isinstance(mandate, dict)
+                    or (mandate.get("user") or {}).get("login") != "khalidd692"):
+                raise ValueError("mandate is not owner-authored")
+            sha = hashlib.sha256(
+                (mandate.get("body") or "").encode("utf-8")).hexdigest()
+            if args.mandate_sha256 and sha != args.mandate_sha256:
+                raise ValueError("mandate content does not match the pinned sha256")
+            payload = github_source(
+                REPO, args.issue, args.mandate_issue, args.mandate_comment,
+                mandate_sha256=sha)
+            print(json.dumps({
+                "preflight": "OK", "mandate_sha256": sha,
+                "missions": [{"id": m["id"],
+                              "contract_sha256": payload["approvals"][m["id"]]}
+                             for m in payload["missions"]],
+            }, ensure_ascii=True), flush=True)
+            return 0
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            print(json.dumps({"preflight": "BLOCKED",
+                              "error": type(exc).__name__,
+                              "detail": str(exc)[:300]}, ensure_ascii=True),
+                  flush=True)
+            return 2
     scan = (lambda: existing_events(REPO, args.issue)) if (args.issue and not args.no_publish) else None
     runtime, pub = build_runtime(args.state, model=args.model, cli_exe=args.cli_exe,
                                  issue=args.issue, publish=not args.no_publish, scan=scan)
