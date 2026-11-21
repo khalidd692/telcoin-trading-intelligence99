@@ -775,12 +775,15 @@ class ReliabilityReviewTests(unittest.TestCase):
         codes = []
 
         def go():
-            with mock.patch.object(hga, "publish_comment", side_effect=slow_publish):
-                codes.append(hga.main(["propose", "--state", str(self.root), "--issue", "94",
-                                       "--backlog", str(bl), "--task", "I-02"]))
+            codes.append(hga.main(["propose", "--state", str(self.root), "--issue", "94",
+                                   "--backlog", str(bl), "--task", "I-02"]))
 
-        t1, t2 = threading.Thread(target=go), threading.Thread(target=go)
-        t1.start(); t2.start(); t1.join(); t2.join()
+        # Un SEUL patch posé dans le thread principal : patch.object n'est pas
+        # thread-safe et un patch posé/retiré par deux threads fuit et casse les
+        # tests suivants (publish_comment remplacé par un Mock résiduel).
+        with mock.patch.object(hga, "publish_comment", side_effect=slow_publish):
+            t1, t2 = threading.Thread(target=go), threading.Thread(target=go)
+            t1.start(); t2.start(); t1.join(); t2.join()
         self.assertEqual(sorted(codes), [0, 0])
         self.assertEqual(len(published), 1)  # verrou + CAS : une seule publication
 

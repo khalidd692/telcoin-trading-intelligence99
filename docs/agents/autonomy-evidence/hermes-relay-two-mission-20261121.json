@@ -40,7 +40,18 @@
   "delegation_id": "deleg_f1268c0c",
   "lecture_seule": true,
   "premier_tour": "5 VÉRIFIÉ / 2 PARTIEL ; réserves corrigées dans ce commit (AttributeError/Blocked, propose, fail-open sans empreinte, tests non probants)",
-  "seconde_passe": "À FAIRE sur les ajouts post-revue"
+  "seconde_passe": {
+   "sous_agent": "tel99-verifier",
+   "subagent_id": "sa-0-9ff3128d",
+   "delegation_id": "deleg_e9d8bb5c",
+   "resultat": "5/5 points VÉRIFIÉS (catch AttributeError/Blocked, propose + concurrence, existing_events non-dict + recovery fail-closed, probance test duplicate JSON, 66 tests relais)",
+   "reserve": "branche Blocked->already_proposed non couverte par un test déterministe dédié"
+  },
+  "stabilite": {
+   "avant": "test_propose_concurrent_single_publication posait mock.patch sur un global depuis deux threads -> fuites, 3-4 echecs aleatoires (50% des runs)",
+   "apres": "patch unique pose dans le thread principal ; 8/8 runs de 66 tests relais OK ; 95/95 cible OK",
+   "commit": "a_venir"
+  }
  },
  "limites": [
   "Aucune mission synthétique live exécutée (approbation propriétaire requise)",
