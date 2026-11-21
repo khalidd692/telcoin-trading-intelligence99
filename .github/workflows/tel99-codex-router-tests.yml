@@ -1,0 +1,29 @@
+name: TEL99 Codex model discovery
+
+on:
+  pull_request:
+    branches:
+      - agents/codex-model-router
+      - assist/autonomy-integration-20261119
+      - main
+    paths:
+      - '.github/workflows/tel99-codex-router-tests.yml'
+      - 'scripts/agents/automation/codex_model_router.py'
+      - 'tests/test_codex_model_router.py'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -B -m unittest -v tests.test_codex_model_router

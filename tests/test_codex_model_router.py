@@ -226,6 +226,50 @@ class RouterTests(unittest.TestCase):
         self.assertIsNone(attempt["cli_usage"]["terminal_event"])
         self.assertNotIn("secret", json.dumps(attempt))
 
+    def test_unreadable_output_still_closes_the_persisted_attempt(self):
+        from local_codex import Supervisor, digest
+
+        mission = {"id": "OBSERVE", "routing_profile": "routine"}
+        approval = digest(json.dumps(mission, sort_keys=True))
+        state = router.new_checkpoint(mission["id"], approval, mission["routing_profile"])
+        plan = router.prepare_attempt(state, approval, BASE, snapshot(LUNA))
+        key = "codex-local-route/OBSERVE"
+        # Parser depth varies across Python builds. Both a decode error and
+        # a recursion limit mean that this optional observation is unavailable.
+        output = "[" * 3000 + "null" + "]" * 3000 + '\n{"type":"turn.completed"}'
+        with tempfile.TemporaryDirectory() as directory:
+            supervisor = Supervisor(Path(directory), demo=True)
+            supervisor.store.put(key, plan.checkpoint)
+            proof = {"artifact_digests": {"result": ARTIFACT}}
+            with patch.object(router, "read_snapshot", return_value=snapshot(LUNA)):
+                supervisor.complete_route(mission, "tests_passed", proof=proof, exec_jsonl=output)
+            saved = Supervisor(Path(directory), demo=True).store.get(key)
+        attempt, = saved["attempts"]
+        self.assertEqual(attempt["status"], "tests_passed")
+        self.assertEqual(attempt["test_evidence_sha256"], digest(json.dumps(proof, sort_keys=True)))
+        self.assertIsNone(attempt["cli_usage"]["terminal_event"])
+        self.assertIsNone(attempt["cli_usage"]["tokens"])
+        self.assert_blocked("ROUTE_FINISHED", router.prepare_attempt, saved, approval, BASE, snapshot(LUNA))
+
+    def test_unicode_inside_json_is_not_a_record_boundary(self):
+        usage = {"input_tokens": 10, "cached_input_tokens": 0, "output_tokens": 3}
+        event = {"type": "turn.completed", "usage": usage, "note": "ligne\u2028suite"}
+        output = json.dumps(event, ensure_ascii=False) + "\r\n"
+        result = self.finish(self.start(), "worker_error", exec_jsonl=output)["attempts"][0]
+        self.assertEqual(result["cli_usage"]["tokens"], usage)
+        self.assertNotIn("suite", json.dumps(result))
+
+    def test_mixed_sessions_cannot_supply_a_token_measurement(self):
+        usage = {"input_tokens": 10, "cached_input_tokens": 0, "output_tokens": 3}
+        output = "\n".join(map(json.dumps, (
+            {"type": "thread.started", "thread_id": "one"},
+            {"type": "turn.completed", "usage": usage},
+            {"type": "thread.started", "thread_id": "two"},
+        )))
+        result = self.finish(self.start(), "worker_error", exec_jsonl=output)["attempts"][0]
+        for field in ("thread_id", "terminal_event", "tokens"):
+            self.assertIsNone(result["cli_usage"][field])
+
     def test_reported_effective_model_mismatch_stops_escalation(self):
         attempt = self.start("debug")
         state = self.finish(attempt, "tests_failed", test_evidence_sha256=VERDICT,

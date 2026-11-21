@@ -464,21 +464,27 @@ def prepare_exec(argv, checkpoint, approval_sha256, base_commit, snapshot, persi
 
 
 def _exec_usage(exec_jsonl, effective_settings):
+    observation = {"source": "codex exec --json", "thread_id": None,
+                   "terminal_event": None, "tokens": None, "effective_settings": effective_settings}
     thread_id = None
     terminal = None
     tokens = None
     ambiguous = False
-    for line in exec_jsonl.splitlines():
+    for line in exec_jsonl.split("\n"):
+        if not line.strip(" \t\r"):
+            continue
         try:
             event = json.loads(line)
-        except ValueError:
-            continue
+        except (ValueError, RecursionError):
+            return observation
         if not isinstance(event, dict):
-            continue
+            return observation
         if event.get("type") == "thread.started":
             value = event.get("thread_id")
-            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
-                thread_id = value
+            if (not _hash(value, r"[A-Za-z0-9_-]{1,128}") or terminal is not None
+                    or (thread_id is not None and thread_id != value)):
+                return observation
+            thread_id = value
         if event.get("type") in ("turn.completed", "turn.failed"):
             ambiguous |= terminal is not None
             terminal = event["type"]
@@ -488,9 +494,10 @@ def _exec_usage(exec_jsonl, effective_settings):
             if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0 for k in keys):
                 if usage["cached_input_tokens"] <= usage["input_tokens"]:
                     tokens = {key: usage[key] for key in keys}
-    return {"source": "codex exec --json", "thread_id": thread_id,
-            "terminal_event": None if ambiguous else terminal,
-            "tokens": None if ambiguous else tokens, "effective_settings": effective_settings}
+    observation["thread_id"] = thread_id
+    if not ambiguous:
+        observation.update(terminal_event=terminal, tokens=tokens)
+    return observation
 
 
 def record_result(checkpoint, approval_sha256, number, status, *, duration_ms,
