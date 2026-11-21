@@ -1,0 +1,67 @@
+{
+  "renderer-release": {
+    "obligations": ["layout", "fonts"], "budget": 6, "mandatory": [],
+    "checks": [
+      {"id": "viewport", "cost": 3, "covers": ["layout"]},
+      {"id": "glyphs", "cost": 2, "covers": ["fonts"]},
+      {"id": "unused-metrics", "cost": 10, "covers": []}
+    ]
+  },
+  "archive-export": {
+    "obligations": ["read", "write", "restore"], "budget": 7, "mandatory": ["manifest"],
+    "checks": [
+      {"id": "legacy-import", "cost": 4, "covers": ["read"]},
+      {"id": "roundtrip", "cost": 5, "covers": ["read", "write", "restore"]},
+      {"id": "index", "cost": 3, "covers": ["write"]},
+      {"id": "manifest", "cost": 2, "covers": []}
+    ]
+  },
+  "audio-pipeline": {
+    "obligations": ["pcm", "aac", "flac", "wav", "ogg", "opus"], "budget": 6, "mandatory": [],
+    "checks": [
+      {"id": "codec-family", "cost": 3, "covers": ["pcm", "aac", "flac", "wav"]},
+      {"id": "decoder-a", "cost": 3, "covers": ["pcm", "aac", "ogg"]},
+      {"id": "decoder-b", "cost": 3, "covers": ["flac", "wav", "opus"]},
+      {"id": "ogg-only", "cost": 2, "covers": ["ogg"]},
+      {"id": "opus-only", "cost": 2, "covers": ["opus"]}
+    ]
+  },
+  "calendar-upgrade": {
+    "obligations": ["dates", "timezone", "locale"], "budget": 12, "mandatory": ["approval"],
+    "checks": [
+      {"id": "approval", "cost": 4, "covers": ["dates"]},
+      {"id": "intl", "cost": 3, "covers": ["timezone", "locale"]},
+      {"id": "dst", "cost": 5, "covers": ["timezone"]}
+    ]
+  },
+  "warehouse-schema": {
+    "obligations": ["rows", "keys", "nulls"], "budget": 15, "mandatory": ["load"],
+    "checks": [
+      {"id": "load", "cost": 3, "covers": ["rows"]},
+      {"id": "keys-sample", "cost": 1, "covers": ["keys"]}
+    ]
+  },
+  "mobile-offline": {
+    "obligations": ["resume"], "budget": 2, "mandatory": ["airplane", "emulator"],
+    "checks": [
+      {"id": "airplane", "cost": 2, "covers": ["resume"]},
+      {"id": "emulator", "cost": 1, "covers": []}
+    ]
+  },
+  "math-library": {
+    "obligations": ["precision", "rounding"], "budget": 4, "mandatory": ["vectors", "ties"],
+    "checks": [
+      {"id": "ties", "cost": 2, "covers": ["rounding"]},
+      {"id": "vectors", "cost": 2, "covers": ["precision", "rounding"]}
+    ]
+  },
+  "editor-locales": {
+    "obligations": ["de", "it", "fr"], "budget": 4, "mandatory": [],
+    "checks": [
+      {"id": "pack-a", "cost": 3, "covers": ["de", "it"]},
+      {"id": "pack-b", "cost": 3, "covers": ["de", "fr"]},
+      {"id": "single-it", "cost": 1, "covers": ["it"]},
+      {"id": "single-fr", "cost": 1, "covers": ["fr"]}
+    ]
+  }
+}
