@@ -1,4 +1,5 @@
-"""Plan verification coverage under an estimated budget. Read one JSON contract on stdin."""
+"""Plan or resume verification under an estimated budget. Read one JSON request on stdin."""
+import argparse
 import json
 import sys
 
@@ -12,7 +13,7 @@ def identifiers(values):
     return result
 
 
-def plan_checks(contract):
+def parse_contract(contract):
     fields = {"budget", "obligations", "mandatory", "checks"}
     if not isinstance(contract, dict) or contract.keys() != fields:
         raise ValueError("Expected budget, obligations, mandatory and checks.")
@@ -38,7 +39,10 @@ def plan_checks(contract):
         catalog[name] = cost, covers
     if not mandatory <= catalog.keys():
         raise ValueError("Missing mandatory check in catalog.")
+    return budget, target, mandatory, catalog
 
+
+def select_checks(budget, target, mandatory, catalog):
     available = frozenset().union(*(covers for _, covers in catalog.values()))
     if target - available:
         return {"status": "blocked", "checks": [], "uncovered": sorted(target - available)}
@@ -64,12 +68,40 @@ def plan_checks(contract):
             "cost": minimum, "all_relevant_cost": reference_cost}
 
 
+def plan_checks(contract):
+    return select_checks(*parse_contract(contract))
+
+
+def replan_checks(request):
+    if not isinstance(request, dict) or request.keys() != {"contract", "passed", "unavailable"}:
+        raise ValueError("Expected contract, passed and unavailable.")
+    budget, target, mandatory, catalog = parse_contract(request["contract"])
+    passed = identifiers(request["passed"])
+    unavailable = identifiers(request["unavailable"])
+    if not (passed | unavailable) <= catalog.keys() or passed & unavailable:
+        raise ValueError("Passed and unavailable must be disjoint sets of known checks.")
+
+    blocked = mandatory & unavailable
+    if blocked:
+        result = {"status": "blocked", "checks": [], "unavailable_mandatory": sorted(blocked)}
+    else:
+        covered = frozenset().union(*(catalog[name][1] for name in passed))
+        pending = {name: (cost, covers - covered) for name, (cost, covers) in catalog.items()
+                   if name not in passed and name not in unavailable}
+        result = select_checks(budget, target - covered, mandatory - passed, pending)
+    return {**result, "reused": sorted(passed)}
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--replan", action="store_true", help="Plan from verified passes and remaining budget.")
+    args = parser.parse_args()
     try:
         payload = sys.stdin.buffer.read(65537)
         if len(payload) > 65536:
             raise ValueError("Contract exceeds 64 KiB.")
-        result = plan_checks(json.loads(payload))
+        plan = replan_checks if args.replan else plan_checks
+        result = plan(json.loads(payload))
     except (ValueError, RecursionError) as error:
         print(json.dumps({"status": "invalid", "reason": str(error)}))
         return 2

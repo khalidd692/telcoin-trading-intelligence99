@@ -1,0 +1,732 @@
+{
+  "candidate_planner_sha256": "0829597264d4d74988c6e392384e7229b3a83711c45d17489212174b4f50a4c5",
+  "candidate_revision": "7a51e847731d5c6552a07c0aa8d8e170b350d7fb",
+  "cases": {
+    "bibliography-metadata": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 9,
+          "status": "blocked"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 18,
+          "checks": [
+            "export-and-fallback",
+            "fixture-license"
+          ],
+          "cost": 5,
+          "reused": [
+            "links-fixture"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "export-and-fallback",
+          "fixture-license"
+        ],
+        "cost": 5,
+        "reused": [
+          "links-fixture"
+        ],
+        "status": "planned"
+      }
+    },
+    "catalog-reindex": {
+      "baseline": {
+        "executable": true,
+        "oracle_match": false,
+        "result": {
+          "all_relevant_cost": 16,
+          "checks": [
+            "cold-index",
+            "page-boundary"
+          ],
+          "cost": 6,
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 12,
+          "checks": [
+            "page-boundary"
+          ],
+          "cost": 2,
+          "reused": [
+            "cold-index"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "page-boundary"
+        ],
+        "cost": 2,
+        "reused": [
+          "cold-index"
+        ],
+        "status": "planned"
+      }
+    },
+    "document-rendering": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 6,
+          "status": "blocked"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 3,
+          "checks": [
+            "local-fonts",
+            "print-pages"
+          ],
+          "cost": 3,
+          "reused": [
+            "media-rights"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "local-fonts",
+          "print-pages"
+        ],
+        "cost": 3,
+        "reused": [
+          "media-rights"
+        ],
+        "status": "planned"
+      }
+    },
+    "energy-meter-import": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 4,
+          "status": "blocked"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 0,
+          "checks": [],
+          "cost": 0,
+          "reused": [
+            "sample-provenance",
+            "signed-meter-fixture"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [],
+        "cost": 0,
+        "reused": [
+          "sample-provenance",
+          "signed-meter-fixture"
+        ],
+        "status": "planned"
+      }
+    },
+    "exhibition-labels": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 7,
+          "status": "blocked"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 0,
+          "checks": [],
+          "cost": 0,
+          "reused": [
+            "attribution-audit",
+            "label-fixture"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [],
+        "cost": 0,
+        "reused": [
+          "attribution-audit",
+          "label-fixture"
+        ],
+        "status": "planned"
+      }
+    },
+    "fleet-maintenance": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 8,
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "minimum_cost": 5,
+          "reused": [
+            "inspection-fixture"
+          ],
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "minimum_cost": 5,
+        "reused": [
+          "inspection-fixture"
+        ],
+        "status": "blocked"
+      }
+    },
+    "gallery-offline": {
+      "baseline": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 10,
+          "checks": [
+            "gallery-device",
+            "settings-view"
+          ],
+          "cost": 7,
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 7,
+          "checks": [
+            "gallery-device",
+            "settings-view"
+          ],
+          "cost": 7,
+          "reused": [
+            "cached-fixture"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "gallery-device",
+          "settings-view"
+        ],
+        "cost": 7,
+        "reused": [
+          "cached-fixture"
+        ],
+        "status": "planned"
+      }
+    },
+    "harbor-tide-feed": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "status": "blocked",
+          "uncovered": [
+            "provisional-label"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "reused": [
+            "recorded-station"
+          ],
+          "status": "blocked",
+          "uncovered": [
+            "provisional-label"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "reused": [
+          "recorded-station"
+        ],
+        "status": "blocked",
+        "uncovered": [
+          "provisional-label"
+        ]
+      }
+    },
+    "inventory-reconciliation": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "status": "blocked",
+          "unavailable_mandatory": [
+            "policy-approval",
+            "warehouse-signoff"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "reused": [
+            "cycle-count"
+          ],
+          "status": "blocked",
+          "unavailable_mandatory": [
+            "policy-approval",
+            "warehouse-signoff"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "reused": [
+          "cycle-count"
+        ],
+        "status": "blocked",
+        "unavailable_mandatory": [
+          "policy-approval",
+          "warehouse-signoff"
+        ]
+      }
+    },
+    "library-holds": {
+      "baseline": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 7,
+          "checks": [
+            "offline-replay"
+          ],
+          "cost": 3,
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 7,
+          "checks": [
+            "offline-replay"
+          ],
+          "cost": 3,
+          "reused": [
+            "preview-check"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "offline-replay"
+        ],
+        "cost": 3,
+        "reused": [
+          "preview-check"
+        ],
+        "status": "planned"
+      }
+    },
+    "museum-audio": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 8,
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "minimum_cost": 5,
+          "reused": [
+            "editor-fixture"
+          ],
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "minimum_cost": 5,
+        "reused": [
+          "editor-fixture"
+        ],
+        "status": "blocked"
+      }
+    },
+    "newsletter-localization": {
+      "baseline": {
+        "executable": true,
+        "oracle_match": false,
+        "result": {
+          "all_relevant_cost": 14,
+          "checks": [
+            "accessibility-bundle",
+            "review-assets"
+          ],
+          "cost": 6,
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 12,
+          "checks": [
+            "accessibility-bundle"
+          ],
+          "cost": 4,
+          "reused": [
+            "review-assets"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "accessibility-bundle"
+        ],
+        "cost": 4,
+        "reused": [
+          "review-assets"
+        ],
+        "status": "planned"
+      }
+    },
+    "observatory-schedule": {
+      "baseline": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 8,
+          "checks": [
+            "configuration-review",
+            "saved-schedule"
+          ],
+          "cost": 5,
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 8,
+          "checks": [
+            "configuration-review",
+            "saved-schedule"
+          ],
+          "cost": 5,
+          "reused": [],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "configuration-review",
+          "saved-schedule"
+        ],
+        "cost": 5,
+        "reused": [],
+        "status": "planned"
+      }
+    },
+    "parking-permits": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "status": "blocked",
+          "uncovered": [
+            "permit-zone"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "reused": [],
+          "status": "blocked",
+          "uncovered": [
+            "permit-zone"
+          ]
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "reused": [],
+        "status": "blocked",
+        "uncovered": [
+          "permit-zone"
+        ]
+      }
+    },
+    "public-event-calendar": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": false,
+        "result": {
+          "checks": [],
+          "minimum_cost": 7,
+          "status": "blocked"
+        },
+        "valid_blocker": false
+      },
+      "candidate": {
+        "executable": true,
+        "oracle_match": true,
+        "result": {
+          "all_relevant_cost": 6,
+          "checks": [
+            "export-fixture"
+          ],
+          "cost": 3,
+          "reused": [
+            "date-fixture",
+            "sample-audit"
+          ],
+          "status": "planned"
+        },
+        "valid_blocker": false
+      },
+      "oracle": {
+        "checks": [
+          "export-fixture"
+        ],
+        "cost": 3,
+        "reused": [
+          "date-fixture",
+          "sample-audit"
+        ],
+        "status": "planned"
+      }
+    },
+    "trail-route-export": {
+      "baseline": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "minimum_cost": 4,
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "candidate": {
+        "executable": false,
+        "oracle_match": true,
+        "result": {
+          "checks": [],
+          "minimum_cost": 4,
+          "reused": [],
+          "status": "blocked"
+        },
+        "valid_blocker": true
+      },
+      "oracle": {
+        "checks": [],
+        "minimum_cost": 4,
+        "reused": [],
+        "status": "blocked"
+      }
+    }
+  },
+  "g5": {
+    "baseline": "baseline",
+    "baseline_rate": 0.4375,
+    "candidate": "candidate",
+    "candidate_rate": 1.0,
+    "decided_at": "2026-11-21T13:55:47Z",
+    "delta": 0.5625,
+    "per_task": [
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "bibliography-metadata"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "catalog-reindex"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "document-rendering"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "energy-meter-import"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "exhibition-labels"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "fleet-maintenance"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "gallery-offline"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "harbor-tide-feed"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "inventory-reconciliation"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "library-holds"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "museum-audio"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "newsletter-localization"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "observatory-schedule"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "parking-permits"
+      },
+      {
+        "baseline": false,
+        "candidate": true,
+        "task_id": "public-event-calendar"
+      },
+      {
+        "baseline": true,
+        "candidate": true,
+        "task_id": "trail-route-export"
+      }
+    ],
+    "reasons": [
+      "candidate improves +56.25% with no regression"
+    ],
+    "task_count": 16,
+    "verdict": "keep"
+  },
+  "jointly_executable": {
+    "baseline_checks": 9,
+    "baseline_cost": 27,
+    "candidate_checks": 7,
+    "candidate_cost": 21,
+    "cases": 5
+  },
+  "soundness": {
+    "baseline": {
+      "executable": 5,
+      "oracle_match": 7,
+      "valid_blocker": 6
+    },
+    "candidate": {
+      "executable": 10,
+      "oracle_match": 16,
+      "valid_blocker": 6
+    }
+  }
+}

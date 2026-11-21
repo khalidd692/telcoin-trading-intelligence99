@@ -1,0 +1,239 @@
+{
+  "bibliography-metadata": {
+    "contract": {
+      "budget": 5,
+      "obligations": ["citation-links", "edition-fallback", "exports"],
+      "mandatory": ["fixture-license"],
+      "checks": [
+        {"id": "full-bibliography", "cost": 8, "covers": ["citation-links", "edition-fallback", "exports"]},
+        {"id": "links-fixture", "cost": 4, "covers": ["citation-links"]},
+        {"id": "export-and-fallback", "cost": 4, "covers": ["edition-fallback", "exports"]},
+        {"id": "fallback-rows", "cost": 2, "covers": ["edition-fallback"]},
+        {"id": "export-status", "cost": 3, "covers": ["exports"]},
+        {"id": "fixture-license", "cost": 1, "covers": []}
+      ]
+    },
+    "passed": ["links-fixture"],
+    "unavailable": []
+  },
+  "catalog-reindex": {
+    "contract": {
+      "budget": 10,
+      "obligations": ["freshness", "filtering", "pagination"],
+      "mandatory": [],
+      "checks": [
+        {"id": "cold-index", "cost": 4, "covers": ["freshness", "filtering"]},
+        {"id": "page-boundary", "cost": 2, "covers": ["pagination"]},
+        {"id": "complete-reindex", "cost": 7, "covers": ["freshness", "filtering", "pagination"]},
+        {"id": "warm-fixture", "cost": 3, "covers": ["filtering", "pagination"]}
+      ]
+    },
+    "passed": ["cold-index"],
+    "unavailable": []
+  },
+  "document-rendering": {
+    "contract": {
+      "budget": 3,
+      "obligations": ["fonts", "page-breaks"],
+      "mandatory": ["media-rights"],
+      "checks": [
+        {"id": "local-fonts", "cost": 1, "covers": ["fonts"]},
+        {"id": "print-pages", "cost": 2, "covers": ["page-breaks"]},
+        {"id": "media-rights", "cost": 3, "covers": []},
+        {"id": "render-service", "cost": 2, "covers": ["fonts", "page-breaks"]}
+      ]
+    },
+    "passed": ["media-rights"],
+    "unavailable": ["render-service"]
+  },
+  "energy-meter-import": {
+    "contract": {
+      "budget": 1,
+      "obligations": ["hour-offset", "scale"],
+      "mandatory": ["sample-provenance"],
+      "checks": [
+        {"id": "signed-meter-fixture", "cost": 3, "covers": ["scale"]},
+        {"id": "sample-provenance", "cost": 1, "covers": ["hour-offset"]},
+        {"id": "meter-roundtrip", "cost": 5, "covers": ["scale", "hour-offset"]}
+      ]
+    },
+    "passed": ["sample-provenance", "signed-meter-fixture"],
+    "unavailable": []
+  },
+  "exhibition-labels": {
+    "contract": {
+      "budget": 0,
+      "obligations": ["accession-number"],
+      "mandatory": ["attribution-audit"],
+      "checks": [
+        {"id": "attribution-audit", "cost": 2, "covers": []},
+        {"id": "label-fixture", "cost": 5, "covers": ["accession-number"]}
+      ]
+    },
+    "passed": ["label-fixture", "attribution-audit"],
+    "unavailable": []
+  },
+  "fleet-maintenance": {
+    "contract": {
+      "budget": 2,
+      "obligations": ["inspection-due", "service-hours"],
+      "mandatory": ["review-approval"],
+      "checks": [
+        {"id": "inspection-fixture", "cost": 3, "covers": ["inspection-due"]},
+        {"id": "service-report", "cost": 2, "covers": ["service-hours"]},
+        {"id": "review-approval", "cost": 3, "covers": []}
+      ]
+    },
+    "passed": ["inspection-fixture"],
+    "unavailable": []
+  },
+  "gallery-offline": {
+    "contract": {
+      "budget": 7,
+      "obligations": ["empty-state", "cached-layout", "preferences"],
+      "mandatory": [],
+      "checks": [
+        {"id": "browser-suite", "cost": 2, "covers": ["empty-state", "cached-layout", "preferences"]},
+        {"id": "gallery-device", "cost": 6, "covers": ["empty-state", "cached-layout"]},
+        {"id": "settings-view", "cost": 1, "covers": ["preferences"]},
+        {"id": "cached-fixture", "cost": 3, "covers": ["cached-layout"]}
+      ]
+    },
+    "passed": ["cached-fixture"],
+    "unavailable": ["browser-suite"]
+  },
+  "harbor-tide-feed": {
+    "contract": {
+      "budget": 5,
+      "obligations": ["station-name", "water-height", "provisional-label"],
+      "mandatory": [],
+      "checks": [
+        {"id": "recorded-station", "cost": 2, "covers": ["station-name"]},
+        {"id": "height-fixture", "cost": 1, "covers": ["water-height"]},
+        {"id": "combined-live-feed", "cost": 2, "covers": ["provisional-label", "water-height"]},
+        {"id": "station-summary", "cost": 4, "covers": ["station-name", "water-height"]}
+      ]
+    },
+    "passed": ["recorded-station"],
+    "unavailable": ["combined-live-feed"]
+  },
+  "inventory-reconciliation": {
+    "contract": {
+      "budget": 20,
+      "obligations": ["sku-join", "lot-age"],
+      "mandatory": ["policy-approval", "warehouse-signoff", "cycle-count"],
+      "checks": [
+        {"id": "warehouse-signoff", "cost": 2, "covers": []},
+        {"id": "sku-fixture", "cost": 2, "covers": ["sku-join"]},
+        {"id": "age-fixture", "cost": 3, "covers": ["lot-age"]},
+        {"id": "policy-approval", "cost": 1, "covers": []},
+        {"id": "cycle-count", "cost": 4, "covers": ["sku-join"]}
+      ]
+    },
+    "passed": ["cycle-count"],
+    "unavailable": ["warehouse-signoff", "policy-approval", "age-fixture"]
+  },
+  "library-holds": {
+    "contract": {
+      "budget": 4,
+      "obligations": ["hold-order", "pickup-notice"],
+      "mandatory": [],
+      "checks": [
+        {"id": "preview-check", "cost": 5, "covers": []},
+        {"id": "hold-fixture", "cost": 1, "covers": ["hold-order"]},
+        {"id": "notice-preview", "cost": 3, "covers": ["pickup-notice"]},
+        {"id": "offline-replay", "cost": 3, "covers": ["hold-order", "pickup-notice"]}
+      ]
+    },
+    "passed": ["preview-check"],
+    "unavailable": []
+  },
+  "newsletter-localization": {
+    "contract": {
+      "budget": 6,
+      "obligations": ["sender-name", "rtl-layout", "subscription-state"],
+      "mandatory": [],
+      "checks": [
+        {"id": "abc-draft", "cost": 4, "covers": ["sender-name", "rtl-layout", "subscription-state"]},
+        {"id": "accessibility-bundle", "cost": 4, "covers": ["rtl-layout", "subscription-state"]},
+        {"id": "browser-pair", "cost": 4, "covers": ["subscription-state", "rtl-layout"]},
+        {"id": "review-assets", "cost": 2, "covers": ["sender-name"]},
+        {"id": "text-preview", "cost": 2, "covers": ["subscription-state"]},
+        {"id": "rtl-preview", "cost": 2, "covers": ["rtl-layout"]}
+      ]
+    },
+    "passed": ["review-assets"],
+    "unavailable": ["abc-draft"]
+  },
+  "museum-audio": {
+    "contract": {
+      "budget": 4,
+      "obligations": ["chapter-order", "artwork-fallback", "captions"],
+      "mandatory": [],
+      "checks": [
+        {"id": "editor-fixture", "cost": 5, "covers": ["chapter-order"]},
+        {"id": "full-walkthrough", "cost": 8, "covers": ["chapter-order", "artwork-fallback", "captions"]},
+        {"id": "captions-panel", "cost": 3, "covers": ["captions"]},
+        {"id": "cover-regression", "cost": 2, "covers": ["artwork-fallback"]}
+      ]
+    },
+    "passed": ["editor-fixture"],
+    "unavailable": []
+  },
+  "observatory-schedule": {
+    "contract": {
+      "budget": 5,
+      "obligations": ["queue-order", "minute-rounding"],
+      "mandatory": ["configuration-review"],
+      "checks": [
+        {"id": "device-suite", "cost": 2, "covers": ["queue-order", "minute-rounding"]},
+        {"id": "saved-schedule", "cost": 3, "covers": ["queue-order", "minute-rounding"]},
+        {"id": "configuration-review", "cost": 2, "covers": []},
+        {"id": "legacy-export", "cost": 3, "covers": ["queue-order"]}
+      ]
+    },
+    "passed": [],
+    "unavailable": ["device-suite"]
+  },
+  "parking-permits": {
+    "contract": {
+      "budget": 0,
+      "obligations": ["permit-zone"],
+      "mandatory": ["privacy-review"],
+      "checks": [
+        {"id": "privacy-review", "cost": 1, "covers": []},
+        {"id": "zone-fixture", "cost": 1, "covers": ["permit-zone"]}
+      ]
+    },
+    "passed": [],
+    "unavailable": ["zone-fixture"]
+  },
+  "public-event-calendar": {
+    "contract": {
+      "budget": 3,
+      "obligations": ["duplicate-event", "local-time", "calendar-export"],
+      "mandatory": ["sample-audit"],
+      "checks": [
+        {"id": "date-fixture", "cost": 1, "covers": ["local-time"]},
+        {"id": "sample-audit", "cost": 4, "covers": ["duplicate-event"]},
+        {"id": "roundtrip", "cost": 3, "covers": ["calendar-export", "local-time"]},
+        {"id": "export-fixture", "cost": 3, "covers": ["calendar-export"]}
+      ]
+    },
+    "passed": ["date-fixture", "sample-audit"],
+    "unavailable": []
+  },
+  "trail-route-export": {
+    "contract": {
+      "budget": 2,
+      "obligations": ["elevation", "track-format"],
+      "mandatory": [],
+      "checks": [
+        {"id": "gpx-roundtrip", "cost": 4, "covers": ["track-format", "elevation"]},
+        {"id": "slope-check", "cost": 3, "covers": ["elevation"]}
+      ]
+    },
+    "passed": [],
+    "unavailable": []
+  }
+}
