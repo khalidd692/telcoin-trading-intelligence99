@@ -1,0 +1,64 @@
+{
+ "generated_at": "2026-11-21T21:05:00Z",
+ "role": "atelier Hermes (auteur) — preuves durables",
+ "branche": "hermes/relay-two-mission-20261121",
+ "base": "hermes/relay-github-adapter-20261120 (branche de #126)",
+ "commit": "9a104c3b",
+ "pr": "https://github.com/khalidd692/telcoin-trading-intelligence99/pull/135",
+ "pr_draft": true,
+ "tests": {
+  "commandes": [
+   "python -X utf8 -B -m unittest tests.test_hermes_relay tests.test_autonomy_runtime tests.test_agent_state_cas tests.test_kilo_executor"
+  ],
+  "resultat_cible": "95/95 OK (66 relais + 14 moteur + 7 CAS + 8 kilo executor)",
+  "suite_large": "940 tests, 3 échecs, 8 ignorés",
+  "echecs_suite_large": [
+   "test_cloud_autonomy.CallbackTests.test_fire_callback_is_a_noop_without_a_url (pré-existant, hors périmètre)",
+   "test_cloud_autonomy.CallbackTests.test_fire_callback_posts_completed_to_the_service (pré-existant, hors périmètre)",
+   "test_cloud_integration.FileStoreTests.test_keys_lists_prefixed (séparateur de chemin Windows missions\\a, pré-existant, fichier non modifié)"
+  ],
+  "offline": "aucun réseau, aucun appel modèle, aucun fournisseur payant",
+  "mode": "Windows 11, git-bash, python -X utf8"
+ },
+ "corrections": {
+  "#126-1": "encoding utf-8 explicite sur gh api (default_fetcher + publish_comment)",
+  "#126-2": "boucle run fail-closed : OSError/ValueError/KeyError/TypeError/AttributeError/Blocked -> observe(BLOCKED, BLOCKER) + sortie 2",
+  "#126-3": "propose sous exclusive(session.lock) + re-check CAS ; Blocked -> already_proposed ; échec publication -> sortie 1",
+  "#126-4": "existing_events renvoie {url, contract_sha256} ; recovery seule si empreintes égales ; forme str historique normalisée ; commentaires non-dict ignorés",
+  "#126-5": "journal relay-events.jsonl appendu AVANT le mark CAS (append-before-mark)",
+  "#126-6": "--mandate-sha256 épingle le contenu du mandat (opt-in, historique conservé)",
+  "#126-7": "parse_approvals rejette les clés JSON dupliquées (object_pairs_hook=_unique_keys)"
+ },
+ "recette_deux_missions": {
+  "test": "tests/test_hermes_relay.py::TwoMissionRecipeTests::test_recipe_a_then_b_end_to_end_and_idempotent",
+  "resultat": "admission GitHub authentifiée A et B, ACK A puis ACK B, ACCEPTED A puis ACCEPTED B, A exécutée avant B (dépendance CAS), 2 entrées mémoire, second run idempotent (0 réexécution, 0 publication)",
+  "live": "NON EXÉCUTÉ — en attente d'approbation explicite du propriétaire (runbook § Recette)"
+ },
+ "verification_independante": {
+  "sous_agent": "tel99-verifier",
+  "subagent_id": "sa-0-421f690f",
+  "delegation_id": "deleg_f1268c0c",
+  "lecture_seule": true,
+  "premier_tour": "5 VÉRIFIÉ / 2 PARTIEL ; réserves corrigées dans ce commit (AttributeError/Blocked, propose, fail-open sans empreinte, tests non probants)",
+  "seconde_passe": {
+   "sous_agent": "tel99-verifier",
+   "subagent_id": "sa-0-9ff3128d",
+   "delegation_id": "deleg_e9d8bb5c",
+   "resultat": "5/5 points VÉRIFIÉS (catch AttributeError/Blocked, propose + concurrence, existing_events non-dict + recovery fail-closed, probance test duplicate JSON, 66 tests relais)",
+   "reserve": "branche Blocked->already_proposed non couverte par un test déterministe dédié"
+  },
+  "stabilite": {
+   "avant": "test_propose_concurrent_single_publication posait mock.patch sur un global depuis deux threads -> fuites, 3-4 echecs aleatoires (50% des runs)",
+   "apres": "patch unique pose dans le thread principal ; 8/8 runs de 66 tests relais OK ; 95/95 cible OK",
+   "commit": "d3d679f5"
+  }
+ },
+ "limites": [
+  "Aucune mission synthétique live exécutée (approbation propriétaire requise)",
+  "#126-6 opt-in par conception (compatibilité états live existants)",
+  "PC allumé requis ; aucun service permanent ni cron installé",
+  "C (démo) reste AWAITING_HUMAN — jamais rejouée automatiquement",
+  "Secret OpenHands #88 toujours AWAITING_HUMAN avant production",
+  "Aucune fusion, aucun déploiement, aucun ordre financier"
+ ]
+}

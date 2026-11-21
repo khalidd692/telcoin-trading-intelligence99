@@ -369,16 +369,34 @@ class ReviewHardeningTests(unittest.TestCase):
             exe.execute(mission(i="../escape"))
 
     def test_f3_scan_recovers_existing_event_without_repost(self):
-        r, _ = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
-                             scan=lambda: {("HERMES-RELAY-TEST-A", "ACK"): "https://github.com/existing#1"})
         a = mission()
+        r, _ = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
+                             scan=lambda: {(a["id"], "ACK"): {
+                                 "url": "https://github.com/existing#1",
+                                 "contract_sha256": fingerprint(a)}})
         r.claim(a)
         r.inbox.receive({"request_id": a["id"]})
         self.assertEqual(self.published, [])  # no duplicate POST
-        rec = r.store.get("hermes-relay-published/HERMES-RELAY-TEST-A/ACK")
+        rec = r.store.get(f"hermes-relay-published/{a['id']}/ACK")
         self.assertIsNotNone(rec)
         self.assertTrue(rec["recovered"])
         self.assertEqual(rec["url"], "https://github.com/existing#1")
+
+    def test_f3_scan_same_id_different_contract_is_not_swallowed(self):
+        # Réserve #126-4: a same-id event carrying a DIFFERENT contract is a new
+        # approval, not a crash recovery -> it must be published, not recorded.
+        a = mission()
+        r, _ = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
+                             scan=lambda: {(a["id"], "ACK"): {
+                                 "url": "https://github.com/existing#1",
+                                 "contract_sha256": "0" * 64}})
+        r.claim(a)
+        r.inbox.receive({"request_id": a["id"]})
+        self.assertEqual(len(self.published), 1)  # new approval published, not swallowed
+        rec = r.store.get(f"hermes-relay-published/{a['id']}/ACK")
+        self.assertIsNotNone(rec)
+        self.assertNotIn("recovered", rec)  # recorded as a fresh publication
+        self.assertEqual(rec["url"], "https://github.com/fake#1")  # fresh POST, pas l'URL recoverée
 
     def test_f3_scan_unavailable_defers_publication(self):
         state = {"down": True}
@@ -399,7 +417,8 @@ class ReviewHardeningTests(unittest.TestCase):
         comments = [{"id": 1, "body": body, "html_url": "u1"}, {"id": 2, "body": "no block"}]
         found = hga.existing_events("x/y", 94, fetcher=lambda ep: comments)
         self.assertIsNotNone(found)
-        self.assertEqual(found[("M1", "ACK")], "u1")
+        self.assertEqual(found[("M1", "ACK")],
+                         {"url": "u1", "contract_sha256": "x"})
         def boom(ep):
             raise OSError("down")
         self.assertIsNone(hga.existing_events("x/y", 94, fetcher=boom))
@@ -476,7 +495,8 @@ class Phase2Tests(unittest.TestCase):
             return comments[(page - 1) * 100:page * 100]
         found = hga.existing_events("x/y", 94, fetcher=fetcher)
         self.assertIsNotNone(found)
-        self.assertEqual(found[("M-LATE", "ACCEPTED")], "u-late")
+        self.assertEqual(found[("M-LATE", "ACCEPTED")],
+                         {"url": "u-late", "contract_sha256": "z"})
 
     def test_executor_unknown_actual_cost_refused(self):
         fake = self.root / "fake_ok.py"
@@ -604,6 +624,244 @@ class ReviewR1R2Tests(unittest.TestCase):
                               "--backlog", str(bl), "--task", "I-02"])
         self.assertEqual((code1, code2), (0, 0))
         self.assertEqual(len(published), 1)  # dédup CAS: pas de seconde publication
+
+
+class ReliabilityReviewTests(unittest.TestCase):
+    """Sept corrections de fiabilité (#126-1 .. #126-7), audit lecture seule."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.published = []
+
+    def fake_publisher(self, body):
+        self.published.append(body)
+        return f"https://github.com/fake#{len(self.published)}"
+
+    def test_duplicate_json_key_rejected(self):
+        m = mission("HERMES-RELAY-DUP")
+        fp = fingerprint(m)
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=3600)) \
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
+        approval = json.dumps({"approver": "khalidd692", "mandate_comment_id": MANDATE,
+                               "expires_at": expires, "mission_sha256": fp})
+        # duplicate une clé NON couverte par l'empreinte (expires_at, même valeur) :
+        # l'ancien code l'admettait (dernier verdict), le nouveau le rejette.
+        doubled = approval.replace('"expires_at": "' + expires + '"',
+                                   '"expires_at": "' + expires + '", "expires_at": "' + expires + '"', 1)
+        self.assertIn('"expires_at"', doubled)
+        body = ("```hermes-mission/v1\n" + '{"mission": ' + json.dumps(m)
+                + ', "approval": ' + doubled + "}\n```")
+        c = {"id": 1, "user": {"login": "khalidd692"}, "body": body}
+        self.assertEqual(parse_approvals([c], mandate_comment_id=MANDATE)["missions"], [])
+
+    def test_mandate_content_pinned_by_sha256(self):
+        comment = {"id": MANDATE, "user": {"login": "khalidd692"}, "body": "GO synthetique"}
+        sha = hashlib.sha256(b"GO synthetique").hexdigest()
+        self.assertEqual(fetch_mandate("x/y", 67, MANDATE, fetcher=lambda ep: comment,
+                                      mandate_sha256=sha)["body"], "GO synthetique")
+        with self.assertRaises(ValueError):
+            fetch_mandate("x/y", 67, MANDATE, fetcher=lambda ep: comment,
+                          mandate_sha256="0" * 64)
+        # sans épingle: comportement historique (auteur seul) conservé
+        self.assertEqual(fetch_mandate("x/y", 67, MANDATE,
+                                       fetcher=lambda ep: comment)["body"], "GO synthetique")
+
+    def test_gh_calls_pin_utf8_encoding(self):
+        class R:
+            returncode = 0
+            stdout = '{"ok": true}'
+            stderr = ""
+        with mock.patch.object(gms.subprocess, "run", return_value=R()) as run:
+            gms.default_fetcher("repos/x/y/issues/1/comments")
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        self.assertTrue(run.call_args.kwargs.get("text"))
+        with mock.patch.object(hga.subprocess, "run", return_value=R()) as run:
+            hga.publish_comment("x/y", 1, "body")
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+
+    def test_journal_appends_before_cas_mark(self):
+        published = []
+        r, pub = build_runtime(self.root, issue=94,
+                               publisher=lambda body: published.append(body) or "u")
+        a = mission()
+        r.claim(a)
+        r.save(a, "ACCEPTED", result=ok_result(a))
+        real = r.store.put_cas
+
+        def exploding(key, value, old):
+            if key.startswith("hermes-relay-journal/"):
+                raise OSError("crash entre append et mark")
+            return real(key, value, old)
+
+        r.store.put_cas = exploding
+        with self.assertRaises(OSError):
+            pub.sync()
+        lines = (self.root / "relay-events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 1)  # la transition n'est pas perdue
+
+    def test_main_loop_unexpected_error_fail_closed(self):
+        with mock.patch.object(hga, "github_source", side_effect=TypeError("boom")):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--once",
+                             "--no-publish", "--seconds", "60"])
+        self.assertEqual(code, 2)
+        # heartbeat refera STOPPED à la sortie ; le BLOCKER reste prouvé et
+        # aucune mission n'a été exécutée (fail-closed, pas de boucle).
+        report = Runtime(self.root).status()
+        self.assertEqual(report["missions"], {})
+        self.assertEqual(report["last_observed"].get("BLOCKER"), "TypeError")
+
+    def test_main_wires_mandate_sha256_into_source(self):
+        seen = {}
+        def fake_source(*a, **kw):
+            seen.update(kw)
+            return {"missions": [], "approvals": {}, "sources": {}}
+        with mock.patch.object(hga, "github_source", side_effect=fake_source):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", "a" * 64,
+                             "--once", "--no-publish", "--seconds", "60"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen.get("mandate_sha256"), "a" * 64)
+
+    def test_existing_events_ignores_non_dict_comments(self):
+        found = hga.existing_events("x/y", 94, fetcher=lambda ep: ["not-a-dict", 7, None])
+        self.assertEqual(found, {})
+
+    def test_contractless_recovered_event_is_published_fail_closed(self):
+        # Réserve #126-4: sans empreinte sur l'événement existant, la
+        # correspondance n'est pas prouvée -> on publie plutôt que avaler.
+        a = mission()
+        r, _ = build_runtime(self.root, issue=94, publisher=self.fake_publisher,
+                             scan=lambda: {(a["id"], "ACK"): {
+                                 "url": "https://github.com/existing#1",
+                                 "contract_sha256": None}})
+        r.claim(a)
+        r.inbox.receive({"request_id": a["id"]})
+        self.assertEqual(len(self.published), 1)
+
+    def test_main_loop_attribute_error_fail_closed(self):
+        with mock.patch.object(hga, "github_source", side_effect=AttributeError("boom")):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--once",
+                             "--no-publish", "--seconds", "60"])
+        self.assertEqual(code, 2)
+        report = Runtime(self.root).status()
+        self.assertEqual(report["missions"], {})
+        self.assertEqual(report["last_observed"].get("BLOCKER"), "AttributeError")
+
+    def test_propose_publish_failure_returns_error(self):
+        bl = self.root / "backlog.json"
+        bl.write_text(json.dumps({"tasks": [
+            {"id": "I-02", "owner": "hermes", "initial_state": "todo"}]}))
+        with mock.patch.object(hga, "publish_comment", side_effect=OSError("down")):
+            code = hga.main(["propose", "--state", str(self.root), "--issue", "94",
+                             "--backlog", str(bl), "--task", "I-02"])
+        self.assertEqual(code, 1)
+
+    def test_propose_concurrent_single_publication(self):
+        import threading
+        bl = self.root / "backlog.json"
+        bl.write_text(json.dumps({"tasks": [
+            {"id": "I-02", "owner": "hermes", "initial_state": "todo"}]}))
+        published = []
+
+        def slow_publish(repo, issue, body, **kw):
+            published.append(body)
+            time.sleep(0.05)
+            return "u"
+
+        codes = []
+
+        def go():
+            codes.append(hga.main(["propose", "--state", str(self.root), "--issue", "94",
+                                   "--backlog", str(bl), "--task", "I-02"]))
+
+        # Un SEUL patch posé dans le thread principal : patch.object n'est pas
+        # thread-safe et un patch posé/retiré par deux threads fuit et casse les
+        # tests suivants (publish_comment remplacé par un Mock résiduel).
+        with mock.patch.object(hga, "publish_comment", side_effect=slow_publish):
+            t1, t2 = threading.Thread(target=go), threading.Thread(target=go)
+            t1.start(); t2.start(); t1.join(); t2.join()
+        self.assertEqual(sorted(codes), [0, 0])
+        self.assertEqual(len(published), 1)  # verrou + CAS : une seule publication
+
+
+class TwoMissionRecipeTests(unittest.TestCase):
+    """Recette #123 : deux missions synthétiques distinctes A puis B, enchaînées."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.published = []
+
+    def fake_publisher(self, body):
+        self.published.append(body)
+        return f"https://github.com/fake#{len(self.published)}"
+
+    def _run(self, stub):
+        a = mission("HERMES-RECIPE-A", specialist="tel99-analyst")
+        b = mission("HERMES-RECIPE-B", dependencies=[a["id"]], specialist="tel99-dev")
+        comments = [approval_comment(a, cid=11), approval_comment(b, cid=12)]
+        mandate = {"id": MANDATE, "user": {"login": "khalidd692"}, "body": "GO synthetique"}
+
+        def fetcher(endpoint):
+            if endpoint.endswith(f"/comments/{MANDATE}"):
+                return mandate
+            return comments if endpoint.endswith("page=1") else []
+
+        real_source = gms.github_source
+
+        def source():
+            return real_source("x/y", 94, 67, MANDATE, fetcher=fetcher)
+
+        with mock.patch.object(hga, "github_source", side_effect=lambda *a, **k: source()), \
+             mock.patch.object(hga, "existing_events", return_value={}), \
+             mock.patch.object(hga, "HermesExecutor", lambda **kw: stub), \
+             mock.patch.object(hga, "publish_comment",
+                               side_effect=lambda repo, issue, body, **kw: self.fake_publisher(body)):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-issue", "67", "--mandate-comment", str(MANDATE),
+                             "--once", "--seconds", "60"])
+        return code, a, b
+
+    def test_recipe_a_then_b_end_to_end_and_idempotent(self):
+        class StubExec:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, m):
+                self.calls.append(m["id"])
+                return ok_result(m)
+
+        stub = StubExec()
+        code, a, b = self._run(stub)
+        self.assertEqual(code, 0)
+        self.assertEqual(stub.calls, [a["id"], b["id"]])  # A avant B (dépendance CAS)
+        r = Runtime(self.root)
+        self.assertEqual(r.state(a)["status"], "ACCEPTED")
+        self.assertEqual(r.state(b)["status"], "ACCEPTED")
+        self.assertEqual(len(self.published), 4)  # ACK A, ACK B, ACCEPTED A, ACCEPTED B
+        idx = {}
+        for i, body in enumerate(self.published):
+            for mid in (a["id"], b["id"]):
+                for status in ("ACK", "ACCEPTED"):
+                    if f'"mission_id": "{mid}"' in body and f'"status": "{status}"' in body:
+                        idx[(mid, status)] = i
+        self.assertLess(idx[(a["id"], "ACK")], idx[(b["id"], "ACK")])
+        self.assertLess(idx[(a["id"], "ACCEPTED")], idx[(b["id"], "ACCEPTED")])
+        memory_files = list((self.root / "memory").rglob("*.json"))
+        self.assertEqual(len(memory_files), 1)  # un document par projet
+        entries = json.loads(memory_files[0].read_text(encoding="utf-8"))["entries"]
+        self.assertEqual({e["id"] for e in entries}, {a["id"], b["id"]})
+
+        # second run on the same durable state: idempotent, zero duplicate
+        code2, _, _ = self._run(stub)
+        self.assertEqual(code2, 0)
+        self.assertEqual(stub.calls, [a["id"], b["id"]])
+        self.assertEqual(len(self.published), 4)
 
 
 if __name__ == "__main__":
