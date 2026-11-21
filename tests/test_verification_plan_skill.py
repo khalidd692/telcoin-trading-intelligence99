@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,11 +10,13 @@ SCRIPT = (Path(__file__).resolve().parents[1] / ".agents" / "skills"
           / "plan-verification" / "scripts" / "plan_checks.py")
 
 
-def invoke(contract, exit_code=0, *, replan=False):
+def invoke(contract, exit_code=0, *, replan=False, input_path=None, cwd=None):
     command = [sys.executable, "-I", "-B", str(SCRIPT)]
     if replan:
         command.append("--replan")
-    proc = subprocess.run(command,
+    if input_path is not None:
+        command.extend(["--input", str(input_path)])
+    proc = subprocess.run(command, cwd=cwd,
                           input=json.dumps(contract), text=True, capture_output=True, timeout=5)
     if proc.returncode != exit_code:
         raise AssertionError(f"exit {proc.returncode}: {proc.stderr}")
@@ -101,3 +104,29 @@ class VerificationReplanTests(unittest.TestCase):
         contract["checks"][0]["cost"] = 0
         request = {"contract": contract, "passed": [], "unavailable": ["load"]}
         self.assertEqual(invoke(request, 2, replan=True)["status"], "invalid")
+
+
+class VerificationFileInputTests(unittest.TestCase):
+    def test_file_mode_matches_stdin_in_both_planners_from_another_directory(self):
+        with tempfile.TemporaryDirectory(prefix="projet séparé ") as workdir:
+            contract = example()
+            contract["checks"][0]["id"] = "vérifier paramètres"
+            for replan in (False, True):
+                with self.subTest(replan=replan):
+                    payload = ({"contract": contract, "passed": ["vérifier paramètres", "policy"],
+                                "unavailable": ["combined"]} if replan else contract)
+                    filename = Path("mission à vérifier.json")
+                    (Path(workdir) / filename).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                    result = invoke(None, replan=replan, input_path=filename, cwd=workdir)
+                    self.assertEqual(result, invoke(payload, replan=replan))
+
+    def test_unreadable_and_oversized_input_report_invalid(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            path = Path(workdir) / "contract.json"
+            self.assertEqual(invoke(None, 2, input_path=path)["status"], "invalid")
+            payload = json.dumps(example()).encode("utf-8")
+            path.write_bytes(payload.ljust(65536, b" "))
+            self.assertEqual(invoke(None, input_path=path), invoke(example()))
+            path.write_bytes(payload.ljust(65537, b" "))
+            result = invoke(None, 2, input_path=path)
+            self.assertEqual(result, {"status": "invalid", "reason": "Contract exceeds 64 KiB."})

@@ -9,7 +9,7 @@ L’agent chargé du plan recueille les critères d’acceptation auprès du dem
 
 Estimer tous les coûts dans la même unité additive, par exemple des minutes de calcul. Pour des contrôles qui doivent être exécutés ensemble, chiffrer l’ensemble comme un contrôle. Le calcul accepte jusqu’à 12 critères, 64 contrôles et 64 Kio de JSON. Il convient aux petits lots dont les coûts peuvent être additionnés.
 
-Depuis la racine du dépôt, fournir le contrat sur l’entrée standard du planificateur. Exemple de contrat pour une modification de la reprise après interruption :
+Enregistrer le contrat dans un fichier JSON UTF-8. Cet exemple porte sur une modification de la reprise après interruption :
 
 ```json
 {"budget":5,"obligations":["load","resume"],"mandatory":["policy"],"checks":[
@@ -19,8 +19,10 @@ Depuis la racine du dépôt, fournir le contrat sur l’entrée standard du plan
   {"id":"policy","cost":1,"covers":[]}]}
 ```
 
-```sh
-python -IB .agents/skills/plan-verification/scripts/plan_checks.py < contract.json
+Dans les commandes suivantes, `$SkillDir` désigne le chemin absolu du dossier qui contient ce `SKILL.md`. Dans Hermes, ouvrir `skill_view(name="plan-verification")` et utiliser le champ `skill_dir` du Skill approuvé. Sur les autres hôtes, utiliser le chemin du dossier installé. Conserver le répertoire de travail du projet à vérifier et passer le chemin du contrat à `--input`. Les commandes acceptent les chemins entre guillemets sous PowerShell et sous les shells POSIX. L’entrée standard reste disponible quand `--input` est omis.
+
+```text
+python -IB "$SkillDir/scripts/plan_checks.py" --input "contract.json"
 ```
 
 - **planned** donne les identifiants de coût total minimal. À coût égal, le plan privilégie le plus petit nombre de contrôles, puis un ordre stable. Dans l’exemple, conserver `combined` et `policy` coûte 5 unités sur les 11 de la stratégie qui lance tous les contrôles pertinents.
@@ -43,8 +45,8 @@ Dans l’exemple initial, `load` et `policy` ont réussi, `combined` est indispo
   {"id":"policy","cost":1,"covers":[]}]},"passed":["load","policy"],"unavailable":["combined"]}
 ```
 
-```sh
-python -IB .agents/skills/plan-verification/scripts/plan_checks.py --replan < resume.json
+```text
+python -IB "$SkillDir/scripts/plan_checks.py" --replan --input "resume.json"
 ```
 
 Le plan renvoie `resume` pour un coût additionnel de 3 et liste `load` et `policy` dans `reused`. Les identifiants de `passed` et `unavailable` doivent être connus et distincts. `unavailable_mandatory` signale un contrôle obligatoire impossible à exécuter. Les autres blocages indiquent les critères restants sans couverture (`uncovered`) ou le coût additionnel minimal (`minimum_cost`). Un plan vide à coût zéro indique que toutes les obligations sont déjà couvertes par les preuves fournies.
