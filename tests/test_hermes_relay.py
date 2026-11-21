@@ -173,6 +173,32 @@ class ExecutorTests(unittest.TestCase):
         with self.assertRaises(ExecutorUnavailable):
             self.exe(self.ok).execute(mission(synthetic_data=False))
 
+    def test_qwen_is_preferred_but_longcat_remains_available(self):
+        self.assertEqual(FREE_MODELS[0], "qwen/qwen4-max:free")
+        self.assertIn("meituan/longcat-2.5:free", FREE_MODELS)
+        self.assertIn("upstage/solar-mini4:free", FREE_MODELS)
+        self.assertEqual(self.exe(self.ok).model, FREE_MODELS[0])
+
+    def test_qwen_unknown_actual_cost_is_blocked(self):
+        def unknown_cost(home, session):
+            row = usage_stub(home, session)
+            row["actual_cost_usd"] = None
+            return row
+        exe = HermesExecutor(root=self.root, cli_command=[sys.executable, str(self.ok)],
+                             usage_reader=unknown_cost)
+        with self.assertRaisesRegex(ExecutorUnavailable, "COST_UNKNOWN_OR_NONZERO_REFUSED"):
+            exe.execute(mission())
+
+    def test_qwen_session_model_mismatch_is_blocked(self):
+        def incorrect_model(home, session):
+            row = usage_stub(home, session)
+            row["model"] = "meituan/longcat-2.5:free"
+            return row
+        exe = HermesExecutor(root=self.root, cli_command=[sys.executable, str(self.ok)],
+                             usage_reader=incorrect_model)
+        with self.assertRaisesRegex(ExecutorUnavailable, "HERMES_MODEL_IDENTITY_MISMATCH"):
+            exe.execute(mission())
+
     def test_model_allowlist_gate(self):
         with self.assertRaises(ExecutorUnavailable):
             self.exe(self.ok, model="paid/model").execute(mission())
