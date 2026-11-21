@@ -1,8 +1,8 @@
 {
-  "generated_at": 1795244167,
-  "observations": 509,
-  "valid_observations": 495,
-  "latest_decision": "INVALIDATION",
+  "generated_at": 1795254573,
+  "observations": 510,
+  "valid_observations": 496,
+  "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 450,
-              "mean_pct": 0.08186
+              "count": 451,
+              "mean_pct": 0.08394
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 36,
-              "mean_pct": -2.87242
+              "count": 44,
+              "mean_pct": -3.22414
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795061260,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795088830,
       "previous_decision": "ATTENDRE",
@@ -320,6 +310,18 @@
           "Cl\u00f4ture 4 h sous le support structurel."
         ]
       }
+    },
+    {
+      "observed_at": 1795254573,
+      "previous_decision": "INVALIDATION",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 reclaim",
+        "\u2212 structure",
+        "\u2212 zone"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
