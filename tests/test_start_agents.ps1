@@ -39,3 +39,6 @@ try {
 finally {
     Remove-Item -LiteralPath $directory -Recurse -Force
 }
+
+# The last launcher check expects a nonzero native exit code. Report the suite result.
+exit 0
