@@ -344,6 +344,11 @@ for line in sys.stdin:
 
     def test_non_object_json_rpc_frame_blocks_discovery(self):
         with self.assertRaisesRegex(router.RouteBlocked, "not a JSON object") as exc:
+            self.read_from_child('print("[null]")')
+        self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
+
+    def test_deep_json_frame_fails_closed_across_parsers(self):
+        with self.assertRaises(router.RouteBlocked) as exc:
             self.read_from_child('print("[" * 3000 + "null" + "]" * 3000)')
         self.assertEqual(exc.exception.status, "BLOCKED_MODEL")
 
