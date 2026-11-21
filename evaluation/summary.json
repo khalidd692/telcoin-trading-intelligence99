@@ -1,8 +1,8 @@
 {
-  "generated_at": 1795206430,
-  "observations": 505,
-  "valid_observations": 492,
-  "latest_decision": "ATTENDRE",
+  "generated_at": 1795219537,
+  "observations": 506,
+  "valid_observations": 493,
+  "latest_decision": "INVALIDATION",
   "latest_valid": "true",
   "horizons": {
     "1h": {
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 446,
-              "mean_pct": 0.24538
+              "count": 447,
+              "mean_pct": 0.24261
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 14,
-              "mean_pct": -2.45632
+              "count": 22,
+              "mean_pct": -2.59994
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795043238,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 structure"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795055826,
       "previous_decision": "ATTENDRE",
@@ -268,6 +258,40 @@
         "+ rsi"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795219537,
+      "previous_decision": "ATTENDRE",
+      "decision": "INVALIDATION",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 rsi"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:INVALIDATION:1795219200",
+        "market": "KRAKEN:TELUSD",
+        "type": "INVALIDATION",
+        "decision": "INVALIDATION",
+        "confirmed": false,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001395,
+        "price_at": 1795219200,
+        "candle_closed_at": 1795219200,
+        "snapshot_at": 1795219489.212964,
+        "data_valid": true,
+        "watch": null,
+        "invalidation": {
+          "level": 0.0014,
+          "unit": "4h"
+        },
+        "factors": [],
+        "blockers": [
+          "Cl\u00f4ture 4 h sous le support structurel."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
