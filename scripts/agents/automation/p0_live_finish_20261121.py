@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -118,7 +119,36 @@ def read_mission(state: Path, mission_id: str) -> dict:
     }
 
 
-def audit(state: Path) -> dict:
+def inspect_qwen_billing_db(session_id: str | None, db: Path) -> dict:
+    """Read the exact historical C session from Hermes DB without writing it."""
+    if not isinstance(session_id, str) or re.fullmatch(r"local-[0-9a-f]{64}", session_id) is None:
+        return {"status": "NOT_VERIFIED", "reason": "INVALID_OR_MISSING_SESSION_ID"}
+    if not db.is_file():
+        return {"status": "NOT_VERIFIED", "reason": "BILLING_DB_UNAVAILABLE"}
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                "SELECT model, billing_provider, estimated_cost_usd, actual_cost_usd, "
+                "cost_status FROM session_model_usage WHERE session_id=? "
+                "ORDER BY last_seen DESC LIMIT 1", (session_id,)
+            ).fetchone()
+        finally:
+            con.close()
+    except (sqlite3.Error, OSError):
+        return {"status": "NOT_VERIFIED", "reason": "BILLING_DB_READ_FAILED"}
+    if row is None:
+        return {"status": "NOT_VERIFIED", "reason": "SESSION_NOT_FOUND"}
+    model, provider, estimate, actual, recorded_status = row
+    valid = (model == QWEN_MODEL and provider == "nous"
+             and estimate == 0.0 and actual == 0.0)
+    return {"status": "VERIFIED_ZERO_IN_LOCAL_DB" if valid else "NOT_VERIFIED",
+            "model": model, "billing_provider": provider,
+            "estimated_cost_usd": estimate, "actual_cost_usd": actual,
+            "cost_status": recorded_status}
+
+
+def audit(state: Path, billing_db: Path | None = None) -> dict:
     if not state.is_dir():
         raise ValueError("state directory not found; no mission executed")
     snapshots = {mission_id: read_mission(state, mission_id) for mission_id in MISSIONS}
@@ -138,6 +168,8 @@ def audit(state: Path) -> dict:
         "mode": "READ_ONLY_HISTORICAL_AUDIT",
         "ab_existing_acceptance_verified_from_local_checkpoints": ab_pass,
         "c_historical_status": c["status"],
+        "c_billing_db_readonly": (inspect_qwen_billing_db(c.get("session_id"), billing_db)
+                                  if billing_db is not None else {"status": "NOT_CHECKED"}),
         "c_currently_accepted": False if c["status"] == "REJECTED" else c["status"] == "ACCEPTED",
         "c_expected_model": QWEN_MODEL,
         "c_wrong_state_scope": c["status"] != "MISSING",  # C required separate state.
@@ -156,10 +188,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path,
                         help="Existing recipe state; defaults to LOCALAPPDATA path")
+    parser.add_argument("--billing-db", type=Path,
+                        help="Optional read-only Hermes state.db path; never creates a database")
     args = parser.parse_args(argv)
     try:
         state = args.state if args.state is not None else default_state()
-        report = audit(state)
+        db = args.billing_db
+        if db is None:
+            hermes_home = Path(os.environ["HERMES_HOME"]) if os.environ.get("HERMES_HOME") else (Path.home() / "AppData" / "Local" / "hermes")
+            db = hermes_home / "state.db"
+        report = audit(state, billing_db=db)
         print(json.dumps(report, ensure_ascii=True, sort_keys=True))
         return 0 if report["ab_existing_acceptance_verified_from_local_checkpoints"] else 2
     except (OSError, ValueError, UnicodeError, TypeError, KeyError) as exc:
