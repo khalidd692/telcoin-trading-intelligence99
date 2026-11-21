@@ -113,8 +113,8 @@ class ProcessControlTests(unittest.TestCase):
             time.sleep(.02)
         self.assertEqual(len(list(self.root.glob('ready-*'))), 2)
         (self.root/'race-start').touch()
-        for process in workers:
-            code, _, err = self.finish(process)
+        results = [self.finish(process) for process in workers]
+        for code, _, err in results:
             self.assertEqual(code, 0, err)
         executions = (self.root/'worker-executions.jsonl').read_text().splitlines()
         self.assertEqual(len(executions), 1)

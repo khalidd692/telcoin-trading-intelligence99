@@ -21,6 +21,7 @@ raises on a missing key: a missing key is ``None``, which is how the bus tells
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import pathlib
@@ -77,21 +78,58 @@ class FileStore:
                     raise
                 time.sleep(0.01 * (attempt + 1))
 
-    def _read(self, path):
+    def _read(self, path, default=None):
         try:
             return json.loads(self._retry_file_access(lambda: path.read_text(encoding="utf-8")))
         except FileNotFoundError:
-            return None
+            return default
+
+    @contextmanager
+    def _locked(self, path):
+        lock_path = path.with_suffix(".lock")
+        with self._retry_file_access(lambda: lock_path.open("a+b")) as lock:
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            elif msvcrt is not None:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                raise StoreError("file compare-and-set requires an OS file lock")
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                else:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def read(self, key: str, *, default=None):
+        """Read one snapshot, using default only for a missing file."""
+        path = self._path(key)
+        # Windows handles can collide with an atomic replacement. Serialize
+        # reads with the same per-key lock used by both writers.
+        if msvcrt is not None and fcntl is None:
+            try:
+                with self._locked(path):
+                    return self._read(path, default)
+            except FileNotFoundError:
+                return default
+        return self._read(path, default)
 
     def get(self, key: str):
         try:
-            return self._read(self._path(key))
+            return self.read(key)
         except (OSError, ValueError):
             return None
 
     def put(self, key: str, value) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
+        with self._locked(path):
+            self._write(path, value)
+
+    def _write(self, path, value):
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n",
                        encoding="utf-8")
@@ -119,34 +157,15 @@ class FileStore:
         """
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = path.with_suffix(".lock")
-        with lock_path.open("a+b") as lock:
-            if fcntl is not None:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            elif msvcrt is not None:
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                raise StoreError("file compare-and-set requires an OS file lock")
+        with self._locked(path):
             try:
-                try:
-                    current = self._read(path)
-                except (OSError, ValueError) as exc:
-                    raise StoreError("cannot read the existing value for file CAS") from exc
-                if current != expected:
-                    return False
-                tmp = path.with_suffix(".tmp")
-                tmp.write_text(
-                    json.dumps(value, indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8")
-                self._retry_file_access(lambda: tmp.replace(path))
-                return True
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-                else:
-                    lock.seek(0)
-                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                current = self._read(path)
+            except (OSError, ValueError) as exc:
+                raise StoreError("cannot read the existing value for file CAS") from exc
+            if current != expected:
+                return False
+            self._write(path, value)
+            return True
 
     def durable(self) -> bool:
         """File storage is durable only on a host, not across a cloud pod."""
