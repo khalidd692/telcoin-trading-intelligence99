@@ -24,9 +24,15 @@ class HistoricalReadOnlyTests(unittest.TestCase):
                    verified=True, evidence=True):
         ckpt = self.state / "ledger" / "kilo-local" / (mid + ".json")
         ckpt.parent.mkdir(parents=True, exist_ok=True)
-        value = {"id": mid, "status": status, "contract_sha256": "f" * 64,
-                 "verification": {"ok": verified, "checks": [{"ok": verified}] * 5},
+        value = {"id": mid, "status": status,
+                 "contract_sha256": audit_module.EXPECTED_CONTRACTS[mid],
+                 "verification": {
+                     "ok": verified, "verifier": "hermes-fixed-subprocess-v1",
+                     "checks": [{"name": name, "ok": verified}
+                                for name in sorted(audit_module.REQUIRED_CHECKS)]},
+                 "verdict": {"validated": verified},
                  "result": {"artifact": "OK", "sha256": hashlib.sha256(b"OK").hexdigest(),
+                            "specialist_id": audit_module.EXPECTED_ROLES[mid],
                             "model": model, "session_id": "local-" + "a"*64,
                             "provider_evidence": {
                                 "model": model, "billing_provider": "nous",
@@ -68,6 +74,15 @@ class HistoricalReadOnlyTests(unittest.TestCase):
         result = audit_module.audit(self.state)
         self.assertFalse(result["missions"][audit_module.MISSION_C]["provider_cost_evidence_present_and_zero"])
         self.assertIsNone(result["missions"][audit_module.MISSION_C]["actual_cost_usd"])
+
+    def test_checkpoint_fingerprint_mismatch_not_reported_as_accepted(self):
+        self.setup_ab()
+        path = self.state / "ledger" / "kilo-local" / (audit_module.MISSION_A + ".json")
+        row = json.loads(path.read_text(encoding="utf-8"))
+        row["contract_sha256"] = "f" * 64
+        path.write_text(json.dumps(row), encoding="utf-8")
+        result = audit_module.audit(self.state)
+        self.assertFalse(result["ab_existing_acceptance_verified_from_local_checkpoints"])
 
     def test_malformed_checkpoint_fails_closed(self):
         self.setup_ab()
