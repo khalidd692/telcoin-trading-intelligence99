@@ -270,6 +270,18 @@ class RouterTests(unittest.TestCase):
         for field in ("thread_id", "terminal_event", "tokens"):
             self.assertIsNone(result["cli_usage"][field])
 
+    def test_duplicate_event_or_counter_keys_leave_usage_unknown(self):
+        for line in (
+            '{"type":"turn.failed","type":"turn.completed"}',
+            '{"type":"turn.completed","usage":{"input_tokens":9,"cached_input_tokens":0,'
+            '"output_tokens":2,"output_tokens":1}}',
+        ):
+            with self.subTest(line=line):
+                attempt = self.finish(self.start(), "worker_error", exec_jsonl=line)["attempts"][0]
+                self.assertIsNone(attempt["cli_usage"]["terminal_event"])
+                self.assertIsNone(attempt["cli_usage"]["tokens"])
+                self.assertEqual(attempt["status"], "worker_error")
+
     def test_reported_effective_model_mismatch_stops_escalation(self):
         attempt = self.start("debug")
         state = self.finish(attempt, "tests_failed", test_evidence_sha256=VERDICT,

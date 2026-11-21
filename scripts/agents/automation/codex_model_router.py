@@ -463,6 +463,13 @@ def prepare_exec(argv, checkpoint, approval_sha256, base_commit, snapshot, persi
     return plan, [*argv[:-1], *plan.exec_args, "-"]
 
 
+def _unique_event_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError("Duplicate field in Codex CLI evidence.")
+    return fields
+
+
 def _exec_usage(exec_jsonl, effective_settings):
     observation = {"source": "codex exec --json", "thread_id": None,
                    "terminal_event": None, "tokens": None, "effective_settings": effective_settings}
@@ -474,7 +481,7 @@ def _exec_usage(exec_jsonl, effective_settings):
         if not line.strip(" \t\r"):
             continue
         try:
-            event = json.loads(line)
+            event = json.loads(line, object_pairs_hook=_unique_event_fields)
         except (ValueError, RecursionError):
             return observation
         if not isinstance(event, dict):
