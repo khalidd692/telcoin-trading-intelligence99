@@ -28,6 +28,10 @@ Si le superviseur dispose d'une télémétrie locale fiable qui confirme les ré
 
 ## Recette
 
+La découverte App Server lit au plus 20 pages de 50 entrées et accepte des curseurs d’au plus 1 024 caractères. Les deux tubes du sous-processus utilisent les entrées-sorties non bloquantes de Python 3.12 avec une échéance globale de 25 secondes. Le tampon contient au plus 524 289 octets et le transport refuse les trames de plus de 524 288 octets. Une trame hors limite, un JSON hors contrat ou une page trop longue interrompt la découverte avant le lancement. Les libellés de famille avec espace ou tiret sont reconnus. Le modèle exécuté reste l’identifiant exact déclaré dans le champ `model`.
+
+Les essais hors ligne exercent des sous-processus Python qui imitent App Server. Ils couvrent les notifications en rafale, une trame trop longue, un JSON de type invalide, un enfant qui cesse de lire et une sortie héritée par un descendant. Les tests de pagination vérifient qu’une page de 51 entrées et un curseur hors limite sont refusés avant la lecture du quota. Les règles de réserve et de réconciliation s’appliquent à tout lancement.
+
 > Exécuter depuis la racine du clone avec Python 3.12 ou le Python du runtime Codex.
 
 ```powershell
