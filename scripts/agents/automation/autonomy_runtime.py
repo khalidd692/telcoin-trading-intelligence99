@@ -14,6 +14,8 @@ from intelligence.memory import MemoryStore, Entry
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
 TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
+CHECKPOINT_STATUSES = TERMINAL | {"ACK", "RUNNING", "WORKER_EXITED"}
+LEGACY_STOP = Path(__file__).resolve().parents[3] / ".kilo" / "STOP"
 def fingerprint(m):
     return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
 def seal(missions):
@@ -36,21 +38,25 @@ def validate_contract(m,approvals):
     return True
 
 class Runtime(Supervisor):
-    def __init__(self,root,executor=None,verifier=None,*,before_execute=None):
+    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
         self.executor=executor or self.execute_worker
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
+        self.legacy_stop = legacy_stop
         self.quota_exhausted = False
     def state(self,m):
         key=f"kilo-local/{m['id']}"
         try:
-            value = self.store.read(key, default={})
+            missing = object()
+            value = self.store.read(key, default=missing)
         except (OSError, ValueError) as exc:
             raise Blocked("corrupt checkpoint") from exc
-        if not isinstance(value, dict):
+        if value is missing:
+            return {}
+        if not isinstance(value, dict) or not value:
             raise Blocked("corrupt checkpoint")
         return value
     def save(self,m,status,**details):
@@ -69,7 +75,8 @@ class Runtime(Supervisor):
     def expired(self):
         return self.deadline is not None and time.monotonic()>=self.deadline
     def stopped(self):
-        return (self.root/"stop.request").exists()
+        return ((self.root / "stop.request").exists()
+                or self.legacy_stop is not None and self.legacy_stop.exists())
     def worker_command(self,m):
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
     def execute_worker(self,m):
@@ -112,9 +119,14 @@ class Runtime(Supervisor):
         saved=self.state(m)
         if saved and saved.get("contract_sha256")!=fingerprint(m):
             raise Blocked("existing mission identity bound to different content")
+        if saved and (saved.get("id") != m["id"] or saved.get("status") not in CHECKPOINT_STATUSES):
+            raise Blocked("unrecognized prior checkpoint; reconciliation required")
         if saved.get("status")=="ACCEPTED":
             self.remember(m,saved);return
         if saved.get("status") in TERMINAL:return
+        if self.legacy_stop is not None and (
+                self.legacy_stop.parent / "state" / f"{m['id']}_state.json").exists():
+            raise Blocked("legacy mission checkpoint exists; reconciliation required")
         if saved.get("status")=="RUNNING":
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
@@ -146,12 +158,16 @@ class Runtime(Supervisor):
             except Exception as exc:
                 self.save(m,"BLOCKED",reason=type(exc).__name__);return
             saved=self.save(m,"WORKER_EXITED",result=result)
+        if self.stopped() or self.expired():
+            return
         try:
             verified=self.verifier(m,saved["result"])
         except Exception as exc:
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable",error=type(exc).__name__);return
         if not isinstance(verified, dict) or verified.get("unavailable"):
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable");return
+        if self.stopped() or self.expired():
+            return
         checks = verified.get("checks")
         ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
               and all(isinstance(check, dict) and check.get("ok") is True for check in checks))
@@ -217,7 +233,8 @@ class Runtime(Supervisor):
             if isinstance(value,dict):missions[value["id"]]={k:v for k,v in value.items() if k!="result"}
         health=heartbeat_status(self.root)
         observed=health.get("STATE","UNKNOWN")
-        if self.stopped() and observed!="STOPPED":observed="STOP_REQUESTED"
+        if self.stopped() and self.live["STATE"]=="STOPPED":observed="STOPPED"
+        elif self.stopped() and observed!="STOPPED":observed="STOP_REQUESTED"
         elif self.live["STATE"]!="IDLE":observed=self.live["STATE"]
         return {"state":observed,"last_observed":health,"missions":missions,"quota":"unknown",
                 "local_requires_pc_on":True,"cloud_connected":False}
@@ -230,7 +247,7 @@ def main(argv=None):
     p.add_argument("--registry-sha256")
     p.add_argument("--seconds",type=int,default=300)
     p.add_argument("--once",action="store_true")
-    a=p.parse_args(argv);r=Runtime(a.state)
+    a=p.parse_args(argv);r=Runtime(a.state, legacy_stop=LEGACY_STOP)
     if a.action=="stop":
         (r.root/"stop.request").touch();print("STOP requested");return 0
     if a.action=="status":print(json.dumps(r.status(),ensure_ascii=True));return 0
@@ -247,7 +264,8 @@ def main(argv=None):
     failed = run_session(r, lambda: r.poll(source), once=a.once)
     report=r.status()
     print(json.dumps(report))
-    return 2 if failed or any(m["status"] in {"BLOCKED","REJECTED","AWAITING_HUMAN"} for m in report["missions"].values()) else 0
+    return 2 if failed or any(
+        m["status"] != "ACCEPTED" for m in report["missions"].values()) else 0
 
 
 def run_session(runtime, poll, *, once=False):

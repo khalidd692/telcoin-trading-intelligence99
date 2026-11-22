@@ -1,6 +1,7 @@
 import hashlib
 import unittest
-from unittest.mock import Mock
+from subprocess import CompletedProcess
+from unittest.mock import Mock, patch
 from scripts.agents.automation.kilo_executor import Executor, ExecutorUnavailable, verify
 from scripts.agents.native.provider import ProviderError
 
@@ -30,6 +31,21 @@ class KiloExecutorTests(unittest.TestCase):
     def test_verifier_rejects_red_artifact_independently(self):
         result = Executor(provider=self.provider('BAD')).execute(mission())
         self.assertFalse(verify(mission(), result)['ok'])
+
+    def test_verifier_rejects_incomplete_success_report(self):
+        result = Executor(provider=self.provider()).execute(mission())
+        incomplete = '{"ok":true,"checks":[{"name":"synthetic-contract","ok":true}]}'
+        with patch("scripts.agents.automation.kilo_executor.subprocess.run",
+                   return_value=CompletedProcess([], 0, incomplete, "")):
+            self.assertFalse(verify(mission(), result)['ok'])
+
+    def test_verifier_rejects_missing_artifact_even_when_both_hashes_are_missing(self):
+        contract = mission()
+        contract.pop('expected_sha256')
+        result = Executor(provider=self.provider()).execute(mission())
+        result.pop('artifact')
+        result.pop('sha256')
+        self.assertFalse(verify(contract, result)['ok'])
 
     def test_verifier_unavailable_fails_closed(self):
         result = Executor(provider=self.provider()).execute(mission())

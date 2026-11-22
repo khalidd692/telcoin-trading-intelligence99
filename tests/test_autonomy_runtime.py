@@ -93,6 +93,57 @@ class RuntimeTests(unittest.TestCase):
     def test_stop_before_poll_no_calls(self):
         (self.root/"stop.request").touch()
         a=mission();self.r.run_queue([a],seal([a]));self.assertEqual(self.calls,[])
+    def test_legacy_stop_marker_blocks_work_and_is_preserved(self):
+        marker = self.root / ".kilo" / "STOP"
+        marker.parent.mkdir()
+        marker.write_text("operator STOP", encoding="utf-8")
+        runtime = Runtime(self.root / "state", executor=self.execute, legacy_stop=marker)
+        a = mission()
+        runtime.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(runtime.status()["state"], "STOPPED")
+        self.assertEqual(marker.read_text(encoding="utf-8"), "operator STOP")
+    def test_stop_after_worker_receipt_defers_verification_without_replay(self):
+        a = mission()
+        b = mission("demo-b", dependencies=[a["id"]])
+        marker = self.root / "stop.request"
+
+        def execute_then_stop(m):
+            receipt = self.execute(m)
+            if m == a:
+                marker.touch()
+            return receipt
+
+        self.r.executor = execute_then_stop
+        self.r.run_queue([a, b], seal([a, b]))
+        self.assertEqual(self.calls, [a["id"]])
+        self.assertEqual(self.r.state(a)["status"], "WORKER_EXITED")
+        self.assertEqual(self.r.state(b), {})
+        marker.rename(self.root / "operator-cleared-stop")
+        resumed = Runtime(self.root, executor=self.execute)
+        resumed.run_queue([a, b], seal([a, b]))
+        self.assertEqual(self.calls, [a["id"], b["id"]])
+        self.assertEqual(resumed.state(b)["status"], "ACCEPTED")
+    def test_legacy_verified_checkpoint_blocks_replay_without_promoting_verdict(self):
+        a = mission()
+        legacy = self.root / ".kilo"
+        (legacy / "state").mkdir(parents=True)
+        checkpoint = legacy / "state" / f"{a['id']}_state.json"
+        original = '{"mission_id":"demo-a","state":"VERIFIED"}'
+        checkpoint.write_text(original, encoding="utf-8")
+        runtime = Runtime(self.root / "state", executor=self.execute, legacy_stop=legacy / "STOP")
+        runtime.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(runtime.state(a), {})
+        self.assertEqual(runtime.status()["state"], "BLOCKED")
+        self.assertEqual(checkpoint.read_text(encoding="utf-8"), original)
+    def test_unknown_prior_status_is_blocked_without_worker_or_state_change(self):
+        a = mission()
+        before = self.r.save(a, "UNRECOGNIZED")
+        self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.r.state(a), before)
+        self.assertEqual(self.r.status()["state"], "BLOCKED")
     def test_github_unavailable_fail_closed(self):
         def unavailable():raise OSError("offline")
         self.assertFalse(self.r.poll(unavailable))

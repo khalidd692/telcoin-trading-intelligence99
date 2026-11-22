@@ -15,7 +15,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scripts.agents.automation.autonomy_runtime import (
-    Blocked, QuotaBlocked, Runtime, TERMINAL, fingerprint, run_session,
+    Blocked, LEGACY_STOP, QuotaBlocked, Runtime, TERMINAL, fingerprint, run_session,
 )
 from scripts.agents.automation.github_mission_source import (
     MAX_MISSIONS, approval_is_current, fetch_comments, fetch_pages, fenced_json, gh_json, parse_approvals,
@@ -251,6 +251,8 @@ class KiloGitHubHandoff:
         return url if row.get("html_url") == url else None
 
     def publish_once(self, phase, state, binding, *, evidence=None, pull_request=None):
+        if self.runtime.stopped() or self.runtime.expired():
+            return None
         store = self.runtime.store
         key = f"kilo-github/outbox/{state['id']}/{phase}"
         event = self.event(phase, state, binding)
@@ -275,6 +277,8 @@ class KiloGitHubHandoff:
                 # The POST might have reached GitHub. Only a read can reconcile it.
                 return None
             if self.campaign and not self.current_approval(binding, state["id"]):
+                return None
+            if self.runtime.stopped() or self.runtime.expired():
                 return None
             pending = {"event": event}
             if not store.put_cas(key, pending, None):
@@ -336,6 +340,8 @@ class KiloGitHubHandoff:
     def sync_results(self):
         store = self.runtime.store
         for state in self.states():
+            if self.runtime.stopped() or self.runtime.expired():
+                return
             if state.get("status") not in TERMINAL:
                 continue
             mid = state["id"]
@@ -372,7 +378,7 @@ class KiloGitHubHandoff:
     def poll(self):
         self.source_valid = self.waiting_for_github = False
         ok = self.runtime.poll(self.source)
-        if self.source_valid:
+        if self.source_valid and not self.runtime.stopped():
             self.sync_results()
         if self.waiting_for_github and not self.runtime.stopped():
             self.runtime.observe(STATE="BLOCKED", BLOCKER="GITHUB_RECEIPT_OR_APPROVAL_UNCONFIRMED")
@@ -392,7 +398,7 @@ def main(argv=None):
     parser.add_argument("--seconds", type=int, choices=range(1, 3601), metavar="1..3600", default=300)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
-    runtime = Runtime(args.state)
+    runtime = Runtime(args.state, legacy_stop=LEGACY_STOP)
     if args.action == "stop":
         (runtime.root / "stop.request").touch()
         print("STOP requested")
@@ -422,7 +428,7 @@ def main(argv=None):
         for key in runtime.store.keys("kilo-github/outbox") if (row := runtime.store.get(key))
     }
     print(json.dumps(report, ensure_ascii=True))
-    return 2 if failed or any(row["status"] in {"BLOCKED", "REJECTED", "AWAITING_HUMAN", "ACK"}
+    return 2 if failed or any(row["status"] != "ACCEPTED"
                               for row in report["missions"].values()) else 0
 
 

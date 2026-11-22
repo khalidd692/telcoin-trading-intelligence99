@@ -13,6 +13,13 @@ function Assert-LauncherExit([int]$Expected, [string]$Pattern, [string[]]$Argume
 }
 
 try {
+    Push-Location -LiteralPath $directory
+    $null = New-Item -ItemType Directory -Path '.kilo/claims', '.kilo/sessions', '.kilo/state', '.kilo/evidence', '.kilo/worktrees'
+    $sentinels = Get-ChildItem -LiteralPath '.kilo' -Directory | ForEach-Object {
+        $path = Join-Path $_.FullName 'existing.json'
+        Set-Content -LiteralPath $path -Value 'existing state' -Encoding utf8NoBOM
+        $path
+    }
     $state = Join-Path $directory 'GitHub state with spaces'
     $registry = Join-Path $directory 'registry.json'
     '{"missions":[],"approvals":{}}' | Set-Content -LiteralPath $registry -Encoding utf8NoBOM
@@ -34,9 +41,15 @@ try {
         '-State', (Join-Path $directory 'campaign'))
     Assert-LauncherExit 2 'STOP remains set' @('-Action', 'START', '-GitHubIssue', '123', '-Campaign',
         '-State', (Join-Path $directory 'campaign'), '-MandateComment', '7100000001', '-MandateSha256', $pin)
-    Write-Output '10/10 PowerShell launcher checks passed without GitHub or Kilo network access.'
+    foreach ($path in $sentinels) {
+        if ((Get-Content -LiteralPath $path) -cne 'existing state') {
+            throw "Launcher test modified existing state at $path"
+        }
+    }
+    Write-Output '10/10 PowerShell launcher checks passed, with existing state preserved.'
 }
 finally {
+    Pop-Location
     Remove-Item -LiteralPath $directory -Recurse -Force
 }
 

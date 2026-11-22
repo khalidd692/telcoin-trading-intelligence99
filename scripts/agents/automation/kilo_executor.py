@@ -78,6 +78,10 @@ class Executor:
                 'provider_evidence': dict(evidence)}
 
 
+_VERIFIER = 'tel99-fixed-subprocess-v1'
+_VERIFIER_CHECKS = {
+    'synthetic-contract', 'artifact-sha256', 'specialist-identity', 'zero-cost-evidence',
+}
 _VERIFY_CODE = r'''
 import hashlib, json, re, sys
 try:
@@ -89,7 +93,7 @@ try:
     role = mission.get('specialist') or mission.get('assigned_to') or mission.get('role')
     checks = [
         {'name':'synthetic-contract', 'ok': mission.get('synthetic_data') is True},
-        {'name':'artifact-sha256', 'ok': actual == mission.get('expected_sha256') == result.get('sha256')},
+        {'name':'artifact-sha256', 'ok': actual is not None and actual == mission.get('expected_sha256') == result.get('sha256')},
         {'name':'specialist-identity', 'ok': result.get('specialist_id') == role and role in ('tel99-dev','tel99-analyst','tel99-verifier')},
         {'name':'zero-cost-evidence', 'ok': evidence.get('cost_usd') == '0' and evidence.get('http_status') == 200 and all(re.fullmatch('[a-f0-9]{64}',str(evidence.get(k,''))) is not None for k in ('catalog_sha256','response_sha256'))},
     ]
@@ -116,8 +120,17 @@ def verify(mission, result, *, executable=None):
             check=False,
         )
         report = json.loads(completed.stdout)
-        if completed.returncode != 0 or report.get('ok') not in (True, False):
+        if completed.returncode != 0 or not isinstance(report, dict):
             raise ValueError('invalid verifier result')
+        checks = report.get('checks')
+        if (report.get('verifier') != _VERIFIER or type(report.get('ok')) is not bool
+                or not isinstance(checks, list) or len(checks) != len(_VERIFIER_CHECKS)
+                or any(not isinstance(c, dict) or not isinstance(c.get('name'), str)
+                       or type(c.get('ok')) is not bool for c in checks)
+                or {c['name'] for c in checks} != _VERIFIER_CHECKS
+                or report['ok'] != all(c['ok'] for c in checks)
+                or report['ok'] and report.get('artifact_sha256') != mission.get('expected_sha256')):
+            raise ValueError('incomplete or inconsistent verifier result')
         return report
     except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
         return {'ok': False, 'unavailable': True,
