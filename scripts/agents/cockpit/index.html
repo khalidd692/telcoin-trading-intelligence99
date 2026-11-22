@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122b2b">
+  <title>Cockpit des agents</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#overview"><span class="mark" aria-hidden="true">A</span> Atelier des agents</a>
+    <nav aria-label="Sections du cockpit">
+      <a href="#overview">Vue d’ensemble</a><a href="#missions">Missions</a>
+      <a href="#roles">Rôles</a><a href="#journal">Journal</a><a href="#pulls">Pull requests</a>
+    </nav>
+  </aside>
+  <main id="overview">
+    <header class="top"><span id="repo">INCONNU</span><button id="refresh" type="button">Actualiser</button></header>
+    <div class="content">
+      <section class="hero" aria-label="État du cockpit">
+        <div class="hero-text">
+          <p id="mode">Lecture seule</p>
+          <h1>Cockpit des agents</h1>
+          <p id="asof" class="asof">Dernière observation · INCONNU</p>
+        </div>
+        <div class="hero-status"><span>État du superviseur</span><strong id="state">INCONNU</strong></div>
+      </section>
+      <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+      <section class="budget-section" aria-labelledby="budget-title">
+        <div class="section-head"><h2 id="budget-title">Quota et estimations</h2></div>
+        <dl id="budgets" class="budgets"></dl>
+      </section>
+      <div class="columns">
+        <div class="primary">
+          <section class="panel" id="missions">
+            <div class="section-head"><h2>Missions</h2><span class="count" id="mission-count"></span></div>
+            <ul id="mission-list" class="records"></ul>
+          </section>
+          <section class="panel" id="journal">
+            <div class="section-head"><h2>Journal et erreurs</h2></div>
+            <p id="blocker" class="blocker"></p>
+            <ul id="event-list" class="records"></ul>
+          </section>
+          <section class="panel" id="pulls">
+            <div class="section-head"><h2>Pull requests</h2></div>
+            <ul id="pull-list" class="records"></ul>
+          </section>
+        </div>
+        <section class="panel role-panel" id="roles">
+          <div class="section-head"><h2>Rôles</h2><span class="count" id="role-count"></span></div>
+          <ul id="role-list" class="records roles"></ul>
+        </section>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
