@@ -1,7 +1,7 @@
 {
-  "generated_at": 1795332542,
-  "observations": 521,
-  "valid_observations": 503,
+  "generated_at": 1795346585,
+  "observations": 522,
+  "valid_observations": 504,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 397,
-              "mean_pct": 1.86116
+              "count": 398,
+              "mean_pct": 1.86301
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 97,
-              "mean_pct": -3.06697
+              "count": 105,
+              "mean_pct": -2.96618
             }
           }
         }
@@ -159,46 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795244167,
-      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
-      "decision": "INVALIDATION",
-      "data_valid": true,
-      "changed_factors": [
-        "+ reclaim",
-        "+ structure",
-        "+ zone"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:INVALIDATION:1795233600",
-        "market": "KRAKEN:TELUSD",
-        "type": "INVALIDATION",
-        "decision": "INVALIDATION",
-        "confirmed": false,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001365,
-        "price_at": 1795233600,
-        "candle_closed_at": 1795233600,
-        "snapshot_at": 1795244119.126399,
-        "data_valid": true,
-        "watch": null,
-        "invalidation": {
-          "level": 0.001387,
-          "unit": "4h"
-        },
-        "factors": [
-          "structure",
-          "reclaim",
-          "zone"
-        ],
-        "blockers": [
-          "Cl\u00f4ture 4 h sous le support structurel."
-        ]
-      }
-    },
     {
       "observed_at": 1795254573,
       "previous_decision": "INVALIDATION",
@@ -332,6 +292,16 @@
       "decision": "ATTENDRE",
       "data_valid": true,
       "changed_factors": [],
+      "event": null
+    },
+    {
+      "observed_at": 1795346585,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence"
+      ],
       "event": null
     }
   ],
