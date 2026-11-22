@@ -142,7 +142,9 @@ def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, m
     } if plan.get("status") == "PLANNED" and isinstance(steps, list) else set()
     estimates = object_fields(plan.get("estimates"))
     return {
-        "mode": "demo" if mode == "demo" else "snapshot", "repository": repository,
+        "mode": "demo" if mode == "demo" or (status_matches and status.get("data_mode") == "fixture")
+        else "snapshot",
+        "repository": repository,
         "project": project,
         "state": label(status.get("state"), STATES) if status_matches else None,
         "observed_at": date(heartbeat.get("HEARTBEAT")),
