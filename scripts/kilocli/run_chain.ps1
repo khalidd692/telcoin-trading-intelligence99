@@ -37,7 +37,7 @@ function Write-Log([string]$message, [string]$level='INFO') {
 }
 
 # Stop signal file
-$stopFile = Join-Path $env:TEMP 'chain_stop.signal'
+$stopFile = Join-Path (Join-Path $root '.kilo') 'STOP'
 function Check-Stop() {
     if (Test-Path -LiteralPath $stopFile) {
         Write-Log "Stop signal detected" 'WARN'
@@ -97,6 +97,9 @@ function Invoke-VerifyScript([string]$VerifyScriptPath, [string]$EvidenceFile, [
 }
 
 function Run-Mission([string]$ContractFile, [string]$MissionLabel) {
+    if (Check-Stop) {
+        return @{ ok = $false; reason = 'stop_signal' }
+    }
     Write-Log "=== START ${MissionLabel}: ${ContractFile} ===" 'INFO'
     
     $contractPath = $root + "\" + $ContractFile
@@ -113,7 +116,29 @@ function Run-Mission([string]$ContractFile, [string]$MissionLabel) {
     $stateDir = $root + "\.kilo\state"
     if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
     $stateFile = $stateDir + "\" + $missionId + "_state.json"
-    
+
+    # Terminal states must not trigger another model invocation.
+    # Unknown or interrupted states fail closed until independently reconciled.
+    if (Test-Path -LiteralPath $stateFile) {
+        try {
+            $prior = Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            Write-Log "Unreadable prior state for ${missionId}: $($_.Exception.Message)" 'ERROR'
+            return @{ ok = $false; reason = 'unreadable_prior_state' }
+        }
+        if ($prior.mission_id -ne $missionId) {
+            Write-Log "Prior state mission ID mismatch for ${missionId}" 'ERROR'
+            return @{ ok = $false; reason = 'prior_state_id_mismatch' }
+        }
+        if ($prior.state -in @('VERIFIED', 'ACCEPTED')) {
+            Write-Log "Mission ${missionId} already $($prior.state) - skipping CLI and verification" 'INFO'
+            return @{ ok = $true; missionId = $missionId; verdict = $prior.state; skipped = $true }
+        }
+        # Includes REJECTED, FAILED, RUNNING and any unrecognized state: never replay implicitly.
+        Write-Log "Mission ${missionId} has prior state $($prior.state) - reconciliation required; no replay" 'WARN'
+        return @{ ok = $false; missionId = $missionId; reason = 'prior_state_requires_reconciliation'; prior_state = $prior.state }
+    }
+
     # --- STEP 1: Specialist invocation ---
     Write-Log "Invoking specialist $specialist for $missionId" 'INFO'
     $invokeScript = $root + "\scripts\kilocli\invoke_specialist.ps1"
