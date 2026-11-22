@@ -47,7 +47,7 @@ function header(title, badge) {
 function utc(value) { return value ? value.replace("T", " ").replace(/Z$/, " UTC") : unknown; }
 
 function update(data) {
-  byId("repo").textContent = data.repository ?? unknown;
+  byId("repo").textContent = [data.project, data.repository].filter(Boolean).join(" · ") || unknown;
   byId("mode").textContent = data.mode === "demo" ? "Démonstration locale · données simulées" : "Lecture seule · instantanés locaux";
   byId("asof").textContent = "Dernière observation · " + utc(data.observed_at);
   byId("state").textContent = state(data.state);

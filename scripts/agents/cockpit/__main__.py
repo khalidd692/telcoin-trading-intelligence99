@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import tempfile
 
+from ..project_kit import load as load_kit
 from . import REPO_RE, read_snapshot, snapshot
 
 ASSETS = Path(__file__).resolve().parent
@@ -96,13 +97,23 @@ def main(argv=None):
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--pulls", type=Path)
     parser.add_argument("--handoffs", type=Path)
-    parser.add_argument("--repository", default=DEFAULT_REPO)
+    parser.add_argument("--repository")
+    parser.add_argument("--kit", type=Path)
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args(argv)
-    if not 0 <= args.port <= 65535 or not REPO_RE.fullmatch(args.repository):
+    if not 0 <= args.port <= 65535 or (args.repository and not REPO_RE.fullmatch(args.repository)):
         parser.error("port ou dépôt invalide")
-    if args.demo and (args.status or args.plan or args.pulls or args.handoffs):
+    if args.kit and args.repository:
+        parser.error("--kit fournit le dépôt")
+    if args.demo and (args.status or args.plan or args.pulls or args.handoffs or args.kit):
         parser.error("--demo n'utilise pas de fichiers opérateur")
+    repository, project = args.repository or DEFAULT_REPO, None
+    if args.kit:
+        try:
+            profile = load_kit(args.kit).profile
+        except (OSError, ValueError, RecursionError) as exc:
+            parser.error(str(exc))
+        repository, project = profile["repository"], profile["project"]
     if args.demo:
         data = demo()
 
@@ -112,7 +123,7 @@ def main(argv=None):
         def read():
             return snapshot(status=read_snapshot(args.status), plan=read_snapshot(args.plan),
                             pulls=read_snapshot(args.pulls), handoffs=read_snapshot(args.handoffs),
-                            repository=args.repository)
+                            repository=repository, project=project)
 
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler(read)) as server:
         print(f"http://127.0.0.1:{server.server_port}/", flush=True)

@@ -16,18 +16,25 @@ from .team_config import role_catalog
 LIMIT = 65536
 
 
-def read_json(path):
+def strict_json(raw):
     def unique(pairs):
         obj = dict(pairs)
         if len(obj) != len(pairs):
             raise ValueError("duplicate configuration key")
         return obj
 
+    def invalid_constant(_value):
+        raise ValueError("non-finite JSON value")
+
+    return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+
+def read_json(path, *, limit=LIMIT):
     with Path(path).open("rb") as stream:
-        raw = stream.read(LIMIT + 1)
-    if len(raw) > LIMIT:
-        raise ValueError("configuration exceeds 64 KiB")
-    return json.loads(raw, object_pairs_hook=unique)
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("input exceeds the byte limit")
+    return strict_json(raw)
 
 
 def _names(data, field, allowed, *, required=True):
@@ -127,13 +134,16 @@ def prepare(kit, contract):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "status", "plan"):
+    for command in ("init", "status", "plan", "verify"):
         child = commands.add_parser(command)
         child.add_argument("--directory", type=Path, required=True)
         if command == "init":
             child.add_argument("--profile", type=Path, required=True)
         elif command == "plan":
             child.add_argument("--contract", type=Path, required=True)
+        elif command == "verify":
+            child.add_argument("--mission-id", required=True)
+            child.add_argument("--journal-sha256", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -142,6 +152,10 @@ def main(argv=None):
             kit = load(args.directory)
         if args.command == "plan":
             report = prepare(kit, read_json(args.contract))
+        elif args.command == "verify":
+            from .platform_evidence import verify
+
+            report = verify(kit, args.mission_id, args.journal_sha256)
         else:
             report = {"status": "READY", "project": kit.profile["project"],
                       "repository": kit.profile["repository"], "state": str(kit.state),

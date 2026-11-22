@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 import re
 
+from ..project_kit import read_json
 from ..team_config import role_catalog
 
 MAX_JSON = 512 * 1024
@@ -29,10 +28,7 @@ def read_snapshot(path):
     if path is None:
         return None
     try:
-        with Path(path).open("rb") as stream:
-            data = stream.read(MAX_JSON + 1)
-        if len(data) <= MAX_JSON:
-            return json.loads(data)
+        return read_json(path, limit=MAX_JSON)
     except (OSError, ValueError, RecursionError):
         pass
     return None
@@ -76,20 +72,25 @@ def github_url(value, repo, suffix):
     return value if re.fullmatch(re.escape(prefix) + suffix, value) else None
 
 
-def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, mode="snapshot"):
+def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, mode="snapshot", project=None):
     if not REPO_RE.fullmatch(repository):
         raise ValueError("invalid repository")
     status = object_fields(status)
     plan = object_fields(plan)
-    heartbeat = object_fields(status.get("last_observed"))
+    status_matches = project is None or status.get("project") == project
+    if project is not None and plan.get("project") != project:
+        plan = {}
+    heartbeat = object_fields(status.get("last_observed")) if status_matches else {}
+    mission_ids = set()
     rows = status.get("missions")
     missions = [] if isinstance(rows, dict) else None
     if missions is not None:
         for row in list(rows.values())[:MAX_ROWS]:
             row = object_fields(row)
             mid = identifier(row.get("id"))
-            if mid is None:
+            if mid is None or (project is not None and row.get("project") != project):
                 continue
+            mission_ids.add(mid)
             proof = object_fields(row.get("verification"))
             digest = proof.get("artifact_sha256")
             missions.append({
@@ -103,11 +104,14 @@ def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, m
     if events is not None:
         for key, value in list(receipts.items())[:MAX_ROWS]:
             match = re.fullmatch(r"kilo-github/outbox/([A-Za-z0-9-]{1,48})/(ACK|RESULT|EVIDENCE)", key)
-            if match and identifier(match[1]):
+            if (match and identifier(match[1])
+                    and (project is None or (status_matches and match[1] in mission_ids))):
                 url = github_url(value, repository, r"issues/[1-9][0-9]*#issuecomment-[1-9][0-9]*")
                 if url or value == "PENDING_RECONCILIATION":
                     events.append({"mission": match[1], "phase": match[2], "url": url})
-    handoffs = object_fields(handoffs).get("events")
+    handoff_data = object_fields(handoffs)
+    handoffs = (handoff_data.get("events")
+                if project is None or handoff_data.get("project") == project else None)
     if isinstance(handoffs, list):
         if events is None:
             events = []
@@ -116,7 +120,7 @@ def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, m
             mid = identifier(event.get("task_id"))
             phase = event.get("status")
             phase = label(phase.upper(), STATES) if isinstance(phase, str) else None
-            if mid and phase:
+            if mid and phase and (project is None or mid in mission_ids):
                 events.append({"mission": mid, "phase": phase, "at": date(event.get("at")), "url": None})
         events.sort(key=lambda row: row.get("at") or "", reverse=True)
         events = events[:MAX_ROWS]
@@ -139,13 +143,15 @@ def snapshot(*, status=None, plan=None, pulls=None, handoffs=None, repository, m
     estimates = object_fields(plan.get("estimates"))
     return {
         "mode": "demo" if mode == "demo" else "snapshot", "repository": repository,
-        "state": label(status.get("state"), STATES), "observed_at": date(heartbeat.get("HEARTBEAT")),
+        "project": project,
+        "state": label(status.get("state"), STATES) if status_matches else None,
+        "observed_at": date(heartbeat.get("HEARTBEAT")),
         "missions": missions, "events": events, "pulls": projected_pulls,
         "error": label(heartbeat.get("BLOCKER"), BLOCKERS),
         "roles": [{"role": role, "configured": spec.active,
                    "activity": "PLANNED" if role in planned_roles else None}
                   for role, spec in role_catalog().items()],
-        "budget": {"quota": number(status.get("quota")),
+        "budget": {"quota": number(status.get("quota")) if status_matches else None,
                    "calls": number(estimates.get("model_calls")),
                    "seconds": number(estimates.get("seconds")),
                    "context_tokens": number(estimates.get("context_tokens"))},
