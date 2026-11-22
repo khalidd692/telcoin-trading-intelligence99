@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795361055,
-  "observations": 523,
-  "valid_observations": 504,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795361586,
+  "observations": 524,
+  "valid_observations": 505,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 453,
-              "mean_pct": 0.22976
+              "count": 454,
+              "mean_pct": 0.23452
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 398,
-              "mean_pct": 1.86301
+              "count": 399,
+              "mean_pct": 1.86615
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 105,
-              "mean_pct": -2.96618
+              "count": 113,
+              "mean_pct": -2.62917
             }
           }
         }
@@ -159,14 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795259549,
-      "previous_decision": "ATTENDRE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [],
-      "event": null
-    },
     {
       "observed_at": 1795273200,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -301,6 +293,17 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795361586,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence",
+        "+ volume"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -351,10 +354,10 @@
       }
     },
     "false_positives": {
-      "count": 26,
-      "evaluable": 42,
+      "count": 27,
+      "evaluable": 43,
       "pending": 0,
-      "unknown": 1,
+      "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
   }
