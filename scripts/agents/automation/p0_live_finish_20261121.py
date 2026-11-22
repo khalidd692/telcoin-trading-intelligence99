@@ -40,6 +40,10 @@ EXPECTED_MODELS = {
 EXPECTED_ROLES = {
     MISSION_A: "tel99-analyst", MISSION_B: "tel99-dev", MISSION_C: "tel99-analyst",
 }
+EXPECTED_SESSIONS = {
+    MISSION_A: "local-3139741921003cb68e6b35387e61ef623a8c1517b56431e4cdb6f7de17e29e62",
+    MISSION_B: "local-5e538a446c010b0cac78b968f64f1d7280fbc2baa58670c325e242e6884e9c86",
+}
 REQUIRED_CHECKS = frozenset({
     "synthetic-contract", "artifact-sha256", "specialist-identity",
     "hermes-session-evidence", "zero-cost-evidence",
@@ -53,16 +57,26 @@ def default_state() -> Path:
     return Path(local) / "hermes-tel99" / "autonomous" / "recipe-20261121-AB"
 
 
+def unique_checkpoint_fields(pairs):
+    value = {}
+    for name, item in pairs:
+        if name in value:
+            raise ValueError("duplicate checkpoint key")
+        value[name] = item
+    return value
+
+
 def read_mission(state: Path, mission_id: str) -> dict:
     """Inspect a single checkpoint; never initialise Runtime or FileStore."""
     checkpoint = state / "ledger" / "kilo-local" / (mission_id + ".json")
     try:
-        raw = checkpoint.read_bytes()
+        with checkpoint.open("rb") as stream:
+            raw = stream.read(1_000_001)
     except FileNotFoundError:
         return {"id": mission_id, "status": "MISSING"}
     if len(raw) > 1_000_000:
         raise ValueError(f"oversized checkpoint for {mission_id}")
-    value = json.loads(raw.decode("utf-8"))
+    value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_checkpoint_fields)
     if not isinstance(value, dict) or value.get("id") != mission_id:
         raise ValueError(f"invalid checkpoint identity for {mission_id}")
     status = value.get("status")
@@ -70,8 +84,13 @@ def read_mission(state: Path, mission_id: str) -> dict:
                       "ACK", "RUNNING", "WORKER_EXITED", "STOPPED"}:
         raise ValueError(f"unrecognised checkpoint status for {mission_id}")
     verification = value.get("verification") or {}
+    verdict = value.get("verdict") or {}
+    if not isinstance(verification, dict) or not isinstance(verdict, dict):
+        raise ValueError(f"invalid verifier report for {mission_id}")
     checks = verification.get("checks") or []
-    if not isinstance(verification, dict) or not isinstance(checks, list):
+    if not isinstance(checks, list) or any(
+            not isinstance(check, dict) or not isinstance(check.get("name"), str)
+            for check in checks):
         raise ValueError(f"invalid verifier report for {mission_id}")
     result = value.get("result") or {}
     if not isinstance(result, dict):
@@ -84,20 +103,22 @@ def read_mission(state: Path, mission_id: str) -> dict:
                            if isinstance(artifact, str) else None)
     artifact_ok = (actual_artifact_sha == EXPECTED_ARTIFACT_SHA256
                    and result.get("sha256") == EXPECTED_ARTIFACT_SHA256)
-    check_names = {x.get("name") for x in checks if isinstance(x, dict)}
+    check_names = {x["name"] for x in checks}
     checks_ok = (check_names == REQUIRED_CHECKS
                  and len(checks) == len(REQUIRED_CHECKS)
-                 and all(isinstance(x, dict) and x.get("ok") is True for x in checks))
+                 and all(x.get("ok") is True for x in checks))
     session_id = result.get("session_id")
     specialist_ok = (result.get("specialist_id") == EXPECTED_ROLES[mission_id]
                      and isinstance(session_id, str)
-                     and re.fullmatch(r"local-[0-9a-f]{64}", session_id) is not None)
+                     and re.fullmatch(r"local-[0-9a-f]{64}", session_id) is not None
+                     and (mission_id not in EXPECTED_SESSIONS
+                          or session_id == EXPECTED_SESSIONS[mission_id]))
     cost_verified = (evidence.get("model") == result.get("model")
                      and evidence.get("billing_provider") == "nous"
-                     and evidence.get("estimated_cost_usd") == 0.0
-                     and evidence.get("actual_cost_usd") == 0.0
+                     and all(type(evidence.get(name)) in (int, float) and evidence[name] == 0
+                             for name in ("estimated_cost_usd", "actual_cost_usd"))
                      and evidence.get("session_id") == result.get("session_id")
-                     and isinstance(evidence.get("api_call_count"), int)
+                     and type(evidence.get("api_call_count")) is int
                      and evidence["api_call_count"] >= 1)
     return {
         "id": mission_id,
@@ -109,7 +130,7 @@ def read_mission(state: Path, mission_id: str) -> dict:
         "independent_verification_recorded": (
             verification.get("ok") is True and checks_ok
             and verification.get("verifier") == "hermes-fixed-subprocess-v1"
-            and (value.get("verdict") or {}).get("validated") is True),
+            and verdict.get("validated") is True),
         "model": result.get("model"),
         "model_matches_original_execution": result.get("model") == EXPECTED_MODELS[mission_id],
         "session_id": result.get("session_id"),
@@ -126,7 +147,7 @@ def inspect_qwen_billing_db(session_id: str | None, db: Path) -> dict:
     if not db.is_file():
         return {"status": "NOT_VERIFIED", "reason": "BILLING_DB_UNAVAILABLE"}
     try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             row = con.execute(
                 "SELECT model, billing_provider, estimated_cost_usd, actual_cost_usd, "
@@ -163,14 +184,14 @@ def audit(state: Path, billing_db: Path | None = None) -> dict:
         for mid in (MISSION_A, MISSION_B)
     )
     c = snapshots[MISSION_C]
-    # Do not reinterpret/rewrite REJECTED even if stored cost evidence is zero.
+    # The audited A/B state cannot authorize C, regardless of the raw checkpoint.
     return {
         "mode": "READ_ONLY_HISTORICAL_AUDIT",
         "ab_existing_acceptance_verified_from_local_checkpoints": ab_pass,
         "c_historical_status": c["status"],
         "c_billing_db_readonly": (inspect_qwen_billing_db(c.get("session_id"), billing_db)
                                   if billing_db is not None else {"status": "NOT_CHECKED"}),
-        "c_currently_accepted": False if c["status"] == "REJECTED" else c["status"] == "ACCEPTED",
+        "c_currently_accepted": False,
         "c_expected_model": QWEN_MODEL,
         "c_wrong_state_scope": c["status"] != "MISSING",  # C required separate state.
         "c_reconciliation_authorised": False,
