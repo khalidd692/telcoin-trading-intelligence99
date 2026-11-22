@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795330585,
-  "observations": 520,
-  "valid_observations": 502,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795332542,
+  "observations": 521,
+  "valid_observations": 503,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 452,
-              "mean_pct": 0.23387
+              "count": 453,
+              "mean_pct": 0.22976
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 396,
-              "mean_pct": 1.86255
+              "count": 397,
+              "mean_pct": 1.86116
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 89,
-              "mean_pct": -3.04423
+              "count": 97,
+              "mean_pct": -3.06697
             }
           }
         }
@@ -159,14 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795227734,
-      "previous_decision": "INVALIDATION",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [],
-      "event": null
-    },
     {
       "observed_at": 1795244167,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -333,6 +325,14 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795332542,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -362,14 +362,14 @@
         "median_late_minutes": 165.94166666666666
       },
       "5": {
-        "episodes": 4,
+        "episodes": 5,
         "detected": 0,
         "missed": 3,
-        "unknown": 1,
+        "unknown": 2,
         "detection_fraction_known": 0.0,
-        "late_alerts": 3,
+        "late_alerts": 4,
         "median_lead_minutes": null,
-        "median_late_minutes": 339.46666666666664
+        "median_late_minutes": 449.9
       },
       "10": {
         "episodes": 1,
