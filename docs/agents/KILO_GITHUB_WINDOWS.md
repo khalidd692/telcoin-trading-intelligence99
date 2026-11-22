@@ -4,6 +4,8 @@ Cette branche ajoute la réception GitHub au moteur de la PR #124 et réutilise 
 
 ## Démarrer, lire l’état et arrêter
 
+Pour la reprise native et le diagnostic Windows en lecture seule, suivre [la procédure de reprise](WINDOWS_REPRISE_AUTONOMIE.md).
+
 Depuis un worktree Windows distinct au SHA de la PR brouillon, avec PowerShell 7, Python 3.12 et le profil GitHub CLI du propriétaire déjà configuré sur github.com. Préparer la file décrite plus bas, puis remplir les trois valeurs d’après cette file.
 
 ~~~powershell
@@ -17,7 +19,7 @@ Dans une autre console du même worktree, avec le même numéro d’issue et le 
 .\start-agents.ps1 -Action STOP -GitHubIssue $Issue
 ~~~
 
-`START` sonde toutes les dix secondes entre les traitements, pendant 1 à 3 600 secondes. Utiliser `-Once` pour un seul passage. `STOP_REQUESTED` signale la demande, `STOPPED` la fin observée de la session. Le prochain lancement explicite requiert d’archiver le fichier `stop.request` après confirmation de l’arrêt. Les appels GitHub ont un délai maximal de huit secondes chacun. La vérification déjà engagée peut prendre jusqu’à quinze secondes. Un HTTP 429 du fournisseur arrête la session sans repli. STATUS indique un quota inconnu si le fournisseur ne l'atteste pas.
+`START` sonde toutes les dix secondes entre les traitements, pendant 1 à 3 600 secondes au maximum. Utiliser `-Once` pour un seul passage. Une campagne s’arrête dès que ses deux RESULT acceptés et leurs brouillons sont confirmés. Une livraison incomplète retourne 2. `STOP_REQUESTED` signale la demande et `STOPPED` la fin observée de la session. Le prochain lancement explicite requiert d’archiver le fichier `stop.request` après confirmation de l’arrêt. Les appels GitHub ont un délai maximal de huit secondes chacun. La vérification déjà engagée peut prendre jusqu’à quinze secondes. Une limite de GitHub ou du fournisseur arrête la session sans repli. STATUS indique un quota inconnu si le fournisseur ne l’atteste pas.
 
 Utiliser **un seul répertoire d’état durable par file**, par défaut `.tel99-automation-state/kilo-github-<issue>`. Le CAS et le verrou couvrent les processus qui partagent ce répertoire sur la même machine. Conserver et sauvegarder cet état après l’arrêt, y compris les claims, reçus, artefacts et résultats du vérificateur. Après un POST au résultat incertain, le programme relit GitHub. Si le reçu reste introuvable, `PENDING_RECONCILIATION` demande une revue humaine du reçu et de l’état local. Une reprise à partir de `RUNNING` donne `AWAITING_HUMAN` et conserve le claim. À partir de `WORKER_EXITED`, elle reprend la vérification du résultat sauvegardé.
 

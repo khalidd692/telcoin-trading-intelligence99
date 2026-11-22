@@ -14,15 +14,20 @@ cooldown; there is no retry loop.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
-import sys
 import time
 from pathlib import Path
+
+if __package__:
+    from .autonomy_runtime import REJECTED_MISSION
+else:
+    from autonomy_runtime import REJECTED_MISSION
+from local_codex import QuotaBlocked
+from protocol.store import FileStore, StoreError
 
 # Only models whose free access was verified callable in this environment.
 # Several models of one provider can share the same fair-share limit: a 429
@@ -37,10 +42,19 @@ SESSION_RE = re.compile(r"session_id:\s*(local-[0-9a-f]{64})")
 RATE_LIMIT_RE = re.compile(r"429|too many requests|rate[ -]?limit|fair[ -]?share|quota", re.IGNORECASE)
 COOLDOWN_MIN_S = 60
 COOLDOWN_MAX_S = 3600
+COOLDOWN_KEY = "provider-cooldown"
 
 
 class ExecutorUnavailable(RuntimeError):
     """A provider, quota, cost or contract block. No paid fallback is attempted."""
+
+
+class HermesQuotaBlocked(ExecutorUnavailable, QuotaBlocked):
+    """End the relay session when the provider quota cannot be used safely."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
 
 
 def default_cli_command():
@@ -91,26 +105,48 @@ class HermesExecutor:
         self.timeout = int(timeout)
         self.usage_reader = usage_reader or read_usage_row
         self.stop_requested = stop_requested or (self.root / "stop.request").exists
-        self.cooldown_path = self.root / "provider-cooldown.json"
+        self.cooldown_path = self.root / f"{COOLDOWN_KEY}.json"
+        self.cooldown_store = FileStore(self.root)
 
     # -- quota circuit breaker (durable, bounded, no retry loop) ------------
     def _cooldowns(self):
+        missing = object()
         try:
-            data = json.loads(self.cooldown_path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, ValueError):
-            return {}
+            data = self.cooldown_store.read(COOLDOWN_KEY, default=missing)
+        except (OSError, ValueError) as exc:
+            raise HermesQuotaBlocked("BLOCKED_PROVIDER_COOLDOWN_STATE_UNAVAILABLE") from exc
+        if data is missing:
+            return None
+        if not isinstance(data, dict) or any(
+                type(value) not in (int, float) or not 0 <= value < float("inf")
+                for value in data.values()):
+            raise HermesQuotaBlocked("BLOCKED_PROVIDER_COOLDOWN_STATE_UNAVAILABLE")
+        return data
 
     def _check_cooldown(self):
-        until = self._cooldowns().get(self.model)
-        if isinstance(until, (int, float)) and time.time() < until:
-            raise ExecutorUnavailable("BLOCKED_PROVIDER_COOLDOWN")
+        data = self._cooldowns() or {}
+        # Older versions stored model keys for the same Nous quota. Honor every
+        # active legacy entry so switching models cannot clear the protection.
+        keys = [f"provider:{self.provider}"]
+        if self.provider == "nous":
+            keys.extend(FREE_MODELS)
+        if time.time() < max(data.get(key, 0) for key in keys):
+            raise HermesQuotaBlocked("BLOCKED_PROVIDER_COOLDOWN")
 
     def _arm_cooldown(self, seconds):
         seconds = max(COOLDOWN_MIN_S, min(COOLDOWN_MAX_S, int(seconds)))
-        data = self._cooldowns()
-        data[self.model] = time.time() + seconds
-        self.cooldown_path.write_text(json.dumps(data), encoding="utf-8")
+        previous = self._cooldowns()
+        data = dict(previous or {})
+        key = f"provider:{self.provider}"
+        data[key] = max(data.get(key, 0), time.time() + seconds)
+        try:
+            recorded = self.cooldown_store.put_cas(COOLDOWN_KEY, data, previous)
+        except (OSError, StoreError) as exc:
+            raise HermesQuotaBlocked("BLOCKED_PROVIDER_COOLDOWN_STATE_UNAVAILABLE") from exc
+        if not recorded:
+            # A concurrent write is safe only if it already has an active lockout.
+            self._check_cooldown()
+            raise HermesQuotaBlocked("BLOCKED_PROVIDER_COOLDOWN_STATE_UNAVAILABLE")
 
     # -- contract gate (mirrors the engine's synthetic scope) ---------------
     def _validate(self, mission):
@@ -120,6 +156,8 @@ class HermesExecutor:
         # but a direct call must not allow path traversal via file names.
         if not re.fullmatch(r"[a-zA-Z0-9-]{1,48}", str(mission.get("id", ""))):
             raise ExecutorUnavailable("Invalid mission id")
+        if mission["id"] == REJECTED_MISSION:
+            raise ExecutorUnavailable("historical mission C is permanently excluded")
         if (mission.get("synthetic_data") is not True or specialist not in ROLES
                 or mission.get("project") != "synthetic"
                 or not isinstance(objective, str) or not 1 <= len(objective) <= 4000
@@ -159,6 +197,8 @@ class HermesExecutor:
                and not k.upper().startswith(("OPENAI_", "ANTHROPIC_", "GH_", "GITHUB_", "PYTHON"))}
         started = time.time()
         with out_path.open("wb") as out, err_path.open("wb") as err:
+            if self.stop_requested():
+                raise ExecutorUnavailable("HERMES_WORKER_STOPPED_OR_TIMEOUT")
             proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=err, env=env, cwd=str(self.root))
             try:
@@ -179,7 +219,7 @@ class HermesExecutor:
         if proc.returncode != 0:
             if RATE_LIMIT_RE.search(stdout_text + stderr_text):
                 self._arm_cooldown(300)
-                raise ExecutorUnavailable("BLOCKED_PROVIDER_RATE_LIMIT")
+                raise HermesQuotaBlocked("BLOCKED_PROVIDER_RATE_LIMIT")
             raise ExecutorUnavailable("HERMES_WORKER_FAILED")
         match = SESSION_RE.search(stderr_text)
         if not match:

@@ -6,6 +6,7 @@ from copy import deepcopy
 from urllib.parse import parse_qs, urlsplit
 
 from scripts.agents.automation.autonomy_runtime import FileStore, fingerprint
+from scripts.agents.automation.github_mission_source import GitHubWriteNotSent
 from scripts.agents.automation.kilo_acceptance_pr import publish_verified_pr
 
 
@@ -175,6 +176,21 @@ class AcceptancePullRequestTests(unittest.TestCase):
         self.github.drop_pr_before_creation = False
         self.assertIsNone(self.publish())
         self.assertEqual([endpoint for endpoint, _ in self.github.writes].count("pulls"), 1)
+
+    def test_write_guard_before_pr_post_allows_explicit_resume(self):
+        real_api = self.github
+
+        def stopped_api(endpoint, *, method="GET", payload=None):
+            if endpoint == f"{API}/pulls" and method == "POST":
+                raise GitHubWriteNotSent("stopped before POST")
+            return real_api(endpoint, method=method, payload=payload)
+
+        self.github = stopped_api
+        self.assertIsNone(self.publish())
+        self.assertIsNone(real_api.pull)
+        self.github = real_api
+        self.assertEqual(self.publish(), PR_URL)
+        self.assertEqual([endpoint for endpoint, _ in real_api.writes].count("pulls"), 1)
 
     def test_restart_finds_closed_draft_without_reposting(self):
         self.assertEqual(self.publish(), PR_URL)

@@ -71,4 +71,4 @@ jobs:
         run: ./tests/test_start_agents.ps1
       - name: Relevant runtime tests
         shell: pwsh
-        run: python -B -m unittest tests.test_autonomy_runtime tests.test_kilo_github_campaign tests.test_agent_capabilities -q
+        run: python -B -m unittest tests.test_autonomy_runtime tests.test_kilo_github_campaign tests.test_hermes_relay tests.test_windows_diagnostic tests.test_agent_capabilities -q

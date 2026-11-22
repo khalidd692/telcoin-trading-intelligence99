@@ -40,6 +40,14 @@ MAX_MISSIONS = 20
 ORIGINS = {"delegated-mandate", "owner-direct"}
 
 
+class GitHubRateLimited(OSError):
+    """GitHub refused the request because its API limit was reached."""
+
+
+class GitHubWriteNotSent(OSError):
+    """A local guard prevented a GitHub write before any request was sent."""
+
+
 def is_owner(user):
     return (isinstance(user, dict) and user.get("login") == OWNER_LOGIN
             and user.get("id") == OWNER_ID and user.get("type") == "User")
@@ -58,16 +66,19 @@ def gh_json(endpoint, *, body=None, timeout=60, method="GET", payload=None):
     if payload is not None:
         command.extend(["--input", "-"])
     try:
-        completed = subprocess.run(command, input=json.dumps(payload) if payload is not None else None,
+        completed = subprocess.run(command, input=json.dumps(payload).encode("utf-8") if payload is not None else None,
                                    capture_output=True,
                                    env={**os.environ, "GH_PROMPT_DISABLED": "1"},
-                                   encoding="utf-8", timeout=timeout, check=False)
+                                   timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
         # Fail-closed to the engine's SOURCE_UNAVAILABLE path (review F1).
         raise OSError("gh api timeout") from exc
     if completed.returncode != 0:
+        error = completed.stderr.decode("utf-8", errors="replace").casefold()
+        if "(http 429)" in error or "(http 403)" in error and "rate limit" in error:
+            raise GitHubRateLimited("GitHub API rate limit reached")
         raise OSError(f"gh api unavailable (exit {completed.returncode})")
-    return json.loads(completed.stdout)
+    return json.loads(completed.stdout.decode("utf-8"))
 
 
 def fetch_comments(repo, issue, *, fetcher=None, max_pages=MAX_PAGES):
@@ -155,7 +166,7 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
             continue
         login = user.get("login", "")
         body = comment.get("body") or ""
-        if (login not in APPROVERS or not isinstance(body, str)
+        if (not isinstance(login, str) or login not in APPROVERS or not isinstance(body, str)
                 or EVENT_MARKER in body or PROPOSAL_MARKER in body):
             continue
         if strict:
@@ -189,14 +200,14 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
         # human approval. Missing origin stays backward-compatible with the
         # validated synthetic demo and is treated as delegated-mandate.
         origin = approval.get("origin", "delegated-mandate")
-        if origin not in ORIGINS:
+        if not isinstance(origin, str) or origin not in ORIGINS:
             continue
         if origin == "owner-direct":
             # Requires a local owner artifact the adapter only READS (never
             # writes): approval distinct from the agent that proposes/executes.
             artifact = owner_approval_reader(mid) if owner_approval_reader else None
             if (not isinstance(artifact, dict)
-                    or artifact.get("approved_by") not in APPROVERS
+                    or artifact.get("approved_by") != login
                     or artifact.get("channel") != "owner-local"
                     or artifact.get("mission_sha256") != digest):
                 continue
