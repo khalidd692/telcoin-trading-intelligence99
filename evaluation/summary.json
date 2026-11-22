@@ -1,7 +1,7 @@
 {
-  "generated_at": 1795308260,
-  "observations": 518,
-  "valid_observations": 501,
+  "generated_at": 1795317218,
+  "observations": 519,
+  "valid_observations": 502,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 454,
-              "mean_pct": 0.07772
+              "count": 455,
+              "mean_pct": 0.08461
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 395,
-              "mean_pct": 1.86381
+              "count": 396,
+              "mean_pct": 1.86255
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 81,
-              "mean_pct": -3.37308
+              "count": 89,
+              "mean_pct": -3.04423
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795199149,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ rsi"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795219537,
       "previous_decision": "ATTENDRE",
@@ -357,6 +347,16 @@
       "data_valid": true,
       "changed_factors": [],
       "event": null
+    },
+    {
+      "observed_at": 1795317218,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -366,14 +366,14 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 7,
+        "episodes": 8,
         "detected": 2,
         "missed": 2,
-        "unknown": 3,
+        "unknown": 4,
         "detection_fraction_known": 0.5,
-        "late_alerts": 5,
+        "late_alerts": 6,
         "median_lead_minutes": 42.1,
-        "median_late_minutes": 154.4
+        "median_late_minutes": 154.86666666666667
       },
       "3": {
         "episodes": 7,
