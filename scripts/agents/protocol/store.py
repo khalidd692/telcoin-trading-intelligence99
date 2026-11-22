@@ -21,17 +21,38 @@ raises on a missing key: a missing key is ``None``, which is how the bus tells
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import pathlib
+import time
 import urllib.error
 import urllib.request
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 DEFAULT_ROOT = pathlib.Path("bus")
 
 
 class StoreError(RuntimeError):
     """Raised when a durable write cannot be confirmed."""
+
+
+class CASConflict(RuntimeError):
+    """Raised when a compare-and-set finds the stored value changed.
+
+    This is the *lost-update* signal: the caller read version *V*, another
+    writer committed first, so our conditional write did not apply. The caller
+    re-reads and retries; nothing is silently overwritten.
+    """
 
 
 class FileStore:
@@ -45,22 +66,74 @@ class FileStore:
     def _path(self, key: str) -> pathlib.Path:
         return self.root / f"{key}.json"
 
-    def get(self, key: str):
-        path = self._path(key)
-        if not path.is_file():
-            return None
+    @staticmethod
+    def _retry_file_access(operation):
+        # Windows can deny a concurrent read/rename while an open handle is
+        # being released. Keep retries bounded and leave other errors visible.
+        for attempt in range(6):
+            try:
+                return operation()
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 5:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+
+    def _read(self, path, default=None):
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(self._retry_file_access(lambda: path.read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            return default
+
+    @contextmanager
+    def _locked(self, path):
+        lock_path = path.with_suffix(".lock")
+        with self._retry_file_access(lambda: lock_path.open("a+b")) as lock:
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            elif msvcrt is not None:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                raise StoreError("file compare-and-set requires an OS file lock")
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                else:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def read(self, key: str, *, default=None):
+        """Read one snapshot, using default only for a missing file."""
+        path = self._path(key)
+        # Windows handles can collide with an atomic replacement. Serialize
+        # reads with the same per-key lock used by both writers.
+        if msvcrt is not None and fcntl is None:
+            try:
+                with self._locked(path):
+                    return self._read(path, default)
+            except FileNotFoundError:
+                return default
+        return self._read(path, default)
+
+    def get(self, key: str):
+        try:
+            return self.read(key)
         except (OSError, ValueError):
             return None
 
     def put(self, key: str, value) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
+        with self._locked(path):
+            self._write(path, value)
+
+    def _write(self, path, value):
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n",
                        encoding="utf-8")
-        tmp.replace(path)
+        self._retry_file_access(lambda: tmp.replace(path))
 
     def keys(self, prefix: str = "") -> list[str]:
         base = self.root / prefix if prefix else self.root
@@ -70,6 +143,29 @@ class FileStore:
         for path in sorted(base.rglob("*.json")):
             out.append(str(path.relative_to(self.root)).removesuffix(".json"))
         return out
+
+    def put_cas(self, key: str, value, expected) -> bool:
+        """Write ``value`` only if the stored value equals ``expected``.
+
+        Atomic within one host: an advisory file lock serialises concurrent
+        conditional writers to the same key, and the actual file write stays
+        atomic (temp file + rename). Two processes performing a read-modify-
+        write on the same key therefore cannot lose an update — the second one
+        sees the first one's committed value and is told the CAS failed.
+
+        Returns ``True`` when written, ``False`` on a compare-and-set conflict.
+        """
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._locked(path):
+            try:
+                current = self._read(path)
+            except (OSError, ValueError) as exc:
+                raise StoreError("cannot read the existing value for file CAS") from exc
+            if current != expected:
+                return False
+            self._write(path, value)
+            return True
 
     def durable(self) -> bool:
         """File storage is durable only on a host, not across a cloud pod."""
@@ -145,6 +241,43 @@ class KvStore:
                 if internal.startswith(prefix):
                     out.append(internal)
         return sorted(out)
+
+    def put_cas(self, key: str, value, expected) -> bool:
+        """Conditional write using the KV record version (``if_version``).
+
+        The cloud KV exposes the record version via ``?meta=true`` and accepts a
+        conditional write with ``?if_version=<version>`` (HTTP 409 on mismatch),
+        the same mechanism the cloud orchestrator's lock uses. We read the
+        version, verify the current value still equals ``expected``, then write
+        conditionally; a 409 means another writer won and the CAS is refused
+        (no lost update). Returns ``True`` when written, ``False`` on conflict.
+
+        A backend that does not expose a version cannot do an atomic CAS, so it
+        raises :class:`StoreError` and the caller fails closed.
+        """
+        wire = self._wire(key)
+        status, body = self._request("GET", f"{self.base}/v1/kv/{wire}?meta=true")
+        if status == 404:
+            current, version = None, None
+        elif status == 200 and isinstance(body, dict) and "value" in body:
+            current, version = body.get("value"), body.get("version")
+            if version is None:
+                raise StoreError(
+                    f"KV backend exposes no record version for {key!r}: "
+                    "cannot perform an atomic compare-and-set")
+        else:
+            raise StoreError(f"KV metadata read failed for {key!r}: HTTP {status}")
+
+        if current != expected:
+            return False
+
+        condition = "nx=true" if version is None else f"if_version={version}"
+        status, _ = self._request("PUT", f"{self.base}/v1/kv/{wire}?{condition}", value)
+        if status in (200, 201, 204):
+            return True
+        if status == 409:
+            return False
+        raise StoreError(f"KV conditional write failed for {key!r}: HTTP {status}")
 
     def durable(self) -> bool:
         return True

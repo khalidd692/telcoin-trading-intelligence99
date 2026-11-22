@@ -23,11 +23,19 @@ keeps it reviewable and diff-friendly in git.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import pathlib
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+try:
+    from ..protocol.store import FileStore
+except ImportError:  # direct CLI imports the existing top-level package
+    from protocol.store import FileStore
 
 SCHEMA_VERSION = 1
 COMMON_PROJECT = "common"
@@ -112,11 +120,50 @@ class Entry:
             created_at=str(data.get("created_at", "")) or utcnow_iso(),
             version=int(data.get("version", 1)),
             confidence=float(data.get("confidence", 0.5)),
-            verified=bool(data.get("verified", False)),
+            verified=data.get("verified") is True,
             verified_by=str(data.get("verified_by", "")),
             supersedes=str(data.get("supersedes", "")),
             superseded_by=str(data.get("superseded_by", "")),
         )
+
+
+def _read_project_snapshot(path: pathlib.Path, project: str) -> dict:
+    if not project or project != slug(project):
+        raise ValueError("invalid snapshot project")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, dict) or type(data.get("schema")) is not int
+            or data["schema"] != SCHEMA_VERSION or data.get("project") != project
+            or not isinstance(data.get("entries"), list)
+            or not isinstance(data.get("history"), list)
+            or not all(isinstance(event, dict) for event in data["history"])):
+        raise ValueError("invalid memory snapshot or different project")
+    seen = set()
+    for entry in data["entries"]:
+        if (not isinstance(entry, dict) or entry.get("project") != project
+                or not isinstance(entry.get("id"), str) or entry["id"] in seen
+                or type(entry.get("verified")) is not bool
+                or type(entry.get("version")) is not int or entry["version"] < 1):
+            raise ValueError("invalid or duplicate entry in memory snapshot")
+        Entry.from_dict(entry)
+        seen.add(entry["id"])
+    return data
+
+
+def _write_new_private(path: pathlib.Path, data: dict) -> None:
+    """Publish a complete, owner-only local file without replacing a target."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".memory-", delete=False) as output:
+            tmp_path = pathlib.Path(output.name)
+            json.dump(data, output, indent=2, ensure_ascii=False, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(tmp_path, path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink()
 
 
 class MemoryStore:
@@ -124,6 +171,7 @@ class MemoryStore:
 
     def __init__(self, root: str | pathlib.Path) -> None:
         self.root = pathlib.Path(root)
+        self._file_store = FileStore(self.root)
 
     # -- paths --------------------------------------------------------------
     def _path(self, project: str) -> pathlib.Path:
@@ -133,25 +181,43 @@ class MemoryStore:
 
     def _load(self, project: str) -> dict:
         path = self._path(project)
-        if not path.is_file():
-            return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
-                    "history": []}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
                     "history": []}
-        data.setdefault("entries", [])
+        except (OSError, ValueError) as exc:
+            raise ValueError("memory document is unreadable") from exc
+        if not isinstance(data, dict) or data.get("project") != project:
+            raise ValueError("memory document belongs to a different project or is invalid")
+        entries = data.setdefault("entries", [])
+        if not isinstance(entries, list) or any(
+                not isinstance(entry, dict) or entry.get("project") != project for entry in entries):
+            raise ValueError("memory document contains invalid or foreign entries")
         data.setdefault("history", [])
         return data
 
+    def _write_lock(self, project):
+        path = self._path(project)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return self._file_store._locked(path)
+
     def _save(self, project: str, data: dict) -> None:
         path = self._path(project)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                       encoding="utf-8")
-        tmp.replace(path)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".memory-", delete=False) as stream:
+            temporary = pathlib.Path(stream.name)
+            try:
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+                stream.write("\n")
+            except BaseException:
+                stream.close()
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     # -- write --------------------------------------------------------------
     def record(self, entry: Entry, *, actor: str = "agent") -> Entry:
@@ -163,7 +229,14 @@ class MemoryStore:
         """
         if not isinstance(entry.project, str) or not entry.project.strip():
             raise ValueError("entry project must be a non-empty string")
-        data = self._load(entry.project)
+        with self._write_lock(entry.project):
+            data = self._load(entry.project)
+            self._record_entry(data, entry, actor)
+            self._save(entry.project, data)
+        return entry
+
+    @staticmethod
+    def _record_entry(data: dict, entry: Entry, actor: str) -> None:
         previous = [e for e in data["entries"] if e["id"] == entry.id]
         if previous:
             entry.version = max(int(e.get("version", 1)) for e in previous) + 1
@@ -177,8 +250,6 @@ class MemoryStore:
             "id": entry.id,
             "version": entry.version,
         })
-        self._save(entry.project, data)
-        return entry
 
     def supersede(self, project: str, old_id: str, new: Entry, *,
                   actor: str = "agent") -> Entry:
@@ -187,21 +258,26 @@ class MemoryStore:
         The old entry is kept (with ``superseded_by`` set) so the reason a
         belief changed remains auditable.
         """
-        new.supersedes = old_id
-        new.project = project
-        self.record(new, actor=actor)
-        data = self._load(project)
-        for e in data["entries"]:
-            if e["id"] == old_id:
-                e["superseded_by"] = new.id
-        data["history"].append({
-            "at": utcnow_iso(),
-            "actor": actor,
-            "action": "supersede",
-            "id": new.id,
-            "supersedes": old_id,
-        })
-        self._save(project, data)
+        if new.project != project:
+            raise ValueError("a replacement entry must belong to the same project")
+        if new.id == old_id:
+            raise ValueError("a replacement entry needs a distinct id")
+        with self._write_lock(project):
+            data = self._load(project)
+            old = next((entry for entry in data["entries"] if entry["id"] == old_id), None)
+            if old is None:
+                raise ValueError("the entry to replace does not exist")
+            new.supersedes = old_id
+            old["superseded_by"] = new.id
+            self._record_entry(data, new, actor)
+            data["history"].append({
+                "at": utcnow_iso(),
+                "actor": actor,
+                "action": "supersede",
+                "id": new.id,
+                "supersedes": old_id,
+            })
+            self._save(project, data)
         return new
 
     def verify(self, project: str, entry_id: str, *, by: str,
@@ -211,19 +287,22 @@ class MemoryStore:
         Verification is what lets a retrieved experience be trusted; an entry
         that was never verified keeps ``verified = False`` and is ranked lower.
         """
-        data = self._load(project)
-        found = False
-        for e in data["entries"]:
-            if e["id"] == entry_id:
-                e["verified"] = True
-                e["verified_by"] = by
-                e["confidence"] = max(0.0, min(1.0, confidence))
-                found = True
-        if found:
-            data["history"].append({
-                "at": utcnow_iso(), "actor": by, "action": "verify", "id": entry_id,
-            })
-            self._save(project, data)
+        with self._write_lock(project):
+            data = self._load(project)
+            found = False
+            for e in data["entries"]:
+                if e["id"] == entry_id:
+                    if not isinstance(by, str) or not by.strip() or by == e.get("author"):
+                        raise ValueError("verification requires a distinct reviewer")
+                    e["verified"] = True
+                    e["verified_by"] = by
+                    e["confidence"] = max(0.0, min(1.0, confidence))
+                    found = True
+            if found:
+                data["history"].append({
+                    "at": utcnow_iso(), "actor": by, "action": "verify", "id": entry_id,
+                })
+                self._save(project, data)
         return found
 
     # -- read ---------------------------------------------------------------
@@ -247,7 +326,8 @@ class MemoryStore:
 
     def search(self, project: str, query: str, *, limit: int = 5,
                kinds: tuple[str, ...] | None = None,
-               include_superseded: bool = False) -> list[Entry]:
+               include_superseded: bool = False, include_common: bool = True,
+               verified_only: bool = False) -> list[Entry]:
         """Rank stored experiences against a free-text query.
 
         Scoring is deterministic and explainable: a token overlap on title,
@@ -255,16 +335,20 @@ class MemoryStore:
         an exact tag match. Superseded entries are excluded by default, because
         retrieving a belief we already corrected would repeat the old mistake.
         """
-        tokens = {t for t in re.split(r"[^a-z0-9]+", query.lower()) if t}
+        tokens = set(re.findall(r"[^\W_]+", query.casefold()))
         scored: list[tuple[float, Entry]] = []
-        for entry in self.all_entries(project):
+        for entry in self.all_entries(project, include_common=include_common):
+            if verified_only and (entry.verified is not True or not entry.verified_by):
+                continue
             if not include_superseded and entry.superseded_by:
                 continue
             if kinds and entry.kind not in kinds:
                 continue
-            hay_title = set(re.split(r"[^a-z0-9]+", entry.title.lower()))
-            hay_body = set(re.split(r"[^a-z0-9]+", entry.body.lower()))
-            hay_tags = {t.lower() for t in entry.tags}
+            hay_title = set(re.findall(r"[^\W_]+", entry.title.casefold()))
+            hay_body = set(re.findall(r"[^\W_]+", entry.body.casefold()))
+            hay_tags = {t.casefold() for t in entry.tags}
+            if tokens and not tokens.intersection(hay_title | hay_body | hay_tags):
+                continue
             score = 0.0
             score += 3.0 * len(tokens & hay_title)
             score += 1.0 * len(tokens & hay_body)
@@ -278,6 +362,32 @@ class MemoryStore:
                 scored.append((score, entry))
         scored.sort(key=lambda pair: (-pair[0], pair[1].id))
         return [entry for _, entry in scored[:limit]]
+
+    def context_references(self, project: str, query: str, *, limit: int = 3) -> list[dict]:
+        """Summarize matching verified knowledge without exposing free-form content."""
+        if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 256
+                or not re.search(r"[^\W_]", query)
+                or type(limit) is not int or not 1 <= limit <= 8
+                or project == COMMON_PROJECT):
+            raise ValueError("invalid project context request")
+        entries = self.search(project, query, limit=limit, include_common=False, verified_only=True)
+        return [{"project": project, "id": entry.id, "version": entry.version,
+                 "sha256": hashlib.sha256(json.dumps(entry.to_dict(), sort_keys=True,
+                                                    ensure_ascii=True).encode()).hexdigest()}
+                for entry in entries if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", entry.id)]
+
+    def export_project(self, project: str, destination: str | pathlib.Path) -> None:
+        """Write one existing project document, including its provenance and history."""
+        path = pathlib.Path(destination)
+        snapshot = _read_project_snapshot(self._path(project), project)
+        _write_new_private(path, snapshot)
+
+    def restore_project(self, project: str, source: str | pathlib.Path) -> None:
+        """Restore an operator-provided snapshot into an empty project slot."""
+        data = _read_project_snapshot(pathlib.Path(source), project)
+        destination = self._path(project)
+        with self._write_lock(project):
+            _write_new_private(destination, data)
 
     def history(self, project: str) -> list[dict]:
         return self._load(project)["history"]

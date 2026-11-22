@@ -16,7 +16,10 @@
     },
     "config_schema": {
       "type": "object",
-      "required": ["repository", "mission_label"],
+      "required": [
+        "repository",
+        "mission_label"
+      ],
       "additionalProperties": false,
       "properties": {
         "repository": {
@@ -95,6 +98,14 @@
           "type": "boolean",
           "default": false,
           "description": "Kill-switch. When true, the run stops immediately (exit 3) before any probe, spend or conversation. Also settable without redeploy via the env var TEL99_EMERGENCY_STOP, the sentinel file .tel99-automation-state/EMERGENCY_STOP, or the KV key emergency_stop."
+        },
+        "authorized_approvers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Explicit authorized approvers; empty fails closed."
         }
       }
     },

@@ -142,6 +142,13 @@ def _rank_key(spec: ModelSpec, task: TaskProfile,
     return (-score, spec.id)
 
 
+def _valid_quality_rates(rates):
+    if not isinstance(rates, dict):
+        return {}
+    return {model: value for model, value in rates.items()
+            if type(value) in (float, int) and 0 <= value <= 1}
+
+
 def route(
     task: TaskProfile,
     *,
@@ -150,6 +157,8 @@ def route(
     dry_run: bool = False,
     measured_quality: dict[str, float] | None = None,
     journal: list[dict] | None = None,
+    approved_models: frozenset[str] | None = None,
+    allow_local: bool = True,
 ) -> Decision:
     """Choose a model for ``task`` and explain the decision.
 
@@ -163,14 +172,24 @@ def route(
     """
     difficulty, signals = classify_difficulty(task)
     min_quality = MIN_QUALITY[difficulty]
+    measured_quality = _valid_quality_rates(measured_quality)
 
     rejected: list[dict] = []
     eligible: list[ModelSpec] = []
 
     for spec in catalog.MODEL_CATALOG:
+        if approved_models is not None and spec.id not in approved_models:
+            rejected.append({"id": spec.id, "reason": "model not approved by the operator"})
+            continue
         if not spec.is_free:
             rejected.append({"id": spec.id, "reason": f"cost_tier={spec.cost_tier} "
                              "(no-spend rule)"})
+            continue
+        if task.estimated_tokens > spec.context_tokens:
+            rejected.append({"id": spec.id, "reason": "context exceeds the model window"})
+            continue
+        if task.confidential and not spec.is_local:
+            rejected.append({"id": spec.id, "reason": "confidential task requires local inference"})
             continue
         if task.needs_tools and not spec.supports_tools:
             rejected.append({"id": spec.id, "reason": "does not support tools"})
@@ -187,7 +206,7 @@ def route(
             rejected.append({"id": spec.id, "reason": "availability not verified "
                              "(fail-closed on a real run)"})
             continue
-        if spec.is_local and not dry_run:
+        if spec.is_local and (not allow_local or not dry_run):
             # A local model is only reachable when the operator's machine is on.
             rejected.append({"id": spec.id, "reason": "local model unreachable "
                              "when the operator's PC is off"})
@@ -197,8 +216,8 @@ def route(
     # Quota: fail-closed on a real run.
     reasons: list[str] = []
     if not dry_run:
-        if quota_remaining is None:
-            reasons.append("quota unknown: refusing to start a real run")
+        if type(quota_remaining) is not int or type(min_quota) is not int or min_quota < 1:
+            reasons.append("quota unknown or invalid: refusing to start a real run")
         elif quota_remaining < min_quota:
             reasons.append(f"quota too low: {quota_remaining} < {min_quota}")
 
@@ -232,11 +251,8 @@ def load_measured_quality(path: str) -> dict[str, float]:
             data = json.load(handle)
     except (OSError, ValueError):
         return {}
-    out: dict[str, float] = {}
-    for model_id, payload in (data or {}).items():
-        if isinstance(payload, dict) and "success_rate" in payload:
-            try:
-                out[model_id] = float(payload["success_rate"])
-            except (TypeError, ValueError):
-                continue
-    return out
+    if not isinstance(data, dict):
+        return {}
+    return _valid_quality_rates({model: payload.get("success_rate")
+                                 for model, payload in data.items()
+                                 if isinstance(payload, dict)})

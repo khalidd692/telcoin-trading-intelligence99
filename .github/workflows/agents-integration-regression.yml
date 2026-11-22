@@ -1,0 +1,74 @@
+name: Agents integration regression (offline)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".agents/**"
+      - ".plugin/**"
+      - ".github/workflows/agents-integration-regression.yml"
+      - "scripts/agents/**"
+      - "docs/agents/**"
+      - "tests/**"
+      - "start-agents.ps1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agents-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-and-site:
+    name: Python, collector, and site regression (no model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TEL99_LIVE_PROBES: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Full Python regression suite, offline
+        run: python -B -m unittest discover -s tests -q
+      - name: Collector regression suite
+        run: python -B -m unittest discover -s collector -p 'test_*.py' -q
+      - name: Agent role and Skill definitions
+        run: python -B scripts/agents/render_agents.py --check
+      - name: Dashboard regression
+        run: node tests/test_dashboard.js
+      - name: Realtime feed regression
+        run: node tests/test_realtime.js
+      - name: Diff whitespace check
+        run: git diff --check origin/main...HEAD
+
+  windows-powershell:
+    name: Windows PowerShell launcher regression (offline)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      TEL99_LIVE_PROBES: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Safe launcher tests (isolated temporary directories)
+        shell: pwsh
+        run: ./tests/test_start_agents.ps1
+      - name: Relevant runtime tests
+        shell: pwsh
+        run: python -B -m unittest tests.test_autonomy_runtime tests.test_kilo_github_campaign tests.test_agent_capabilities -q

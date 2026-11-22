@@ -11,11 +11,15 @@ fail-closed availability and quota).
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import io
+import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "agents"))
@@ -95,6 +99,14 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(decision.ok)
         self.assertNotIn(decision.chosen.id, [m.id for m in decision.fallbacks])
 
+    def test_measured_quality_ignores_untrusted_rates(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = pathlib.Path(root) / "rates.json"
+            path.write_text('{"nan":{"success_rate":NaN},"bool":{"success_rate":true},'
+                            '"too-high":{"success_rate":1.2},"valid":{"success_rate":0.75}}',
+                            encoding="utf-8")
+            self.assertEqual(router.load_measured_quality(str(path)), {"valid": 0.75})
+
     def test_load_measured_quality_ignores_missing_file(self):
         self.assertEqual(router.load_measured_quality("/nonexistent/x.json"), {})
 
@@ -126,6 +138,15 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(got.version, 2)
         self.assertGreaterEqual(len(self.store.history("tel99")), 2)
 
+    def test_unreadable_memory_is_preserved_on_record(self):
+        path = self.store._path("tel99")
+        path.parent.mkdir(parents=True)
+        original = b'{"project":"tel99","entries":'
+        path.write_bytes(original)
+        with self.assertRaises(ValueError):
+            self.store.record(self._entry("tel99", "new"))
+        self.assertEqual(path.read_bytes(), original)
+
     def test_projects_are_isolated(self):
         self.store.record(self._entry("tel99", "a", title="tel secret"))
         self.store.record(self._entry("other", "b", title="other secret"))
@@ -135,6 +156,23 @@ class MemoryTests(unittest.TestCase):
         self.assertNotIn("b", tel)
         self.assertIn("b", other)
         self.assertNotIn("a", other)
+
+    def test_colliding_legacy_filenames_cannot_read_or_overwrite_another_project(self):
+        self.store.record(self._entry("project-a", "original"))
+        with self.assertRaises(ValueError):
+            self.store.search("project a", "original")
+        with self.assertRaises(ValueError):
+            self.store.record(self._entry("project a", "foreign"))
+        self.assertEqual([entry.id for entry in self.store.all_entries("project-a")], ["original"])
+
+    def test_store_refuses_foreign_entries_in_a_project_document(self):
+        self.store.record(self._entry("project-a", "original"))
+        document = self.store._path("project-a")
+        data = json.loads(document.read_text(encoding="utf-8"))
+        data["entries"].append(self._entry("project-b", "foreign").to_dict())
+        document.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.store.search("project-a", "foreign")
 
     def test_common_pool_is_visible_to_every_project(self):
         self.store.record(self._entry(memory.COMMON_PROJECT, "c", title="shared rule"))
@@ -164,10 +202,53 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(old.superseded_by, "new")
         self.assertEqual(self.store.get("tel99", "new").supersedes, "old")
 
+    def test_supersede_cannot_copy_an_entry_from_another_project(self):
+        self.store.record(self._entry("tel99", "old"))
+        new = self._entry("other", "new")
+        with self.assertRaises(ValueError):
+            self.store.supersede("tel99", "old", new)
+        self.assertEqual(new.project, "other")
+        self.assertEqual(self.store.get("tel99", "old").superseded_by, "")
+        self.assertIsNone(self.store.get("tel99", "new"))
+
+    def test_supersede_commits_both_links_and_history_in_one_write(self):
+        self.store.record(self._entry("tel99", "old"))
+        new = self._entry("tel99", "new")
+        with patch.object(self.store, "_save", wraps=self.store._save) as save:
+            self.store.supersede("tel99", "old", new)
+        save.assert_called_once()
+        persisted = memory.MemoryStore(self.tmp.name)
+        self.assertEqual(persisted.get("tel99", "old").superseded_by, "new")
+        self.assertEqual(persisted.get("tel99", "new").supersedes, "old")
+        self.assertEqual([event["action"] for event in persisted.history("tel99")],
+                         ["record", "record", "supersede"])
+
+    def test_supersede_rejects_a_missing_or_self_referencing_predecessor(self):
+        self.store.record(self._entry("tel99", "current"))
+        for old_id in ("missing", "current"):
+            with self.subTest(old_id=old_id), self.assertRaises(ValueError):
+                self.store.supersede("tel99", old_id, self._entry("tel99", "current"))
+        self.assertEqual(self.store.get("tel99", "current").version, 1)
+
     def test_verify_marks_entry_verified(self):
         self.store.record(self._entry("tel99", "a", title="claim"))
         self.assertTrue(self.store.verify("tel99", "a", by="tel99-verifier"))
         self.assertTrue(self.store.get("tel99", "a").verified)
+
+    def test_concurrent_writers_preserve_records_and_history(self):
+        with ThreadPoolExecutor(max_workers=4) as threads:
+            entries = [self._entry("atlas-lab", f"fact-{i}") for i in range(24)]
+            list(threads.map(self.store.record, entries))
+        self.assertEqual(len(self.store.all_entries("atlas-lab")), 24)
+        self.assertEqual(len(self.store.history("atlas-lab")), 24)
+
+    def test_proposal_author_cannot_verify_own_entry(self):
+        entry = self._entry("atlas-lab", "proposal")
+        entry.author = "author"
+        self.store.record(entry)
+        with self.assertRaisesRegex(ValueError, "distinct reviewer"):
+            self.store.verify("atlas-lab", "proposal", by="author")
+        self.assertFalse(self.store.get("atlas-lab", "proposal").verified)
 
     def test_search_on_unknown_project_returns_empty(self):
         self.assertEqual(self.store.search("never-seen", "anything"), [])
@@ -183,12 +264,61 @@ class ImprovementTests(unittest.TestCase):
                 for t, s in mapping.items()]
 
     def test_keep_when_candidate_improves_without_regression(self):
-        outcomes = (self._outcomes("base", {"t1": False, "t2": True})
-                    + self._outcomes("cand", {"t1": True, "t2": True}))
-        result = improvement.compare(outcomes, baseline_id="base",
-                                     candidate_id="cand")
+        cases = {f"task-{i}": i >= 6 for i in range(10)}
+        outcomes = (self._outcomes("base", cases)
+                    + self._outcomes("cand", dict.fromkeys(cases, True)))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
         self.assertEqual(result.verdict, improvement.KEEP)
-        self.assertAlmostEqual(result.delta, 0.5)
+        self.assertAlmostEqual(result.delta, 0.6)
+
+    def test_paired_cost_improvement_requires_known_non_regressing_outcomes(self):
+        rows = [improvement.Outcome(f"case-{i}", model, True, tokens=cost * 100,
+                                    seconds=float(cost), cost_units=cost, provider_calls=cost)
+                for i in range(10) for model, cost in (("base", 3), ("candidate", 2))]
+        report = improvement.compare(rows, baseline_id="base", candidate_id="candidate")
+        self.assertEqual(report.verdict, improvement.KEEP)
+        self.assertEqual(report.to_dict()["paired_metrics"]["candidate"]["cost_units"], 20)
+        self.assertEqual(report.to_dict()["paired_metrics"]["base"]["provider_calls"], 30)
+        rows[1].cost_units = None
+        report = improvement.compare(rows, baseline_id="base", candidate_id="candidate")
+        self.assertEqual(report.verdict, improvement.REJECT)
+        self.assertIsNone(report.to_dict()["paired_metrics"]["candidate"]["cost_units"])
+
+    def test_rejects_false_boolean_and_nonfinite_observation(self):
+        for success, seconds in (("false", 1.0), (True, float("nan"))):
+            with self.assertRaises(ValueError):
+                improvement.Outcome("case", "candidate", success, seconds=seconds)
+
+    def test_pinned_report_is_recomputed_and_forged_verdict_is_refused(self):
+        observations = [improvement.Outcome("fixture", mid, True, cost_units=1)
+                        for mid in ("baseline", "candidate")]
+        comparison = improvement.compare(observations, baseline_id="baseline", candidate_id="candidate")
+        with tempfile.TemporaryDirectory() as directory:
+            report = pathlib.Path(directory) / "report.json"
+            improvement.write_evaluation_report(report, comparison, observations)
+            original = report.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            self.assertEqual(improvement.review_evaluation(report, digest).verdict, improvement.REJECT)
+            forged = json.loads(original)
+            forged["evaluation"]["verdict"] = "keep"
+            report.write_text(json.dumps(forged), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "hash"):
+                improvement.review_evaluation(report, digest)
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                improvement.review_evaluation(report, hashlib.sha256(report.read_bytes()).hexdigest())
+
+    def test_one_green_pair_is_inconclusive(self):
+        outcomes = (self._outcomes("base", {"t1": False})
+                    + self._outcomes("cand", {"t1": True}))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+        self.assertEqual(result.verdict, improvement.INCONCLUSIVE)
+
+    def test_candidate_cannot_drop_baseline_tasks_to_win(self):
+        shared = {f"task-{i}": False for i in range(10)}
+        outcomes = (self._outcomes("base", {**shared, "withheld": False})
+                    + self._outcomes("cand", dict.fromkeys(shared, True)))
+        result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+        self.assertEqual(result.verdict, improvement.INCONCLUSIVE)
 
     def test_reject_on_regression(self):
         outcomes = (self._outcomes("base", {"t1": True, "t2": False})
@@ -220,17 +350,20 @@ class ImprovementTests(unittest.TestCase):
             loaded = router.load_measured_quality(str(path))
         self.assertEqual(loaded["m1"], 0.5)
 
-    def test_apply_verdict_records_memory(self):
+    def test_keep_is_recorded_as_a_proposal_without_self_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = memory.MemoryStore(tmp)
-            outcomes = (self._outcomes("base", {"t1": False})
-                        + self._outcomes("cand", {"t1": True}))
-            result = improvement.compare(outcomes, baseline_id="base",
-                                         candidate_id="cand")
+            cases = {f"task-{i}": False for i in range(10)}
+            outcomes = (self._outcomes("base", cases)
+                        + self._outcomes("cand", dict.fromkeys(cases, True)))
+            result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
+            self.assertEqual(result.verdict, improvement.KEEP)
             entry_id = improvement.apply_verdict(result, store, "tel99")
             stored = store.get("tel99", entry_id)
         self.assertEqual(stored.kind, "procedure")
-        self.assertTrue(stored.verified)
+        self.assertFalse(stored.verified)
+        self.assertEqual(stored.verified_by, "")
+        self.assertIn("proposed", stored.tags)
 
 
 class DemoIntegrationTests(unittest.TestCase):

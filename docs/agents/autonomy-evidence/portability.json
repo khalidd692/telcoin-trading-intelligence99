@@ -1,0 +1,28 @@
+{
+  "observed_utc": "2026-11-19T20:40:35.332387+00:00",
+  "initial_ci": {
+    "head": "0ac5c28ea33a63f62dc2c427853b01d8558ef834",
+    "failed_runs": [
+      44610506281,
+      44610506336
+    ],
+    "cause": "Windows-only inherited msvcrt import on Linux; 14 errors and5 failures all traced to lock helper"
+  },
+  "fix": "Preserve msvcrt on Windows, use nonblocking POSIX flock on POSIX",
+  "linux_sandbox": {
+    "network": "none",
+    "filesystem": "read-only repository mount, tmpfs scratch",
+    "image": "docker.io/library/python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+    "tests_run": 32,
+    "failures": 0,
+    "errors": 0,
+    "exit_code": 0
+  },
+  "windows_after_fix": {
+    "tests_run": 381,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "cloud_pc_off_proven": false
+}

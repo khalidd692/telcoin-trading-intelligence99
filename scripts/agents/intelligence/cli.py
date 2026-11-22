@@ -72,6 +72,42 @@ def cmd_route(args) -> int:
     return 0
 
 
+def cmd_plan(args) -> int:
+    root = str(HERE.parents[3])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from scripts.agents.intelligence import capabilities
+
+    def unique_fields(pairs):
+        obj = dict(pairs)
+        if len(obj) != len(pairs):
+            raise ValueError("duplicate contract key")
+        return obj
+
+    try:
+        with pathlib.Path(args.contract).open("rb") as file:
+            raw = file.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("mission contract exceeds 64 KiB")
+        contract = json.loads(raw, object_pairs_hook=unique_fields)
+        report = capabilities.plan(contract, memory_store=_store(args) if args.memory_root else None)
+    except (OSError, ValueError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["status"] == "PLANNED" else 3
+
+
+def cmd_roles(args) -> int:
+    root = str(HERE.parents[3])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from scripts.agents.intelligence.capabilities import roles
+
+    print(json.dumps(roles(), indent=2))
+    return 0
+
+
 def cmd_remember(args) -> int:
     store = _store(args)
     entry = memory.Entry(
@@ -110,25 +146,47 @@ def cmd_recall(args) -> int:
 
 
 def cmd_improve(args) -> int:
-    raw = json.loads(pathlib.Path(args.outcomes).read_text(encoding="utf-8"))
-    outcomes = [improvement.Outcome(**row) for row in raw]
-    comparison = improvement.compare(
-        outcomes, baseline_id=args.baseline, candidate_id=args.candidate,
-        min_delta=args.min_delta,
-    )
+    try:
+        with pathlib.Path(args.outcomes).open("rb") as file:
+            raw = file.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise ValueError("evaluation observations exceed the size limit")
+        observations = json.loads(raw)
+        if not isinstance(observations, list):
+            raise ValueError("evaluation observations must be an array")
+        outcomes = [improvement.Outcome(**row) for row in observations]
+        comparison = improvement.compare(
+            outcomes, baseline_id=args.baseline, candidate_id=args.candidate,
+            min_delta=args.min_delta,
+        )
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
     print(json.dumps(comparison.to_dict(), indent=2, ensure_ascii=False))
+    if args.measured_out:
+        try:
+            improvement.write_evaluation_report(args.measured_out, comparison, outcomes)
+        except FileExistsError:
+            print("evaluation output already exists", file=sys.stderr)
+            return 2
+        print(f"wrote evaluation report to {args.measured_out}")
     if args.record:
         store = _store(args)
         entry_id = improvement.apply_verdict(
             comparison, store, args.project or "common"
         )
         print(f"recorded verdict as {entry_id}")
-    if not args.measured_out:
-        pass
-    else:
-        improvement.write_measured_quality(args.measured_out, outcomes)
-        print(f"wrote measured quality to {args.measured_out}")
     return 0 if comparison.verdict != improvement.REJECT else 1
+
+
+def cmd_review_evaluation(args) -> int:
+    try:
+        result = improvement.review_evaluation(args.report, args.sha256)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
+    print(json.dumps({"status": "REPRODUCED", "evaluation": result.to_dict()}, indent=2))
+    return 0
 
 
 def cmd_demo(args) -> int:
@@ -154,6 +212,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quota", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_route)
+
+    p = sub.add_parser("plan", help="plan a read-only team mission without provider calls")
+    p.add_argument("--contract", required=True)
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("roles", help="list active and reserved team profiles")
+    p.set_defaults(func=cmd_roles)
 
     p = sub.add_parser("remember", help="record knowledge")
     p.add_argument("--project", required=True)
@@ -183,8 +248,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-delta", type=float, default=0.0)
     p.add_argument("--record", action="store_true")
     p.add_argument("--project", default="")
-    p.add_argument("--measured-out", default="")
+    p.add_argument("--measured-out", default="", help="new file for a review-only evaluation report")
     p.set_defaults(func=cmd_improve)
+
+    p = sub.add_parser("review-evaluation", help="recompute a SHA-pinned evaluation report")
+    p.add_argument("--report", required=True)
+    p.add_argument("--sha256", required=True)
+    p.set_defaults(func=cmd_review_evaluation)
 
     p = sub.add_parser("demo", help="run the end-to-end demonstration")
     p.add_argument("--dry-run", action="store_true")

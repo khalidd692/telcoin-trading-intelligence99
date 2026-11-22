@@ -1,0 +1,43 @@
+{
+ "verdict": "SUPPORT",
+ "role": "tel99-verifier (independant, lecture seule)",
+ "delegation_id": "deleg_41d713f0",
+ "subagent_id": "sa-0-75c69b25",
+ "duration_s": 327.46,
+ "commit_audite": "c0638f1f",
+ "base_diff": "2eac0867",
+ "etat_depot": "git status --porcelain vide avant/apres; aucun fichier modifie, aucun commit, aucun reseau, aucun appel modele",
+ "tests_rejoues": {
+  "test_hermes_relay.py": "50/50",
+  "test_autonomy_runtime.py": "14/14",
+  "test_agent_state_cas.py": "7/7",
+  "test_kilo_executor.py": "8/8",
+  "total": "79/79 (au moment de l'audit)"
+ },
+ "points_verifies": {
+  "1_pagination_fail_closed": "VÉRIFIÉ — MAX_PAGES=100, cap page pleine -> ValueError, poll BLOCKED fail-closed, existing_events même traversée, tests 350 commentaires",
+  "2_cout_strictement_nul": "VÉRIFIÉ — estimated==0.0 ET actual==0.0, None refusé (executor hermes_executor.py:186-189 + vérificateur hermes_verifier.py:32); note non bloquante: int 0/False == 0.0 en Python, colonnes SQLite numériques",
+  "3_frontiere_approbation": "VÉRIFIÉ — ORIGINS, owner-direct artefact lu-only (grep: aucune écriture owner-approvals dans le dépôt), anti-traversal, PROPOSAL_MARKER filtré, scope synthétique structurel + worker -t ''; limite résiduelle même-compte documentée runbook:86-93"
+ },
+ "non_regression_F1_F5": "AUCUNE RÉGRESSION (références fichier:ligne dans le transcript joint)",
+ "reserves": [
+  {
+   "id": "R1",
+   "severite": "MOYEN",
+   "titre": "--max-tasks non câblé dans poll: dépassement possible intra-poll (jusqu'à 20 avant le budget post-poll)",
+   "reproduction": "repro_maxtasks.py (hors dépôt): 3 missions fraîches, poll sans max_tasks -> 3 exécutions",
+   "statut": "CORRIGÉ par l'auteur: poll_budget(states, max_tasks) = min(20, max_tasks + terminaux existants) câblé dans main; cap dur intra-poll = max_tasks nouvelles exécutions; budget session_executed borne le total inter-polls; tests test_poll_budget_helper + test_main_wiring_hard_intra_poll_cap (main --max-tasks 1, 2 missions -> 1 seule exécution)"
+  },
+  {
+   "id": "R2",
+   "severite": "FAIBLE",
+   "titre": "propose: retour put_cas non vérifié, pas de session.lock -> doublon PROPOSED possible en concurrence",
+   "statut": "CORRIGÉ par l'auteur: retour put_cas vérifié + flag cas_conflict audit; fenêtre résiduelle at-least-once documentée (impact borné: PROPOSED jamais exécutable ni admis); test test_propose_dedup_via_main"
+  }
+ ],
+ "gate_support": "79/79 tests + 3 points vérifiés code + aucune régression F1-F5 -> SUPPORT; R1 réserve de robustesse signalée, depuis corrigée",
+ "preuves_durables": [
+  "relay_2026-11-20/phase2_review_transcript.log (trace complète)",
+  "relay_2026-11-20/repro_maxtasks_reviewer.py (reproduction R1 du vérificateur)"
+ ]
+}

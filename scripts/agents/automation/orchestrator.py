@@ -91,6 +91,7 @@ DEFAULT_CONFIG = {
     # Kill-switch, mirrored from the plugin schema. When true the run stops
     # immediately (exit 3) before any probe, spend or conversation.
     "emergency_stop": False,
+    "authorized_approvers": [],
 }
 
 
