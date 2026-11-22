@@ -8,10 +8,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 import math
-import queue
+import os
 import re
 import subprocess
-from threading import Thread
 import time
 from types import MappingProxyType
 
@@ -37,6 +36,10 @@ EFFORTS = ("low", "medium", "high", "xhigh")
 COMMIT = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
 WINDOWS = {300, 10080}
 MAX_QUOTA_AGE_SECONDS = 30
+METADATA_TIMEOUT_SECONDS = 25
+MAX_METADATA_LINE_BYTES = 512 * 1024
+MODEL_PAGE_SIZE = 50
+MAX_MODEL_CURSOR_CHARS = 1024
 
 
 class RouteBlocked(RuntimeError):
@@ -105,25 +108,49 @@ def _app_server(cli, cwd, env):
     with subprocess.Popen(
         [cli, *STANDARD_CONFIG, "app-server"], cwd=cwd, env=env,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        encoding="utf-8", errors="replace",
+        bufsize=0,
     ) as process:
-        lines = queue.Queue()
-
-        def read_lines():
-            try:
-                for line in process.stdout:
-                    lines.put(line)
-            finally:
-                lines.put(None)
-
-        reader = Thread(target=read_lines, daemon=True)
-        reader.start()
-        deadline = time.monotonic() + 25
+        stdout = process.stdout.fileno()
+        stdin = process.stdin.fileno()
+        pending = bytearray()
+        deadline = time.monotonic() + METADATA_TIMEOUT_SECONDS
         request_id = 0
 
         def send(message):
-            process.stdin.write(json.dumps(message) + "\n")
-            process.stdin.flush()
+            data = memoryview((json.dumps(message) + "\n").encode("ascii"))
+            while data and time.monotonic() < deadline:
+                try:
+                    written = os.write(stdin, data)
+                except BlockingIOError:
+                    written = 0
+                if written:
+                    data = data[written:]
+                else:
+                    time.sleep(0.01)
+            if data:
+                raise TimeoutError("Codex metadata write deadline reached.")
+
+        def receive(status, method):
+            while time.monotonic() < deadline:
+                end = pending.find(b"\n")
+                if end >= 0:
+                    line = bytes(pending[:end])
+                    del pending[:end + 1]
+                    return line
+                if len(pending) > MAX_METADATA_LINE_BYTES:
+                    raise RouteBlocked(status, f"Codex metadata frame exceeds the size limit for {method}.")
+                capacity = MAX_METADATA_LINE_BYTES + 1 - len(pending)
+                try:
+                    chunk = os.read(stdout, min(65536, capacity))
+                except BlockingIOError:
+                    time.sleep(0.01)
+                    continue
+                if not chunk:
+                    line = bytes(pending) or None
+                    pending.clear()
+                    return line
+                pending.extend(chunk)
+            return None
 
         def request(method, params=None):
             nonlocal request_id
@@ -138,12 +165,12 @@ def _app_server(cli, cwd, env):
                     message["params"] = params
                 send(message)
                 while time.monotonic() < deadline:
-                    line = lines.get(timeout=max(0.0, deadline - time.monotonic()))
+                    line = receive(status, method)
                     if line is None:
                         break
-                    event = json.loads(line)
+                    event = json.loads(line.decode("utf-8"))
                     if not isinstance(event, dict):
-                        continue
+                        raise RouteBlocked(status, f"Codex metadata frame is not a JSON object for {method}.")
                     if request_id > 2 and event.get("method") == "account/updated":
                         update = event.get("params")
                         if not isinstance(update, dict) or update.get("authMode") != "chatgpt":
@@ -153,18 +180,23 @@ def _app_server(cli, cwd, env):
                         if "error" not in event and isinstance(result, dict):
                             return result
                         break
-            except (queue.Empty, OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 pass
             raise RouteBlocked(status, f"Codex metadata unavailable for {method}.")
 
         try:
+            # Python 3.12 supports nonblocking pipes on Windows as well as POSIX.
+            try:
+                os.set_blocking(stdout, False)
+                os.set_blocking(stdin, False)
+            except (AttributeError, OSError) as exc:
+                raise RouteBlocked("BLOCKED_MODEL", "Nonblocking Codex metadata pipes unavailable.") from exc
             request("initialize", {"clientInfo": {"name": "tel99-model-router", "version": "1.0"}})
             send({"method": "initialized"})
             yield request
         finally:
             if process.poll() is None:
                 process.kill()
-            reader.join(timeout=2)
 
 
 def read_snapshot(cli, cwd, env, *, include_catalog=True):
@@ -177,15 +209,18 @@ def read_snapshot(cli, cwd, env, *, include_catalog=True):
             cursors = set()
             for _ in range(20 if include_catalog else 0):
                 page = request("model/list", {
-                    "includeHidden": False, "limit": 50, "cursor": cursor, "modelProvider": "openai",
+                    "includeHidden": False, "limit": MODEL_PAGE_SIZE, "cursor": cursor,
+                    "modelProvider": "openai",
                 })
                 entries, cursor = page.get("data"), page.get("nextCursor")
-                if not isinstance(entries, list) or any(not isinstance(item, dict) for item in entries):
+                if (not isinstance(entries, list) or len(entries) > MODEL_PAGE_SIZE
+                        or any(not isinstance(item, dict) for item in entries)):
                     raise RouteBlocked("BLOCKED_MODEL", "Invalid Codex catalog page.")
                 models.extend(entries)
                 if cursor is None:
                     break
-                if not isinstance(cursor, str) or not cursor or cursor in cursors:
+                if (not isinstance(cursor, str) or not 1 <= len(cursor) <= MAX_MODEL_CURSOR_CHARS
+                        or cursor in cursors):
                     raise RouteBlocked("BLOCKED_MODEL", "Invalid Codex catalog cursor.")
                 cursors.add(cursor)
             else:
@@ -428,22 +463,35 @@ def prepare_exec(argv, checkpoint, approval_sha256, base_commit, snapshot, persi
     return plan, [*argv[:-1], *plan.exec_args, "-"]
 
 
+def _unique_event_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError("Duplicate field in Codex CLI evidence.")
+    return fields
+
+
 def _exec_usage(exec_jsonl, effective_settings):
+    observation = {"source": "codex exec --json", "thread_id": None,
+                   "terminal_event": None, "tokens": None, "effective_settings": effective_settings}
     thread_id = None
     terminal = None
     tokens = None
     ambiguous = False
-    for line in exec_jsonl.splitlines():
+    for line in exec_jsonl.split("\n"):
+        if not line.strip(" \t\r"):
+            continue
         try:
-            event = json.loads(line)
-        except ValueError:
-            continue
+            event = json.loads(line, object_pairs_hook=_unique_event_fields)
+        except (ValueError, RecursionError):
+            return observation
         if not isinstance(event, dict):
-            continue
+            return observation
         if event.get("type") == "thread.started":
             value = event.get("thread_id")
-            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
-                thread_id = value
+            if (not _hash(value, r"[A-Za-z0-9_-]{1,128}") or terminal is not None
+                    or (thread_id is not None and thread_id != value)):
+                return observation
+            thread_id = value
         if event.get("type") in ("turn.completed", "turn.failed"):
             ambiguous |= terminal is not None
             terminal = event["type"]
@@ -453,9 +501,10 @@ def _exec_usage(exec_jsonl, effective_settings):
             if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0 for k in keys):
                 if usage["cached_input_tokens"] <= usage["input_tokens"]:
                     tokens = {key: usage[key] for key in keys}
-    return {"source": "codex exec --json", "thread_id": thread_id,
-            "terminal_event": None if ambiguous else terminal,
-            "tokens": None if ambiguous else tokens, "effective_settings": effective_settings}
+    observation["thread_id"] = thread_id
+    if not ambiguous:
+        observation.update(terminal_event=terminal, tokens=tokens)
+    return observation
 
 
 def record_result(checkpoint, approval_sha256, number, status, *, duration_ms,

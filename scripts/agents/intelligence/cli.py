@@ -72,6 +72,42 @@ def cmd_route(args) -> int:
     return 0
 
 
+def cmd_plan(args) -> int:
+    root = str(HERE.parents[3])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from scripts.agents.intelligence import capabilities
+
+    def unique_fields(pairs):
+        obj = dict(pairs)
+        if len(obj) != len(pairs):
+            raise ValueError("duplicate contract key")
+        return obj
+
+    try:
+        with pathlib.Path(args.contract).open("rb") as file:
+            raw = file.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("mission contract exceeds 64 KiB")
+        contract = json.loads(raw, object_pairs_hook=unique_fields)
+        report = capabilities.plan(contract)
+    except (OSError, ValueError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["status"] == "PLANNED" else 3
+
+
+def cmd_roles(args) -> int:
+    root = str(HERE.parents[3])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from scripts.agents.intelligence.capabilities import roles
+
+    print(json.dumps(roles(), indent=2))
+    return 0
+
+
 def cmd_remember(args) -> int:
     store = _store(args)
     entry = memory.Entry(
@@ -156,6 +192,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quota", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_route)
+
+    p = sub.add_parser("plan", help="plan a read-only team mission without provider calls")
+    p.add_argument("--contract", required=True)
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("roles", help="list active and reserved team profiles")
+    p.set_defaults(func=cmd_roles)
 
     p = sub.add_parser("remember", help="record knowledge")
     p.add_argument("--project", required=True)

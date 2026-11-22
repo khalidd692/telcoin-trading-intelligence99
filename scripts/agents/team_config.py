@@ -194,6 +194,11 @@ def reserved_agents() -> tuple[AgentSpec, ...]:
     return tuple(specs)
 
 
+def role_catalog() -> dict[str, AgentSpec]:
+    """Expose the canonical active and reserved profiles to planners."""
+    return {spec.role: spec for spec in (*ACTIVE_AGENTS, *reserved_agents())}
+
+
 def unique_names(suffix: str | None = None) -> dict[str, str]:
     """Return collision-free agent names for one run.
 

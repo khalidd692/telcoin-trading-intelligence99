@@ -157,6 +157,8 @@ def route(
     dry_run: bool = False,
     measured_quality: dict[str, float] | None = None,
     journal: list[dict] | None = None,
+    approved_models: frozenset[str] | None = None,
+    allow_local: bool = True,
 ) -> Decision:
     """Choose a model for ``task`` and explain the decision.
 
@@ -176,9 +178,18 @@ def route(
     eligible: list[ModelSpec] = []
 
     for spec in catalog.MODEL_CATALOG:
+        if approved_models is not None and spec.id not in approved_models:
+            rejected.append({"id": spec.id, "reason": "model not approved by the operator"})
+            continue
         if not spec.is_free:
             rejected.append({"id": spec.id, "reason": f"cost_tier={spec.cost_tier} "
                              "(no-spend rule)"})
+            continue
+        if task.estimated_tokens > spec.context_tokens:
+            rejected.append({"id": spec.id, "reason": "context exceeds the model window"})
+            continue
+        if task.confidential and not spec.is_local:
+            rejected.append({"id": spec.id, "reason": "confidential task requires local inference"})
             continue
         if task.needs_tools and not spec.supports_tools:
             rejected.append({"id": spec.id, "reason": "does not support tools"})
@@ -195,7 +206,7 @@ def route(
             rejected.append({"id": spec.id, "reason": "availability not verified "
                              "(fail-closed on a real run)"})
             continue
-        if spec.is_local and not dry_run:
+        if spec.is_local and (not allow_local or not dry_run):
             # A local model is only reachable when the operator's machine is on.
             rejected.append({"id": spec.id, "reason": "local model unreachable "
                              "when the operator's PC is off"})
