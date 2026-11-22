@@ -58,10 +58,10 @@ def _plan_verification(contract):
     return report
 
 
-def plan(contract):
+def plan(contract, *, memory_store=None):
     """Validate a JSON mission and return correlated handoffs without dispatching."""
     _fields(contract, ("project", "mission_id", "approved_models", "budget", "steps"),
-            ("verification", "confidential"))
+            ("verification", "confidential", "context"))
     try:
         validate_project(contract["project"])
     except MissionError as exc:
@@ -107,6 +107,11 @@ def plan(contract):
     if len(skill_steps) > 1 or bool(skill_steps) != ("verification" in contract):
         raise ValueError("one role must own the verification skill and its contract")
 
+    if "context" in contract:
+        _fields(contract["context"], ("query", "limit"))
+        if memory_store is None:
+            raise ValueError("project context requires an explicit memory root")
+
     estimates = {"model_calls": len(steps), "seconds": sum(s["estimated_seconds"] for s in steps),
                  "context_tokens": sum(s["estimated_tokens"] for s in steps)}
     report = {"status": "BLOCKED", "provider_status": "PROVIDER_PENDING", "provider_calls": 0,
@@ -142,6 +147,9 @@ def plan(contract):
             codes.append("VERIFICATION_UNAVAILABLE")
             return report
 
+    if "context" in contract:
+        report["context"] = memory_store.context_references(
+            contract["project"], contract["context"]["query"], limit=contract["context"]["limit"])
     raw = json.dumps(contract, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     correlation = f"plan-{digest}"

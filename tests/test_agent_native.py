@@ -352,6 +352,35 @@ class KernelTests(unittest.TestCase):
             self.assertTrue(second.reused)
             self.assertEqual(second.provider_calls, 0)
 
+    def test_cache_cannot_accept_a_changed_prompt_or_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_OK])
+            check = mission.Check("syntax", [sys.executable, "-c", "pass"])
+            spec = mission.MissionSpec("bound-cache", "write", artifacts=["mathutils.py"],
+                                       checks=[check])
+            self.assertEqual(engine.run(spec).verdict, mission.PASS)
+            spec.prompt = "a different output"
+            with self.assertRaisesRegex(mission.MissionError, "cached mission contract"):
+                engine.run(spec)
+            spec.prompt = "write"
+            check.command[-1] = "raise SystemExit(1)"
+            with self.assertRaisesRegex(mission.MissionError, "cached mission contract"):
+                engine.run(spec)
+            self.assertEqual(engine.provider.calls, 1)
+
+    def test_repair_context_excludes_unrelated_model_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _engine(tmp, [MATH_BAD + "\nUNDECLARED_PAYLOAD", MATH_OK])
+            spec = mission.MissionSpec(
+                "compact", "implement double", artifacts=["mathutils.py"], max_repairs=1,
+                checks=[mission.Check("behavior", [sys.executable, "-c",
+                    "import mathutils; assert mathutils.double(2) == 4"])])
+            with patch.object(engine.provider, "complete", wraps=engine.provider.complete) as call:
+                self.assertEqual(engine.run(spec).verdict, mission.PASS)
+            request = call.call_args.kwargs["prompt"]
+            self.assertNotIn("UNDECLARED_PAYLOAD", request)
+            self.assertIn("def double", request)
+
     def test_same_mission_id_is_isolated_across_projects(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = _engine(tmp, [MATH_OK, MATH_BAD])
@@ -360,21 +389,21 @@ class KernelTests(unittest.TestCase):
             ])
             common = {"mission_id": "shared-id", "prompt": "write",
                       "artifacts": ["mathutils.py"], "checks": [check]}
-            first = engine.run(mission.MissionSpec(project="tel99", **common))
-            second = engine.run(mission.MissionSpec(project="project-b", **common))
+            first = engine.run(mission.MissionSpec(project="atlas-lab", **common))
+            second = engine.run(mission.MissionSpec(project="boreal-lab", **common))
 
             self.assertEqual(first.verdict, mission.PASS)
             self.assertEqual(second.verdict, mission.FAIL)
             self.assertFalse(second.reused)
             self.assertEqual(second.provider_calls, 1)
-            self.assertEqual(engine.recall("shared-id", project="tel99")[0]["project"], "tel99")
-            self.assertEqual(engine.recall("shared-id", project="project-b")[0]["project"],
-                             "project-b")
+            self.assertEqual(engine.recall("shared-id", project="atlas-lab")[0]["project"], "atlas-lab")
+            self.assertEqual(engine.recall("shared-id", project="boreal-lab")[0]["project"],
+                             "boreal-lab")
             artifacts = pathlib.Path(tmp) / "state" / "artifacts"
             self.assertIn("return add(x, x)",
-                          (artifacts / "shared-id" / "mathutils.py").read_text())
+                          (artifacts / "_projects" / "atlas-lab" / "shared-id" / "mathutils.py").read_text())
             self.assertIn("return x",
-                          (artifacts / "_projects" / "project-b" / "shared-id"
+                          (artifacts / "_projects" / "boreal-lab" / "shared-id"
                            / "mathutils.py").read_text())
 
     def test_refused_run_leaks_no_claim(self):

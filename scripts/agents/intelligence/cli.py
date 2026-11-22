@@ -90,7 +90,7 @@ def cmd_plan(args) -> int:
         if len(raw) > 65536:
             raise ValueError("mission contract exceeds 64 KiB")
         contract = json.loads(raw, object_pairs_hook=unique_fields)
-        report = capabilities.plan(contract)
+        report = capabilities.plan(contract, memory_store=_store(args) if args.memory_root else None)
     except (OSError, ValueError, RecursionError) as exc:
         print(json.dumps({"status": "INVALID", "error": str(exc)}))
         return 2
@@ -146,12 +146,22 @@ def cmd_recall(args) -> int:
 
 
 def cmd_improve(args) -> int:
-    raw = json.loads(pathlib.Path(args.outcomes).read_text(encoding="utf-8"))
-    outcomes = [improvement.Outcome(**row) for row in raw]
-    comparison = improvement.compare(
-        outcomes, baseline_id=args.baseline, candidate_id=args.candidate,
-        min_delta=args.min_delta,
-    )
+    try:
+        with pathlib.Path(args.outcomes).open("rb") as file:
+            raw = file.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise ValueError("evaluation observations exceed the size limit")
+        observations = json.loads(raw)
+        if not isinstance(observations, list):
+            raise ValueError("evaluation observations must be an array")
+        outcomes = [improvement.Outcome(**row) for row in observations]
+        comparison = improvement.compare(
+            outcomes, baseline_id=args.baseline, candidate_id=args.candidate,
+            min_delta=args.min_delta,
+        )
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
     print(json.dumps(comparison.to_dict(), indent=2, ensure_ascii=False))
     if args.measured_out:
         try:
@@ -167,6 +177,16 @@ def cmd_improve(args) -> int:
         )
         print(f"recorded verdict as {entry_id}")
     return 0 if comparison.verdict != improvement.REJECT else 1
+
+
+def cmd_review_evaluation(args) -> int:
+    try:
+        result = improvement.review_evaluation(args.report, args.sha256)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+        print(json.dumps({"status": "INVALID", "error": str(exc)}))
+        return 2
+    print(json.dumps({"status": "REPRODUCED", "evaluation": result.to_dict()}, indent=2))
+    return 0
 
 
 def cmd_demo(args) -> int:
@@ -230,6 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", default="")
     p.add_argument("--measured-out", default="", help="new file for a review-only evaluation report")
     p.set_defaults(func=cmd_improve)
+
+    p = sub.add_parser("review-evaluation", help="recompute a SHA-pinned evaluation report")
+    p.add_argument("--report", required=True)
+    p.add_argument("--sha256", required=True)
+    p.set_defaults(func=cmd_review_evaluation)
 
     p = sub.add_parser("demo", help="run the end-to-end demonstration")
     p.add_argument("--dry-run", action="store_true")

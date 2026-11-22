@@ -11,6 +11,8 @@ fail-closed availability and quota).
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import io
 import json
 import pathlib
@@ -233,6 +235,21 @@ class MemoryTests(unittest.TestCase):
         self.assertTrue(self.store.verify("tel99", "a", by="tel99-verifier"))
         self.assertTrue(self.store.get("tel99", "a").verified)
 
+    def test_concurrent_writers_preserve_records_and_history(self):
+        with ThreadPoolExecutor(max_workers=4) as threads:
+            entries = [self._entry("atlas-lab", f"fact-{i}") for i in range(24)]
+            list(threads.map(self.store.record, entries))
+        self.assertEqual(len(self.store.all_entries("atlas-lab")), 24)
+        self.assertEqual(len(self.store.history("atlas-lab")), 24)
+
+    def test_proposal_author_cannot_verify_own_entry(self):
+        entry = self._entry("atlas-lab", "proposal")
+        entry.author = "author"
+        self.store.record(entry)
+        with self.assertRaisesRegex(ValueError, "distinct reviewer"):
+            self.store.verify("atlas-lab", "proposal", by="author")
+        self.assertFalse(self.store.get("atlas-lab", "proposal").verified)
+
     def test_search_on_unknown_project_returns_empty(self):
         self.assertEqual(self.store.search("never-seen", "anything"), [])
 
@@ -253,6 +270,42 @@ class ImprovementTests(unittest.TestCase):
         result = improvement.compare(outcomes, baseline_id="base", candidate_id="cand")
         self.assertEqual(result.verdict, improvement.KEEP)
         self.assertAlmostEqual(result.delta, 0.6)
+
+    def test_paired_cost_improvement_requires_known_non_regressing_outcomes(self):
+        rows = [improvement.Outcome(f"case-{i}", model, True, tokens=cost * 100,
+                                    seconds=float(cost), cost_units=cost, provider_calls=cost)
+                for i in range(10) for model, cost in (("base", 3), ("candidate", 2))]
+        report = improvement.compare(rows, baseline_id="base", candidate_id="candidate")
+        self.assertEqual(report.verdict, improvement.KEEP)
+        self.assertEqual(report.to_dict()["paired_metrics"]["candidate"]["cost_units"], 20)
+        self.assertEqual(report.to_dict()["paired_metrics"]["base"]["provider_calls"], 30)
+        rows[1].cost_units = None
+        report = improvement.compare(rows, baseline_id="base", candidate_id="candidate")
+        self.assertEqual(report.verdict, improvement.REJECT)
+        self.assertIsNone(report.to_dict()["paired_metrics"]["candidate"]["cost_units"])
+
+    def test_rejects_false_boolean_and_nonfinite_observation(self):
+        for success, seconds in (("false", 1.0), (True, float("nan"))):
+            with self.assertRaises(ValueError):
+                improvement.Outcome("case", "candidate", success, seconds=seconds)
+
+    def test_pinned_report_is_recomputed_and_forged_verdict_is_refused(self):
+        observations = [improvement.Outcome("fixture", mid, True, cost_units=1)
+                        for mid in ("baseline", "candidate")]
+        comparison = improvement.compare(observations, baseline_id="baseline", candidate_id="candidate")
+        with tempfile.TemporaryDirectory() as directory:
+            report = pathlib.Path(directory) / "report.json"
+            improvement.write_evaluation_report(report, comparison, observations)
+            original = report.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            self.assertEqual(improvement.review_evaluation(report, digest).verdict, improvement.REJECT)
+            forged = json.loads(original)
+            forged["evaluation"]["verdict"] = "keep"
+            report.write_text(json.dumps(forged), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "hash"):
+                improvement.review_evaluation(report, digest)
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                improvement.review_evaluation(report, hashlib.sha256(report.read_bytes()).hexdigest())
 
     def test_one_green_pair_is_inconclusive(self):
         outcomes = (self._outcomes("base", {"t1": False})

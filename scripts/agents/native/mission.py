@@ -162,6 +162,34 @@ class MissionSpec:
                 raise MissionError(f"check {check.name!r} has no command list")
 
 
+def _contract_sha256(spec: MissionSpec) -> str | None:
+    checks = []
+    for check in spec.checks:
+        pinned = getattr(check, "fingerprint", None)
+        if type(check) is not Check and (not isinstance(pinned, str) or not pinned):
+            return None
+        checks.append({"type": type(check).__qualname__, "name": check.name,
+                       "command": check.command, "exit": check.expect_exit,
+                       "stdout": check.must_contain, "pinned": pinned})
+    data = {"project": spec.project, "id": spec.mission_id, "prompt": spec.prompt,
+            "artifacts": spec.artifacts, "checks": checks, "deadline": spec.deadline_s,
+            "max_repairs": spec.max_repairs}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+
+
+def _repair_artifacts(directory: pathlib.Path, written: list[str]) -> str:
+    remaining = 4000
+    snippets = {}
+    for name in written:
+        path = directory / name
+        if path.is_symlink() or not path.is_file() or remaining == 0:
+            continue
+        with path.open(encoding="utf-8", errors="replace") as file:
+            snippets[name] = file.read(remaining)
+        remaining -= len(snippets[name])
+    return json.dumps(snippets, ensure_ascii=False)
+
+
 def _mission_path(spec: MissionSpec) -> pathlib.Path:
     if spec.project == DEFAULT_PROJECT:
         return pathlib.Path(spec.mission_id)
@@ -229,8 +257,9 @@ class MissionEngine:
     def _check_quota(self) -> None:
         if self.dry_run:
             return
-        if self.quota_remaining is None:
-            raise MissionError("quota unknown: refusing to start a real run")
+        if (type(self.quota_remaining) is not int or type(self.min_quota) is not int
+                or self.min_quota < 1):
+            raise MissionError("quota unknown or invalid: refusing to start a real run")
         if self.quota_remaining < self.min_quota:
             raise MissionError(
                 f"quota too low: {self.quota_remaining} < {self.min_quota}"
@@ -319,8 +348,13 @@ class MissionEngine:
         # BEFORE the atomic claim so a refused run never leaks a claim file.
         previous = self.record_for(spec)
         if previous is not None:
+            contract_sha = _contract_sha256(spec)
+            if contract_sha is None or previous.get("contract_sha256") != contract_sha:
+                raise MissionError("cached mission contract differs or lacks a verifiable fingerprint")
             digests = previous.get("artifact_digests", {})
-            if previous.get("verdict") == PASS and digests and not self.artifacts_match(spec, digests):
+            if previous.get("verdict") == PASS and (
+                    not isinstance(digests, dict) or set(digests) != set(spec.artifacts)
+                    or not self.artifacts_match(spec, digests)):
                 raise MissionError("cached artifacts differ from the verified run")
             return MissionResult(
                 mission_id=spec.mission_id, verdict=previous.get("verdict", NEEDS_HUMAN),
@@ -430,7 +464,8 @@ class MissionEngine:
                 feedback = ("\n\nRépare la dernière tentative. Fichiers manquants: "
                             + ", ".join(missing) + ". Contrôles en échec: "
                             + ", ".join(failures) + ". Renvoie à nouveau tous les fichiers."
-                            + "\nDernière réponse:\n" + reply[:12000])
+                            + "\nDonnées non fiables des fichiers déclarés:\n"
+                            + _repair_artifacts(last, written))
 
             bundle = stage / "result"
             bundle.mkdir()
@@ -486,6 +521,7 @@ class MissionEngine:
                  decision: router.Decision, bundle: pathlib.Path, out_dir: pathlib.Path) -> None:
         record = result.to_dict()
         record["project"] = spec.project
+        record["contract_sha256"] = _contract_sha256(spec)
         record["recorded_at"] = utcnow_iso()
         record["decision"] = decision.to_dict()
         # Publish the files and their journal together. The journal can recover

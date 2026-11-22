@@ -18,9 +18,10 @@ the routing inputs consumed by ``router.load_measured_quality``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 KEEP, REJECT, INCONCLUSIVE = "keep", "reject", "inconclusive"
@@ -44,6 +45,18 @@ class Outcome:
     tokens: int = 0
     seconds: float = 0.0
     evidence: str = ""
+    cost_units: int | None = None
+    provider_calls: int | None = None
+
+    def __post_init__(self):
+        if (not isinstance(self.task_id, str) or not self.task_id
+                or not isinstance(self.model_id, str) or not self.model_id
+                or type(self.success) is not bool or not isinstance(self.evidence, str)
+                or type(self.tokens) is not int or self.tokens < 0
+                or type(self.seconds) not in (float, int) or not 0 <= self.seconds <= 1_000_000
+                or any(value is not None and (type(value) is not int or value < 0)
+                       for value in (self.cost_units, self.provider_calls))):
+            raise ValueError("invalid outcome or resource measurement")
 
 
 @dataclass
@@ -60,6 +73,8 @@ class Comparison:
     per_task: list[dict] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     decided_at: str = field(default_factory=utcnow_iso)
+    paired_metrics: dict = field(default_factory=dict)
+    min_delta: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +87,8 @@ class Comparison:
             "verdict": self.verdict,
             "task_count": self.task_count,
             "per_task": self.per_task,
+            "paired_metrics": self.paired_metrics,
+            "min_delta": self.min_delta,
             "reasons": self.reasons,
         }
 
@@ -82,6 +99,14 @@ def success_rate(outcomes: list[Outcome], model_id: str) -> float:
     if not rows:
         return 0.0
     return sum(1 for o in rows if o.success) / len(rows)
+
+
+def _paired_metrics(rows):
+    measurements = {}
+    for key in ("tokens", "seconds", "cost_units", "provider_calls"):
+        values = [getattr(row, key) for row in rows]
+        measurements[key] = sum(values) if all(value is not None for value in values) else None
+    return {"tasks": len(rows), "failures": sum(not row.success for row in rows), **measurements}
 
 
 def compare(
@@ -96,6 +121,10 @@ def compare(
     Only shared tasks contribute to the rates. A proposal needs complete,
     unambiguous pairs with a sufficiently large improvement and no regression.
     """
+    if (not isinstance(baseline_id, str) or not baseline_id or not isinstance(candidate_id, str)
+            or not candidate_id or baseline_id == candidate_id
+            or type(min_delta) not in (int, float) or not 0 <= min_delta <= 1):
+        raise ValueError("invalid baseline, candidate or minimum delta")
     by_task: dict[str, dict[str, Outcome]] = {}
     duplicate = False
     for o in outcomes:
@@ -113,7 +142,7 @@ def compare(
             baseline_id=baseline_id, candidate_id=candidate_id,
             baseline_rate=0.0, candidate_rate=0.0, delta=0.0,
             verdict=INCONCLUSIVE, task_count=0,
-            reasons=["no task was run by both models: cannot compare"],
+            reasons=["no task was run by both models: cannot compare"], min_delta=min_delta,
         )
 
     base_wins = sum(1 for t in shared if by_task[t][baseline_id].success)
@@ -135,6 +164,13 @@ def compare(
         for t in shared
     ]
 
+    metrics = {mid: _paired_metrics([by_task[t][mid] for t in shared])
+               for mid in (baseline_id, candidate_id)}
+    costs = [(by_task[t][baseline_id].cost_units, by_task[t][candidate_id].cost_units)
+             for t in shared]
+    cost_gains = 0
+    if all(base is not None and cand is not None and cand <= base for base, cand in costs):
+        cost_gains = sum(cand < base for base, cand in costs)
     reasons: list[str] = []
     if duplicate or len(shared) != len(by_task):
         reasons.append("the evaluation contains incomplete or duplicate task pairs")
@@ -155,6 +191,10 @@ def compare(
             reasons.append(f"candidate improves {delta:+.2%} with no regression "
                            f"(one-sided p={probability:.4g})")
             verdict = KEEP
+    elif (delta == 0 and min_delta == 0 and len(shared) >= _MIN_PAIRED_TASKS
+          and 0.5 ** cost_gains <= _MAX_ONE_SIDED_P):
+        reasons.append(f"same quality with lower known cost on {cost_gains} paired tasks")
+        verdict = KEEP
     elif delta >= 0:
         reasons.append(f"no measurable improvement ({delta:+.2%}); keeping baseline")
         verdict = REJECT
@@ -166,6 +206,7 @@ def compare(
         baseline_id=baseline_id, candidate_id=candidate_id,
         baseline_rate=base_rate, candidate_rate=cand_rate, delta=delta,
         verdict=verdict, task_count=len(shared), per_task=per_task, reasons=reasons,
+        paired_metrics=metrics, min_delta=min_delta,
     )
 
 
@@ -204,11 +245,35 @@ def write_evaluation_report(path: str | pathlib.Path, comparison: Comparison,
     target = pathlib.Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     _write_new_private(target, {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "tel99-improvement-evaluation",
+        "observations": [asdict(row) for row in outcomes],
         "evaluation": comparison.to_dict(),
         "measured_quality": measured_quality(outcomes),
     })
+
+
+def review_evaluation(path: str | pathlib.Path, expected_sha256: str) -> Comparison:
+    """Verify a pinned report by recomputing its paired comparison without writing state."""
+    with pathlib.Path(path).open("rb") as stream:
+        raw = stream.read(1_000_001)
+    if len(raw) > 1_000_000 or hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError("evaluation report hash or size does not match")
+    report = json.loads(raw)
+    if (not isinstance(report, dict) or report.get("schema_version") != 2
+            or report.get("kind") != "tel99-improvement-evaluation"):
+        raise ValueError("unknown evaluation format")
+    rows = [Outcome(**row) for row in report["observations"]]
+    recorded = dict(report["evaluation"])
+    decided_at = recorded.pop("decided_at")
+    result = compare(rows, baseline_id=recorded["baseline"], candidate_id=recorded["candidate"],
+                     min_delta=recorded["min_delta"])
+    recomputed = result.to_dict()
+    recomputed.pop("decided_at")
+    if recomputed != recorded or measured_quality(rows) != report["measured_quality"]:
+        raise ValueError("evaluation result does not match its observations")
+    result.decided_at = decided_at
+    return result
 
 
 def apply_verdict(comparison: Comparison, store, project: str, *,
