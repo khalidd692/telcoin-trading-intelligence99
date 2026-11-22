@@ -18,7 +18,8 @@ from scripts.agents.automation.autonomy_runtime import (
     Blocked, LEGACY_STOP, QuotaBlocked, Runtime, TERMINAL, fingerprint, run_session,
 )
 from scripts.agents.automation.github_mission_source import (
-    MAX_MISSIONS, approval_is_current, fetch_comments, fetch_pages, fenced_json, gh_json, is_owner, parse_approvals,
+    MAX_MISSIONS, GitHubRateLimited, GitHubWriteNotSent, approval_is_current, fetch_comments,
+    fetch_pages, fenced_json, gh_json, is_owner, parse_approvals,
 )
 from scripts.agents.automation.kilo_acceptance_pr import (
     ACCEPTANCE_BASE, ACCEPTANCE_BASE_SHA, publish_verified_pr,
@@ -50,7 +51,9 @@ class KiloGitHubHandoff:
         self.pr_publisher = pr_publisher or publish_verified_pr
         self.campaign = campaign
         self.source_valid = False
+        self.admitted_ids = set()
         self.waiting_for_github = False
+        self.github_rate_limited = False
         if runtime is None:
             return
         runtime.bind_transport("kilo-github")
@@ -71,11 +74,19 @@ class KiloGitHubHandoff:
             if body is not None or payload is not None or method != "GET":
                 raise ValueError("preflight only permits GitHub reads")
             return gh_json(endpoint, body=body, method=method, payload=payload, timeout=8)
+        if self.github_rate_limited:
+            raise GitHubRateLimited("GitHub API rate limit reached")
         if runtime.stopped() or runtime.expired():
+            if body is not None or method != "GET":
+                raise GitHubWriteNotSent("session stopped or expired before write")
             raise OSError("session stopped or expired")
         remaining = 8 if runtime.deadline is None else runtime.deadline - time.monotonic()
-        return gh_json(endpoint, body=body, method=method, payload=payload,
-                       timeout=min(8, max(0.05, remaining)))
+        try:
+            return gh_json(endpoint, body=body, method=method, payload=payload,
+                           timeout=min(8, max(0.05, remaining)))
+        except GitHubRateLimited:
+            self.github_rate_limited = True
+            raise
 
     def post_event(self, issue, body):
         if self.post is not None:
@@ -184,20 +195,41 @@ class KiloGitHubHandoff:
             raise ValueError("approved missions exceed the queue limit")
         return candidates
 
+    def check_campaign_base(self):
+        base = self.fetch(f"repos/{REPO}/git/ref/heads/{ACCEPTANCE_BASE}")
+        target = base.get("object") if isinstance(base, dict) else None
+        if not isinstance(target, dict) or (target.get("sha"), target.get("type")) != (
+                ACCEPTANCE_BASE_SHA, "commit"):
+            raise ValueError("campaign evidence base ref has changed")
+
+    def check_github_identity(self):
+        if not is_owner(self.github("user")):
+            raise ValueError("the GitHub CLI must be authenticated as the pinned owner")
+        if self.campaign:
+            repository = self.github(f"repos/{REPO}")
+            permissions = repository.get("permissions") if isinstance(repository, dict) else None
+            if not isinstance(permissions, dict) or permissions.get("push") is not True:
+                raise ValueError("campaign draft publication requires repository push permission")
+
+    @staticmethod
+    def check_campaign_graph(candidates, scope):
+        roots = []
+        for mid, binding in candidates.items():
+            dependencies = binding["mission"]["dependencies"]
+            if not dependencies:
+                roots.append(mid)
+            elif set(dependencies) != scope["contracts"].keys() - {mid} or len(dependencies) != 1:
+                raise ValueError("campaign dependency must name the other pinned contract")
+        if len(candidates) == 2 and len(roots) != 1:
+            raise ValueError("campaign needs one independent mission and one dependent on it")
+
     def preflight(self):
         scope = self.check_mandate()
         if self.campaign:
-            base = self.fetch(f"repos/{REPO}/git/ref/heads/{ACCEPTANCE_BASE}")
-            target = base.get("object") if isinstance(base, dict) else None
-            if not isinstance(target, dict) or (target.get("sha"), target.get("type")) != (
-                    ACCEPTANCE_BASE_SHA, "commit"):
-                raise ValueError("campaign evidence base ref has changed")
+            self.check_campaign_base()
         candidates = self.discover_candidates(scope)
-        if self.campaign and len(candidates) == 2:
-            dependencies = [binding["mission"]["dependencies"] for binding in candidates.values()]
-            if not any(deps == [mid] and not binding["mission"]["dependencies"]
-                       for mid, binding in candidates.items() for deps in dependencies):
-                raise ValueError("campaign needs one independent mission and one dependent on it")
+        if self.campaign:
+            self.check_campaign_graph(candidates, scope)
         return [{"issue": binding.get("issue", self.issue), "id": mid,
                  "contract_sha256": binding["contract_sha256"]}
                 for mid, binding in candidates.items()]
@@ -205,7 +237,13 @@ class KiloGitHubHandoff:
     def source(self):
         store = self.runtime.store
         admitted = {}
-        for mid, binding in self.discover_candidates(self.check_mandate()).items():
+        scope = self.check_mandate()
+        candidates = self.discover_candidates(scope)
+        if self.campaign:
+            known = {mid: binding for mid in scope["contracts"]
+                     if (binding := store.get(f"kilo-github/approvals/{mid}")) is not None}
+            self.check_campaign_graph({**candidates, **known}, scope)
+        for mid, binding in candidates.items():
             key = f"kilo-github/approvals/{mid}"
             if store.get(key) is None:
                 store.put_cas(key, binding, None)
@@ -223,6 +261,7 @@ class KiloGitHubHandoff:
                 admitted[mid] = binding["mission"]
         if len(admitted) > MAX_MISSIONS:
             raise ValueError("active missions and recovery checkpoints exceed the queue limit")
+        self.admitted_ids = set(admitted)
         self.source_valid = True
         return {"missions": list(admitted.values()),
                 "approvals": {mid: fingerprint(mission) for mid, mission in admitted.items()}}
@@ -274,7 +313,7 @@ class KiloGitHubHandoff:
         return url if row.get("html_url") == url else None
 
     def publish_once(self, phase, state, binding, *, evidence=None, pull_request=None):
-        if self.runtime.stopped() or self.runtime.expired():
+        if self.github_rate_limited or self.runtime.stopped() or self.runtime.expired():
             return None
         store = self.runtime.store
         key = f"kilo-github/outbox/{state['id']}/{phase}"
@@ -288,26 +327,36 @@ class KiloGitHubHandoff:
             return None
         if previous and previous.get("url"):
             return previous["url"]
+        can_post = previous is None or previous.get("not_sent") is True
         try:
             for row in self.comments(event["issue"]):
                 url = self.receipt_url(row, event)
                 if url:
                     # A receipt without a claim in this ledger belongs to another run.
-                    if previous is None and phase == "ACK":
+                    if can_post and phase == "ACK":
                         return None
                     return url if store.put_cas(key, {"event": event, "url": url}, previous) else None
-            if previous is not None:
+            if not can_post:
                 # The POST might have reached GitHub. Only a read can reconcile it.
                 return None
-            if self.campaign and not self.current_approval(binding, state["id"]):
+            if (self.campaign or phase == "ACK" or state["status"] == "ACCEPTED") and not self.current_approval(
+                    binding, state["id"]):
                 return None
+            if self.campaign and phase == "ACK":
+                self.check_campaign_base()
             if self.runtime.stopped() or self.runtime.expired():
                 return None
             pending = {"event": event}
-            if not store.put_cas(key, pending, None):
+            if not store.put_cas(key, pending, previous):
                 return None
             body = f"```{EVENT}\n{json.dumps(event, ensure_ascii=True, sort_keys=True)}\n```"
-            url = self.receipt_url(self.post_event(event["issue"], body), event)
+            try:
+                if self.runtime.stopped() or self.runtime.expired():
+                    raise GitHubWriteNotSent("session stopped or expired before write")
+                url = self.receipt_url(self.post_event(event["issue"], body), event)
+            except GitHubWriteNotSent:
+                store.put_cas(key, {**pending, "not_sent": True}, pending)
+                return None
             if url and store.put_cas(key, {"event": event, "url": url}, pending):
                 return url
         except (OSError, ValueError):
@@ -329,13 +378,12 @@ class KiloGitHubHandoff:
                 ):
                     self.waiting_for_github = True
                     return False
-                if not self.current_approval(binding, mid):
-                    self.waiting_for_github = True
-                    return False
             if not self.publish_once("ACK", state, binding):
                 self.waiting_for_github = True
                 return False
             if self.current_approval(binding, mid):
+                if self.campaign:
+                    self.check_campaign_base()
                 return True
         except (OSError, ValueError):
             pass
@@ -353,8 +401,13 @@ class KiloGitHubHandoff:
 
     def publish_pull_request(self, state, binding, evidence):
         def authorized_api(endpoint, *, method="GET", payload=None):
-            if method != "GET" and (method != "POST" or not self.current_approval(binding, state["id"])):
-                raise ValueError("campaign approval changed before a GitHub write")
+            if method != "GET":
+                try:
+                    approved = method == "POST" and self.current_approval(binding, state["id"])
+                except (OSError, ValueError) as exc:
+                    raise GitHubWriteNotSent("cannot verify approval before write") from exc
+                if not approved:
+                    raise GitHubWriteNotSent("campaign approval changed before write")
             return self.github(endpoint, method=method, payload=payload)
 
         return self.pr_publisher(REPO, binding["issue"], binding["base"], binding["base_sha"], state,
@@ -403,11 +456,29 @@ class KiloGitHubHandoff:
         ok = self.runtime.poll(self.source)
         if self.source_valid and not self.runtime.stopped():
             self.sync_results()
-        if self.waiting_for_github and not self.runtime.stopped():
+        if self.github_rate_limited:
+            self.runtime.observe(STATE="BLOCKED", BLOCKER="GITHUB_RATE_LIMIT")
+        elif self.waiting_for_github and not self.runtime.stopped():
             self.runtime.observe(STATE="BLOCKED", BLOCKER="GITHUB_RECEIPT_OR_APPROVAL_UNCONFIRMED")
         elif ok and not self.runtime.quota_exhausted:
             self.runtime.observe(BLOCKER=None)
-        return ok and not self.waiting_for_github
+        return ok and not (self.waiting_for_github or self.github_rate_limited)
+
+    def complete(self):
+        states = list(self.states())
+        if (not self.source_valid or not self.admitted_ids or self.waiting_for_github
+                or self.campaign and len(self.admitted_ids) != 2):
+            return False
+        if not self.admitted_ids <= {state["id"] for state in states}:
+            return False
+        for state in states:
+            receipt = self.runtime.store.get(f"kilo-github/outbox/{state['id']}/RESULT") or {}
+            event = receipt.get("event") or {}
+            if (state["status"] != "ACCEPTED" or not receipt.get("url")
+                    or event.get("status") != "ACCEPTED" or not event.get("evidence_url")
+                    or self.campaign and not event.get("pull_request_url")):
+                return False
+        return True
 
 
 def main(argv=None):
@@ -427,8 +498,7 @@ def main(argv=None):
         try:
             handoff = KiloGitHubHandoff(None, args.issue, args.mandate_comment,
                                        args.mandate_sha256, campaign=args.campaign)
-            if not is_owner(handoff.github("user")):
-                raise ValueError("the GitHub CLI must be authenticated as the pinned owner")
+            handoff.check_github_identity()
             missions = handoff.preflight()
             ready = len(missions) == 2 if args.campaign else bool(missions)
             print(json.dumps({"preflight": "READY" if ready else "WAITING_APPROVALS",
@@ -454,23 +524,25 @@ def main(argv=None):
         try:
             handoff = KiloGitHubHandoff(runtime, args.issue, args.mandate_comment, args.mandate_sha256,
                                        campaign=args.campaign)
-            if not is_owner(handoff.github("user")):
-                raise ValueError("the GitHub CLI must be authenticated as the pinned owner")
-            failed = run_session(runtime, handoff.poll, once=args.once)
+            handoff.check_github_identity()
+            run_session(runtime, handoff.poll, once=args.once,
+                        done=lambda: handoff.github_rate_limited or args.campaign and handoff.complete())
+            complete = handoff.complete() and not handoff.github_rate_limited
         except (Blocked, OSError, ValueError) as exc:
             print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
             return 2
-    else:
-        failed = False
     report = runtime.status()
     report["github_queue"] = runtime.store.get(CONFIG_KEY)
     report["github_receipts"] = {
-        key.replace("\\", "/"): row.get("url") or "PENDING_RECONCILIATION"
+        key.replace("\\", "/"): row.get("url") or ("NOT_SENT" if row.get("not_sent") else "PENDING_RECONCILIATION")
         for key in runtime.store.keys("kilo-github/outbox") if (row := runtime.store.get(key))
     }
+    if args.action == "run":
+        report["delivery"] = "COMPLETE" if complete else "INCOMPLETE"
     print(json.dumps(report, ensure_ascii=True))
-    return 2 if failed or any(row["status"] != "ACCEPTED"
-                              for row in report["missions"].values()) else 0
+    if args.action == "run":
+        return 0 if complete else 2
+    return 2 if any(row["status"] != "ACCEPTED" for row in report["missions"].values()) else 0
 
 
 if __name__ == "__main__":

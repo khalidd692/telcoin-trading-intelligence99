@@ -154,7 +154,7 @@ class Runtime(Supervisor):
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
         if saved.get("status")!="WORKER_EXITED":
-            if self.before_execute is None or saved.get("status") != "ACK":
+            if saved.get("status") != "ACK":
                 if not self.claim(m):
                     self.save(m,"AWAITING_HUMAN",reason="existing claim requires reconciliation")
                     return
@@ -162,21 +162,23 @@ class Runtime(Supervisor):
                 if not ack["accepted"]:
                     self.save(m,"AWAITING_HUMAN",reason="existing ACK requires reconciliation");return
                 saved = self.save(m,"ACK",execution_status="NOT_STARTED")
-            if self.before_execute is not None:
-                claim = self.store.get(f"kilo-claims/{m['id']}")
-                if (not isinstance(claim, dict) or claim.get("contract_sha256") != fingerprint(m)
-                        or not self.inbox.seen(m["id"])):
-                    self.save(m, "AWAITING_HUMAN", reason="missing or mismatched claim or local ACK")
-                    return
-                if not self.before_execute(m, saved):
-                    return
-            if self.stopped():self.save(m,"AWAITING_HUMAN",reason="STOP after claim");return
+            claim = self.store.get(f"kilo-claims/{m['id']}")
+            if (not isinstance(claim, dict) or claim.get("contract_sha256") != fingerprint(m)
+                    or not self.inbox.seen(m["id"])):
+                self.save(m, "AWAITING_HUMAN", reason="missing or mismatched claim or local ACK")
+                return
+            if self.stopped() or (self.before_execute is not None and not self.before_execute(m, saved)):
+                return
+            if self.stopped():return  # Keep the ACK so an explicit resume can start once.
             if self.expired():self.save(m,"AWAITING_HUMAN",reason="session deadline after claim");return
             self.save(m,"RUNNING")
+            if self.stopped():
+                self.save(m, "ACK")  # This process knows it has not launched the worker yet.
+                return
             try:result=self.executor(m)
-            except QuotaBlocked:
+            except QuotaBlocked as exc:
                 self.quota_exhausted = True
-                self.save(m, "BLOCKED", reason="BLOCKED_PROVIDER_RATE_LIMIT")
+                self.save(m, "BLOCKED", reason=getattr(exc, "reason", "BLOCKED_PROVIDER_RATE_LIMIT"))
                 return
             except Exception as exc:
                 self.save(m,"BLOCKED",reason=type(exc).__name__);return
@@ -192,8 +194,13 @@ class Runtime(Supervisor):
         if self.stopped() or self.expired():
             return
         checks = verified.get("checks")
+        artifact = saved["result"].get("artifact") if isinstance(saved["result"], dict) else None
         ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
-              and all(isinstance(check, dict) and check.get("ok") is True for check in checks))
+              and all(isinstance(check, dict) and check.get("ok") is True for check in checks)
+              and isinstance(verified.get("verifier"), str) and bool(verified["verifier"])
+              and isinstance(artifact, str)
+              and hashlib.sha256(artifact.encode("utf-8")).hexdigest() == verified.get("artifact_sha256")
+              == saved["result"].get("sha256") == m["expected_sha256"])
         verdict=verify_mission(conversation_finished=True,roles={m["specialist"]:{"reported":True}},
              acceptance_checks=[{"id":"independent-text-contract","command":"fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
@@ -286,27 +293,36 @@ def main(argv=None):
         return 2
     deadline=time.monotonic()+a.seconds
     r.deadline=deadline
+    expected = None
     def source():
+        nonlocal expected
         raw=a.registry.read_bytes()
         if hashlib.sha256(raw).hexdigest()!=a.registry_sha256:raise ValueError("registry changed")
         data = json.loads(raw)
-        if any(m.get("owner") != "kilo" for m in data["missions"]):
+        missions = data.get("missions") if isinstance(data, dict) else None
+        if (not isinstance(missions, list) or not isinstance(data.get("approvals"), dict)
+                or any(not isinstance(m, dict) or m.get("owner") != "kilo"
+                       or not isinstance(m.get("id"), str) for m in missions)):
             raise ValueError("the local Kilo launcher requires Kilo contracts")
+        expected = {m["id"] for m in missions}
         return data
     failed = run_session(r, lambda: r.poll(source), once=a.once)
     report=r.status()
+    accepted = {mid for mid, row in report["missions"].items() if row["status"] == "ACCEPTED"}
+    complete = (not failed and expected is not None and expected <= accepted
+                and len(accepted) == len(report["missions"]))
+    report["delivery"] = "COMPLETE" if complete and expected else "EMPTY" if complete else "INCOMPLETE"
     print(json.dumps(report))
-    return 2 if failed or any(
-        m["status"] != "ACCEPTED" for m in report["missions"].values()) else 0
+    return 0 if complete else 2
 
 
-def run_session(runtime, poll, *, once=False):
+def run_session(runtime, poll, *, once=False, done=None):
     """Run a bounded source poll using the existing lock and heartbeat."""
     failed = False
     with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
         while not (runtime.stopped() or runtime.expired() or runtime.quota_exhausted):
             failed = not poll() or failed
-            if once or runtime.quota_exhausted:
+            if once or runtime.quota_exhausted or (done is not None and done()):
                 break
             until = min(runtime.deadline, time.monotonic() + 10)
             while not runtime.stopped() and time.monotonic() < until:

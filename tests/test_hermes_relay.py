@@ -30,6 +30,8 @@ from scripts.agents.automation import hermes_verifier
 from scripts.agents.automation.hermes_github_adapter import build_runtime, event_body
 
 MANDATE = 7024804657
+MANDATE_SHA = hashlib.sha256(b"GO synthetique").hexdigest()
+OWNER = {"login": "khalidd692", "id": 275517051, "type": "User"}
 SESSION = "local-" + "a" * 64
 
 
@@ -292,6 +294,60 @@ class ExecutorTests(unittest.TestCase):
         finally:
             os.environ.pop("FAKE_COUNTER", None)
 
+    def test_429_blocks_other_models_on_same_provider_after_restart(self):
+        counter = self.root / "calls.txt"
+        with mock.patch.dict(os.environ, {"FAKE_COUNTER": str(counter)}):
+            with self.assertRaisesRegex(ExecutorUnavailable, "BLOCKED_PROVIDER_RATE_LIMIT"):
+                self.exe(self.rate).execute(mission())
+            with self.assertRaisesRegex(ExecutorUnavailable, "BLOCKED_PROVIDER_COOLDOWN"):
+                self.exe(self.rate, model=FREE_MODELS[1]).execute(mission("FRESH-MODEL"))
+        self.assertEqual(counter.read_text(), "x")
+
+    def test_legacy_model_cooldown_blocks_another_model(self):
+        executor = self.exe(self.ok, model=FREE_MODELS[1])
+        executor.cooldown_path.write_text(json.dumps({FREE_MODELS[0]: time.time() + 300}),
+                                          encoding="utf-8")
+        with self.assertRaisesRegex(ExecutorUnavailable, "BLOCKED_PROVIDER_COOLDOWN"):
+            executor.execute(mission())
+
+    def test_invalid_cooldown_state_blocks_worker(self):
+        executor = self.exe(self.ok)
+        for content in ("{", "[]", '{"provider:nous":NaN}', '{"provider:nous":true}'):
+            with self.subTest(content=content):
+                executor.cooldown_path.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(ExecutorUnavailable, "COOLDOWN_STATE_UNAVAILABLE"):
+                    executor.execute(mission())
+
+    def test_model_quota_ends_session_before_claiming_next_mission(self):
+        a, b = mission("NEW-MISSION-A"), mission("NEW-MISSION-B")
+        counter = self.root / "calls.txt"
+        payload = {"missions": [a, b], "approvals": seal([a, b]), "sources": {}}
+        with mock.patch.dict(os.environ, {"FAKE_COUNTER": str(counter)}), \
+             mock.patch.object(hga, "github_source", return_value=payload) as source, \
+             mock.patch.object(hga, "HermesExecutor", return_value=self.exe(self.rate)):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA,
+                             "--no-publish", "--seconds", "1"])
+        r = Runtime(self.root)
+        self.assertEqual(code, 2)
+        self.assertEqual(r.state(a)["reason"], "BLOCKED_PROVIDER_RATE_LIMIT")
+        self.assertEqual(r.state(b), {})
+        self.assertEqual(counter.read_text(), "x")
+        self.assertEqual(source.call_count, 1)
+
+    def test_stop_rechecked_immediately_before_starting_worker(self):
+        a = mission()
+        executor = self.exe(self.ok, stop_requested=lambda: (
+            self.root / f"{a['id']}.hermes.err").exists())
+        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("worker started")), \
+             self.assertRaisesRegex(ExecutorUnavailable, "HERMES_WORKER_STOPPED_OR_TIMEOUT"):
+            executor.execute(a)
+
+    def test_historical_c_cannot_enter_direct_executor(self):
+        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("worker started")), \
+             self.assertRaisesRegex(ExecutorUnavailable, "historical mission C"):
+            self.exe(self.ok).execute(mission("HERMES-QWEN4-20261121-C"))
+
     def test_nonzero_cost_refused(self):
         def paid(home, sid):
             row = usage_stub(home, sid)
@@ -432,6 +488,41 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(r.state(a)["status"], "ACCEPTED")
         self.assertEqual(calls, [a["id"]])
         self.assertEqual(attempts, ["ACK"])
+
+    def test_stop_after_publication_intent_prevents_post(self):
+        a = mission()
+        r, publisher = build_runtime(self.root, issue=94, publisher=self.fake_publisher)
+        original_cas = r.store.put_cas
+
+        def request_stop(key, value, previous):
+            result = original_cas(key, value, previous)
+            if key.startswith("hermes-relay-published/") and isinstance(value, dict) and value.get("pending"):
+                (self.root / "stop.request").touch()
+            return result
+
+        r.store.put_cas = request_stop
+        r.run_queue([a], seal([a]))
+        self.assertEqual(self.published, [])
+
+    def test_ambiguous_ack_without_receipt_blocks_without_reposting(self):
+        a = mission()
+        attempts = []
+
+        def post(body):
+            attempts.append(body)
+            raise OSError("unknown outcome")
+
+        r, _ = build_runtime(self.root, issue=94, publisher=post, scan=lambda: {})
+        r.executor = mock.Mock(side_effect=AssertionError("worker started"))
+        for _ in range(2):
+            r.run_queue([a], seal([a]))
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(r.state(a)["status"], "ACK")
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            hga.main(["status", "--state", str(self.root)])
+        report = json.loads(output.getvalue())
+        self.assertEqual(report.get("pending_publications"),
+                         [f"hermes-relay-published/{a['id']}/ACK"])
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -769,25 +860,157 @@ class ReviewR1R2Tests(unittest.TestCase):
         with mock.patch.object(hga, "github_source", return_value=payload), \
              mock.patch.object(hga, "HermesExecutor", StubExec):
             code = hga.main(["run", "--state", str(self.root), "--issue", "94",
-                             "--mandate-comment", str(MANDATE), "--once",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA, "--once",
                              "--max-tasks", "1", "--no-publish", "--seconds", "60"])
         self.assertEqual(code, 0)
         states = list((self.root / "ledger" / "kilo-local").glob("*.json"))
         self.assertEqual(len(states), 1)  # hard cap intra-poll: 1 seule exécution
+
+    def test_later_poll_uses_only_remaining_session_budget(self):
+        a, b, c = [mission(f"NEW-MISSION-{letter}") for letter in "ABC"]
+        payloads = [{"missions": admitted, "approvals": seal(admitted), "sources": {}}
+                    for admitted in ([a], [a, b, c])]
+        executor = mock.Mock()
+        executor.execute.side_effect = ok_result
+        clock = mock.Mock(wraps=time)
+        polling_time = time.monotonic()
+        clock.monotonic.side_effect = lambda: polling_time
+
+        def skip_poll_interval(_):
+            nonlocal polling_time
+            polling_time += 10
+
+        clock.sleep.side_effect = skip_poll_interval
+        with mock.patch.object(hga, "time", clock), \
+             mock.patch.object(hga, "github_source", side_effect=payloads), \
+             mock.patch.object(hga, "HermesExecutor", return_value=executor):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA,
+                             "--max-tasks", "2", "--no-publish", "--seconds", "60"])
+        r = Runtime(self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(r.state(a)["status"], "ACCEPTED")
+        self.assertEqual(r.state(b)["status"], "ACCEPTED")
+        self.assertEqual(r.state(c), {})
+
+    def test_unadmitted_terminal_checkpoint_cannot_expand_worker_budget(self):
+        a, b = mission("NEW-MISSION-A"), mission("NEW-MISSION-B")
+        stale = mission("ARCHIVED-SYNTHETIC")
+        r = Runtime(self.root)
+        r.save(stale, "ACCEPTED", result=ok_result(stale))
+        payload = {"missions": [a, b], "approvals": seal([a, b]), "sources": {}}
+        executor = mock.Mock()
+        executor.execute.side_effect = ok_result
+        with mock.patch.object(hga, "github_source", return_value=payload), \
+             mock.patch.object(hga, "HermesExecutor", return_value=executor):
+            hga.main(["run", "--state", str(self.root), "--issue", "94",
+                      "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA,
+                      "--max-tasks", "1", "--once", "--no-publish"])
+        self.assertEqual(r.state(a)["status"], "ACCEPTED")
+        self.assertIn(r.state(b).get("execution_status"), (None, "NOT_STARTED"))
 
     def test_propose_dedup_via_main(self):
         bl = self.root / "backlog.json"
         bl.write_text(json.dumps({"tasks": [
             {"id": "I-02", "owner": "hermes", "initial_state": "todo", "title": "memoire"}]}))
         published = []
-        with mock.patch.object(hga, "publish_comment",
-                               side_effect=lambda repo, issue, body: published.append(body) or "u1"):
+        with mock.patch.object(hga, "gh_json", return_value=OWNER), \
+             mock.patch.object(hga, "publish_comment",
+                               side_effect=lambda repo, issue, body, **kw: published.append(body) or "u1"):
             code1 = hga.main(["propose", "--state", str(self.root), "--issue", "94",
                               "--backlog", str(bl), "--task", "I-02"])
             code2 = hga.main(["propose", "--state", str(self.root), "--issue", "94",
                               "--backlog", str(bl), "--task", "I-02"])
         self.assertEqual((code1, code2), (0, 0))
         self.assertEqual(len(published), 1)  # dédup CAS: pas de seconde publication
+
+    def test_propose_obeys_stop_before_any_github_call(self):
+        (self.root / "stop.request").touch()
+        with mock.patch.object(hga, "gh_json", side_effect=AssertionError("GitHub read")), \
+             mock.patch.object(hga, "publish_comment", side_effect=AssertionError("GitHub write")):
+            code = hga.main(["propose", "--state", str(self.root), "--issue", "94"])
+        self.assertEqual(code, 2)
+
+    def test_live_run_requires_a_content_pin_even_without_publication(self):
+        for pin in ([], ["--mandate-sha256", "invalid"]):
+            with self.subTest(pin=pin):
+                with mock.patch.object(hga, "github_source", side_effect=AssertionError("GitHub read")), \
+                     mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
+                    hga.main(["run", "--state", str(self.root), "--issue", "94",
+                              "--mandate-comment", str(MANDATE), "--no-publish", "--once", *pin])
+                self.assertEqual(error.exception.code, 2)
+
+    def test_publishing_run_requires_the_pinned_owner_before_admission(self):
+        with mock.patch.object(hga, "gh_json", return_value={**OWNER, "id": 1}), \
+             mock.patch.object(hga, "github_source", side_effect=AssertionError("GitHub admission")):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA,
+                             "--once"])
+        self.assertEqual(code, 2)
+
+    def test_github_rate_limit_rejects_ack_and_stops_before_next_claim(self):
+        a, b = mission("NEW-MISSION-A"), mission("NEW-MISSION-B")
+        payload = {"missions": [a, b], "approvals": seal([a, b]), "sources": {}}
+        calls = []
+
+        def github(endpoint, *, body, timeout):
+            if endpoint == "user":
+                return OWNER
+            calls.append("POST" if body is not None else "GET")
+            if body is not None:
+                raise hga.GitHubRateLimited("GitHub API rate limit reached")
+            return []
+
+        with mock.patch.object(hga, "gh_json", side_effect=github), \
+             mock.patch.object(hga, "github_source", return_value=payload):
+            code = hga.main(["run", "--state", str(self.root), "--issue", "94",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA,
+                             "--once"])
+        r = Runtime(self.root)
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, ["GET", "POST"])
+        self.assertEqual(r.state(a)["status"], "ACK")
+        self.assertEqual(r.state(b), {})
+        self.assertIsNone(r.store.get(f"hermes-relay-published/{a['id']}/ACK"))
+        self.assertEqual(r.status()["last_observed"]["BLOCKER"], "BLOCKED_GITHUB_RATE_LIMIT")
+
+    def test_explicit_resume_posts_ack_when_stop_prevented_dispatch(self):
+        a = mission()
+        payload = {"missions": [a], "approvals": seal([a]), "sources": {}}
+        arguments = ["run", "--state", str(self.root), "--issue", "94", "--once",
+                     "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA]
+        marker = self.root / "stop.request"
+        executor = mock.Mock()
+        executor.execute.side_effect = ok_result
+        attempts = []
+        actual_publish = hga.publish_comment
+
+        def stop_before_dispatch(*args, **kwargs):
+            marker.touch()
+            return actual_publish(*args, **kwargs)
+
+        def github(endpoint, *, body, timeout):
+            if endpoint == "user":
+                return OWNER
+            if body is None:
+                return []
+            attempts.append(json.loads(hga.EVENT_BLOCK_RE.search(body)[1])["status"])
+            cid = len(attempts)
+            return {"id": cid, "user": OWNER, "created_at": "now", "updated_at": "now",
+                    "issue_url": f"https://api.github.com/repos/{hga.REPO}/issues/94",
+                    "html_url": f"https://github.com/{hga.REPO}/issues/94#issuecomment-{cid}"}
+
+        with mock.patch.object(hga, "gh_json", side_effect=github), \
+             mock.patch.object(hga, "github_source", return_value=payload), \
+             mock.patch.object(hga, "HermesExecutor", return_value=executor):
+            with mock.patch.object(hga, "publish_comment", side_effect=stop_before_dispatch):
+                self.assertEqual(hga.main(arguments), 2)
+            self.assertEqual(attempts, [])
+            self.assertEqual(Runtime(self.root).state(a)["status"], "ACK")
+            marker.unlink()
+            self.assertEqual(hga.main(arguments), 0)
+        self.assertEqual(attempts, ["ACK", "ACCEPTED"])
+        self.assertEqual(Runtime(self.root).state(a)["status"], "ACCEPTED")
 
 
 class ReliabilityReviewTests(unittest.TestCase):
@@ -833,17 +1056,15 @@ class ReliabilityReviewTests(unittest.TestCase):
                                        fetcher=lambda ep: comment)["body"], "GO synthetique")
 
     def test_gh_calls_pin_utf8_encoding(self):
-        class R:
-            returncode = 0
-            stdout = '{"ok": true}'
-            stderr = ""
-        with mock.patch.object(gms.subprocess, "run", return_value=R()) as run:
-            gms.default_fetcher("repos/x/y/issues/1/comments")
-        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        completed = subprocess.CompletedProcess([], 0, '{"body":"déjà vérifié"}'.encode("utf-8"), b"")
+        with mock.patch.object(gms.subprocess, "run", return_value=completed) as run:
+            row = gms.default_fetcher("repos/x/y/issues/1/comments")
+        self.assertEqual(row["body"], "déjà vérifié")
         self.assertIn("github.com", run.call_args.args[0])
-        with mock.patch.object(subprocess, "run", return_value=R()) as run:
-            hga.publish_comment("x/y", 1, "body")
-        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        with mock.patch.object(subprocess, "run", return_value=completed) as run:
+            hga.publish_comment("x/y", 1, "résultat vérifié")
+        self.assertEqual(json.loads(run.call_args.kwargs["input"].decode("utf-8")),
+                         {"body": "résultat vérifié"})
 
     def test_journal_appends_before_cas_mark(self):
         published = []
@@ -868,7 +1089,7 @@ class ReliabilityReviewTests(unittest.TestCase):
     def test_main_loop_unexpected_error_fail_closed(self):
         with mock.patch.object(hga, "github_source", side_effect=TypeError("boom")):
             code = hga.main(["run", "--state", str(self.root), "--issue", "94",
-                             "--mandate-comment", str(MANDATE), "--once",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA, "--once",
                              "--no-publish", "--seconds", "60"])
         self.assertEqual(code, 2)
         # heartbeat refera STOPPED à la sortie ; le BLOCKER reste prouvé et
@@ -909,7 +1130,7 @@ class ReliabilityReviewTests(unittest.TestCase):
     def test_main_loop_attribute_error_fail_closed(self):
         with mock.patch.object(hga, "github_source", side_effect=AttributeError("boom")):
             code = hga.main(["run", "--state", str(self.root), "--issue", "94",
-                             "--mandate-comment", str(MANDATE), "--once",
+                             "--mandate-comment", str(MANDATE), "--mandate-sha256", MANDATE_SHA, "--once",
                              "--no-publish", "--seconds", "60"])
         self.assertEqual(code, 2)
         report = Runtime(self.root).status()
@@ -920,7 +1141,8 @@ class ReliabilityReviewTests(unittest.TestCase):
         bl = self.root / "backlog.json"
         bl.write_text(json.dumps({"tasks": [
             {"id": "I-02", "owner": "hermes", "initial_state": "todo"}]}))
-        with mock.patch.object(hga, "publish_comment", side_effect=OSError("down")):
+        with mock.patch.object(hga, "gh_json", return_value=OWNER), \
+             mock.patch.object(hga, "publish_comment", side_effect=OSError("down")):
             code = hga.main(["propose", "--state", str(self.root), "--issue", "94",
                              "--backlog", str(bl), "--task", "I-02"])
         self.assertEqual(code, 1)
@@ -946,7 +1168,8 @@ class ReliabilityReviewTests(unittest.TestCase):
         # Un SEUL patch posé dans le thread principal : patch.object n'est pas
         # thread-safe et un patch posé/retiré par deux threads fuit et casse les
         # tests suivants (publish_comment remplacé par un Mock résiduel).
-        with mock.patch.object(hga, "publish_comment", side_effect=slow_publish):
+        with mock.patch.object(hga, "gh_json", return_value=OWNER), \
+             mock.patch.object(hga, "publish_comment", side_effect=slow_publish):
             t1, t2 = threading.Thread(target=go), threading.Thread(target=go)
             t1.start(); t2.start(); t1.join(); t2.join()
         self.assertEqual(sorted(codes), [0, 0])
@@ -982,14 +1205,15 @@ class TwoMissionRecipeTests(unittest.TestCase):
         def source():
             return real_source("x/y", 94, 67, MANDATE, fetcher=fetcher)
 
-        with mock.patch.object(hga, "github_source", side_effect=lambda *a, **k: source()), \
+        with mock.patch.object(hga, "gh_json", return_value=OWNER), \
+             mock.patch.object(hga, "github_source", side_effect=lambda *a, **k: source()), \
              mock.patch.object(hga, "existing_events", return_value={}), \
              mock.patch.object(hga, "HermesExecutor", lambda **kw: stub), \
              mock.patch.object(hga, "publish_comment",
                                side_effect=lambda repo, issue, body, **kw: self.fake_publisher(body)):
             code = hga.main(["run", "--state", str(self.root), "--issue", "94",
                              "--mandate-issue", "67", "--mandate-comment", str(MANDATE),
-                             "--once", "--seconds", "60"])
+                             "--mandate-sha256", MANDATE_SHA, "--once", "--seconds", "60"])
         return code, a, b
 
     def test_recipe_a_then_b_end_to_end_and_idempotent(self):

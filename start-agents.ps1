@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
- [ValidateSet('START','RUN','STATUS','STOP','PREFLIGHT')][string]$Action='STATUS',
+ [ValidateSet('START','RUN','STATUS','STOP','PREFLIGHT','DIAGNOSTIC')][string]$Action='STATUS',
  [string]$Python,
  [string]$State,
  [string]$Registry,
@@ -13,12 +13,24 @@ param(
  [switch]$Once
 )
 $ErrorActionPreference='Stop'
-if (-not $Python) {
- $managed=Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
- if (Test-Path -LiteralPath $managed) { $Python=$managed }
- else { $Python=(Get-Command python -ErrorAction Stop).Source }
+try {
+ if (-not $Python) {
+  $managed=Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
+  if (Test-Path -LiteralPath $managed) { $Python=$managed }
+  else { $Python=(Get-Command python -ErrorAction Stop).Source }
+ }
+ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'Python executable missing' }
+} catch {
+ if ($Action -ne 'DIAGNOSTIC') { throw }
+ @{
+  status='BLOCKED'
+  timestamp_utc=[DateTimeOffset]::UtcNow.ToString('o')
+  source='PowerShell launcher'
+  versions=@{python=$null; pwsh=$PSVersionTable.PSVersion.ToString()}
+  blockers=@('PYTHON_UNAVAILABLE')
+ } | ConvertTo-Json -Depth 3
+ exit 2
 }
-if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'Python executable missing' }
 if ($Action -eq 'START') { $Action='RUN' }
 if ($Campaign -and (-not $GitHubIssue -or ($MandateComment -le 0 -and -not $State))) {
  throw 'Campaign requires -GitHubIssue and either -MandateComment or -State'
@@ -32,6 +44,21 @@ if (-not $State) {
   'kilo'
  }
  $State=Join-Path $PSScriptRoot ".tel99-automation-state/$name"
+}
+if ($Action -eq 'DIAGNOSTIC') {
+ $entry=Join-Path $PSScriptRoot 'scripts/agents/automation/windows_diagnostic.py'
+ $argv=@('-B',$entry,'--state',$State)
+ if ($GitHubIssue) { $argv+=@('--issue',"$GitHubIssue") }
+ if ($MandateComment -or $MandateSha256) {
+  if (-not $GitHubIssue -or $MandateComment -le 0 -or $MandateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+   throw 'DIAGNOSTIC GitHub reads require -GitHubIssue, -MandateComment and -MandateSha256'
+  }
+  $argv+=@('--mandate-comment',"$MandateComment",'--mandate-sha256',$MandateSha256)
+ }
+ if ($Campaign) { $argv+='--campaign' }
+ $PSNativeCommandUseErrorActionPreference=$false
+ & $Python @argv
+ exit $LASTEXITCODE
 }
 $script=if ($GitHubIssue) { 'kilo_github_adapter.py' } else { 'autonomy_runtime.py' }
 $entry=Join-Path $PSScriptRoot "scripts/agents/automation/$script"

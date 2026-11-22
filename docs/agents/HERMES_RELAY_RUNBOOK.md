@@ -15,15 +15,17 @@ GitHub (issue #94, commentaires hermes-mission/v1 approuvés par khalidd692)
   → hermes_github_adapter.py   (publication ACK/résultat idempotente CAS + journal relay-events.jsonl)
 ```
 
-## Commandes (Windows, bash git-bash, chemins natifs C:/...)
+## Commandes (Git Bash sous Windows)
+
+Utiliser une issue, un mandat frais et un état dédié à cette recette. Le préflight en lecture seule fournit l’empreinte UTF-8 du mandat. Les identifiants historiques restent dans la section de preuves.
 
 ```bash
-cd C:/Users/sabri/Desktop/telcoin-trading-intelligence99-worktree-hermes-relay
 python -B scripts/agents/automation/hermes_github_adapter.py run \
-  --state C:/Users/sabri/AppData/Local/hermes-tel99/autonomous/relay-live \
-  --issue 94 --mandate-issue 67 --mandate-comment 7024804657 \
+  --state "$TEL99_RELAY_STATE" \
+  --issue "$TEL99_RELAY_ISSUE" --mandate-issue "$TEL99_MANDATE_ISSUE" \
+  --mandate-comment "$TEL99_MANDATE_COMMENT" --mandate-sha256 "$TEL99_MANDATE_SHA256" \
   --once --seconds 570 \
-  --cli-exe C:/Users/sabri/AppData/Local/hermes/installs/8ddc43e438efe657/environments/20f33f9fbe1641249cc951b62c3c0ce1/venv/Scripts/hermes.exe
+  --cli-exe "$TEL99_HERMES_EXE"
 # status / stop :
 python -B scripts/agents/automation/hermes_github_adapter.py status --state <state>
 python -B scripts/agents/automation/hermes_github_adapter.py stop   --state <state>
@@ -47,18 +49,15 @@ Les événements publiés par le relais (`hermes-relay-event/v1`) ne sont jamais
 
 ## Quotas / coûts
 
-- **Modèle préféré depuis la branche Qwen4** : `qwen/qwen4-max:free` (provider `nous`), déjà joignable lors d’une sonde manuelle Windows. `meituan/longcat-2.5:free` et `upstage/solar-mini4:free` restent sélectionnables. **Aucune bascule automatique en cas de 429** et aucun repli payant.
-- **Important :** la sonde Qwen répondant « OK » ne prouve pas encore son coût nul pour le worker. Le worker exige pour chaque session réelle une identité `model`/`billing_provider` exacte ET `estimated_cost_usd == actual_cost_usd == 0.0` dans la base Hermes ; sinon la mission est bloquée. Confirmer une session Qwen réussie et la persister avant de déclarer le modèle qualifié en production.
+- Le choix de modèle exige un catalogue et un quota à jour pour le fournisseur configuré. Les identifiants historiques `:free` servent à corréler les anciens reçus. Un 429 met fin aux lancements de la session.
+- Le worker exige une identité `model`/`billing_provider` exacte et `estimated_cost_usd == actual_cost_usd == 0.0` dans la base Hermes. Une preuve manquante bloque la mission.
 - Preuve de coût : ligne `session_model_usage` de `state.db` (lecture seule) — estimated/actual
   cost_usd doit être 0 ; sinon `NONZERO_COST_REFUSED`.
-- 429/quota → `BLOCKED_PROVIDER_RATE_LIMIT`, checkpoint BLOCKED durable, cooldown borné
-  (60..3600 s) dans `<state>/provider-cooldown.json`. Pas de boucle de retry.
-- Reprise d'un BLOCKED : relancer la commande après expiration du cooldown (décision opérateur).
+- 429/quota → `BLOCKED_PROVIDER_RATE_LIMIT`, checkpoint durable, délai de réessai du fournisseur (60 à 3 600 s) dans `<state>/provider-cooldown.json`. Le délai s’applique aux modèles du même fournisseur dans ce registre. Reprendre uniquement des missions admissibles après l’expiration et la décision de l’opérateur.
 
 ## Reprise / anti-doublon (sémantique #124, vérifiée live)
 
-- Crash pendant RUNNING → au redémarrage : `AWAITING_HUMAN` (« uncertain worker outcome; never replay »).
-  Jamais de second appel modèle. Réconciliation humaine requise (nouvelle mission ou reset explicite).
+- Crash pendant `RUNNING` → `AWAITING_HUMAN`. Réconcilier la tentative et conserver le checkpoint avant toute nouvelle mission autorisée.
 - Crash après WORKER_EXITED → reprise de la vérification sans nouvel appel worker.
 - ACK/publications : dédup CAS durable par mission/phase ; un redémarrage ne republie rien.
   Durcissement F3 : avant tout POST, scan des événements déjà publiés sur GitHub
@@ -183,9 +182,9 @@ Les commentaires GitHub [mission A](https://github.com/khalidd692/telcoin-tradin
 - Deux verdicts indépendants `MISSION_ACCEPTED`, cinq contrôles réussis chacun, dont coût nul attesté par les relevés de session locaux ; code de sortie relais 0 ; session arrêtée après deux exécutions autorisées.
 - **Restant à prouver :** reprise `--once` sur cet état exact sans doublon de publication ni nouvel appel modèle, puis deux **nouvelles issues GitHub** avec modifications de code, PR brouillons et revue indépendante. Les tâches A/B sont des commentaires synthétiques texte, pas des issues de développement.
 
-## Qualification Qwen4 — priorité après A/B
+## Qualification du fournisseur pour une nouvelle recette
 
-Cette branche donne `qwen/qwen4-max:free` comme **préférence pour les nouvelles sessions** (ancienne session LongCat inchangée). Le modèle n’est pas encore déclaré qualifié de bout en bout : avant promotion dans la branche principale, exécuter un mandat synthétique neuf et borné, inspecter `session_model_usage` et la vérification indépendante ; zéro coût estimé ET réel obligatoire. Le fournisseur, le modèle réellement utilisé, la durée, le quota et le statut seront consignés dans une nouvelle preuve GitHub. Aucun nouveau superviseur, aucune fusion automatique, aucune dépense ni ordre de trading.
+La disponibilité d’un modèle, le quota et les coûts restent à vérifier sur le compte et à l’heure de la nouvelle recette. La mission C reste `REJECTED`. [Choix de l’exécuteur et reprise Windows](WINDOWS_REPRISE_AUTONOMIE.md)
 
 
 ## Diagnostic Windows sans calcul SHA PowerShell (issue #137, PR dédiée)

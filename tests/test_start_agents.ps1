@@ -47,12 +47,19 @@ try {
     Assert-LauncherExit 2 'dedicated issue' @('-Action', 'PREFLIGHT', '-GitHubIssue', '114',
         '-State', $readOnlyState, '-MandateComment', '7100000001', '-MandateSha256', $pin)
     if (Test-Path -LiteralPath $readOnlyState) { throw 'Preflight initialized state' }
+    $diagnosticState = Join-Path $directory 'diagnostic with spaces'
+    Assert-LauncherExit 2 '"status": "BLOCKED"' @('-Action', 'DIAGNOSTIC', '-State', $diagnosticState)
+    if (Test-Path -LiteralPath $diagnosticState) { throw 'Diagnostic initialized state' }
+    Assert-LauncherExit 2 '"stop_request": "PRESENT"' @('-Action', 'DIAGNOSTIC', '-GitHubIssue', '987',
+        '-State', $state)
+    Assert-LauncherExit 2 'PYTHON_UNAVAILABLE' @('-Action', 'DIAGNOSTIC', '-Python',
+        (Join-Path $directory 'missing-python.exe'))
     foreach ($path in $sentinels) {
         if ((Get-Content -LiteralPath $path) -cne 'existing state') {
             throw "Launcher test modified existing state at $path"
         }
     }
-    Write-Output '12/12 PowerShell launcher checks passed, with existing state preserved.'
+    Write-Output '15/15 PowerShell launcher checks passed, with existing state preserved.'
 }
 finally {
     Pop-Location

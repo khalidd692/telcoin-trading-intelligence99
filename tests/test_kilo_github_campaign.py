@@ -1,5 +1,7 @@
 """Two-issue campaign tests with GitHub and provider fixtures."""
 import json
+import contextlib
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -37,6 +39,7 @@ class CampaignGitHub(GitHub):
         self.discovery_pages = None
         self.prs = []
         self.publish_blocked = False
+        self.base_sha = BASE_SHA
 
     def add_issue(self, number, contract=None):
         issue = {
@@ -59,6 +62,8 @@ class CampaignGitHub(GitHub):
         return row
 
     def fetch(self, endpoint):
+        if endpoint == f"repos/{bridge.REPO}/git/ref/heads/{BASE}":
+            return {"object": {"sha": self.base_sha, "type": "commit"}}
         prefix = f"repos/{bridge.REPO}/issues"
         if endpoint.startswith(prefix + "?"):
             page = int(endpoint.split("page=")[-1])
@@ -117,6 +122,8 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(kwargs.get("method"), "GET")
             if endpoint == "user":
                 return OWNER
+            if endpoint == f"repos/{bridge.REPO}":
+                return {"permissions": {"push": True}}
             if endpoint == f"repos/{bridge.REPO}/git/ref/heads/{BASE}":
                 return {"object": {"sha": BASE_SHA, "type": "commit"}}
             return self.gh.fetch(endpoint)
@@ -127,6 +134,78 @@ class CampaignTests(unittest.TestCase):
                                 "--state", str(state)])
         self.assertEqual(code, 0)
         self.assertFalse(state.exists())
+        self.assertEqual(self.gh.posts, [])
+        self.assertEqual(self.calls, [])
+
+    def test_run_once_without_two_delivered_results_does_not_report_success(self):
+        def github(endpoint, **kwargs):
+            if endpoint == "user":
+                return OWNER
+            if endpoint == f"repos/{bridge.REPO}":
+                return {"permissions": {"push": True}}
+            return self.gh.fetch(endpoint)
+
+        with patch.object(bridge, "gh_json", side_effect=github), contextlib.redirect_stdout(io.StringIO()):
+            code = bridge.main(["run", "--once", "--campaign", "--issue", str(ISSUE),
+                                "--mandate-comment", str(MANDATE), "--mandate-sha256", self.gh.pin,
+                                "--state", str(self.root)])
+        self.assertEqual(code, 2)
+
+    def test_drifted_base_halts_before_ack_or_worker(self):
+        self.gh.add_issue(FIRST)
+        self.gh.add_issue(SECOND, self.gh.second)
+        self.gh.base_sha = "1" * 40
+        self.assertFalse(self.handoff().poll())
+        self.assertEqual(self.gh.posts, [])
+        self.assertEqual(self.calls, [])
+
+    def test_base_drift_after_the_remote_ack_halts_before_worker(self):
+        self.gh.add_issue(FIRST)
+        handoff = self.handoff()
+        post = handoff.post
+
+        def post_then_drift(issue, body):
+            reply = post(issue, body)
+            self.gh.base_sha = "1" * 40
+            return reply
+
+        handoff.post = post_then_drift
+        self.assertFalse(handoff.poll())
+        self.assertEqual([event["phase"] for event in self.gh.posts], ["ACK"])
+        self.assertEqual(self.calls, [])
+
+    def test_resume_after_stop_before_the_ack_request_was_sent(self):
+        self.gh.add_issue(FIRST)
+        handoff = self.handoff()
+        marker = self.root / "stop.request"
+        store = handoff.runtime.store
+        save = store.put_cas
+
+        def save_then_stop(key, value, expected):
+            saved = save(key, value, expected)
+            if key.endswith("/ACK") and saved and expected is None:
+                marker.touch()
+            return saved
+
+        with patch.object(store, "put_cas", side_effect=save_then_stop):
+            handoff.poll()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.gh.posts, [])
+        marker.rename(self.root / "stop.acknowledged")
+        self.assertTrue(self.handoff().poll())
+        self.assertEqual(self.calls, [self.gh.first["id"]])
+        self.assertEqual([event["phase"] for event in self.gh.posts], ["ACK", "EVIDENCE", "RESULT"])
+
+    def test_campaign_rejects_a_second_independent_contract(self):
+        self.gh.second["dependencies"] = []
+        self.gh.mandate["body"] = block("kilo-campaign/v1", {
+            "repo": bridge.REPO, "issue": ISSUE, "label": "enhancement",
+            "expires_at": expires(), "base": BASE, "base_sha": BASE_SHA,
+            "contracts": {m["id"]: fingerprint(m) for m in (self.gh.first, self.gh.second)},
+        })
+        self.gh.add_issue(FIRST)
+        self.gh.add_issue(SECOND, self.gh.second)
+        self.assertFalse(self.handoff().poll())
         self.assertEqual(self.gh.posts, [])
         self.assertEqual(self.calls, [])
 

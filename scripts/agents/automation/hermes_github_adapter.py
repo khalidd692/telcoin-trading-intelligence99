@@ -28,7 +28,8 @@ from local_codex import exclusive, heartbeat, Blocked
 from hermes_executor import HermesExecutor, FREE_MODELS
 from hermes_verifier import verify as hermes_verify
 from github_mission_source import (
-    github_source, EVENT_MARKER, PROPOSAL_MARKER, fetch_comments, gh_json, is_owner,
+    github_source, EVENT_MARKER, PROPOSAL_MARKER, GitHubRateLimited, GitHubWriteNotSent,
+    fetch_comments, gh_json, is_owner,
 )
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
@@ -124,12 +125,10 @@ def session_executed(states, session_start):
 
 
 def poll_budget(states, max_tasks):
-    """Hard intra-poll cap (review R1): session budget + terminal skips.
+    """Queue steps for the remaining session budget plus terminal skips.
 
-    run_queue counts idempotent terminal skips against max_tasks; adding the
-    current terminal count keeps the intra-poll NEW-execution bound equal to
-    max_tasks, while session_executed caps the total across polls. Bounded by
-    the engine's 20-mission registry limit.
+    The engine counts a terminal skip as a queue step. The launch gate still
+    limits worker starts when a terminal checkpoint is absent from the poll.
     """
     terminal = sum(1 for s in states if isinstance(s, dict)
                    and s.get("status") in {"ACCEPTED", "REJECTED", "BLOCKED", "AWAITING_HUMAN"})
@@ -148,10 +147,10 @@ def build_proposal_body(tasks):
             + "\n```\n<!-- récepteur Hermes : proposition du relais, pas une mission approuvée -->")
 
 
-def publish_comment(repo, issue, body, *, publisher=None):
+def publish_comment(repo, issue, body, *, publisher=None, fetcher=None):
     if publisher is not None:
         return publisher(body)
-    row = gh_json(f"repos/{repo}/issues/{issue}/comments", body=body)
+    row = (fetcher or gh_json)(f"repos/{repo}/issues/{issue}/comments", body=body)
     return owner_receipt_url(row, repo, issue)
 
 
@@ -180,13 +179,16 @@ class Publisher:
         self.publisher = publisher
         self.enabled = enabled
         self.scan = scan  # callable -> {(mid, phase): {"url","contract_sha256"}} | None
+        self.fetcher = None
+        self.github_rate_limited = False
 
     def _key(self, mid, phase):
         return f"hermes-relay-published/{mid}/{phase}"
 
     def _publish_once(self, mid, phase, body, state):
         key = self._key(mid, phase)
-        if mid == REJECTED_MISSION or self.r.stopped() or self.r.expired() or not self.enabled:
+        if (mid == REJECTED_MISSION or self.r.stopped() or self.r.expired()
+                or not self.enabled or self.github_rate_limited):
             return False
         previous = self.r.store.get(key)
         if previous and previous.get("url"):
@@ -201,13 +203,27 @@ class Publisher:
                     and recovered.get("contract_sha256") == state_sha and recovered.get("url")):
                 return self.r.store.put_cas(key, {"phase": phase, "url": recovered["url"],
                                                   "at": time.time(), "recovered": True}, previous)
-        if previous is not None or self.r.stopped() or self.r.expired():
+        if (previous is not None or self.r.stopped() or self.r.expired()
+                or self.github_rate_limited):
             return False
         pending = {"phase": phase, "contract_sha256": state_sha, "pending": True}
         if not self.r.store.put_cas(key, pending, None):
             return False
+        if self.r.stopped() or self.r.expired():
+            # This process knows no POST was invoked, so there is no ambiguity.
+            self.r.store.put_cas(key, None, pending)
+            return False
         try:
-            url = publish_comment(self.repo, self.issue, body, publisher=self.publisher)
+            url = publish_comment(self.repo, self.issue, body, publisher=self.publisher,
+                                  fetcher=self.fetcher)
+        except GitHubWriteNotSent:
+            self.r.store.put_cas(key, None, pending)
+            return False
+        except GitHubRateLimited:
+            # An explicit API limit response establishes that GitHub rejected the POST.
+            self.github_rate_limited = self.r.quota_exhausted = True
+            self.r.store.put_cas(key, None, pending)
+            return False
         except (OSError, ValueError):
             return False
         return bool(url) and self.r.store.put_cas(
@@ -237,6 +253,15 @@ class Publisher:
             if status in TERMINAL_PUBLISH:
                 self._publish_once(mid, status, event_body(
                     mid, status, state, issue=self.issue, comment_id=source.get("comment_id")), state)
+
+    def status(self):
+        report = self.r.status()
+        report["published"] = {key.replace("\\", "/"): receipt
+                               for key in self.r.store.keys("hermes-relay-published")
+                               if (receipt := self.r.store.get(key)) is not None}
+        report["pending_publications"] = [key for key, value in report["published"].items()
+                                          if isinstance(value, dict) and value.get("pending")]
+        return report
 
     def _journal(self, mid, state):
         key = f"hermes-relay-journal/{mid}"
@@ -321,21 +346,41 @@ def main(argv=None):
                               "detail": str(exc)[:300]}, ensure_ascii=True),
                   flush=True)
             return 2
-    scan = (lambda: existing_events(REPO, args.issue)) if (args.issue and not args.no_publish) else None
+    if args.action == "run" and (not args.issue or not args.mandate_comment
+                                 or not re.fullmatch(r"[a-f0-9]{64}", args.mandate_sha256 or "")):
+        parser.error("run requires --issue, --mandate-comment and the exact --mandate-sha256")
     runtime, pub = build_runtime(args.state, model=args.model, cli_exe=args.cli_exe,
-                                 issue=args.issue, publish=not args.no_publish, scan=scan)
+                                 issue=args.issue, publish=not args.no_publish)
+
+    def relay_github(endpoint, *, body=None):
+        if runtime.stopped() or runtime.expired() or pub.github_rate_limited:
+            if body is not None:
+                raise GitHubWriteNotSent("GitHub write paused before dispatch")
+            raise OSError("GitHub requests paused for this session")
+        remaining = 8 if runtime.deadline is None else runtime.deadline - time.monotonic()
+        try:
+            return gh_json(endpoint, body=body, timeout=min(8, max(0.05, remaining)))
+        except GitHubRateLimited:
+            pub.github_rate_limited = runtime.quota_exhausted = True
+            raise
+
+    def require_publishing_owner():
+        if not is_owner(relay_github("user")):
+            raise ValueError("the GitHub CLI must be authenticated as the pinned owner")
+
     if args.action == "stop":
         (runtime.root / "stop.request").touch()
         print("STOP requested")
         return 0
     if args.action == "status":
-        report = runtime.status()
-        report["published"] = {k: runtime.store.get(k) for k in runtime.store.keys("hermes-relay-published")}
-        print(json.dumps(report, ensure_ascii=True))
+        print(json.dumps(pub.status(), ensure_ascii=True))
         return 0
     if args.action == "propose":
         if not args.issue:
             parser.error("propose requires --issue")
+        if runtime.stopped():
+            print("STOP remains set; operator must explicitly acknowledge before proposing")
+            return 2
         backlog_path = args.backlog or (Path(__file__).resolve().parents[3]
                                         / "docs" / "agents" / "AUTONOMIE_ZERO_COPIER_COLLER" / "BACKLOG.json")
         backlog = json.loads(backlog_path.read_text(encoding="utf-8"))
@@ -359,16 +404,29 @@ def main(argv=None):
         # concurrentes ne doivent pas publier toutes les deux avant le CAS.
         try:
             with exclusive(runtime.root / "session.lock"):
+                if runtime.stopped():
+                    return 2
                 if runtime.store.get(key) is not None:
                     print(json.dumps({"already_proposed": True,
                                       "url": (runtime.store.get(key) or {}).get("url")}))
                     return 0
-                url = publish_comment(REPO, args.issue, body)
+                require_publishing_owner()
+                if runtime.stopped():
+                    return 2
+                url = publish_comment(REPO, args.issue, body, fetcher=relay_github)
+                if not url:
+                    raise ValueError("GitHub did not return a trusted proposal receipt")
                 recorded = runtime.store.put_cas(key, {"url": url, "tasks": [t["id"] for t in tasks], "at": time.time()}, None)
         except Blocked:
             # verrou non bloquant détenu par un autre propose : already_proposed
             print(json.dumps({"already_proposed": True, "reason": "lock_held"}))
             return 0
+        except GitHubRateLimited:
+            print(json.dumps({"proposed": [], "error": "BLOCKED_GITHUB_RATE_LIMIT"}))
+            return 2
+        except GitHubWriteNotSent:
+            print(json.dumps({"proposed": [], "error": "GITHUB_WRITE_NOT_SENT"}))
+            return 2
         except (OSError, ValueError) as exc:
             print(json.dumps({"proposed": [], "error": type(exc).__name__}))
             return 1
@@ -378,8 +436,6 @@ def main(argv=None):
         print(json.dumps({"proposed": [t["id"] for t in tasks], "url": url,
                           "cas_conflict": not recorded}))
         return 0
-    if not args.issue or not args.mandate_comment:
-        parser.error("run requires --issue and --mandate-comment")
     # Phase-2 bounded session ceiling: 2 h (engine CLI stays at 1 h).
     if not 1 <= args.seconds <= 7200:
         parser.error("seconds must be 1..7200")
@@ -388,40 +444,73 @@ def main(argv=None):
     if runtime.stopped():
         print("STOP remains set; operator must explicitly acknowledge before run")
         return 2
+    deadline = time.monotonic() + args.seconds
+    runtime.deadline = deadline
     try:
+        if not args.no_publish:
+            require_publishing_owner()
         runtime.bind_transport("hermes-github")
+    except GitHubRateLimited:
+        print(json.dumps({"status": "BLOCKED", "reason": "BLOCKED_GITHUB_RATE_LIMIT"}))
+        return 2
     except (Blocked, OSError, ValueError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
         return 2
-    deadline = time.monotonic() + args.seconds
-    runtime.deadline = deadline
+    if not args.no_publish:
+        pub.fetcher = relay_github
+        pub.scan = lambda: existing_events(REPO, args.issue, fetcher=relay_github)
     session_start = time.time()
     reader = owner_approval_reader_for(args.state)
+    source_valid = False
+
+    def checkpoints():
+        return [runtime.store.get(key) for key in runtime.store.keys("kilo-local")]
+
+    publish_ack = runtime.before_execute
+
+    def before_execute(mission, state):
+        if len(session_executed(checkpoints(), session_start)) >= args.max_tasks:
+            return False
+        return publish_ack is None or publish_ack(mission, state)
+
+    runtime.before_execute = before_execute
 
     def source():
+        nonlocal source_valid
         payload = github_source(REPO, args.issue, args.mandate_issue, args.mandate_comment,
+                                fetcher=relay_github,
                                 owner_approval_reader=reader,
                                 mandate_sha256=args.mandate_sha256)
         for mid, comment_id in (payload.get("sources") or {}).items():
             runtime.store.put(f"hermes-relay-source/{mid}",
                               {"comment_id": comment_id, "issue": args.issue})
+        source_valid = True
         return payload
 
     failed = False
     with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
-        while not runtime.stopped() and time.monotonic() < deadline:
+        while not (runtime.stopped() or runtime.expired() or runtime.quota_exhausted):
             try:
-                states = [runtime.store.get(k) for k in runtime.store.keys("kilo-local")]
-                failed = not runtime.poll(source, max_tasks=poll_budget(states, args.max_tasks)) or failed
-                pub.sync()
+                source_valid = False
+                states = checkpoints()
+                remaining = args.max_tasks - len(session_executed(states, session_start))
+                failed = not runtime.poll(source, max_tasks=poll_budget(states, remaining)) or failed
+                if source_valid and not pub.github_rate_limited:
+                    pub.sync()
             except (OSError, ValueError, KeyError, TypeError, AttributeError, Blocked) as exc:
                 # Réserve #126-2: un incident inattendu doit être fail-closed
                 # (BLOCKED), jamais une boucle morte ni un repli payant.
                 runtime.observe(STATE="BLOCKED", BLOCKER=type(exc).__name__)
                 failed = True
                 break
-            executed = session_executed(
-                [runtime.store.get(k) for k in runtime.store.keys("kilo-local")], session_start)
+            if pub.github_rate_limited:
+                runtime.observe(STATE="BLOCKED", BLOCKER="BLOCKED_GITHUB_RATE_LIMIT")
+                failed = True
+                break
+            if runtime.quota_exhausted:
+                failed = True
+                break
+            executed = session_executed(checkpoints(), session_start)
             if len(executed) >= args.max_tasks:
                 runtime.observe(STATE="IDLE", NEXT="SESSION_BUDGET_REACHED")
                 print(json.dumps({"session_budget_reached": sorted(executed),
@@ -432,9 +521,9 @@ def main(argv=None):
             until = min(deadline, time.monotonic() + 10)
             while not runtime.stopped() and time.monotonic() < until:
                 time.sleep(0.1)
-    report = runtime.status()
+    report = pub.status()
     print(json.dumps(report, ensure_ascii=True))
-    return 2 if failed or any(m["status"] != "ACCEPTED"
+    return 2 if failed or (pub.enabled and report["pending_publications"]) or any(m["status"] != "ACCEPTED"
                               for m in report["missions"].values()) else 0
 
 

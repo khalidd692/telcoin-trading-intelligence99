@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlencode
 
 from scripts.agents.automation.autonomy_runtime import fingerprint, validate_contract
-from scripts.agents.automation.github_mission_source import fenced_json
+from scripts.agents.automation.github_mission_source import GitHubWriteNotSent, fenced_json
 from protocol.store import StoreError
 
 
@@ -249,6 +249,9 @@ def publish_verified_pr(repo, issue, base, base_sha, state, evidence_url, *, api
                 pull = github("pulls", method="POST", payload={
                     "title": title, "body": body, "head": branch, "base": base, "draft": True,
                 })
+            except GitHubWriteNotSent:
+                store.put_cas(key, {k: v for k, v in journal.items() if k != "pr_pending"}, journal)
+                return None
             except (OSError, ValueError, TypeError):
                 # A lost POST response is reconciled by reads, including closed drafts.
                 pull = _existing_pull(github, branch)

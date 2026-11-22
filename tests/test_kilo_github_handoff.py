@@ -3,13 +3,15 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from scripts.agents.automation.autonomy_runtime import fingerprint
 from scripts.agents.automation import kilo_github_adapter as bridge
 from scripts.agents.automation.kilo_executor import Executor, ProviderRateLimited
+from scripts.agents.automation import github_mission_source as source
 from scripts.agents.native.provider import ProviderError
 
 
@@ -154,6 +156,7 @@ class KiloGitHubHandoffTests(unittest.TestCase):
         self.gh.approve(mission("tampered"), mission_sha256="0" * 64)
         self.gh.approve(mission("expired"), expires_at=PAST)
         self.gh.approve(mission("wrong-scope", owner="hermes"))
+        self.gh.approve(mission("malformed-origin"), origin=[])
         self.gh.approve(mission("extra-command", command="unsafe"))
         self.gh.approve(mission("wrong-issue"))["issue_url"] += "0"
         self.gh.approve(mission("edited"))["updated_at"] = expires()
@@ -215,6 +218,46 @@ class KiloGitHubHandoffTests(unittest.TestCase):
         self.bridge().poll()
         self.assertEqual(self.calls, [])
         self.assertNotIn("ACCEPTED", [p["status"] for p in self.gh.posts])
+
+    def test_approval_removed_after_poll_prevents_new_ack(self):
+        row = self.gh.approve(mission())
+        handoff = self.bridge()
+        read = handoff.fetch
+
+        def revoked(endpoint):
+            if endpoint.endswith(f"/comments/{row['id']}"):
+                return None
+            return read(endpoint)
+
+        handoff.fetch = revoked
+        self.assertFalse(handoff.poll())
+        self.assertEqual(self.gh.posts, [])
+        self.assertEqual(self.calls, [])
+
+    def test_approval_removed_during_worker_prevents_new_accepted_receipts(self):
+        row = self.gh.approve(mission())
+
+        def execute_and_revoke(contract):
+            result = self.execute(contract)
+            self.gh.comments.remove(row)
+            return result
+
+        self.assertFalse(self.bridge(executor=execute_and_revoke).poll())
+        self.assertEqual([event['phase'] for event in self.gh.posts], ['ACK'])
+
+    def test_github_rate_limit_is_distinct_from_a_forbidden_request(self):
+        for stderr, expected in (
+            (b'gh: abuse detection (HTTP 429)', source.GitHubRateLimited),
+            (b'gh: You have exceeded a secondary rate limit (HTTP 403)', source.GitHubRateLimited),
+            (b'gh: Resource not accessible (HTTP 403)', OSError),
+        ):
+            with self.subTest(expected=expected):
+                response = subprocess.CompletedProcess([], 1, b'', stderr)
+                with patch.object(source.subprocess, 'run', return_value=response):
+                    with self.assertRaises(OSError) as raised:
+                        source.gh_json('rate_limit')
+                    self.assertIs(type(raised.exception), expected)
+                    self.assertNotIn(stderr.decode(), str(raised.exception))
 
     def test_offline_then_restart_fetches_without_replay(self):
         self.gh.approve(mission())

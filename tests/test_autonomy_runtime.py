@@ -1,7 +1,7 @@
 import hashlib, json, multiprocessing, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, seal, validate_contract
+from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, main, seal, validate_contract
 
 def mission(i="demo-a", **kw):
     m=dict(id=i,project="synthetic",owner="kilo",priority="P0",dependencies=[],
@@ -100,6 +100,40 @@ class RuntimeTests(unittest.TestCase):
     def test_stop_before_poll_no_calls(self):
         (self.root/"stop.request").touch()
         a=mission();self.r.run_queue([a],seal([a]));self.assertEqual(self.calls,[])
+    def test_local_run_missing_approved_dependency_is_incomplete(self):
+        a = mission(dependencies=["not-approved"])
+        registry = self.root / "registry.json"
+        raw = json.dumps({"missions": [a], "approvals": seal([a])}).encode()
+        registry.write_bytes(raw)
+        code = main(["run", "--state", str(self.root), "--registry", str(registry),
+                     "--registry-sha256", hashlib.sha256(raw).hexdigest(), "--once"])
+        self.assertEqual(code, 2)
+
+    def test_partial_positive_verifier_report_is_never_accepted(self):
+        a = mission()
+        self.r.verifier = lambda m, r: {"ok": True, "checks": [{"name": "syntax", "ok": True}]}
+        self.r.run_queue([a], seal([a]))
+        self.assertNotEqual(self.r.state(a)["status"], "ACCEPTED")
+    def test_stop_after_durable_ack_can_resume_once(self):
+        a = mission()
+        marker = self.root / "stop.request"
+        save = self.r.save
+
+        def stop_after_ack(contract, status, **details):
+            checkpoint = save(contract, status, **details)
+            if status == "ACK":
+                marker.touch()
+            return checkpoint
+
+        with patch.object(self.r, "save", side_effect=stop_after_ack):
+            self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.r.state(a)["status"], "ACK")
+        marker.rename(self.root / "stop.acknowledged")
+        self.r.run_queue([a], seal([a]))
+        self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [a["id"]])
+        self.assertEqual(self.r.state(a)["status"], "ACCEPTED")
     def test_legacy_stop_marker_blocks_work_and_is_preserved(self):
         marker = self.root / ".kilo" / "STOP"
         marker.parent.mkdir()
