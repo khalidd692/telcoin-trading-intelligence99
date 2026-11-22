@@ -1013,7 +1013,8 @@ def run(config: dict, offline: bool = False) -> int:
                                     mission_body=mission.get("body") or "")
         validated, verdict = verify_outcome(final, evidence,
                                             expected_roles=agent_names,
-                                            mission_body=mission.get("body") or "")
+                                            mission_body=mission.get("body") or "",
+                                            acceptance_checks=evidence.get("acceptance_checks"))
         journal_entry(state, "outcome_verdict", validated=validated,
                       roles={r: info.get("proven") for r, info in verdict["roles"].items()},
                       checks=verdict["checks"])
@@ -1142,6 +1143,173 @@ def extract_acceptance_criteria(body: str) -> str:
     return " ".join(captured).strip()
 
 
+# A declared executable criterion inside the acceptance section, e.g.
+#   - check: python -m unittest tests.test_x
+#   - check [business-test]: python -m unittest tests.test_x
+_CHECK_LINE = re.compile(
+    r"^[-*]?\s*check(?:\s*\[(?P<id>[^\]]+)\])?\s*:\s*(?P<cmd>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _slug(text: str, limit: int = 40) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", (text or "").strip().lower()).strip("-")
+    return slug[:limit] or "check"
+
+
+def _heading_level(line: str) -> int:
+    """Return the heading level of ``line`` (``#`` count), or 0 for a non-heading.
+
+    A bold-only line (``**...**``) is treated as a level-1 heading, matching
+    :func:`extract_acceptance_criteria`. This lets the producer scope the
+    acceptance section by heading *level*: a sub-heading keeps it open, while a
+    heading at the same or a shallower level closes it. A mid-sentence mention of
+    the acceptance phrase is therefore never mistaken for the section heading.
+    """
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        return len(stripped) - len(stripped.lstrip("#"))
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        return 1
+    return 0
+
+
+def acceptance_checks_from_body(body: str) -> list[dict]:
+    """Extract *declared* acceptance checks from a mission body.
+
+    A mission may declare executable criteria as ``check: <command>`` lines in
+    its acceptance section::
+
+        ### Critere d'acceptation
+        Le test de non-regression passe.
+        - check: python -m unittest tests.test_x
+
+    This returns one structured entry per declared command and **never runs the
+    command**: executing a command taken from an untrusted issue body is exactly
+    what the safety contract forbids. The entry therefore carries only the
+    requested ``command`` and no result, which the verdict treats as
+    *automatable but unconfirmed* -> NEEDS_HUMAN, never a silent PASS. A trusted
+    producer (CI, an independent verifier) must supply ``exit_code``,
+    ``reproducible`` and ``output_digest`` to satisfy the criterion.
+    """
+    if not body:
+        return []
+    checks: list[dict] = []
+    section_level = 0
+    for raw in body.splitlines():
+        line = raw.strip()
+        level = _heading_level(line)
+        if level:
+            # A heading: either the acceptance section itself, or the end of it.
+            # Capture continues under deeper sub-headings (``#### Detail``), but a
+            # heading at the same or a shallower level closes the section.
+            if _ACCEPTANCE_HEADING.search(line):
+                section_level = level
+            elif section_level and level <= section_level:
+                section_level = 0
+            continue
+        if not section_level:
+            continue
+        match = _CHECK_LINE.match(line)
+        if match and match.group("cmd").strip():
+            cmd = match.group("cmd").strip()
+            checks.append({
+                "id": (match.group("id") or _slug(cmd)).strip(),
+                "command": cmd,
+                "automatable": True,
+                "exit_code": None,
+                "reproducible": False,
+                "output_digest": None,
+            })
+    return checks
+
+
+def _as_check_list(value) -> list | None:
+    """Normalise an acceptance-check input to a list, or ``None`` when absent.
+
+    A malformed container (a truthy non-iterable) is treated as absent so a bad
+    caller can never crash the verdict; the mission then falls back to the
+    declared-text check rather than being silently accepted. A single check dict
+    is wrapped in a one-element list.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return None
+
+
+def _check_fields(entry) -> tuple[str, bool, object, bool, object]:
+    """Read one acceptance-check entry defensively.
+
+    Accepts a dict (the wire shape) or any object exposing the same attributes
+    (e.g. ``protocol.envelope.Evidence``). A malformed entry is treated as a
+    non-automatable check named ``check`` so it routes to NEEDS_HUMAN instead of
+    crashing the verdict or being silently dropped.
+    """
+    if isinstance(entry, dict):
+        cid = str(entry.get("id") or entry.get("command") or "check")
+        automatable = (bool(entry.get("command"))
+                       if entry.get("automatable") is None
+                       else bool(entry.get("automatable")))
+        return (cid, automatable, entry.get("exit_code"),
+                bool(entry.get("reproducible")), entry.get("output_digest"))
+    cid = str(getattr(entry, "claim", None) or getattr(entry, "kind", None)
+              or getattr(entry, "id", None) or "check")
+    command = getattr(entry, "command", None)
+    return (cid, bool(command), getattr(entry, "exit_code", None),
+            bool(getattr(entry, "reproducible", False)),
+            getattr(entry, "output_digest", None))
+
+
+def _check_satisfied(exit_code, reproducible: bool, digest) -> bool:
+    """A criterion is satisfied only by reproducible external evidence."""
+    return exit_code == 0 and bool(reproducible) and bool(digest)
+
+
+def _entry_satisfied(entry) -> bool:
+    """True only when an entry carries reproducible, positive evidence.
+
+    Non-automatable, unconfirmed (no result recorded) and red entries are all
+    ``False``, so they win any conflict in the fail-closed merge.
+    """
+    _cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
+    if not automatable:
+        return False
+    if exit_code is None and not digest:
+        return False
+    return _check_satisfied(exit_code, reproducible, digest)
+
+
+def _merge_acceptance_checks(evidence_checks, arg_checks) -> list:
+    """Merge the evidence's checks with the caller's, fail-closed.
+
+    Both inputs are normalised to lists (a malformed container becomes empty).
+    Entries are keyed by id; when the same id appears on both sides the entry
+    that is NOT satisfied wins, so a caller cannot hide a red check the run
+    actually produced by passing an empty or narrower list. Order is stable:
+    evidence order first, then any argument-only ids.
+    """
+    evidence_list = _as_check_list(evidence_checks) or []
+    arg_list = _as_check_list(arg_checks) or []
+    merged: dict[str, object] = {}
+    order: list[str] = []
+    for entry in [*evidence_list, *arg_list]:
+        cid = _check_fields(entry)[0]
+        if cid not in merged:
+            merged[cid] = entry
+            order.append(cid)
+        elif not _entry_satisfied(entry):
+            # A failing (or unconfirmed / non-automatable) entry always wins,
+            # whether the clash is between two evidence entries or between the
+            # evidence and the caller: a red check can never be hidden behind a
+            # green one. Order is stable: first-seen ids keep their position.
+            merged[cid] = entry
+    return [merged[cid] for cid in order]
+
+
 def _role_proves(obs: dict) -> bool:
     """True when one observation is a real, completed, non-empty result.
 
@@ -1188,7 +1356,8 @@ def _role_evidence(observations: list, expected_name: str, base_name: str) -> di
 
 
 def collect_evidence(cid: str, expected_roles: dict | None = None,
-                     mission_body: str = "") -> dict:
+                     mission_body: str = "",
+                     acceptance_checks: list | None = None) -> dict:
     """Gather observable proof that each required role actually ran and reported.
 
     A ``finished`` execution status only says the conversation stopped; it says
@@ -1273,12 +1442,19 @@ def collect_evidence(cid: str, expected_roles: dict | None = None,
         "children": child_reports,
         "roles": roles,
         "acceptance_criteria": extract_acceptance_criteria(mission_body),
+        # Structured acceptance checks: the caller's, else the ones the mission
+        # *declares* in its acceptance section (``check: <command>``). A declared
+        # check carries no result, so it is automatable-but-unconfirmed and the
+        # verdict routes it to NEEDS_HUMAN rather than accepting on text alone.
+        "acceptance_checks": (acceptance_checks if acceptance_checks is not None
+                              else acceptance_checks_from_body(mission_body)),
     }
 
 
 def verify_outcome(final: str, evidence: dict, *,
                    expected_roles: dict | None = None,
-                   mission_body: str = "") -> tuple[bool, dict]:
+                   mission_body: str = "",
+                   acceptance_checks: list | None = None) -> tuple[bool, dict]:
     """Decide whether an outcome is *validated*, from evidence alone.
 
     The verdict is deliberately conservative. A run is validated only when:
@@ -1347,9 +1523,51 @@ def verify_outcome(final: str, evidence: dict, *,
         f"{len((criteria or '').strip())} chars declared",
     )
 
-    validated = all([finished, has_response, criteria_check, *role_checks])
+    # --- Acceptance checks: the criterion must be *satisfied*, not just declared.
+    # A criterion is satisfied only by reproducible external evidence: a recorded
+    # command exit code 0, marked reproducible, with an output digest. A red
+    # check makes the mission REJECTED even when every role reported PASS (this is
+    # gate G3/S-05: "trois rapports PASS mensongers + test echoue => false").
+    # A criterion that cannot be automated is NEEDS_HUMAN, never a silent PASS.
+    #
+    # The evidence's checks and the argument's checks are *merged fail-closed*:
+    # when the same id appears in both, the entry that is NOT satisfied wins, so
+    # a caller can never neutralise a red check the run actually produced by
+    # passing a narrower or empty list.
+    merged = _merge_acceptance_checks(evidence.get("acceptance_checks"),
+                                      acceptance_checks)
+    check_results = []
+    satisfied: list[str] = []
+    failed: list[str] = []
+    needs_human: list[str] = []
+    for entry in merged:
+        cid, automatable, exit_code, reproducible, digest = _check_fields(entry)
+        if not automatable:
+            needs_human.append(cid)
+            check_results.append(check(
+                f"criterion_{cid}", False, "not automatable -> NEEDS_HUMAN"))
+            continue
+        if exit_code is None and not digest:
+            # The criterion is executable but no result was recorded: a declared
+            # check is a promise, not a proof. Route it to a human/independent
+            # verifier rather than accepting on the text or faking a FAIL.
+            needs_human.append(cid)
+            check_results.append(check(
+                f"criterion_{cid}", False, "no result recorded -> NEEDS_HUMAN"))
+            continue
+        ok = _check_satisfied(exit_code, reproducible, digest)
+        check_results.append(check(
+            f"criterion_{cid}", ok,
+            f"exit_code={exit_code!r} reproducible={reproducible}"))
+        (satisfied if ok else failed).append(cid)
+
+    validated = all([finished, has_response, criteria_check, *role_checks,
+                     *check_results])
     return validated, {"validated": validated, "checks": checks,
                        "roles": roles, "acceptance_criteria": criteria,
+                       "acceptance_checks": merged,
+                       "satisfied": satisfied, "failed": failed,
+                       "needs_human": needs_human,
                        "observations": evidence.get("observations") or [],
                        "children": evidence.get("children") or []}
 
