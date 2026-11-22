@@ -30,7 +30,7 @@ from protocol.handoff import Inbox
 from hermes_executor import HermesExecutor, FREE_MODELS
 from hermes_verifier import verify as hermes_verify
 from github_mission_source import (
-    github_source, default_fetcher, EVENT_MARKER, PROPOSAL_MARKER, fetch_comments,
+    github_source, EVENT_MARKER, PROPOSAL_MARKER, fetch_comments,
 )
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
@@ -308,25 +308,18 @@ def main(argv=None):
         if not args.issue or not args.mandate_comment:
             parser.error("preflight requires --issue and --mandate-comment")
         try:
-            mandate = default_fetcher(
-                f"repos/{REPO}/issues/comments/{args.mandate_comment}")
-            if (not isinstance(mandate, dict)
-                    or (mandate.get("user") or {}).get("login") != "khalidd692"):
-                raise ValueError("mandate is not owner-authored")
-            sha = hashlib.sha256(
-                (mandate.get("body") or "").encode("utf-8")).hexdigest()
-            if args.mandate_sha256 and sha != args.mandate_sha256:
-                raise ValueError("mandate content does not match the pinned sha256")
             payload = github_source(
                 REPO, args.issue, args.mandate_issue, args.mandate_comment,
-                mandate_sha256=sha)
+                mandate_sha256=args.mandate_sha256)
+            missions = [{"id": m["id"],
+                         "contract_sha256": payload["approvals"][m["id"]]}
+                        for m in payload["missions"]]
             print(json.dumps({
-                "preflight": "OK", "mandate_sha256": sha,
-                "missions": [{"id": m["id"],
-                              "contract_sha256": payload["approvals"][m["id"]]}
-                             for m in payload["missions"]],
+                "preflight": "OK" if missions else "NO_ADMISSIONS",
+                "mandate_sha256": payload["mandate_sha256"],
+                "missions": missions,
             }, ensure_ascii=True), flush=True)
-            return 0
+            return 0 if missions else 2
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             print(json.dumps({"preflight": "BLOCKED",
                               "error": type(exc).__name__,

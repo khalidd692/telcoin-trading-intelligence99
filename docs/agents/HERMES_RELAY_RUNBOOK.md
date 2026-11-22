@@ -196,7 +196,7 @@ Le relais accepte désormais `preflight` : il récupère le mandat avec **son pr
 python -B scripts/agents/automation/hermes_github_adapter.py preflight --state "$env:LOCALAPPDATA\hermes-tel99\autonomous\recipe-20261121-AB" --issue 94 --mandate-issue 67 --mandate-comment 7024804657
 ```
 
-Le retour `preflight=OK` avec `mandate_sha256` évite le calcul PowerShell incorrect lié à la sérialisation Unicode. En cas de panne GitHub ou d'empreinte épinglée incorrecte, `preflight=BLOCKED` et `error/detail` donnent la cause exacte ; aucune mission n'est exécutée. L'action `run` conserve l'obligation du hash épinglé fourni par l'opérateur ; ce changement ne contourne pas l'approbation.
+Le mandat est lu une seule fois. Si aucune mission ne satisfait les critères, `preflight=NO_ADMISSIONS` renvoie le code 2 et affiche le SHA du mandat. Le retour `preflight=OK` avec `mandate_sha256` évite le calcul PowerShell incorrect lié à la sérialisation Unicode. En cas de panne GitHub ou d'empreinte épinglée incorrecte, `preflight=BLOCKED` et `error/detail` donnent la cause exacte ; aucune mission n'est exécutée. L'action `run` conserve l'obligation du hash épinglé fourni par l'opérateur ; ce changement ne contourne pas l'approbation.
 
 
 ## P0 sécurité — incident C du 21 novembre 2026 : ne jamais relancer le runner ancien (#141)

@@ -77,9 +77,8 @@ class PreflightTests(unittest.TestCase):
             m = mission()
             mandate = {"user": {"login": "khalidd692"}, "body": "GO propriétaire: été ✅"}
             expected_sha = hashlib.sha256(mandate["body"].encode("utf-8")).hexdigest()
-            with mock.patch.object(hga, "default_fetcher", return_value=mandate), \
-                 mock.patch.object(hga, "github_source", return_value={
-                     "missions": [m], "approvals": seal([m])}) as source, \
+            with mock.patch(f"{hga.github_source.__module__}.default_fetcher", side_effect=[
+                    mandate, [approval_comment(m)]]) as fetch, \
                  mock.patch.object(hga, "build_runtime",
                                    side_effect=AssertionError("preflight must not start runtime")), \
                  mock.patch("sys.stdout", new_callable=io.StringIO) as output:
@@ -90,26 +89,27 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(data["preflight"], "OK")
             self.assertEqual(data["mandate_sha256"], expected_sha)
             self.assertEqual(data["missions"][0]["id"], m["id"])
-            self.assertEqual(source.call_args.kwargs["mandate_sha256"], expected_sha)
+            self.assertEqual(data["missions"][0]["contract_sha256"], seal([m])[m["id"]])
+            self.assertEqual(fetch.call_count, 2)
+            self.assertTrue(fetch.call_args_list[0].args[0].endswith(f"/issues/comments/{MANDATE}"))
             self.assertFalse(Path(root, "ledger").exists())
 
     def test_pinned_mandate_mismatch_fails_closed(self):
         with tempfile.TemporaryDirectory() as root:
             mandate = {"user": {"login": "khalidd692"}, "body": "modified"}
-            with mock.patch.object(hga, "default_fetcher", return_value=mandate), \
-                 mock.patch.object(hga, "github_source",
-                                   side_effect=AssertionError("must not fetch contracts")), \
+            with mock.patch(f"{hga.github_source.__module__}.default_fetcher", return_value=mandate) as fetch, \
                  mock.patch("sys.stdout", new_callable=io.StringIO) as output:
                 code = hga.main(["preflight", "--state", root, "--issue", "94",
                                  "--mandate-comment", str(MANDATE),
                                  "--mandate-sha256", "0" * 64])
             self.assertEqual(code, 2)
+            fetch.assert_called_once()
             self.assertIn("does not match", output.getvalue())
             self.assertFalse(Path(root, "ledger").exists())
 
     def test_github_failure_reports_exact_error(self):
         with tempfile.TemporaryDirectory() as root:
-            with mock.patch.object(hga, "default_fetcher",
+            with mock.patch(f"{hga.github_source.__module__}.default_fetcher",
                                    side_effect=OSError("github unavailable")), \
                  mock.patch("sys.stdout", new_callable=io.StringIO) as output:
                 code = hga.main(["preflight", "--state", root, "--issue", "94",
@@ -119,6 +119,18 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(report["preflight"], "BLOCKED")
             self.assertEqual(report["error"], "OSError")
             self.assertIn("github unavailable", report["detail"])
+
+    def test_empty_queue_reports_no_admissions(self):
+        mandate = {"user": {"login": "khalidd692"}, "body": "GO"}
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch(f"{hga.github_source.__module__}.default_fetcher", side_effect=[mandate, []]), \
+             mock.patch.object(hga, "build_runtime", side_effect=AssertionError("unexpected runtime")), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = hga.main(["preflight", "--state", root, "--issue", "94",
+                             "--mandate-comment", str(MANDATE)])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(output.getvalue())["preflight"], "NO_ADMISSIONS")
+            self.assertEqual(list(Path(root).iterdir()), [])
 
 
 class SourceTests(unittest.TestCase):

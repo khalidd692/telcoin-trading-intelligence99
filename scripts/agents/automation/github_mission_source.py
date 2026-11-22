@@ -160,14 +160,16 @@ def parse_approvals(comments, *, mandate_comment_id, now=None, owner_approval_re
 
 def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=None,
                   owner_approval_reader=None, mandate_sha256=None):
-    """Return the ``{"missions": [...], "approvals": {...}}`` poll payload.
+    """Return admitted missions and the hash of the checked mandate snapshot.
 
     Raises OSError/ValueError on GitHub failure or invalid mandate so the
     engine's ``poll`` fail-closes to BLOCKED (SOURCE_UNAVAILABLE_OR_INVALID).
     """
     fetcher = fetcher or default_fetcher
-    fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher,
-                  mandate_sha256=mandate_sha256)
+    mandate = fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher,
+                           mandate_sha256=mandate_sha256)
     comments = fetch_comments(repo, issue, fetcher=fetcher)
-    return parse_approvals(comments, mandate_comment_id=mandate_comment_id,
-                           owner_approval_reader=owner_approval_reader)
+    admitted = parse_approvals(comments, mandate_comment_id=mandate_comment_id,
+                               owner_approval_reader=owner_approval_reader)
+    admitted["mandate_sha256"] = hashlib.sha256((mandate.get("body") or "").encode("utf-8")).hexdigest()
+    return admitted
