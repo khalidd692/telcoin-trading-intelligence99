@@ -13,6 +13,7 @@ own marker and supplies only comments from its pinned issue and owner.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -20,11 +21,13 @@ import subprocess
 from datetime import datetime, timezone
 
 try:
-    from .autonomy_runtime import fingerprint, validate_contract
+    from .autonomy_runtime import REJECTED_MISSION, fingerprint, validate_contract
 except ImportError:  # flat script execution
-    from autonomy_runtime import fingerprint, validate_contract
+    from autonomy_runtime import REJECTED_MISSION, fingerprint, validate_contract
 
-APPROVERS = {"khalidd692"}
+OWNER_LOGIN = "khalidd692"
+OWNER_ID = 275517051
+APPROVERS = {OWNER_LOGIN}
 MARKER = "hermes-mission/v1"
 EVENT_MARKER = "hermes-relay-event/v1"
 PROPOSAL_MARKER = "hermes-relay-proposal/v1"
@@ -35,6 +38,11 @@ BLOCK_RE = re.compile(r"```" + re.escape(MARKER) + r"\s*\n(.*?)\n```", re.DOTALL
 MAX_PAGES = 100
 MAX_MISSIONS = 20
 ORIGINS = {"delegated-mandate", "owner-direct"}
+
+
+def is_owner(user):
+    return (isinstance(user, dict) and user.get("login") == OWNER_LOGIN
+            and user.get("id") == OWNER_ID and user.get("type") == "User")
 
 
 def default_fetcher(endpoint):
@@ -58,7 +66,7 @@ def gh_json(endpoint, *, body=None, timeout=60, method="GET", payload=None):
         # Fail-closed to the engine's SOURCE_UNAVAILABLE path (review F1).
         raise OSError("gh api timeout") from exc
     if completed.returncode != 0:
-        raise OSError("gh api unavailable")
+        raise OSError(f"gh api unavailable (exit {completed.returncode})")
     return json.loads(completed.stdout)
 
 
@@ -80,12 +88,33 @@ def fetch_pages(endpoint, *, fetcher, max_pages=MAX_PAGES):
     raise ValueError("pagination cap reached; refusing to truncate the queue")
 
 
-def fetch_mandate(repo, issue, comment_id, *, fetcher=None):
+def _unique_keys(pairs):
+    """Reject ambiguous duplicate JSON keys for both admission profiles."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError("duplicate JSON key")
+        obj[key] = value
+    return obj
+
+
+def fetch_mandate(repo, issue, comment_id, *, fetcher=None, mandate_sha256=None):
     fetcher = fetcher or default_fetcher
     # Single issue comments live under issues/comments/{id} (no issue number).
     comment = fetcher(f"repos/{repo}/issues/comments/{comment_id}")
     if not isinstance(comment, dict) or (comment.get("user") or {}).get("login") not in APPROVERS:
         raise ValueError("mandate comment is not owner-authored")
+    if "id" in (comment.get("user") or {}) and not is_owner(comment["user"]):
+        raise ValueError("mandate is not from the pinned owner account")
+    if comment.get("id", comment_id) != comment_id or comment.get(
+        "issue_url", f"https://api.github.com/repos/{repo}/issues/{issue}"
+    ) != f"https://api.github.com/repos/{repo}/issues/{issue}":
+        raise ValueError("mandate issue or comment identity mismatch")
+    # Reserve F6: the mandate is pinned by content, not only by author/id.
+    if mandate_sha256 is not None:
+        digest = hashlib.sha256((comment.get("body") or "").encode("utf-8")).hexdigest()
+        if digest != mandate_sha256:
+            raise ValueError("mandate content does not match the pinned sha256")
     return comment
 
 
@@ -106,14 +135,8 @@ def fenced_json(body, marker):
     if match is None:
         return None
 
-    def unique_keys(pairs):
-        obj = dict(pairs)
-        if len(obj) != len(pairs):
-            raise ValueError("duplicate keys")
-        return obj
-
     try:
-        data = json.loads(match[1], object_pairs_hook=unique_keys)
+        data = json.loads(match[1], object_pairs_hook=_unique_keys)
     except (ValueError, RecursionError):
         return None
     return data if isinstance(data, dict) else None
@@ -125,7 +148,12 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
     strict = owner == "kilo"
     missions, approvals, sources, conflicts = [], {}, {}, set()
     for comment in comments:
-        login = (comment.get("user") or {}).get("login", "")
+        if not isinstance(comment, dict):
+            continue
+        user = comment.get("user")
+        if not isinstance(user, dict) or ("id" in user and not is_owner(user)):
+            continue
+        login = user.get("login", "")
         body = comment.get("body") or ""
         if (login not in APPROVERS or not isinstance(body, str)
                 or EVENT_MARKER in body or PROPOSAL_MARKER in body):
@@ -135,7 +163,7 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
         else:
             match = BLOCK_RE.search(body)
             try:
-                payload = json.loads(match[1]) if match else None
+                payload = json.loads(match[1], object_pairs_hook=_unique_keys) if match else None
             except (ValueError, RecursionError):
                 continue
         if not isinstance(payload, dict):
@@ -152,7 +180,7 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
         if not approval_is_current(approval, now):
             continue
         mid = mission.get("id")
-        if not isinstance(mid, str):
+        if not isinstance(mid, str) or mid == REJECTED_MISSION:
             continue
         digest = fingerprint(mission)
         if approval.get("mission_sha256") != digest:
@@ -197,14 +225,17 @@ def parse_approvals(comments, *, mandate_comment_id, now=None,
 
 
 def github_source(repo, issue, mandate_issue, mandate_comment_id, *, fetcher=None,
-                  owner_approval_reader=None):
-    """Return the ``{"missions": [...], "approvals": {...}}`` poll payload.
+                  owner_approval_reader=None, mandate_sha256=None):
+    """Return admitted missions and the hash of the checked mandate snapshot.
 
     Raises OSError/ValueError on GitHub failure or invalid mandate so the
     engine's ``poll`` fail-closes to BLOCKED (SOURCE_UNAVAILABLE_OR_INVALID).
     """
     fetcher = fetcher or default_fetcher
-    fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher)
+    mandate = fetch_mandate(repo, mandate_issue, mandate_comment_id, fetcher=fetcher,
+                           mandate_sha256=mandate_sha256)
     comments = fetch_comments(repo, issue, fetcher=fetcher)
-    return parse_approvals(comments, mandate_comment_id=mandate_comment_id,
-                           owner_approval_reader=owner_approval_reader)
+    admitted = parse_approvals(comments, mandate_comment_id=mandate_comment_id,
+                               owner_approval_reader=owner_approval_reader)
+    admitted["mandate_sha256"] = hashlib.sha256((mandate.get("body") or "").encode("utf-8")).hexdigest()
+    return admitted

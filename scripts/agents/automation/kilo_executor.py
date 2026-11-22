@@ -110,12 +110,18 @@ def verify(mission, result, *, executable=None):
     Its code and acceptance criterion are never supplied by the specialist.
     It does not certify broad source-code correctness or a GitHub approval.
     """
+    return verify_fixed_report(mission, result, _VERIFY_CODE, _VERIFIER, _VERIFIER_CHECKS,
+                               executable=executable)
+
+
+def verify_fixed_report(mission, result, code, verifier, required_checks, *, executable=None):
+    """Run fixed verifier code and require a complete, internally consistent report."""
     try:
         payload = json.dumps({'mission': mission, 'result': result}, ensure_ascii=True)
         if len(payload.encode()) > 99000:
             raise ValueError('oversized verifier input')
         completed = subprocess.run(
-            [executable or sys.executable, '-I', '-B', '-c', _VERIFY_CODE],
+            [executable or sys.executable, '-I', '-B', '-c', code],
             input=payload, capture_output=True, text=True, timeout=15,
             check=False,
         )
@@ -123,11 +129,11 @@ def verify(mission, result, *, executable=None):
         if completed.returncode != 0 or not isinstance(report, dict):
             raise ValueError('invalid verifier result')
         checks = report.get('checks')
-        if (report.get('verifier') != _VERIFIER or type(report.get('ok')) is not bool
-                or not isinstance(checks, list) or len(checks) != len(_VERIFIER_CHECKS)
+        if (report.get('verifier') != verifier or type(report.get('ok')) is not bool
+                or not isinstance(checks, list) or len(checks) != len(required_checks)
                 or any(not isinstance(c, dict) or not isinstance(c.get('name'), str)
                        or type(c.get('ok')) is not bool for c in checks)
-                or {c['name'] for c in checks} != _VERIFIER_CHECKS
+                or {c['name'] for c in checks} != required_checks
                 or report['ok'] != all(c['ok'] for c in checks)
                 or report['ok'] and report.get('artifact_sha256') != mission.get('expected_sha256')):
             raise ValueError('incomplete or inconsistent verifier result')

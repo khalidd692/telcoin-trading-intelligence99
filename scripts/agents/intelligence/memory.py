@@ -174,14 +174,13 @@ class MemoryStore:
 
     def _load(self, project: str) -> dict:
         path = self._path(project)
-        if not path.is_file():
-            return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
-                    "history": []}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return {"schema": SCHEMA_VERSION, "project": project, "entries": [],
                     "history": []}
+        except (OSError, ValueError) as exc:
+            raise ValueError("memory document is unreadable") from exc
         if not isinstance(data, dict) or data.get("project") != project:
             raise ValueError("memory document belongs to a different project or is invalid")
         entries = data.setdefault("entries", [])

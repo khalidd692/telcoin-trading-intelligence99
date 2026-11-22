@@ -9,14 +9,20 @@ GitHub approval.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
+from pathlib import Path
 
-FREE_MODELS = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from scripts.agents.automation.kilo_executor import verify_fixed_report
+
+# Independent verifier allowlist: explicitly pin the same reviewed free-model
+# policy as HermesExecutor; no imports of executor or specialist-supplied rules.
+FREE_MODELS = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 
 _VERIFY_CODE = r'''
 import hashlib, json, re, sys
-FREE = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+FREE = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 try:
     payload = json.loads(sys.stdin.buffer.read(100000))
     mission, result = payload['mission'], payload['result']
@@ -26,10 +32,10 @@ try:
     role = mission.get('specialist') or mission.get('assigned_to') or mission.get('role')
     checks = [
         {'name': 'synthetic-contract', 'ok': mission.get('synthetic_data') is True and mission.get('project') == 'synthetic'},
-        {'name': 'artifact-sha256', 'ok': actual == mission.get('expected_sha256') == result.get('sha256')},
+        {'name': 'artifact-sha256', 'ok': actual is not None and actual == mission.get('expected_sha256') == result.get('sha256')},
         {'name': 'specialist-identity', 'ok': result.get('specialist_id') == role and role in ('tel99-dev', 'tel99-analyst', 'tel99-verifier')},
-        {'name': 'hermes-session-evidence', 'ok': re.fullmatch(r'local-[0-9a-f]{64}', str(result.get('session_id', ''))) is not None and evidence.get('session_id') == result.get('session_id') and evidence.get('exit_code') == 0 and isinstance(evidence.get('api_call_count'), int) and evidence.get('api_call_count') >= 1},
-        {'name': 'zero-cost-evidence', 'ok': evidence.get('estimated_cost_usd') == 0.0 and evidence.get('actual_cost_usd') == 0.0 and evidence.get('model') in FREE and evidence.get('billing_provider') == 'nous' and result.get('model') == evidence.get('model')},
+        {'name': 'hermes-session-evidence', 'ok': re.fullmatch(r'local-[0-9a-f]{64}', str(result.get('session_id', ''))) is not None and evidence.get('session_id') == result.get('session_id') and evidence.get('exit_code') == 0 and type(evidence.get('api_call_count')) is int and evidence.get('api_call_count') >= 1},
+        {'name': 'zero-cost-evidence', 'ok': all(type(evidence.get(key)) in (float, int) and evidence[key] == 0 for key in ('estimated_cost_usd', 'actual_cost_usd')) and evidence.get('model') in FREE and evidence.get('billing_provider') == 'nous' and result.get('model') == evidence.get('model')},
     ]
     print(json.dumps({'ok': all(c['ok'] for c in checks), 'checks': checks, 'artifact_sha256': actual, 'verifier': 'hermes-fixed-subprocess-v1'}))
 except Exception:
@@ -38,21 +44,11 @@ except Exception:
 
 
 def verify(mission, result, *, executable=None):
-    try:
-        payload = json.dumps({"mission": mission, "result": result}, ensure_ascii=True)
-        if len(payload.encode()) > 99000:
-            raise ValueError("oversized verifier input")
-        completed = subprocess.run(
-            [executable or sys.executable, "-I", "-B", "-c", _VERIFY_CODE],
-            input=payload, capture_output=True, text=True, timeout=15, check=False,
-        )
-        report = json.loads(completed.stdout)
-        if completed.returncode != 0 or report.get("ok") not in (True, False):
-            raise ValueError("invalid verifier result")
-        return report
-    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
-        return {"ok": False, "unavailable": True,
-                "checks": [{"name": "independent-verifier-available", "ok": False}]}
+    return verify_fixed_report(
+        mission, result, _VERIFY_CODE, "hermes-fixed-subprocess-v1",
+        {"synthetic-contract", "artifact-sha256", "specialist-identity",
+         "hermes-session-evidence", "zero-cost-evidence"}, executable=executable,
+    )
 
 
 def main(argv=None):

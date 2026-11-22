@@ -27,7 +27,11 @@ from pathlib import Path
 # Only models whose free access was verified callable in this environment.
 # Several models of one provider can share the same fair-share limit: a 429
 # therefore arms a provider cooldown instead of silently trying another model.
-FREE_MODELS = ("meituan/longcat-2.5:free", "upstage/solar-mini4:free")
+# Qwen4 Max Free answered a live Nous probe on Windows. Production zero-cost
+# qualification is still enforced per real session below; if usage is missing,
+# nonzero or from a different model/provider, the mission is BLOCKED.
+# Legacy free models remain selectable explicitly; never fallback automatically.
+FREE_MODELS = ("qwen/qwen4-max:free", "meituan/longcat-2.5:free", "upstage/solar-mini4:free")
 ROLES = frozenset({"tel99-dev", "tel99-analyst", "tel99-verifier"})
 SESSION_RE = re.compile(r"session_id:\s*(local-[0-9a-f]{64})")
 RATE_LIMIT_RE = re.compile(r"429|too many requests|rate[ -]?limit|fair[ -]?share|quota", re.IGNORECASE)
@@ -77,7 +81,7 @@ def _role(mission):
 class HermesExecutor:
     def __init__(self, *, root, model=FREE_MODELS[0], provider="nous",
                  cli_command=None, hermes_home=None, run_budget=150,
-                 timeout=210, usage_reader=None):
+                 timeout=210, usage_reader=None, stop_requested=None):
         self.root = Path(root)
         self.model = model
         self.provider = provider
@@ -86,6 +90,7 @@ class HermesExecutor:
         self.run_budget = int(run_budget)
         self.timeout = int(timeout)
         self.usage_reader = usage_reader or read_usage_row
+        self.stop_requested = stop_requested or (self.root / "stop.request").exists
         self.cooldown_path = self.root / "provider-cooldown.json"
 
     # -- quota circuit breaker (durable, bounded, no retry loop) ------------
@@ -125,6 +130,8 @@ class HermesExecutor:
 
     def execute(self, mission):
         self._validate(mission)
+        if self.stop_requested():
+            raise ExecutorUnavailable("HERMES_WORKER_STOPPED_OR_TIMEOUT")
         self._check_cooldown()
         mid = mission["id"]
         specialist = _role(mission)
@@ -157,7 +164,7 @@ class HermesExecutor:
             try:
                 deadline = time.monotonic() + self.timeout
                 while proc.poll() is None:
-                    if (self.root / "stop.request").exists() or time.monotonic() > deadline:
+                    if self.stop_requested() or time.monotonic() > deadline:
                         proc.kill()
                         proc.wait(timeout=10)
                         raise ExecutorUnavailable("HERMES_WORKER_STOPPED_OR_TIMEOUT")

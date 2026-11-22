@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
- [ValidateSet('START','RUN','STATUS','STOP')][string]$Action='STATUS',
+ [ValidateSet('START','RUN','STATUS','STOP','PREFLIGHT')][string]$Action='STATUS',
  [string]$Python,
  [string]$State,
  [string]$Registry,
@@ -36,7 +36,8 @@ if (-not $State) {
 $script=if ($GitHubIssue) { 'kilo_github_adapter.py' } else { 'autonomy_runtime.py' }
 $entry=Join-Path $PSScriptRoot "scripts/agents/automation/$script"
 $argv=@('-B',$entry,$Action.ToLowerInvariant(),'--state',$State)
-if ($Action -eq 'RUN') {
+if ($Action -eq 'PREFLIGHT' -and -not $GitHubIssue) { throw 'PREFLIGHT requires -GitHubIssue' }
+if ($Action -in @('RUN', 'PREFLIGHT')) {
  if ($GitHubIssue) {
   if ($Registry -or $RegistrySha256) { throw 'Choose either a GitHub issue or the local registry' }
   if ($MandateComment -le 0 -or $MandateSha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -51,8 +52,10 @@ if ($Action -eq 'RUN') {
   }
   $argv+=@('--registry',$Registry,'--registry-sha256',$RegistrySha256)
  }
- $argv+=@('--seconds',"$Seconds")
- if ($Once) { $argv+='--once' }
+ if ($Action -eq 'RUN') {
+  $argv+=@('--seconds',"$Seconds")
+  if ($Once) { $argv+='--once' }
+ }
 }
 & $Python @argv
 exit $LASTEXITCODE

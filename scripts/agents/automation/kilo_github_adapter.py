@@ -18,7 +18,7 @@ from scripts.agents.automation.autonomy_runtime import (
     Blocked, LEGACY_STOP, QuotaBlocked, Runtime, TERMINAL, fingerprint, run_session,
 )
 from scripts.agents.automation.github_mission_source import (
-    MAX_MISSIONS, approval_is_current, fetch_comments, fetch_pages, fenced_json, gh_json, parse_approvals,
+    MAX_MISSIONS, approval_is_current, fetch_comments, fetch_pages, fenced_json, gh_json, is_owner, parse_approvals,
 )
 from scripts.agents.automation.kilo_acceptance_pr import (
     ACCEPTANCE_BASE, ACCEPTANCE_BASE_SHA, publish_verified_pr,
@@ -26,17 +26,10 @@ from scripts.agents.automation.kilo_acceptance_pr import (
 from scripts.agents.automation.policy import is_eligible_mission
 
 REPO = "khalidd692/telcoin-trading-intelligence99"
-OWNER_LOGIN = "khalidd692"
-OWNER_ID = 275517051
 EVENT = "kilo-relay-event/v1"
 HISTORICAL_ISSUES = {67, 94, 109, 112, 113, 114, 123}
 CONFIG_KEY = "kilo-github/config"
 CAMPAIGN = "kilo-campaign/v1"
-
-
-def is_owner(user):
-    return (isinstance(user, dict) and user.get("login") == OWNER_LOGIN
-            and user.get("id") == OWNER_ID and user.get("type") == "User")
 
 
 class KiloGitHubHandoff:
@@ -58,6 +51,9 @@ class KiloGitHubHandoff:
         self.campaign = campaign
         self.source_valid = False
         self.waiting_for_github = False
+        if runtime is None:
+            return
+        runtime.bind_transport("kilo-github")
         self.runtime.before_execute = self.before_execute
         config = {"repo": REPO, "issue": issue, "mandate_id": mandate_id, "mandate_sha256": mandate_sha}
         if campaign:
@@ -71,6 +67,10 @@ class KiloGitHubHandoff:
 
     def github(self, endpoint, *, body=None, method="GET", payload=None):
         runtime = self.runtime
+        if runtime is None:
+            if body is not None or payload is not None or method != "GET":
+                raise ValueError("preflight only permits GitHub reads")
+            return gh_json(endpoint, body=body, method=method, payload=payload, timeout=8)
         if runtime.stopped() or runtime.expired():
             raise OSError("session stopped or expired")
         remaining = 8 if runtime.deadline is None else runtime.deadline - time.monotonic()
@@ -165,10 +165,8 @@ class KiloGitHubHandoff:
         issues = fetch_pages(f"repos/{REPO}/issues?{query}", fetcher=self.fetch, max_pages=3)
         yield from sorted({row["number"] for row in issues if self.eligible_campaign_issue(row, scope)})
 
-    def source(self):
-        scope = self.check_mandate()
-        store = self.runtime.store
-        admitted, candidates = {}, {}
+    def discover_candidates(self, scope):
+        candidates = {}
         for issue in self.discover(scope):
             data = self.approvals(self.comments(issue), issue, scope)
             if self.campaign and len(data["missions"]) > 1:
@@ -182,7 +180,32 @@ class KiloGitHubHandoff:
                 if self.campaign:
                     binding.update(issue=issue, base=scope["base"], base_sha=scope["base_sha"])
                 candidates[mid] = binding
-        for mid, binding in candidates.items():
+        if len(candidates) > MAX_MISSIONS:
+            raise ValueError("approved missions exceed the queue limit")
+        return candidates
+
+    def preflight(self):
+        scope = self.check_mandate()
+        if self.campaign:
+            base = self.fetch(f"repos/{REPO}/git/ref/heads/{ACCEPTANCE_BASE}")
+            target = base.get("object") if isinstance(base, dict) else None
+            if not isinstance(target, dict) or (target.get("sha"), target.get("type")) != (
+                    ACCEPTANCE_BASE_SHA, "commit"):
+                raise ValueError("campaign evidence base ref has changed")
+        candidates = self.discover_candidates(scope)
+        if self.campaign and len(candidates) == 2:
+            dependencies = [binding["mission"]["dependencies"] for binding in candidates.values()]
+            if not any(deps == [mid] and not binding["mission"]["dependencies"]
+                       for mid, binding in candidates.items() for deps in dependencies):
+                raise ValueError("campaign needs one independent mission and one dependent on it")
+        return [{"issue": binding.get("issue", self.issue), "id": mid,
+                 "contract_sha256": binding["contract_sha256"]}
+                for mid, binding in candidates.items()]
+
+    def source(self):
+        store = self.runtime.store
+        admitted = {}
+        for mid, binding in self.discover_candidates(self.check_mandate()).items():
             key = f"kilo-github/approvals/{mid}"
             if store.get(key) is None:
                 store.put_cas(key, binding, None)
@@ -389,8 +412,8 @@ class KiloGitHubHandoff:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("run", "status", "stop"))
-    parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("action", choices=("run", "status", "stop", "preflight"))
+    parser.add_argument("--state", type=Path)
     parser.add_argument("--issue", type=int)
     parser.add_argument("--mandate-comment", type=int)
     parser.add_argument("--mandate-sha256")
@@ -398,6 +421,24 @@ def main(argv=None):
     parser.add_argument("--seconds", type=int, choices=range(1, 3601), metavar="1..3600", default=300)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if args.action == "preflight":
+        if not all((args.issue, args.mandate_comment, args.mandate_sha256)):
+            parser.error("preflight requires --issue, --mandate-comment and --mandate-sha256")
+        try:
+            handoff = KiloGitHubHandoff(None, args.issue, args.mandate_comment,
+                                       args.mandate_sha256, campaign=args.campaign)
+            if not is_owner(handoff.github("user")):
+                raise ValueError("the GitHub CLI must be authenticated as the pinned owner")
+            missions = handoff.preflight()
+            ready = len(missions) == 2 if args.campaign else bool(missions)
+            print(json.dumps({"preflight": "READY" if ready else "WAITING_APPROVALS",
+                              "mandate_sha256": args.mandate_sha256, "missions": missions}))
+            return 0 if ready else 2
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"preflight": "BLOCKED", "detail": str(exc)}))
+            return 2
+    if args.state is None:
+        parser.error("--state is required for run, status and stop")
     runtime = Runtime(args.state, legacy_stop=LEGACY_STOP)
     if args.action == "stop":
         (runtime.root / "stop.request").touch()

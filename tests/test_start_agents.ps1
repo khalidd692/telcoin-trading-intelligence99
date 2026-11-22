@@ -41,12 +41,18 @@ try {
         '-State', (Join-Path $directory 'campaign'))
     Assert-LauncherExit 2 'STOP remains set' @('-Action', 'START', '-GitHubIssue', '123', '-Campaign',
         '-State', (Join-Path $directory 'campaign'), '-MandateComment', '7100000001', '-MandateSha256', $pin)
+    $readOnlyState = Join-Path $directory 'preflight-only'
+    Assert-LauncherExit 1 'requires.*Mandate' @('-Action', 'PREFLIGHT', '-GitHubIssue', '987',
+        '-State', $readOnlyState)
+    Assert-LauncherExit 2 'dedicated issue' @('-Action', 'PREFLIGHT', '-GitHubIssue', '114',
+        '-State', $readOnlyState, '-MandateComment', '7100000001', '-MandateSha256', $pin)
+    if (Test-Path -LiteralPath $readOnlyState) { throw 'Preflight initialized state' }
     foreach ($path in $sentinels) {
         if ((Get-Content -LiteralPath $path) -cne 'existing state') {
             throw "Launcher test modified existing state at $path"
         }
     }
-    Write-Output '10/10 PowerShell launcher checks passed, with existing state preserved.'
+    Write-Output '12/12 PowerShell launcher checks passed, with existing state preserved.'
 }
 finally {
     Pop-Location

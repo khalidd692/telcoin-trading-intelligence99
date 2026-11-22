@@ -1,8 +1,11 @@
 """Two-issue campaign tests with GitHub and provider fixtures."""
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests.test_kilo_acceptance_pr import GitHubFixture, PR_URL
 from tests.test_kilo_github_handoff import (
@@ -105,6 +108,28 @@ class CampaignTests(unittest.TestCase):
             pr_publisher=self.gh.publish_pr,
         )
 
+    def test_preflight_reads_two_issues_and_never_creates_state_or_posts(self):
+        self.gh.add_issue(FIRST)
+        self.gh.add_issue(SECOND, self.gh.second)
+        state = self.root / "never-created"
+
+        def github(endpoint, **kwargs):
+            self.assertEqual(kwargs.get("method"), "GET")
+            if endpoint == "user":
+                return OWNER
+            if endpoint == f"repos/{bridge.REPO}/git/ref/heads/{BASE}":
+                return {"object": {"sha": BASE_SHA, "type": "commit"}}
+            return self.gh.fetch(endpoint)
+
+        with patch.object(bridge, "gh_json", side_effect=github):
+            code = bridge.main(["preflight", "--campaign", "--issue", str(ISSUE),
+                                "--mandate-comment", str(MANDATE), "--mandate-sha256", self.gh.pin,
+                                "--state", str(state)])
+        self.assertEqual(code, 0)
+        self.assertFalse(state.exists())
+        self.assertEqual(self.gh.posts, [])
+        self.assertEqual(self.calls, [])
+
     def test_discovers_separate_issues_and_publishes_before_dependent_work(self):
         handoff = self.handoff()
         self.assertTrue(handoff.poll())
@@ -140,12 +165,47 @@ class CampaignTests(unittest.TestCase):
         self.gh.add_issue(SECOND, self.gh.second)
         git = {FIRST: GitHubFixture(None), SECOND: GitHubFixture(None, pull_number=903)}
         active_issue = None
+        repo = self.root / "fixture-repo"
+        repo.mkdir()
+        checks = {}
+
+        def git_command(cwd, *args):
+            return subprocess.run(
+                ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "core.hooksPath=disabled-hooks", "-c", "commit.gpgsign=false", *args],
+                cwd=cwd, capture_output=True, text=True, timeout=15, check=True,
+            ).stdout.strip()
+
+        git_command(repo, "init", "--template=")
+        (repo / "fixture.py").write_text("def value(n):\n    return n\n", encoding="utf-8")
+        git_command(repo, "add", "fixture.py")
+        git_command(repo, "commit", "-m", "Fixture base")
+        base = git_command(repo, "rev-parse", "HEAD")
 
         def execute(contract):
             if contract == self.gh.second:
                 self.assertTrue(git[FIRST].pull["draft"])
                 self.assertTrue(any(event["phase"] == "RESULT" and event["issue"] == FIRST
                                     for event in self.gh.posts))
+            first = contract == self.gh.first
+            parent = base if first else checks[self.gh.first["id"]]
+            worktree = self.root / contract["id"]
+            git_command(repo, "worktree", "add", "--detach", str(worktree), parent)
+            path = worktree / "fixture.py"
+            before = path.read_text(encoding="utf-8")
+            after = before.replace("return n", "return n + 1") if first else before.replace(
+                "return n + 1", "return (n + 1) * 2")
+            self.assertNotEqual(after, before)
+            path.write_text(after, encoding="utf-8")
+            checked = subprocess.run(
+                [sys.executable, "-I", "-B", "-c",
+                 "import runpy,sys; print(runpy.run_path(sys.argv[1])['value'](3))", str(path)],
+                cwd=worktree, capture_output=True, text=True, check=True, timeout=5,
+            )
+            self.assertEqual(checked.stdout.strip(), "4" if first else "8")
+            git_command(worktree, "add", "fixture.py")
+            git_command(worktree, "commit", "-m", "Deterministic code fixture")
+            checks[contract["id"]] = git_command(worktree, "rev-parse", "HEAD")
             return self.execute(contract)
 
         def api(endpoint, *, method="GET", payload=None):
@@ -164,6 +224,16 @@ class CampaignTests(unittest.TestCase):
         results = [event["pull_request_url"] for event in self.gh.posts if event["phase"] == "RESULT"]
         self.assertEqual(results, [PR_URL, f"https://github.com/{bridge.REPO}/pull/903"])
         self.assertEqual([git[i].blob for i in (FIRST, SECOND)], [b"OK", b"READY"])
+        self.assertEqual(len(set(checks.values())), 2)
+        self.assertEqual(git_command(repo, "rev-parse", "HEAD"), base)
+        writes = [len(fixture.writes) for fixture in git.values()]
+        restarted = self.handoff(executor=execute)
+        restarted.github = api
+        restarted.pr_publisher = bridge.publish_verified_pr
+        self.assertTrue(restarted.poll())
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.gh.posts), 6)
+        self.assertEqual([len(fixture.writes) for fixture in git.values()], writes)
         self.assertTrue(all(fixture.pull["draft"] and fixture.pull["base"]["ref"] == BASE
                             for fixture in git.values()))
 

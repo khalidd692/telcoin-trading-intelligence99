@@ -97,6 +97,14 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(decision.ok)
         self.assertNotIn(decision.chosen.id, [m.id for m in decision.fallbacks])
 
+    def test_measured_quality_ignores_untrusted_rates(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = pathlib.Path(root) / "rates.json"
+            path.write_text('{"nan":{"success_rate":NaN},"bool":{"success_rate":true},'
+                            '"too-high":{"success_rate":1.2},"valid":{"success_rate":0.75}}',
+                            encoding="utf-8")
+            self.assertEqual(router.load_measured_quality(str(path)), {"valid": 0.75})
+
     def test_load_measured_quality_ignores_missing_file(self):
         self.assertEqual(router.load_measured_quality("/nonexistent/x.json"), {})
 
@@ -127,6 +135,15 @@ class MemoryTests(unittest.TestCase):
         got = self.store.get("tel99", "a")
         self.assertEqual(got.version, 2)
         self.assertGreaterEqual(len(self.store.history("tel99")), 2)
+
+    def test_unreadable_memory_is_preserved_on_record(self):
+        path = self.store._path("tel99")
+        path.parent.mkdir(parents=True)
+        original = b'{"project":"tel99","entries":'
+        path.write_bytes(original)
+        with self.assertRaises(ValueError):
+            self.store.record(self._entry("tel99", "new"))
+        self.assertEqual(path.read_bytes(), original)
 
     def test_projects_are_isolated(self):
         self.store.record(self._entry("tel99", "a", title="tel secret"))

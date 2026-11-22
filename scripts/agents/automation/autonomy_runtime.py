@@ -5,16 +5,18 @@ be supplied by a trusted operator; seal() computes fingerprints, not signatures.
 """
 from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys, time
+from graphlib import TopologicalSorter
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat, heartbeat_status
 from protocol.handoff import Inbox, verify_mission
-from protocol.store import FileStore
+from protocol.store import FileStore, StoreError
 from intelligence.memory import MemoryStore, Entry
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
 TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
 CHECKPOINT_STATUSES = TERMINAL | {"ACK", "RUNNING", "WORKER_EXITED"}
+REJECTED_MISSION = "HERMES-QWEN4-20261121-C"
 LEGACY_STOP = Path(__file__).resolve().parents[3] / ".kilo" / "STOP"
 def fingerprint(m):
     return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
@@ -23,6 +25,8 @@ def seal(missions):
 def validate_contract(m,approvals):
     if not isinstance(m,dict) or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}",str(m.get("id",""))):
         raise ValueError("invalid mission id")
+    if m["id"] == REJECTED_MISSION:
+        raise ValueError("historical mission C is permanently excluded")
     if approvals.get(m["id"]) != fingerprint(m):
         raise ValueError("unapproved or modified contract")
     # Additive owner allowlist for the Hermes failover relay (hermes/relay-github-adapter-20261120).
@@ -47,6 +51,24 @@ class Runtime(Supervisor):
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
         self.quota_exhausted = False
+    def bind_transport(self, transport):
+        """Pin a working ledger to one entry point while allowing same-transport restart."""
+        key = "runtime-config/transport"
+        previous = self.store.read(key)
+        if previous is None:
+            legacy_kilo = self.store.get("kilo-github/config") is not None
+            legacy_hermes = bool(self.store.keys("hermes-relay-source"))
+            if (legacy_kilo and transport != "kilo-github"
+                    or legacy_hermes and transport != "hermes-github"):
+                raise Blocked("state belongs to another transport")
+            try:
+                self.store.put_cas(key, transport, None)
+            except StoreError as exc:
+                raise Blocked("cannot bind the state transport") from exc
+            previous = self.store.read(key)
+        if previous != transport:
+            raise Blocked("state belongs to another transport")
+
     def state(self,m):
         key=f"kilo-local/{m['id']}"
         try:
@@ -113,7 +135,8 @@ class Runtime(Supervisor):
                 title="Verified synthetic artifact "+m["id"],
                 body=json.dumps({"contract_sha256":fingerprint(m),"artifact_sha256":saved["result"]["sha256"]}),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
-                verified_by="tel99-fixed-subprocess-v1",confidence=1.0))
+                verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
+                confidence=1.0))
     def _process(self,m,approvals):
         validate_contract(m,approvals)
         saved=self.state(m)
@@ -175,7 +198,7 @@ class Runtime(Supervisor):
              acceptance_checks=[{"id":"independent-text-contract","command":"fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
         if verdict["validated"]:
-            try:self.remember(m,saved)
+            try:self.remember(m,{**saved, "verification": verified})
             except (OSError,ValueError):
                 self.save(m,"AWAITING_HUMAN",reason="memory persistence unavailable");return
         self.save(m,"ACCEPTED" if verdict["validated"] else "REJECTED",verification=verified,verdict=verdict)
@@ -199,6 +222,7 @@ class Runtime(Supervisor):
                         by_id[m["id"]]=m
                     except (ValueError,TypeError):
                         invalid=True
+                TopologicalSorter({mid: m["dependencies"] for mid, m in by_id.items()}).prepare()
                 pending=sorted(by_id.values(),key=lambda m:(str(m.get("priority","P9")),m["id"]))
                 while pending and count<max_tasks and not self.stopped() and not self.expired() and not self.quota_exhausted:
                     progressed=False
@@ -255,12 +279,20 @@ def main(argv=None):
         p.error("trusted registry path and pinned SHA256 required")
     if not 1<=a.seconds<=3600:p.error("seconds must be 1..3600")
     if r.stopped():print("STOP remains set; operator must explicitly acknowledge before run");return 2
+    try:
+        r.bind_transport("kilo-local")
+    except (Blocked, OSError, ValueError) as exc:
+        print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
+        return 2
     deadline=time.monotonic()+a.seconds
     r.deadline=deadline
     def source():
         raw=a.registry.read_bytes()
         if hashlib.sha256(raw).hexdigest()!=a.registry_sha256:raise ValueError("registry changed")
-        return json.loads(raw)
+        data = json.loads(raw)
+        if any(m.get("owner") != "kilo" for m in data["missions"]):
+            raise ValueError("the local Kilo launcher requires Kilo contracts")
+        return data
     failed = run_session(r, lambda: r.poll(source), once=a.once)
     report=r.status()
     print(json.dumps(report))
