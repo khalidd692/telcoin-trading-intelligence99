@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,7 +50,7 @@ jobs:
       - name: Realtime feed regression
         run: node tests/test_realtime.js
       - name: Diff whitespace check
-        run: git diff --check HEAD^
+        run: git diff --check origin/main...HEAD
 
   windows-powershell:
     name: Windows PowerShell launcher regression (offline)
