@@ -167,6 +167,14 @@ class LocalCodeGitHubTests(unittest.TestCase):
             self.assertEqual(runtime.state(self.gh.missions[0])["status"], "AWAITING_HUMAN")
             runtime.run_queue(queue["missions"], queue["approvals"])
             self.assertEqual(len(calls), 1)
+            # Recreate the supervisor instance against the same persisted CAS
+            # state: an uncertain task must NOT be silently run again.
+            restart = Runtime(Path(folder), executor=executor,
+                              verifier=lambda mission, result: {"unavailable": True})
+            self.gh.handoff(restart)
+            restart.run_queue(queue["missions"], queue["approvals"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(restart.state(self.gh.missions[0])["status"], "AWAITING_HUMAN")
 
     def test_local_code_publisher_rejects_unverified_state(self):
         with tempfile.TemporaryDirectory() as folder:
