@@ -1,0 +1,34 @@
+name: TEL99 local agent safety tests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/agents/automation/**"
+      - "tests/test_github_local_code_campaign.py"
+      - "tests/test_local_code_pr_publisher.py"
+      - "tests/test_multiagent_pilot.py"
+      - ".github/workflows/tel99-local-agent-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python syntax and imports
+        run: |
+          python -m py_compile scripts/agents/automation/github_local_code_campaign.py scripts/agents/automation/local_code_pr.py
+      - name: Offline admission, CAS, independent verifier and publisher tests
+        run: |
+          python -B -m unittest -v tests.test_github_local_code_campaign tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
