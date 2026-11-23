@@ -42,6 +42,8 @@ class ModelSpec:
     verified: bool = False   # was availability actually probed in this repo?
     tags: tuple[str, ...] = field(default_factory=tuple)
     endpoint: str = ""
+    memory_mib: int | None = None
+    served_ids: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def is_free(self) -> bool:
@@ -112,6 +114,41 @@ MODEL_CATALOG: tuple[ModelSpec, ...] = (
         verified=False,
         tags=("free", "local", "tools", "code"),
         endpoint="http://localhost:11434/v1",
+    ),
+    ModelSpec(
+        id="local/llama-qwen2.5-3b",
+        provider="llama.cpp",
+        location=LOCAL,
+        cost_tier=COST_FREE,
+        supports_tools=False,
+        context_tokens=4096,
+        latency_tier="fast",
+        quality_prior=0.55,
+        evidence=(
+            "TEL99 Windows local CODE runs in PR #159 establish historical use of Qwen2.5 3B. "
+            "Context, memory, latency and quality are planning estimates. Current availability needs a probe."
+        ),
+        tags=("free", "local", "code", "inventory-only"),
+        endpoint="http://127.0.0.1:18089/v1",
+        memory_mib=2400,
+        served_ids=("qwen2.5-3b-instruct",),
+    ),
+    ModelSpec(
+        id="local/llama-qwen2.5-coder-7b",
+        provider="llama.cpp",
+        location=LOCAL,
+        cost_tier=COST_FREE,
+        supports_tools=False,
+        context_tokens=4096,
+        latency_tier="slow",
+        quality_prior=0.68,
+        evidence=(
+            "docs/agents/LOCAL_FREE_MODELS.md documents Qwen2.5-Coder 7B Q4 as a local option. "
+            "Serving alias, context, memory, latency and quality are provisional. Current availability needs a probe."
+        ),
+        tags=("free", "local", "code", "inventory-only"),
+        memory_mib=5500,
+        served_ids=("qwen2.5-coder-7b-instruct",),
     ),
     ModelSpec(
         id="gpt-5.6",

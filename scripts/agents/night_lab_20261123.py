@@ -26,7 +26,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
-from scripts.agents.automation.autonomy_runtime import LEGACY_STOP, Runtime, validate_contract
+from scripts.agents.automation.autonomy_runtime import (
+    LEGACY_STOP, Runtime, delivered, escalation_matches, mission_edges, validate_contract,
+)
 from local_codex import Blocked, exclusive
 from protocol.store import FileStore
 from scripts.agents.native import sandbox
@@ -128,9 +130,12 @@ def load_registry(path, pin):
         raise ValueError("Identités ou autorisations de missions incohérentes")
     if ids & LEGACY_MISSIONS:
         raise ValueError("Les identités historiques du Night Lab sont réservées à leurs preuves existantes")
-    graph = {mission["id"]: mission["dependencies"] for mission in missions}
+    graph = {mission["id"]: mission_edges(mission) for mission in missions}
     if any(set(dependencies) - ids for dependencies in graph.values()):
         raise ValueError("Dépendance absente du registre local")
+    by_id = {m["id"]: m for m in missions}
+    if any(not escalation_matches(m, by_id.get(m["escalates_from"])) for m in missions if "escalates_from" in m):
+        raise ValueError("La mission d'escalade doit reprendre le contrat indépendant de son prédécesseur")
     TopologicalSorter(graph).prepare()
     return raw, missions
 
@@ -255,7 +260,7 @@ class Campaign:
                 ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=ROOT, timeout=10,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
             )
-        for port in sorted({mission["port"] for mission in self.missions}):
+        for port in sorted({mission["port"] for mission in self.missions if "routing" not in mission}):
             self.check_stop()
             connection = HTTPConnection("127.0.0.1", port, timeout=5)
             try:
@@ -289,6 +294,11 @@ class Campaign:
             mission["id"]: worker["missions"].get(mission["id"], {}).get("status", "EN ATTENTE")
             for mission in self.missions
         }
+        for mission in self.missions:
+            mid = mission["id"]
+            if (self.state["missions"][mid] == "EN ATTENTE"
+                    and self.state["missions"].get(mission.get("escalates_from")) == "ACCEPTED"):
+                self.state["missions"][mid] = "NON REQUISE"
         if log is not None:
             self.read_transitions(log)
         self.state["updated"] = now()
@@ -418,6 +428,7 @@ class Campaign:
                 "id": mid, "status": statuses.get(mid, "EN ATTENTE"), "dependencies": mission["dependencies"],
                 "unmet_dependencies": missing,
                 "checkpoint": checkpoint, "path": mission["path"], "function": mission["function"],
+                **({"escalates_from": mission["escalates_from"]} if "escalates_from" in mission else {}),
             })
         save(self.session / "MISSIONS.json", missions)
         save(self.session / "PREUVES.json", {
@@ -427,6 +438,8 @@ class Campaign:
             "checkout_sha": row.get("checkout_sha"), "verifications": row["gates"],
             "code_sortie_superviseur": row.get("worker_exit"), "arret_force": row.get("forced_stop", False),
             "preuves_missions": {record["id"]: record["checkpoint"].get("verification") for record in missions},
+            "routage_missions": {record["id"]: record["checkpoint"]["model_route"] for record in missions
+                                 if "model_route" in record["checkpoint"]},
             "journaux": sorted(path.name for path in self.session.glob("code-missions.*.log")),
             "correctifs": "code-state/verified-code", "memoire": "code-state/memory",
         })
@@ -439,7 +452,7 @@ class Campaign:
         for record in missions:
             mid, status = record["id"], record["status"]
             summary.append(f"- `{mid}` · **{status}**")
-            if status != "ACCEPTED":
+            if status not in {"ACCEPTED", "NON REQUISE"}:
                 checkpoint = record["checkpoint"]
                 reason = checkpoint.get("reason") or ", ".join(record["unmet_dependencies"]) or row["note"]
                 blockers.append(f"- `{mid}` · **{status}** · {reason}")
@@ -530,7 +543,7 @@ def run(args):
                         campaign.state["cockpit"] = f"http://127.0.0.1:{args.port}/"
                         campaign.publish(f"Cockpit local ouvert sur {campaign.state['cockpit']}")
                         code = campaign.execute(approved)
-                        accepted = all(status == "ACCEPTED" for status in campaign.state["missions"].values())
+                        accepted = delivered(campaign.missions, campaign.state["missions"])
                         if code == 0 and accepted:
                             campaign.publish("Toutes les missions ont été vérifiées et acceptées", "COMPLETE")
                         else:
