@@ -418,6 +418,13 @@ def verify(mission, result, root):
         "test_sha256": _sha(mission["test"]), "sandbox_image": mission["sandbox_image"],
         "checks": [{"name": "bounded-model-receipt", "ok": True}],
     }
+    if local_team.enabled(mission):
+        # A deterministic verifier stage, NOT a third LLM which approves itself.
+        report["verification_role"] = {
+            "role": local_team.TEAM[2],
+            "method": "independent Docker baseline-red / candidate-green",
+            "analyst_sha256": result["agent_trace"]["analyst"]["sha256"],
+        }
     seconds = result.get("generation_seconds")
     if type(seconds) in (float, int) and 0 <= seconds <= 180:
         report["generation_seconds"] = seconds
