@@ -88,7 +88,8 @@ def valid_trace(mission: dict, result: dict) -> bool:
     if not enabled(mission) or not isinstance(result, dict):
         return False
     t = result.get("agent_trace")
-    if not isinstance(t, dict) or t.keys() != {"version", "analyst", "developer"} or t["version"] != 1:
+    if (not isinstance(t, dict) or t.keys() != {"version", "analyst", "developer"}
+            or type(t["version"]) is not int or t["version"] != 1):
         return False
     analyst, developer = t["analyst"], t["developer"]
     if (not isinstance(analyst, dict)
