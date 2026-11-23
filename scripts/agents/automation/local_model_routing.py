@@ -37,9 +37,12 @@ def validate_candidates(candidates):
                 or type(binding["port"]) is not int or not 1024 <= binding["port"] <= 65535):
             raise ValueError("invalid local model binding")
         spec = catalog.by_id(binding["id"])
-        if (spec is None or spec.provider != "llama.cpp" or not spec.is_local or not spec.is_free
-                or spec.memory_mib <= 0 or binding["model"] not in spec.served_ids):
-            raise ValueError("local model/API alias is not in the approved llama.cpp catalogue")
+        if (spec is None or spec.provider not in ("llama.cpp", "ollama")
+                or not spec.is_local or not spec.is_free
+                or not isinstance(spec.memory_mib, int) or spec.memory_mib <= 0
+                or binding["model"] not in spec.served_ids
+                or (spec.provider == "ollama" and binding["port"] != 11434)):
+            raise ValueError("local model/API alias is not in the approved catalogue")
         if spec.id in seen:
             raise ValueError("local model identities must be unique within an approval")
         seen.add(spec.id)
@@ -136,6 +139,22 @@ def _probe(port):
     return served, reason, round(1000 * (time.monotonic() - started), 2)
 
 
+def _probe_ollama(model):
+    """Verify the exact installed Ollama model, without loading it or generating."""
+    started = time.monotonic()
+    try:
+        payload = _probe_json(11434, "/api/tags")
+        rows = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise ProbeError("Ollama model list invalid")
+        listed = [row.get("name") for row in rows if isinstance(row, dict)]
+        if model not in listed:
+            raise ProbeError("approved Ollama model not installed")
+        return model, None, round(1000 * (time.monotonic() - started), 2)
+    except ProbeError as exc:
+        return None, str(exc), round(1000 * (time.monotonic() - started), 2)
+
+
 def check_selected(binding):
     """Recheck a single previously selected, approval-bound model before generation."""
     try:
@@ -145,7 +164,11 @@ def check_selected(binding):
     available = available_memory_mib()
     if available is None or available < AVAILABLE_MEMORY_RESERVE_MIB:
         return False
-    served, _, _ = _probe(binding["port"])
+    spec = catalog.by_id(binding["id"])
+    if spec.provider == "ollama":
+        served, _, _ = _probe_ollama(binding["model"])
+    else:
+        served, _, _ = _probe(binding["port"])
     return served == binding["model"]
 
 
@@ -197,9 +220,11 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
         reason = None
         verified = False
         if not omitted or spec.memory_mib >= LARGE_MODEL_MIB:
-            if port not in probes:
-                probes[port] = _probe(port)
-            served, reason, rtt = probes[port]
+            key = (port, binding["model"]) if spec.provider == "ollama" else (port, "llama.cpp")
+            if key not in probes:
+                probes[key] = (_probe_ollama(binding["model"]) if spec.provider == "ollama"
+                               else _probe(port))
+            served, reason, rtt = probes[key]
             verified = served == binding["model"]
         if omitted:
             reason = "excluded from this attempt"
@@ -216,11 +241,17 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
         if reason is None:
             eligible.append(replace(spec, verified=True, latency_tier=latency_tier))
 
-    if sum(row["verified"] and row["model_memory_mib"] >= LARGE_MODEL_MIB for row in inventory) > 1:
-        eligible = [spec for spec in eligible if spec.memory_mib < LARGE_MODEL_MIB]
+    # Multiple simultaneously served heavy llama.cpp models are unsafe on 16 GiB.
+    # Ollama uses on-demand sequential generations with keep_alive=0s instead.
+    heavy_llama = [row for row in inventory if row["verified"]
+                   and row["model_memory_mib"] >= LARGE_MODEL_MIB
+                   and catalog.by_id(row["id"]).provider == "llama.cpp"]
+    if len(heavy_llama) > 1:
+        ineligible = {row["id"] for row in heavy_llama}
+        eligible = [spec for spec in eligible if spec.id not in ineligible]
         for row in inventory:
-            if row["eligible"] and row["model_memory_mib"] >= LARGE_MODEL_MIB:
-                row.update(eligible=False, reason="more than one large local model is available")
+            if row["id"] in ineligible and row["eligible"]:
+                row.update(eligible=False, reason="more than one heavy llama.cpp model served")
 
     routed = router.route(task, verified_local=tuple(eligible), quota_remaining=mission.get("max_attempts", 1),
                           approved_models=frozenset(binding["id"] for binding in candidates)).to_dict()
