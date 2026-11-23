@@ -74,6 +74,17 @@ class OllamaNativeCodeTests(unittest.TestCase):
         self.assertNotIn("tools", client.payload)
         self.assertTrue(mocked.called)
 
+    def test_coder_without_thinking_override_and_qwen35_with_override(self):
+        for model, expects_think in ((QWEN["model"], False), (REASONER["model"], True)):
+            with self.subTest(model=model):
+                client = _Client({"model": model, "response": "def done():\n    return True"})
+                with patch("scripts.agents.automation.ollama_native.build_opener", return_value=client):
+                    answer = OllamaNativeProvider(model=model, timeout=40).complete(
+                        system="Only code", prompt="Return the correct function"
+                    )
+                self.assertTrue(answer.startswith("def done():"))
+                self.assertEqual(client.payload.get("think"), False if expects_think else None)
+
     def test_empty_final_answer_does_not_turn_reasoning_into_code(self):
         client = _Client({
             "model": GEMMA["model"],
@@ -161,6 +172,11 @@ class OllamaNativeCodeTests(unittest.TestCase):
         self.assertEqual([m["base_sha"] for m in fixed["missions"]], [m["base_sha"] for m in source])
         self.assertEqual(fixed["missions"][0]["model"], GEMMA["model"])
         self.assertEqual(fixed["missions"][0]["port"], 11434)
+        for candidate in (QWEN, REASONER):
+            other = prepare_local_code.prepare(source, "fixed" + candidate["id"].split("/")[-1].replace(".", ""), "fixed", [candidate], [])
+            self.assertEqual(len(other["missions"]), 5)
+            self.assertEqual({m["model"] for m in other["missions"]}, {candidate["model"]})
+            self.assertEqual({m["port"] for m in other["missions"]}, {11434})
         for mission in fixed["missions"]:
             local_codegen.validate_scope(mission)
         for mission in routed["missions"]:
