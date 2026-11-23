@@ -190,6 +190,32 @@ class MultiMandateTests(unittest.TestCase):
         self.assertEqual([len(c.preflight()) for c in handlers], [2, 2])
 
 
+    def test_stop_propagates_into_controller_ledgers(self):
+        root = self.root / "state"
+        for num in (201, 202):
+            (root / f"campaign-{num}").mkdir(parents=True, exist_ok=True)
+        with patch.object(multi, "LEGACY_STOP", self.root / "unused-global-stop"):
+            self.assertEqual(multi.main(["stop", "--state", str(root)]), 0)
+            self.assertTrue((root / "stop.request").exists())
+            self.assertTrue((root / "campaign-201" / "stop.request").exists())
+            self.assertTrue((root / "campaign-202" / "stop.request").exists())
+
+    def test_global_emergency_stop_prevents_dispatch(self):
+        manifest = write_manifest(self.root, [spec(201)])
+        calls = []
+        stop = self.root / "global-stop"
+        stop.touch()
+        with patch.object(multi, "LEGACY_STOP", stop):
+            self.assertEqual(
+                multi.main(["run", "--state", str(self.root / "state"),
+                            "--manifest", str(manifest), "--once"]), 2)
+            result = multi.run_campaigns(
+                manifest, self.root / "state", seconds=1, once=True,
+                build=lambda info, root, deadline: calls.append(info))
+        self.assertEqual(calls, [])
+        self.assertEqual(result, {})
+
+
 class AbruptCrashTests(unittest.TestCase):
     def test_killed_running_worker_is_not_reexecuted(self):
         """Kill the whole Python process inside an executor, then start a fresh Runtime."""
