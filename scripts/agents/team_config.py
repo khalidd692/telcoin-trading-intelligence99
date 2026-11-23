@@ -3,10 +3,9 @@
 This module is deliberately stdlib-only so it can be imported both by the
 launcher scripts and by the CI tests, without the OpenHands SDK installed.
 
-The three pilot roles (dev, analyst, verifier) are ACTIVE. The remaining
-specializations of the TEL99 role catalogue are RESERVED: their definitions
-live in ``.agents/agents/reserve/`` and are never auto-discovered by the SDK
-(which only reads top-level ``*.md`` files).
+The OpenHands SDK loads the three active profiles (dev, analyst, verifier).
+Reserved OpenHands profiles live in ``.agents/agents/reserve/``. The local
+sealed code pipeline defines its own execution stages in automation/local_team.py.
 """
 
 from __future__ import annotations
