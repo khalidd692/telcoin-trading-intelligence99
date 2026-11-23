@@ -9,11 +9,12 @@ param(
  [long]$MandateComment,
  [string]$MandateSha256,
  [switch]$Campaign,
- [ValidateRange(1,3600)][int]$Seconds=300,
+ [ValidateRange(1,21600)][int]$Seconds=300,
  [switch]$Once,
  [switch]$LocalCode
 )
 $ErrorActionPreference='Stop'
+if (-not $LocalCode -and $Seconds -gt 3600) { throw 'Seconds must be 1..3600 outside LocalCode' }
 try {
  if (-not $Python) {
   $managed=Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'

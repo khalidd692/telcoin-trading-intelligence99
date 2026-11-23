@@ -19,6 +19,13 @@ TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
 CHECKPOINT_STATUSES = TERMINAL | {"ACK", "RUNNING", "WORKER_EXITED"}
 REJECTED_MISSION = "HERMES-QWEN4-20261121-C"
 LEGACY_STOP = Path(__file__).resolve().parents[3] / ".kilo" / "STOP"
+LOCAL_VERIFICATION_SECONDS = 75
+
+
+class WorkerInterrupted(Blocked):
+    pass
+
+
 def fingerprint(m):
     return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
 def seal(missions):
@@ -26,8 +33,8 @@ def seal(missions):
 def validate_contract(m,approvals):
     if not isinstance(m,dict) or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}",str(m.get("id",""))):
         raise ValueError("invalid mission id")
-    if m["id"] == REJECTED_MISSION:
-        raise ValueError("historical mission C is permanently excluded")
+    if m["id"] in {REJECTED_MISSION, "night-mixed-ids"}:
+        raise ValueError("historical rejected mission is permanently excluded")
     if approvals.get(m["id"]) != fingerprint(m):
         raise ValueError("unapproved or modified contract")
     if m.get("owner") == "local":
@@ -55,7 +62,8 @@ class Runtime(Supervisor):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
-        self.executor=executor or self.execute_worker
+        self._default_executor = self.execute_worker
+        self.executor = executor or self._default_executor
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
@@ -112,32 +120,47 @@ class Runtime(Supervisor):
         if m.get("owner") == "local":
             return [sys.executable, "-I", "-B", str(Path(__file__).with_name("local_codegen.py"))]
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
-    def execute_worker(self,m):
+    def execute_worker(self, m, *, feedback=None, attempt=1):
         command=self.worker_command(m)
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
         if m.get("owner") == "local":
             env = {k: v for k, v in env.items() if k.upper() in
                    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
-        output=self.root/f"{m['id']}.worker.json"
-        error=self.root/f"{m['id']}.worker.err"
+        scoped_retry = m.get("owner") == "local" and m.get("max_attempts", 1) > 1
+        name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
+        output = self.root / f"{name}.worker.json"
+        error = self.root / f"{name}.worker.err"
+        request = {"mission": m, "feedback": feedback} if feedback is not None else m
         with output.open("wb") as out,error.open("wb") as err:
             p=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=out,stderr=err,env=env,cwd=self.root)
             try:
-                p.stdin.write(json.dumps(m).encode());p.stdin.close()
+                p.stdin.write(json.dumps(request).encode());p.stdin.close()
                 deadline=min(time.monotonic()+100,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
                         p.kill();p.wait(timeout=10)
-                        raise Blocked("worker stopped or timed out; no automatic replay")
+                        raise WorkerInterrupted("worker stopped or timed out; no automatic replay")
                     time.sleep(.1)
                 if p.returncode == 5:
                     raise QuotaBlocked("Kilo free provider HTTP 429")
-                if p.returncode:raise Blocked("free specialist unavailable; no fallback")
+                if p.returncode and not (m.get("owner") == "local" and p.returncode == 4):
+                    raise Blocked("free specialist unavailable; no fallback")
             finally:
                 if p.poll() is None:p.kill();p.wait(timeout=10)
         if output.stat().st_size>1024*1024:raise Blocked("worker output too large")
-        return json.loads(output.read_text(encoding="utf-8"))
+        response = json.loads(output.read_text(encoding="utf-8"))
+        if p.returncode == 4:
+            if not isinstance(response, dict) or response.get("status") != "BLOCKED":
+                raise Blocked("invalid local generator failure receipt")
+            reason = response.get("reason")
+            if not isinstance(reason, str) or not 1 <= len(reason) <= 200:
+                raise Blocked("invalid local generator diagnostic")
+            feedback = response.get("feedback")
+            raise local_codegen.GenerationBlocked(
+                reason, feedback if feedback == {"kind": "empty-completion"} else None,
+            )
+        return response
     def verify_worker(self,m,result):
         if m.get("owner") == "local":
             return local_codegen.verify(m, result, self.root)
@@ -173,6 +196,37 @@ class Runtime(Supervisor):
         if saved.get("status")=="RUNNING":
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
+        maximum = m.get("max_attempts", 1) if m.get("owner") == "local" else 1
+        while self._attempt(m, saved, maximum):
+            saved = self.state(m)
+
+    def _retry(self, m, saved, maximum, *, reason, feedback, verification=None):
+        if maximum == 1 or not local_codegen.valid_feedback(feedback):
+            return False
+        number = saved["attempt"]
+        diagnostic = {"number": number, "reason": reason, "feedback": feedback}
+        if verification is not None:
+            diagnostic["verification"] = verification
+        history = [*saved.get("attempt_history", ()), diagnostic]
+        retry = number < maximum
+        self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
+                  feedback=feedback if retry else None, reason=reason,
+                  result=None, verification=verification)
+        return True
+
+    def _attempt(self, m, saved, maximum):
+        if maximum > 1:
+            history = saved.get("attempt_history", [])
+            expected = len(history) if isinstance(history, list) else maximum
+            feedback = saved.get("feedback")
+            if (expected >= maximum or (expected > 0 and saved.get("status") == "ACK"
+                    and (not local_codegen.valid_feedback(feedback)
+                         or not isinstance(history[-1], dict)
+                         or history[-1].get("number") != expected
+                         or history[-1].get("feedback") != feedback))
+                    or (saved.get("status") == "WORKER_EXITED" and saved.get("attempt") != expected + 1)):
+                self.save(m, "AWAITING_HUMAN", reason="invalid retry checkpoint; reconciliation required")
+                return
         if saved.get("status")!="WORKER_EXITED":
             if saved.get("status") != "ACK":
                 if not self.claim(m):
@@ -190,21 +244,42 @@ class Runtime(Supervisor):
             if self.stopped() or (self.before_execute is not None and not self.before_execute(m, saved)):
                 return
             if self.stopped():return  # Keep the ACK so an explicit resume can start once.
-            if self.expired():self.save(m,"AWAITING_HUMAN",reason="session deadline after claim");return
-            self.save(m,"RUNNING")
+            if self.expired():
+                if m.get("owner") != "local":
+                    self.save(m, "AWAITING_HUMAN", reason="session deadline after claim")
+                return
+            details = ({"attempt": len(saved.get("attempt_history", ())) + 1,
+                        "reason": None, "verification": None} if maximum > 1 else {})
+            running = self.save(m, "RUNNING", **details)
             if self.stopped():
                 self.save(m, "ACK")  # This process knows it has not launched the worker yet.
                 return
-            try:result=self.executor(m)
+            try:
+                if maximum > 1 and self.executor == self._default_executor:
+                    result = self.execute_worker(m, feedback=running.get("feedback"), attempt=running["attempt"])
+                else:
+                    result = self.executor(m)
             except QuotaBlocked as exc:
                 self.quota_exhausted = True
                 self.save(m, "BLOCKED", reason=getattr(exc, "reason", "BLOCKED_PROVIDER_RATE_LIMIT"))
+                return
+            except local_codegen.GenerationBlocked as exc:
+                if self._retry(m, running, maximum, reason=exc.reason, feedback=exc.feedback):
+                    return self.state(m)["status"] == "ACK"
+                self.save(m, "BLOCKED", reason=exc.reason)
+                return
+            except WorkerInterrupted as exc:
+                self.save(m, "AWAITING_HUMAN" if m.get("owner") == "local" else "BLOCKED",
+                          reason=str(exc))
                 return
             except Exception as exc:
                 self.save(m,"BLOCKED",reason=type(exc).__name__);return
             saved=self.save(m,"WORKER_EXITED",result=result)
         if self.stopped() or self.expired():
             return
+        if (maximum > 1 and self.deadline is not None
+                and self.deadline - time.monotonic() < LOCAL_VERIFICATION_SECONDS):
+            return  # Keep the receipt for verification on explicit resume.
         try:
             verified=self.verifier(m,saved["result"])
         except Exception as exc:
@@ -231,11 +306,37 @@ class Runtime(Supervisor):
              acceptance_checks=[{"id":"independent-code-contract" if code else "independent-text-contract",
                    "command":"isolated Docker baseline and candidate" if code else "fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
+        feedback = verified.get("feedback")
+        if (not verdict["validated"] and code and local_codegen.valid_feedback(feedback)
+                and verified.get("ok") is False and isinstance(checks, list)
+                and verified.get("verifier") == local_codegen.VERIFIER
+                and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                and isinstance(artifact, str)
+                and hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+                == verified.get("artifact_sha256") == saved["result"].get("sha256")):
+            outcomes = {c["name"]: c.get("ok") for c in checks
+                        if isinstance(c, dict) and isinstance(c.get("name"), str)}
+            correctable = (
+                feedback["kind"] == "candidate-diff" and outcomes.get("approved-function-diff") is False
+                or feedback["kind"] == "candidate-test" and outcomes.get("baseline-fails") is True
+                and outcomes.get("candidate-passes") is False
+            )
+            if correctable:
+                if self._retry(m, saved, maximum, reason="independent verification rejected the candidate",
+                               feedback=feedback, verification=verified):
+                    return self.state(m)["status"] == "ACK"
         if verdict["validated"]:
             try:self.remember(m,{**saved, "verification": verified})
             except (OSError,ValueError):
                 self.save(m,"AWAITING_HUMAN",reason="memory persistence unavailable");return
-        self.save(m,"ACCEPTED" if verdict["validated"] else "REJECTED",verification=verified,verdict=verdict)
+        status = "ACCEPTED" if verdict["validated"] else "REJECTED"
+        details = {}
+        if maximum > 1:
+            details["feedback"] = None
+            if status == "REJECTED" and saved["attempt"] >= maximum:
+                status = "BLOCKED"
+                details["reason"] = "attempt limit reached without independent verification"
+        self.save(m, status, verification=verified, verdict=verdict, **details)
     def run_queue(self,missions,approvals,max_tasks=20):
         # Shared queue lock also prevents a second watcher declaring a live RUNNING
         # worker orphaned. Per-mission permanent CAS protects independent claimers.
@@ -312,7 +413,9 @@ def main(argv=None):
     if a.action=="status":print(json.dumps(r.status(),ensure_ascii=True));return 0
     if not a.registry or not re.fullmatch(r"[0-9a-f]{64}",a.registry_sha256 or ""):
         p.error("trusted registry path and pinned SHA256 required")
-    if not 1<=a.seconds<=3600:p.error("seconds must be 1..3600")
+    limit = 21600 if a.local_code else 3600
+    if not 1 <= a.seconds <= limit:
+        p.error(f"seconds must be 1..{limit}")
     if r.stopped():print("STOP remains set; operator must explicitly acknowledge before run");return 2
     try:
         r.bind_transport("local-code" if a.local_code else "kilo-local")

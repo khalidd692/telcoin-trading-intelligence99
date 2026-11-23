@@ -28,12 +28,42 @@ FIELDS = {
 }
 VERIFIER = "tel99-local-docker-code-v1"
 PROVIDER = "loopback-code"
+FEEDBACK_MESSAGES = {
+    "candidate-diff": "The proposal was not a valid change to the one approved function. Check Python syntax and preserve its exact signature.",
+    "candidate-test": "The proposal failed an independent behavior check. Reconsider the requested behavior and its edge cases.",
+    "empty-completion": "The previous response contained no function. Return the complete updated function.",
+}
+
+
+class GenerationBlocked(Blocked):
+    """A local worker reported a bounded generation failure."""
+
+    def __init__(self, reason, feedback=None):
+        super().__init__(reason)
+        self.reason = reason
+        self.feedback = feedback
+
+
+def valid_feedback(feedback):
+    if not isinstance(feedback, dict) or not isinstance(feedback.get("kind"), str):
+        return False
+    if feedback["kind"] not in FEEDBACK_MESSAGES:
+        return False
+    if feedback.keys() == {"kind"}:
+        return True
+    return (feedback.keys() == {"kind", "line"} and feedback["kind"] == "candidate-test"
+            and type(feedback["line"]) is int and 1 <= feedback["line"] <= 8000)
 
 
 def validate_scope(mission):
+    if not isinstance(mission, dict):
+        raise ValueError("invalid local code scope")
     path = mission.get("path")
     port = mission.get("port")
-    if (set(mission) != FIELDS or mission["owner"] != "local"
+    max_attempts = mission.get("max_attempts", 1)
+    if (mission.keys() - {"max_attempts"} != FIELDS
+            or type(max_attempts) is not int or not 1 <= max_attempts <= 2
+            or mission["owner"] != "local"
             or mission["project"] != "tel99" or mission["specialist"] != "tel99-dev"
             or not isinstance(mission["id"], str)
             or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}", mission["id"])
@@ -53,7 +83,7 @@ def _sha(text):
 
 
 def _source(mission):
-    data = git_committed_blob(ROOT, mission["base_sha"], mission["path"])
+    data = git_committed_blob(ROOT, mission["base_sha"], mission["path"], timeout=5)
     if len(data) > 100_000:
         raise ValueError("source file exceeds the local code limit")
     return data.decode("utf-8")
@@ -105,8 +135,21 @@ def replace_function(source, name, reply):
     return candidate
 
 
-def execute(mission):
+def execute(mission, feedback=None):
     validate_scope(mission)
+    prompt = f"Task: {mission['objective']}"
+    if feedback is not None:
+        if mission.get("max_attempts", 1) != 2 or not valid_feedback(feedback):
+            raise ValueError("invalid local code retry feedback")
+        prompt += f"\n\nPrevious attempt: {FEEDBACK_MESSAGES[feedback['kind']]}"
+        if "line" in feedback:
+            prompt += f" The failing assertion is at line {feedback['line']} of the approved test."
+            lines = _physical_lines(mission["test"])
+            if feedback["line"] <= len(lines):
+                # The optional case label belongs to the approved test, not the model's output.
+                case = re.search(r"# case: ([a-z0-9-]{1,80})$", lines[feedback["line"] - 1].rstrip())
+                if case:
+                    prompt += f" Approved case: {case[1]}."
     sandbox.require_local_image(mission["sandbox_image"])
     source = _source(mission)
     function = _function_source(source, _function(source, mission["function"]))
@@ -124,10 +167,12 @@ def execute(mission):
             "Use only Python's standard library. You have no tools. "
             "Do not output other code, claims about tests, or deployment and trading actions."
         ),
-        prompt=f"Task: {mission['objective']}\n\nExisting function:\n{function}",
+        prompt=f"{prompt}\n\nExisting function:\n{function}",
     )
-    if not isinstance(reply, str) or not 1 <= len(reply.encode("utf-8")) <= 16_000:
-        raise ValueError("missing or oversized model reply")
+    if reply is None or isinstance(reply, str) and not reply.strip():
+        raise GenerationBlocked("local Qwen returned an empty completion", {"kind": "empty-completion"})
+    if not isinstance(reply, str) or len(reply.encode("utf-8")) > 16_000:
+        raise ValueError("invalid or oversized local Qwen completion")
     return {"artifact": reply, "sha256": _sha(reply), "specialist_id": mission["specialist"],
             "provider": PROVIDER, "model": model}
 
@@ -137,8 +182,14 @@ def _behavior(image, source, test):
     runner = (
         "try:\n"
         f"    exec(compile({test!r}, '<independent-test>', 'exec'))\n"
-        "except AssertionError:\n"
-        "    print('TEL99_TEST_FAIL')\n"
+        "except AssertionError as exc:\n"
+        "    line = None\n"
+        "    frame = exc.__traceback__\n"
+        "    while frame is not None:\n"
+        "        if frame.tb_frame.f_code.co_filename == '<independent-test>':\n"
+        "            line = frame.tb_lineno\n"
+        "        frame = frame.tb_next\n"
+        "    print('TEL99_TEST_FAIL' if line is None else f'TEL99_TEST_FAIL {line}')\n"
         "    raise SystemExit(1)\n"
         "print('TEL99_TEST_PASS')\n"
     )
@@ -147,9 +198,12 @@ def _behavior(image, source, test):
         path.write_bytes(source.encode("utf-8"))
         result = sandbox._run_container(image, path, 20, runner=runner)
     if (result.returncode, result.stdout) == (0, b"TEL99_TEST_PASS\n"):
-        return True
-    if (result.returncode, result.stdout) == (1, b"TEL99_TEST_FAIL\n"):
-        return False
+        return True, None
+    if result.returncode == 1:
+        failure = re.fullmatch(rb"TEL99_TEST_FAIL(?: ([1-9][0-9]{0,3}))?\r?\n", result.stdout)
+        if failure:
+            line = int(failure[1]) if failure[1] else None
+            return False, line if line is not None and line <= 8000 else None
     raise MissionError(f"no independent test verdict from Docker (exit {result.returncode})")
 
 
@@ -175,7 +229,7 @@ def _publish(directory, path, candidate, diff):
 def verify(mission, result, root):
     validate_scope(mission)
     reply = result.get("artifact")
-    if (not isinstance(reply, str) or not 1 <= len(reply.encode("utf-8")) <= 16_000
+    if (not isinstance(reply, str) or not reply.strip() or len(reply.encode("utf-8")) > 16_000
             or result.get("sha256") != _sha(reply) or result.get("specialist_id") != "tel99-dev"
             or result.get("provider") != PROVIDER or result.get("model") != mission["model"]):
         return {"ok": False, "checks": [{"name": "bounded-model-receipt", "ok": False}]}
@@ -188,18 +242,31 @@ def verify(mission, result, root):
     source = _source(mission)
     try:
         candidate = replace_function(source, mission["function"], reply)
-    except (SyntaxError, ValueError):
-        report["checks"].append({"name": "approved-function-diff", "ok": False})
+    except (SyntaxError, ValueError) as exc:
+        report["checks"].append({"name": "approved-function-diff", "ok": False,
+                                 "error": "invalid-python-syntax" if isinstance(exc, SyntaxError)
+                                 else "approved-function-change-required"})
+        report["feedback"] = {"kind": "candidate-diff"}
         return report
     report["checks"].append({"name": "approved-function-diff", "ok": True})
     sandbox.require_local_image(mission["sandbox_image"])
-    before = _behavior(mission["sandbox_image"], source, mission["test"])
-    after = _behavior(mission["sandbox_image"], candidate, mission["test"])
-    report["checks"].extend([
-        {"name": "baseline-fails", "ok": not before, "exit_code": 0 if before else 1},
-        {"name": "candidate-passes", "ok": after, "exit_code": 0 if after else 1},
-    ])
-    if not before and after:
+    before, baseline_line = _behavior(mission["sandbox_image"], source, mission["test"])
+    baseline = {"name": "baseline-fails", "ok": not before, "exit_code": 0 if before else 1}
+    if baseline_line is not None:
+        baseline["assertion_line"] = baseline_line
+    report["checks"].append(baseline)
+    if before:
+        return report
+    after, candidate_line = _behavior(mission["sandbox_image"], candidate, mission["test"])
+    check = {"name": "candidate-passes", "ok": after, "exit_code": 0 if after else 1}
+    if candidate_line is not None:
+        check["assertion_line"] = candidate_line
+    report["checks"].append(check)
+    if not after:
+        report["feedback"] = {"kind": "candidate-test"}
+        if candidate_line is not None:
+            report["feedback"]["line"] = candidate_line
+    else:
         path = mission["path"]
         changes = difflib.unified_diff(
             _physical_lines(source), _physical_lines(candidate),
@@ -218,8 +285,19 @@ def main():
         raw = sys.stdin.buffer.read(100_001)
         if len(raw) > 100_000:
             raise ValueError("worker input exceeds the limit")
-        print(json.dumps(execute(json.loads(raw))), flush=True)
+        data = json.loads(raw)
+        if isinstance(data, dict) and data.keys() == {"mission", "feedback"}:
+            result = execute(data["mission"], feedback=data["feedback"])
+        else:
+            result = execute(data)
+        print(json.dumps(result), flush=True)
         return 0
+    except GenerationBlocked as exc:
+        report = {"status": "BLOCKED", "reason": exc.reason}
+        if valid_feedback(exc.feedback):
+            report["feedback"] = exc.feedback
+        print(json.dumps(report), flush=True)
+        return 4
     except (Blocked, MissionError, OSError, ProviderError, SyntaxError, ValueError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}), flush=True)
         return 4

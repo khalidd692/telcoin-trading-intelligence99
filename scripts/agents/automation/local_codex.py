@@ -80,7 +80,7 @@ def checked(argv, *, cwd=ROOT, env=None):
 
 
 
-def git_committed_blob(workspace, commit, path):
+def git_committed_blob(workspace, commit, path, *, timeout=45):
     """Read the exact committed blob without stat'ing 'SHA:path' on Windows.
 
     A deeply nested Git for Windows checkout can reject the composite
@@ -91,7 +91,7 @@ def git_committed_blob(workspace, commit, path):
         listing = subprocess.check_output(
             ["git", "-c", "core.longpaths=true", "ls-tree", "-r", "-z",
              "--full-tree", commit, "--", path],
-            cwd=workspace, timeout=45,
+            cwd=workspace, timeout=timeout,
         )
         entries = [entry for entry in listing.split(b"\0") if entry]
         if len(entries) != 1:
@@ -104,7 +104,7 @@ def git_committed_blob(workspace, commit, path):
             raise Blocked("L'entree Git ne correspond pas au blob attendu.")
         return subprocess.check_output(
             ["git", "-c", "core.longpaths=true", "cat-file", "blob",
-             fields[2].decode("ascii")], cwd=workspace, timeout=45,
+             fields[2].decode("ascii")], cwd=workspace, timeout=timeout,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeError) as exc:
         raise Blocked("Lecture independante du blob Git impossible.") from exc
