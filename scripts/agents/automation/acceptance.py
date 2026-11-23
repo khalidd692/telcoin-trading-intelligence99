@@ -17,7 +17,7 @@ _MAX_ARTIFACT_BYTES = 256 * 1024
 
 
 def _artifact_path(body: str) -> str | None:
-    paths = re.findall(r"^[ \t]*[-*]?[ \t]*acceptance-artifact:[ \t]*([^\s]+)[ \t]*$",
+    paths = re.findall(r"^[ \t]*[-*]?[ \t]*acceptance-artifact:[ \t]*([^\s]+)[ \t]*\r?$",
                        body, re.MULTILINE | re.IGNORECASE)
     if len(paths) != 1:
         return None
