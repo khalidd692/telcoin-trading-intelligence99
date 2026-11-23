@@ -8,7 +8,7 @@ An owner-prepared local JSON manifest outside the repo must have version=1 and c
 
 On each poll, the manifest is reread. A second controller added to it is checked for owner identity and all signed approvals before workers start. Each controller has its own durable state directory. Completed tasks are not reexecuted; uncertain RUNNING worker outcomes remain AWAITING_HUMAN.
 
-PowerShell: use scripts/agents/automation/run_github_multi_mandate.ps1 -Mode Preflight -Manifest <PATH>; then -Mode Run -Manifest <PATH> -Minutes 60 -PollInterval 30. In a second console use -Mode Status or -Mode Stop. Stop writes stop.request and requires operator audit before removal.
+PowerShell: use scripts/agents/automation/run_github_multi_mandate.ps1 -Mode Preflight -Manifest <PATH>; then -Mode Run -Manifest <PATH> -Minutes 60 -PollInterval 30. In a second console use -Mode Status or -Mode Stop. Stop writes the parent stop.request AND a stop.request inside every existing campaign ledger; legacy .kilo/STOP is honored too. To resume, the operator must audit and deliberately clear the appropriate STOP markers, never erase any CAS receipts or mission checkpoints.
 
 Tests: python -B -m unittest tests.test_github_hour_queue tests.test_github_multi_mandate_session tests.test_github_local_code_campaign tests.test_autonomy_runtime tests.test_local_code_pr_publisher
 
