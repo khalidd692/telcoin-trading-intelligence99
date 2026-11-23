@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795402236,
-  "observations": 530,
-  "valid_observations": 509,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795424641,
+  "observations": 531,
+  "valid_observations": 510,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 403,
-              "mean_pct": 1.96012
+              "count": 404,
+              "mean_pct": 1.98732
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 138,
-              "mean_pct": -0.72275
+              "count": 146,
+              "mean_pct": -0.16811
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795317218,
-      "previous_decision": "ATTENDRE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ convergence"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795330585,
       "previous_decision": "ATTENDRE",
@@ -343,6 +333,14 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795424641,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -352,10 +350,10 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 8,
+        "episodes": 9,
         "detected": 2,
         "missed": 2,
-        "unknown": 4,
+        "unknown": 5,
         "detection_fraction_known": 0.5,
         "late_alerts": 6,
         "median_lead_minutes": 42.1,
@@ -372,10 +370,10 @@
         "median_late_minutes": 165.94166666666666
       },
       "5": {
-        "episodes": 5,
+        "episodes": 6,
         "detected": 0,
         "missed": 3,
-        "unknown": 2,
+        "unknown": 3,
         "detection_fraction_known": 0.0,
         "late_alerts": 4,
         "median_lead_minutes": null,
