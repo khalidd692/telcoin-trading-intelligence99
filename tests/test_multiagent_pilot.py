@@ -125,6 +125,24 @@ class ExistingTeamPilotTests(unittest.TestCase):
         result["agent_trace"]["analyst"]["analysis"] += " fabricated"
         self.assertFalse(local_team.valid_trace(m, result))
 
+    def test_verifier_role_is_named_only_by_real_independent_docker_gate(self):
+        m = mission()
+        result = {
+            "artifact": FIX, "sha256": hashlib.sha256(FIX.encode()).hexdigest(),
+            "specialist_id": "tel99-dev", "provider": local_codegen.PROVIDER,
+            "model": m["model"],
+            "agent_trace": local_team.trace(advice(), developer_model=m["model"], artifact=FIX),
+        }
+        with (tempfile.TemporaryDirectory() as directory,
+              patch.object(local_codegen, "_source", return_value=FUNCTION),
+              patch.object(local_codegen.sandbox, "require_local_image"),
+              patch.object(local_codegen, "_behavior", side_effect=[(False, 1), (True, None)])):
+            verdict = local_codegen.verify(m, result, Path(directory))
+        self.assertTrue(verdict["ok"])
+        self.assertEqual(verdict["verification_role"]["role"], "tel99-verifier")
+        self.assertEqual(verdict["verification_role"]["analyst_sha256"], advice()["sha256"])
+        self.assertEqual([c["ok"] for c in verdict["checks"]], [True] * 4)
+
     def test_historical_evidence_seals_pilot_only_when_opted_in(self):
         with patch.object(evidence_route, "_checked_sessions", return_value=fixtures()):
             registry, plan = evidence_route.prepare_from_evidence(
