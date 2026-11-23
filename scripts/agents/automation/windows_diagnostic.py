@@ -78,7 +78,7 @@ def git_changes(output):
     for row in fields:
         if not row:
             continue
-        if not re.match(r"^[ MADRCU?]{2} ", row):
+        if not re.match(r"^[ MADRCU?T]{2} ", row):
             return None
         index, worktree = row[:2]
         if (index in "RC" or worktree in "RC") and not next(fields, ""):
@@ -87,6 +87,9 @@ def git_changes(output):
             counts["untracked"] += 1
         elif index + worktree in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}:
             counts["conflicts"] += 1
+        elif "T" in index or "T" in worktree:
+            counts["staged"] += index != " "
+            counts["unstaged"] += worktree != " "
         else:
             counts["staged"] += index != " "
             counts["unstaged"] += worktree != " "
