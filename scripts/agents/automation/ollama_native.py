@@ -36,21 +36,23 @@ class OllamaNativeProvider:
 
     def complete(self, *, system: str, prompt: str) -> str:
         self.last_metadata = {}
-        body = json.dumps({
+        payload = {
             "model": self.model,
             "system": system,
             "prompt": prompt,
             "stream": False,
-            # Code-only repair tasks need final code, not a reasoning trace.
-            # Ollama otherwise can consume num_predict in the thinking field.
-            "think": False,
             "keep_alive": "0s",
             "options": {
                 "num_ctx": 8192,
                 "num_predict": self.max_tokens,
                 "temperature": 0,
             },
-        }).encode("utf-8")
+        }
+        # Request final code immediately for supported thinking models only.
+        # Older code-only models need no thinking override.
+        if self.model in ("gemma4:e4b-tel99-8k", "qwen3.5:9b-q4_K_M"):
+            payload["think"] = False
+        body = json.dumps(payload).encode("utf-8")
         request = Request(
             "http://127.0.0.1:11434/api/generate",
             data=body,
