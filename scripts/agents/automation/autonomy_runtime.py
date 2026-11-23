@@ -4,7 +4,7 @@ Registry approvals for synthetic text and scoped code missions must be supplied
 by a trusted operator; seal() computes fingerprints, not signatures.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, re, subprocess, sys, time
+import argparse, hashlib, json, os, re, subprocess, sys, tempfile, time
 from graphlib import TopologicalSorter
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -120,7 +120,7 @@ class Runtime(Supervisor):
         if m.get("owner") == "local":
             return [sys.executable, "-I", "-B", str(Path(__file__).with_name("local_codegen.py"))]
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
-    def execute_worker(self, m, *, feedback=None, attempt=1):
+    def execute_worker(self, m, *, feedback=None, attempt=1, previous=None):
         command=self.worker_command(m)
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
@@ -131,11 +131,19 @@ class Runtime(Supervisor):
         name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
         output = self.root / f"{name}.worker.json"
         error = self.root / f"{name}.worker.err"
-        request = {"mission": m, "feedback": feedback} if feedback is not None else m
-        with output.open("wb") as out,error.open("wb") as err:
-            p=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=out,stderr=err,env=env,cwd=self.root)
+        if feedback is None:
+            if previous is not None:
+                raise Blocked("previous candidate requires verifier feedback")
+            request = m
+        else:
+            request = {"mission": m, "feedback": feedback}
+        if previous is not None:
+            request["previous"] = previous
+        with tempfile.TemporaryFile() as worker_input, output.open("wb") as out, error.open("wb") as err:
+            worker_input.write(json.dumps(request, ensure_ascii=False).encode("utf-8"))
+            worker_input.seek(0)
+            p=subprocess.Popen(command,stdin=worker_input,stdout=out,stderr=err,env=env,cwd=self.root)
             try:
-                p.stdin.write(json.dumps(request).encode());p.stdin.close()
                 deadline=min(time.monotonic()+100,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
@@ -209,9 +217,10 @@ class Runtime(Supervisor):
             diagnostic["verification"] = verification
         history = [*saved.get("attempt_history", ()), diagnostic]
         retry = number < maximum
+        keep_receipt = retry and feedback["kind"] == "candidate-test" and "candidate_sha256" in feedback
         self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
                   feedback=feedback if retry else None, reason=reason,
-                  result=None, verification=verification)
+                  result=saved["result"] if keep_receipt else None, verification=verification)
         return True
 
     def _attempt(self, m, saved, maximum):
@@ -224,7 +233,8 @@ class Runtime(Supervisor):
                          or not isinstance(history[-1], dict)
                          or history[-1].get("number") != expected
                          or history[-1].get("feedback") != feedback))
-                    or (saved.get("status") == "WORKER_EXITED" and saved.get("attempt") != expected + 1)):
+                    or (saved.get("status") == "WORKER_EXITED" and (
+                        type(saved.get("attempt")) is not int or saved["attempt"] != expected + 1))):
                 self.save(m, "AWAITING_HUMAN", reason="invalid retry checkpoint; reconciliation required")
                 return
         if saved.get("status")!="WORKER_EXITED":
@@ -256,7 +266,10 @@ class Runtime(Supervisor):
                 return
             try:
                 if maximum > 1 and self.executor == self._default_executor:
-                    result = self.execute_worker(m, feedback=running.get("feedback"), attempt=running["attempt"])
+                    previous = running.get("result")
+                    retry_context = {"previous": previous["artifact"]} if isinstance(previous, dict) else {}
+                    result = self.execute_worker(m, feedback=running.get("feedback"),
+                                                 attempt=running["attempt"], **retry_context)
                 else:
                     result = self.executor(m)
             except QuotaBlocked as exc:
@@ -313,7 +326,8 @@ class Runtime(Supervisor):
                 and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
                 and isinstance(artifact, str)
                 and hashlib.sha256(artifact.encode("utf-8")).hexdigest()
-                == verified.get("artifact_sha256") == saved["result"].get("sha256")):
+                == verified.get("artifact_sha256") == saved["result"].get("sha256")
+                and feedback.get("candidate_sha256", verified["artifact_sha256"]) == verified["artifact_sha256"]):
             outcomes = {c["name"]: c.get("ok") for c in checks
                         if isinstance(c, dict) and isinstance(c.get("name"), str)}
             correctable = (
