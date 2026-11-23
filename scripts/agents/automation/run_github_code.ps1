@@ -19,7 +19,7 @@ Push-Location -LiteralPath $repo
 try {
     if ($Mode -in @("Run", "Preflight")) {
         Write-Host "TEL99 | Python offline safety regression tests"
-        & $python -B -m unittest tests.test_github_local_code_campaign tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
+        & $python -B -m unittest tests.test_github_local_code_campaign tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
         if ($LASTEXITCODE -ne 0) { throw "Python safety tests failed; execution refused" }
         Write-Host "TEL99 | GitHub owner mandate preflight"
         & $python -B -m $module preflight --issue $controller --mandate-comment $mandate --mandate-sha256 $pin
