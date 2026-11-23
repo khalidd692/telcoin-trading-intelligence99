@@ -270,17 +270,31 @@ def inventory_view(automations: list[dict[str, Any]] | None) -> dict[str, Any]:
     view: list[dict[str, Any]] = []
     for a in items:
         state = a.get("state") or ("ACTIVE" if a.get("enabled") else "INACTIVE")
+        trigger = a.get("trigger") or {}
+        trigger_type = trigger.get("type")
+        
+        is_enabled = bool(a.get("enabled"))
+        
+        # Logic update: An inactive entry without a scheduled trigger must be manual-only, 
+        # with null trigger_type.
+        # If not enabled AND trigger_type is None/missing, it's manual_only=True.
+        # Otherwise, use existing logic for manual_only.
+        if not is_enabled and trigger_type is None:
+            manual_only = True
+        else:
+            manual_only = (not is_enabled) and trigger_type != "cron"
+
         view.append(
             {
                 "id": a.get("id"),
                 "name": a.get("name"),
                 "state": state,
-                "enabled": bool(a.get("enabled")),
-                "manual_only": (not a.get("enabled")) and a.get("trigger", {}).get("type") != "cron",
-                "trigger_type": (a.get("trigger") or {}).get("type"),
+                "enabled": is_enabled,
+                "manual_only": manual_only,
+                "trigger_type": trigger_type,
                 "model": a.get("model"),
-                "ref": ((a.get("plugin_spec") or {}).get("plugin") or {}).get("ref"),
-                "dry_run": ((a.get("plugin_spec") or {}).get("config") or {}).get("dry_run"),
+                "ref": ((a.get("plugin_spec") or {})).get("plugin", {}).get("ref"),
+                "dry_run": ((a.get("plugin_spec") or {})).get("config", {}).get("dry_run"),
             }
         )
     active = [v["id"] for v in view if v["enabled"]]
