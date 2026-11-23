@@ -113,7 +113,48 @@ MODEL_CATALOG: tuple[ModelSpec, ...] = (
         ),
         verified=False,
         tags=("free", "local", "tools", "code"),
-        endpoint="http://localhost:11434/v1",
+        endpoint="http://127.0.0.1:11434/api/generate",
+        memory_mib=5500,
+        served_ids=("qwen2.5-coder:7b",),
+    ),
+    ModelSpec(
+        id="local/ollama-gemma4-e4b",
+        provider="ollama",
+        location=LOCAL,
+        cost_tier=COST_FREE,
+        supports_tools=False,
+        context_tokens=8192,
+        latency_tier="slow",
+        quality_prior=0.55,
+        evidence=(
+            "2026-11-23 observed Gemma 4 E4B (8k profile) accept an approved "
+            "TEL99 load_json repair through native Ollama + independent Docker. "
+            "Quality prior is uncalibrated; availability checked at runtime."
+        ),
+        verified=False,
+        tags=("free", "local", "code", "ollama-native"),
+        endpoint="http://127.0.0.1:11434/api/generate",
+        memory_mib=6800,
+        served_ids=("gemma4:e4b-tel99-8k",),
+    ),
+    ModelSpec(
+        id="local/ollama-qwen3.5-9b",
+        provider="ollama",
+        location=LOCAL,
+        cost_tier=COST_FREE,
+        supports_tools=False,
+        context_tokens=8192,
+        latency_tier="slow",
+        quality_prior=0.55,
+        evidence=(
+            "2026-11-23 user-observed Ollama installation qwen3.5:9b-q4_K_M; "
+            "quality/context/latency are planning estimates, not Docker benchmark."
+        ),
+        verified=False,
+        tags=("free", "local", "code", "ollama-native"),
+        endpoint="http://127.0.0.1:11434/api/generate",
+        memory_mib=7500,
+        served_ids=("qwen3.5:9b-q4_K_M",),
     ),
     ModelSpec(
         id="local/llama-qwen2.5-3b",
