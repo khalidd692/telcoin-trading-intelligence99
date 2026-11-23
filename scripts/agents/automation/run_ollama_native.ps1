@@ -46,14 +46,14 @@ try {
         )
     }
     $cliArgs += @("--prefix", $prefix, "--output", $registry)
-    $out = & $python @args
+    $out = & $python @cliArgs
     if ($LASTEXITCODE -ne 0) { throw "Failed to prepare a new approved mission registry" }
     $newPin = ($out | Select-Object -Last 1).Trim()
     if ($newPin -cnotmatch "^[0-9a-f]{64}$") { throw "Unexpected approved registry digest" }
 
     Write-Host "TEL99 | Fresh approved registry: $registry"
     Write-Host "TEL99 | Registry pin: $newPin"
-    Write-Host "TEL99 | Mode: $Mode | Five original independent tasks"
+    Write-Host "TEL99 | Mode: $Mode | Five original tasks plus optional approved successor"
     Write-Host "TEL99 | Running foreground Night Lab, max one hour, no auto merge"
     & $python -B "scripts/agents/night_lab_20261123.py" run --registry $registry --registry-sha256 $newPin --hours 1
     $runCode = $LASTEXITCODE
