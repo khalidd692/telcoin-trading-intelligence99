@@ -71,7 +71,17 @@ def work_branch_name(prefix: str, issue_number: int, title: str) -> str:
 
 
 def _labels(issue: dict) -> list[str]:
-    return [str(l.get("name", "")) for l in issue.get("labels", []) if isinstance(l, dict)]
+    """Return only string label names from a genuine list of label objects."""
+    if not isinstance(issue, dict):
+        return []
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return []
+    return [
+        label["name"]
+        for label in labels
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    ]
 
 
 def is_eligible_mission(issue: dict, mission_label: str) -> bool:
@@ -104,7 +114,9 @@ def select_mission(
         i
         for i in issues
         if is_eligible_mission(i, mission_label)
-        and isinstance(i.get("number"), int)
+        and type(i.get("number")) is int
+        and i["number"] > 0
+        and (i.get("created_at") is None or isinstance(i.get("created_at"), str))
         and i["number"] not in processed
     ]
     if not candidates:
@@ -263,7 +275,9 @@ def read_approval(issue: dict) -> tuple[dict | None, str]:
     marker of a known scheme is present, and ``reason`` explains why.
     """
     body = issue.get("body") if isinstance(issue, dict) else None
-    text = body or ""
+    if not isinstance(body, str):
+        return None, "issue body is not a string; refusing"
+    text = body
     # Every line that begins like a marker must be a single, well-formed one.
     # Two markers (or one malformed) is ambiguous and is refused: a smuggled
     # marker must never be able to shadow the real approval.
