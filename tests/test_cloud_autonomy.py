@@ -442,8 +442,8 @@ class CallbackTests(unittest.TestCase):
         env["AUTOMATION_RUN_ID"] = "run-1"
         proc = subprocess.run(
             [sys.executable, "-c",
-             "import sys;sys.path.insert(0,'%s');import orchestrator;"
-             "orchestrator.fire_callback('COMPLETED')" % AUTOMATION],
+             "import sys;sys.path.insert(0,%r);import orchestrator;"
+             "orchestrator.fire_callback('COMPLETED')" % str(AUTOMATION)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         thread.join(timeout=5)
@@ -457,8 +457,8 @@ class CallbackTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "AUTOMATION_CALLBACK_URL"}
         proc = subprocess.run(
             [sys.executable, "-c",
-             "import sys;sys.path.insert(0,'%s');import orchestrator;"
-             "orchestrator.fire_callback('COMPLETED')" % AUTOMATION],
+             "import sys;sys.path.insert(0,%r);import orchestrator;"
+             "orchestrator.fire_callback('COMPLETED')" % str(AUTOMATION)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr.decode())
