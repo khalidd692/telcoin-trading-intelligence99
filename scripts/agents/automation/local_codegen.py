@@ -323,7 +323,16 @@ def execute(mission, feedback=None, previous=None):
         prompt=prompt,
     )
     if reply is None or isinstance(reply, str) and not reply.strip():
-        raise GenerationBlocked("local model returned an empty completion", {"kind": "empty-completion"})
+        reason = "local model returned an empty completion"
+        metadata = getattr(provider, "last_metadata", {})
+        if isinstance(metadata, dict) and metadata:
+            # Expose only technical counters and termination state; never thoughts.
+            reason += " (done_reason={}, tokens={}, thinking_present={})".format(
+                metadata.get("done_reason", "unknown"),
+                metadata.get("eval_count"),
+                metadata.get("thinking_present", False),
+            )
+        raise GenerationBlocked(reason, {"kind": "empty-completion"})
     if not isinstance(reply, str) or len(reply.encode("utf-8")) > 16_000:
         raise ValueError("invalid or oversized local model completion")
     return {"artifact": reply, "sha256": _sha(reply), "specialist_id": mission["specialist"],
