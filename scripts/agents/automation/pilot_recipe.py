@@ -270,17 +270,22 @@ def inventory_view(automations: list[dict[str, Any]] | None) -> dict[str, Any]:
     view: list[dict[str, Any]] = []
     for a in items:
         state = a.get("state") or ("ACTIVE" if a.get("enabled") else "INACTIVE")
+        trigger = a.get("trigger")
+        trigger_type = None
+        if isinstance(trigger, dict):
+            trigger_type = trigger.get("type")
+
         view.append(
             {
                 "id": a.get("id"),
                 "name": a.get("name"),
                 "state": state,
                 "enabled": bool(a.get("enabled")),
-                "manual_only": (not a.get("enabled")) and a.get("trigger", {}).get("type") != "cron",
-                "trigger_type": (a.get("trigger") or {}).get("type"),
+                "manual_only": (not a.get("enabled")) and (trigger_type != "cron"),
+                "trigger_type": trigger_type,
                 "model": a.get("model"),
-                "ref": ((a.get("plugin_spec") or {}).get("plugin") or {}).get("ref"),
-                "dry_run": ((a.get("plugin_spec") or {}).get("config") or {}).get("dry_run"),
+                "ref": ((a.get("plugin_spec") or {})).get("plugin", {}).get("ref"),
+                "dry_run": ((a.get("plugin_spec") or {})).get("config", {}).get("dry_run"),
             }
         )
     active = [v["id"] for v in view if v["enabled"]]
