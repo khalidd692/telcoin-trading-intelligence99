@@ -82,7 +82,9 @@ def _checked_sessions(gemma_path, gemma_pin, coder_path, coder_pin):
 def _winner(rows):
     eligible = []
     for index, row in enumerate(rows):
-        if row["accepted"] and all(attempt["attributed_model_outcome"] for attempt in row["attempts"]):
+        # An earlier failed generation may have no Docker receipt. A completed
+        # accepted attempt is still independently verified in _observe.
+        if row["accepted"] and row["attempts"][-1]["attributed_model_outcome"]:
             durations = [attempt["generation_seconds"] for attempt in row["attempts"]]
             elapsed = sum(durations) if all(t is not None for t in durations) else None
             eligible.append((len(row["attempts"]), elapsed is None,
