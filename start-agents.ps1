@@ -10,7 +10,8 @@ param(
  [string]$MandateSha256,
  [switch]$Campaign,
  [ValidateRange(1,3600)][int]$Seconds=300,
- [switch]$Once
+ [switch]$Once,
+ [switch]$LocalCode
 )
 $ErrorActionPreference='Stop'
 try {
@@ -32,6 +33,7 @@ try {
  exit 2
 }
 if ($Action -eq 'START') { $Action='RUN' }
+if ($LocalCode -and $GitHubIssue) { throw 'LocalCode requires a local registry' }
 if ($Campaign -and (-not $GitHubIssue -or ($MandateComment -le 0 -and -not $State))) {
  throw 'Campaign requires -GitHubIssue and either -MandateComment or -State'
 }
@@ -40,6 +42,8 @@ if (-not $State) {
   "kilo-campaign-$GitHubIssue-$MandateComment"
  } elseif ($GitHubIssue) {
   "kilo-github-$GitHubIssue"
+ } elseif ($LocalCode) {
+  'local-code'
  } else {
   'kilo'
  }
@@ -78,6 +82,7 @@ if ($Action -in @('RUN', 'PREFLIGHT')) {
   throw 'RUN requires an operator-approved registry and its pinned SHA256; no automatic approval'
   }
   $argv+=@('--registry',$Registry,'--registry-sha256',$RegistrySha256)
+  if ($LocalCode) { $argv+='--local-code' }
  }
  if ($Action -eq 'RUN') {
   $argv+=@('--seconds',"$Seconds")
