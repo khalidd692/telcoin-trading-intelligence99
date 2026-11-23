@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -101,9 +102,10 @@ class MultiMandateTests(unittest.TestCase):
             ticks.append(1)
             if len(ticks) == 1:
                 write_manifest(self.root, [spec(201), spec(202)])
+            time.sleep(_)
         summary = multi.run_campaigns(
-            manifest, self.root / "ledger", seconds=1,
-            poll_interval=0.01, build=build, sleep=sleep)
+            manifest, self.root / "ledger", seconds=2,
+            poll_interval=1, build=build, sleep=sleep)
         self.assertEqual(calls, [201, 202])
         self.assertEqual(summary, {201: True, 202: True})
 
