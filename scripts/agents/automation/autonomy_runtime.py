@@ -172,7 +172,10 @@ class Runtime(Supervisor):
             worker_input.seek(0)
             p=subprocess.Popen(command,stdin=worker_input,stdout=out,stderr=err,env=env,cwd=self.root)
             try:
-                deadline=min(time.monotonic()+100,self.deadline or float("inf"))
+                # Two sequential bounded Ollama calls only in the explicitly
+                # sealed 3-role pilot; legacy single-agent workers keep 100 s.
+                worker_seconds = 160 if m.get("team") else 100
+                deadline=min(time.monotonic()+worker_seconds,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
                         p.kill();p.wait(timeout=10)
@@ -210,6 +213,16 @@ class Runtime(Supervisor):
             if code:
                 evidence.update({key: saved["verification"][key] for key in
                                  ("base_sha", "path", "candidate_sha256", "diff_sha256", "test_sha256")})
+                if m.get("team"):
+                    role = saved["verification"].get("verification_role", {})
+                    trace = saved["result"].get("agent_trace", {})
+                    analyst = trace.get("analyst", {}) if isinstance(trace, dict) else {}
+                    if (role.get("role") != "tel99-verifier"
+                            or not isinstance(analyst.get("sha256"), str)
+                            or len(analyst["sha256"]) != 64):
+                        raise ValueError("verified team trace is incomplete")
+                    evidence["analyst_sha256"] = analyst["sha256"]
+                    evidence["roles"] = m["team"]
             memory.record(Entry(id=m["id"],project=m["project"],kind="fact",
                 title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
                 body=json.dumps(evidence),

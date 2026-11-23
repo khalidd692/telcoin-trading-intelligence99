@@ -1,8 +1,8 @@
 # TEL99 native Ollama recipe. No Kilo, Codex or paid provider dependency.
-# Run with pwsh -NoProfile -File <path> -Mode Test|Gemma|Coder|Qwen35|Route|Evidence.
+# Run with pwsh -NoProfile -File <path> -Mode Test|Gemma|Coder|Qwen35|Route|Evidence|Team.
 [CmdletBinding()]
 param(
-    [ValidateSet("Test", "Gemma", "Coder", "Qwen35", "Route", "Evidence")]
+    [ValidateSet("Test", "Gemma", "Coder", "Qwen35", "Route", "Evidence", "Team")]
     [string]$Mode = "Test"
 )
 $ErrorActionPreference = "Stop"
@@ -14,7 +14,7 @@ $python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
 Push-Location -LiteralPath $repo
 try {
     Write-Host "TEL99 | Python tests for native Ollama and legacy llama.cpp"
-    & $python -B -m unittest tests.test_ollama_native_code tests.test_local_model_routing tests.test_prepare_local_code tests.test_evidence_route
+    & $python -B -m unittest tests.test_ollama_native_code tests.test_local_model_routing tests.test_prepare_local_code tests.test_evidence_route tests.test_multiagent_pilot
     if ($LASTEXITCODE -ne 0) {
         throw "Regression tests failed; no real model campaign launched"
     }
@@ -29,7 +29,7 @@ try {
     $source = "docs/agents/TEL99_QWEN_REPAIR_QUEUE_20261123.json"
     $pin = "dfc7ae6328f82894b97b2a5a6d7676096fb643d289bc50cba704b30a7ca01bf9"
 
-    if ($Mode -eq "Evidence") {
+    if ($Mode -in @("Evidence", "Team")) {
         # The two Windows runs are independently SHA-pinned. The Python
         # evidence verifier fails closed if even one proof cannot be validated.
         $desktop = [Environment]::GetFolderPath("Desktop")
@@ -65,6 +65,9 @@ try {
             )
         }
     }
+    if ($Mode -eq "Team") {
+        $cliArgs += "--team"
+    }
     $cliArgs += @("--prefix", $prefix, "--output", $registry)
     $out = & $python @cliArgs
     if ($LASTEXITCODE -ne 0) { throw "Failed to prepare a new approved mission registry" }
@@ -73,7 +76,7 @@ try {
 
     Write-Host "TEL99 | Fresh approved registry: $registry"
     Write-Host "TEL99 | Registry pin: $newPin"
-    if ($Mode -eq "Evidence") {
+    if ($Mode -in @("Evidence", "Team")) {
         $plan = [System.IO.Path]::ChangeExtension($registry, ".selection.json")
         if (!(Test-Path -LiteralPath $plan)) { throw "Evidence selection plan missing" }
         Write-Host "TEL99 | Verified per-task model selection"
@@ -98,6 +101,23 @@ try {
             Write-Host "TEL99 | Campaign phase: $($state.phase)"
             $state.missions | Format-List
         }
+    }
+    if ($Mode -eq "Team" -and $latest) {
+        $stateDir = Join-Path $latest.FullName "code-state"
+        $count = 0
+        if (Test-Path -LiteralPath $stateDir) {
+            foreach ($receiptFile in (Get-ChildItem -LiteralPath $stateDir -File -Filter "*.worker.json")) {
+                $receipt = Get-Content -LiteralPath $receiptFile.FullName -Raw | ConvertFrom-Json
+                if ($null -eq $receipt.PSObject.Properties["agent_trace"]) { continue }
+                $trace = $receipt.agent_trace
+                if ($null -ne $trace -and $null -ne $trace.analyst -and $null -ne $trace.developer) {
+                    $count++
+                    Write-Host "TEL99 | Handoff $($receiptFile.Name): $($trace.analyst.role) => $($trace.developer.role)"
+                    Write-Host "       Analyst SHA256: $($trace.analyst.sha256)"
+                }
+            }
+        }
+        Write-Host "TEL99 | Agent analyst/developer handoff receipts observed: $count"
     }
     if ($runCode -ne 0) { throw "Night Lab incomplete or blocked (exit $runCode); inspect evidence" }
     Write-Host "TEL99 | Complete: all mandatory missions accepted"

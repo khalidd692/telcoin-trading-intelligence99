@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import sys
 
-from scripts.agents.automation import compare_local_code as evidence
+from scripts.agents.automation import compare_local_code as evidence, local_team
 from scripts.agents.automation.autonomy_runtime import seal, validate_contract
 from scripts.agents.automation.local_model_routing import validate_candidates
 from scripts.agents.intelligence.catalog import by_id
@@ -95,7 +95,7 @@ def _winner(rows):
     return min(eligible)[-1]
 
 
-def prepare_from_evidence(source, prefix, gemma_path, gemma_pin, coder_path, coder_pin):
+def prepare_from_evidence(source, prefix, gemma_path, gemma_pin, coder_path, coder_pin, *, team=False):
     if not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,38}", prefix):
         raise ValueError("invalid evidence campaign prefix")
     originals = _read_pinned_source(*source)
@@ -118,6 +118,8 @@ def prepare_from_evidence(source, prefix, gemma_path, gemma_pin, coder_path, cod
         row = {k: v for k, v in m.items() if k not in {"model", "port", "routing"}}
         row.update(id=ids[m["id"]], dependencies=[ids[dep] for dep in m["dependencies"]],
                    model=binding["model"], port=binding["port"])
+        if team is True:
+            row["team"] = local_team.TEAM.copy()
         result.append(row)
         decisions.append({
             "case_sha256": key, "function": m["function"], "mission": row["id"],
@@ -145,12 +147,13 @@ def main(argv=None):
     parser.add_argument("--coder", type=Path, required=True)
     parser.add_argument("--coder-sha256", required=True)
     parser.add_argument("--prefix", required=True)
+    parser.add_argument("--team", action="store_true", help="execute the existing 3-role analyst/dev/verifier pilot")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         registry, plan = prepare_from_evidence(
             (args.source, args.source_sha256), args.prefix,
-            args.gemma, args.gemma_sha256, args.coder, args.coder_sha256,
+            args.gemma, args.gemma_sha256, args.coder, args.coder_sha256, team=args.team,
         )
         raw = (json.dumps(registry, sort_keys=True, indent=2) + "\n").encode("utf-8")
         # Unique campaign IDs, no replacement of existing registry or evidence.
