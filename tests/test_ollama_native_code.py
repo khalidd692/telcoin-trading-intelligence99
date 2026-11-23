@@ -6,8 +6,15 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
+
+# The existing TEL99 worker imports local_codex and protocol as legacy top-level
+# modules. Its normal isolated CLI sets these paths before importing worker code.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts" / "agents"))
+sys.path.insert(0, str(ROOT / "scripts" / "agents" / "automation"))
 
 from scripts.agents.automation import local_codegen, local_model_routing, prepare_local_code
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
