@@ -1,18 +1,19 @@
 [CmdletBinding()]
-param(
- [ValidateSet('START','RUN','STATUS','STOP','PREFLIGHT','DIAGNOSTIC')][string]$Action='STATUS',
- [string]$Python,
- [string]$State,
- [string]$Registry,
- [string]$RegistrySha256,
- [ValidateRange(1,2147483647)][int]$GitHubIssue,
- [long]$MandateComment,
- [string]$MandateSha256,
- [switch]$Campaign,
- [ValidateRange(1,21600)][int]$Seconds=300,
- [switch]$Once,
- [switch]$LocalCode
-)
+    param(
+     [ValidateSet('START','RUN','STATUS','STOP','PREFLIGHT','DIAGNOSTIC')][string]$Action='STATUS',
+     [string]$Python,
+     [string]$State,
+     [string]$Registry,
+     [string]$RegistrySha256,
+     [ValidateRange(1,2147483647)][int]$GitHubIssue,
+     [long]$MandateComment,
+     [string]$MandateSha256,
+     [switch]$Campaign,
+     [ValidateRange(1,21600)][int]$Seconds=300,
+     [switch]$Once,
+     [switch]$LocalCode,
+     [ValidateRange(1,3600)][int]$PollInterval=30
+    )
 $ErrorActionPreference='Stop'
 if (-not $LocalCode -and $Seconds -gt 3600) { throw 'Seconds must be 1..3600 outside LocalCode' }
 try {
@@ -85,10 +86,11 @@ if ($Action -in @('RUN', 'PREFLIGHT')) {
   $argv+=@('--registry',$Registry,'--registry-sha256',$RegistrySha256)
   if ($LocalCode) { $argv+='--local-code' }
  }
- if ($Action -eq 'RUN') {
-  $argv+=@('--seconds',"$Seconds")
-  if ($Once) { $argv+='--once' }
- }
+if ($Action -eq 'RUN') {
+   $argv+=@('--seconds',"$Seconds")
+   if ($Once) { $argv+='--once' }
+   $argv+=@('--poll-interval',"$PollInterval")
+  }
 }
 & $Python @argv
 exit $LASTEXITCODE

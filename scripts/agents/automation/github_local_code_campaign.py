@@ -224,9 +224,13 @@ def main(argv=None):
     parser.add_argument("--mandate-sha256")
     parser.add_argument("--base-ref")
     parser.add_argument("--base-sha")
-    parser.add_argument("--seconds", type=int, choices=range(1, 7201), default=3600)
+    parser.add_argument("--seconds", type=int, choices=range(1, 3601), default=3600)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--poll-interval", type=int, default=30, metavar="SECONDS",
+                        help="idle re-discovery sweep interval (default 30)")
     args = parser.parse_args(argv)
+    if not 1 <= args.poll_interval <= 3600:
+        parser.error("--poll-interval must be 1..3600")
     if (args.base_ref is not None or args.base_sha is not None) and (
             args.action not in {"preflight", "run"} or not valid_campaign_base(args.base_ref, args.base_sha)):
         parser.error("--base-ref and --base-sha are required together for preflight or run")
@@ -266,8 +270,12 @@ def main(argv=None):
         campaign = LocalCodeCampaign(runtime, args.issue, args.mandate_comment,
                                      args.mandate_sha256, **base_options)
         campaign.check_github_identity()
+        # Multi-campaign: do NOT stop after the first campaign completes.
+        # The session continues until deadline, stop.request, or quota exhaustion.
+        # `done` only returns True on github_rate_limited or explicit operator stop.
         run_session(runtime, campaign.poll, once=args.once,
-                    done=lambda: campaign.github_rate_limited or campaign.complete())
+                    done=lambda: campaign.github_rate_limited,
+                    poll_interval=args.poll_interval)
         complete = campaign.complete() and not campaign.github_rate_limited
     except (OSError, ValueError, KeyError, Blocked) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))

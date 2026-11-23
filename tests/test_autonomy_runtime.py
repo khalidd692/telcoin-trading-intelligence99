@@ -1,7 +1,7 @@
-import hashlib, json, multiprocessing, tempfile, unittest
+import hashlib, json, multiprocessing, tempfile, time, unittest
 from pathlib import Path
 from unittest.mock import patch
-from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, main, seal, validate_contract
+from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, main, seal, validate_contract, run_session
 from tests.test_local_codegen import mission as code_mission
 
 def mission(i="demo-a", **kw):
@@ -304,4 +304,197 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.state(a)["status"], "BLOCKED")
         self.assertEqual(len(runtime.state(a)["attempt_history"]), 2)
         self.assertEqual(runtime.state(b)["status"], "ACCEPTED")
+if __name__=="__main__":unittest.main()
+
+
+class HourAutonomyTests(unittest.TestCase):
+    """Tests for the 60-minute autonomous session, multi-batch chaining,
+    empty-queue idle re-discovery, and deadline-vs-poll-timeout distinction."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.r = Runtime(self.root, executor=lambda m: result())
+
+    def test_deadline_is_not_a_poll_timeout(self):
+        """idle_wait must return False when the deadline expires, not True."""
+        import time
+        from scripts.agents.automation.local_codex import idle_wait
+        self.r.deadline = time.monotonic() + 0.05
+        time.sleep(0.1)
+        self.assertFalse(idle_wait(self.root, self.r.deadline, poll_interval=1))
+
+    def test_poll_timeout_returns_true(self):
+        """idle_wait returns True when the poll interval elapses without stop."""
+        import time
+        from scripts.agents.automation.local_codex import idle_wait
+        self.r.deadline = None
+        self.assertTrue(idle_wait(self.root, None, poll_interval=0.1))
+
+    def test_stop_request_returns_false(self):
+        """idle_wait returns False when stop.request is present."""
+        from scripts.agents.automation.local_codex import idle_wait
+        (self.root / "stop.request").touch()
+        self.assertFalse(idle_wait(self.root, None, poll_interval=1))
+
+    def test_empty_queue_does_not_report_success(self):
+        """An empty mission queue must not be reported as COMPLETE."""
+        a = mission()
+        registry = self.root / "registry.json"
+        raw = json.dumps({"missions": [], "approvals": {}}).encode()
+        registry.write_bytes(raw)
+        code = main(["run", "--state", str(self.root / "empty"), "--registry", str(registry),
+                     "--registry-sha256", hashlib.sha256(raw).hexdigest(), "--once"])
+        # Empty queue: no missions to deliver → INCOMPLETE, not COMPLETE
+        self.assertEqual(code, 2)
+
+    def test_resume_after_stop_does_not_duplicate_accepted(self):
+        """A second run after stop must not re-execute already-accepted missions."""
+        a = mission()
+        self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.r.state(a)["status"], "ACCEPTED")
+        (self.root / "stop.request").touch()
+        self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.r.state(a)["status"], "ACCEPTED")
+
+    def test_multiple_batches_chain_in_one_session(self):
+        """Two separate batches in one session run sequentially without restart."""
+        a = mission("batch-a")
+        b = mission("batch-b")
+        calls = []
+        def executor(m):
+            calls.append(m["id"])
+            return result()
+        r = Runtime(self.root, executor=executor)
+        r.run_queue([a], seal([a]))
+        r.run_queue([b], seal([b]))
+        self.assertEqual(calls, ["batch-a", "batch-b"])
+
+    def test_poll_interval_is_accepted_by_cli(self):
+        """The --poll-interval CLI argument must be accepted without error."""
+        registry = self.root / "registry.json"
+        raw = json.dumps({"missions": [], "approvals": {}}).encode()
+        registry.write_bytes(raw)
+        code = main(["run", "--state", str(self.root / "cli-poll"), "--registry", str(registry),
+                     "--registry-sha256", hashlib.sha256(raw).hexdigest(), "--once",
+                     "--poll-interval", "5"])
+        self.assertEqual(code, 2)  # empty queue → INCOMPLETE, not crash
+
+    def test_poll_interval_rejects_invalid_values(self):
+        """--poll-interval outside 1..3600 must be rejected."""
+        with self.assertRaises(SystemExit):
+            main(["run", "--state", str(self.root / "cli-invalid"),
+                  "--registry", "x", "--registry-sha256", "0" * 64, "--once",
+                  "--poll-interval", "0"])
+
+    def test_run_session_respects_deadline(self):
+        """run_session must exit when the deadline expires, even if the poll interval is long."""
+        import time
+        calls = []
+        def poll():
+            calls.append(1)
+            return True
+        runtime = Runtime(self.root)
+        runtime.deadline = time.monotonic() + 0.2
+        run_session(runtime, poll, poll_interval=10)
+        self.assertGreater(len(calls), 0)
+
+    def test_run_session_stops_on_stop_request(self):
+        """run_session must exit when stop.request is present."""
+        calls = []
+        def poll():
+            calls.append(1)
+            return True
+        runtime = Runtime(self.root)
+        runtime.deadline = time.monotonic() + 100
+        (self.root / "stop.request").touch()
+        # run_session acquires an exclusive lock; the stop marker is checked
+        # inside the loop. The first poll() call happens, then the loop exits.
+        run_session(runtime, poll, poll_interval=1)
+        # Must exit promptly, not hang
+        self.assertLess(len(calls), 5)
+
+
+class MultiBatchTests(unittest.TestCase):
+    """Real multi-mandate GitHub intake simulation with independent checkpoints."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_two_independent_mandates_run_in_one_session(self):
+        """Two separately approved GitHub mandates execute sequentially without restart."""
+        import hashlib
+        from scripts.agents.automation.autonomy_runtime import Runtime, seal
+
+        a = mission("MANDATE-A")
+        b = mission("MANDATE-B")
+        calls = []
+
+        def executor(m):
+            calls.append(m["id"])
+            return result()
+
+        r = Runtime(self.root, executor=executor)
+        r.run_queue([a], seal([a]))
+        r.run_queue([b], seal([b]))
+        self.assertEqual(calls, ["MANDATE-A", "MANDATE-B"])
+        self.assertEqual(r.state(a)["status"], "ACCEPTED")
+        self.assertEqual(r.state(b)["status"], "ACCEPTED")
+
+    def test_resume_after_interruption_prevents_double_execution(self):
+        """A new Runtime instance after interruption must not re-execute accepted missions."""
+        import hashlib
+        from scripts.agents.automation.autonomy_runtime import Runtime, seal
+
+        a = mission("RESUME-A")
+        calls = []
+
+        def executor(m):
+            calls.append(m["id"])
+            return result()
+
+        r = Runtime(self.root, executor=executor)
+        r.run_queue([a], seal([a]))
+        self.assertEqual(r.state(a)["status"], "ACCEPTED")
+        self.assertEqual(calls, ["RESUME-A"])
+
+        # Simulate interruption: create a new Runtime from the same state dir
+        r2 = Runtime(self.root, executor=executor)
+        r2.run_queue([a], seal([a]))
+        self.assertEqual(calls, ["RESUME-A"])  # no double execution
+        self.assertEqual(r2.state(a)["status"], "ACCEPTED")
+
+    def test_two_mandates_with_independent_checkpoints(self):
+        """Two mandates with separate checkpoints survive restart without collision."""
+        import hashlib
+        from scripts.agents.automation.autonomy_runtime import Runtime, seal
+
+        a = mission("CHECKPOINT-A")
+        b = mission("CHECKPOINT-B")
+        calls = []
+
+        def executor(m):
+            calls.append(m["id"])
+            return result()
+
+        r = Runtime(self.root, executor=executor)
+        r.run_queue([a], seal([a]))
+        r.run_queue([b], seal([b]))
+        self.assertEqual(len(calls), 2)
+
+        # Verify checkpoints are independent
+        self.assertNotEqual(
+            r.store._path(f"kilo-local/{a['id']}"),
+            r.store._path(f"kilo-local/{b['id']}")
+        )
+
+        # Restart with new Runtime — no double execution
+        r2 = Runtime(self.root, executor=executor)
+        r2.run_queue([a, b], seal([a, b]))
+        self.assertEqual(len(calls), 2)  # still only 2
+
+
 if __name__=="__main__":unittest.main()

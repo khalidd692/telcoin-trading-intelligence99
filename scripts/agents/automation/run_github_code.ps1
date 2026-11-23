@@ -1,10 +1,12 @@
 # TEL99: run the existing supervisor on two owner-approved GitHub code issues.
 # No long-running Windows service or task-scheduler installation.
 [CmdletBinding()]
-param(
-    [ValidateSet("Preflight", "Run", "Status", "Stop")]
-    [string]$Mode = "Preflight"
-)
+    param(
+        [ValidateSet("Preflight", "Run", "Status", "Stop")]
+        [string]$Mode = "Preflight",
+        [int]$PollInterval = 30,
+        [ValidateRange(1,3600)][int]$Seconds = 3600
+    )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
@@ -34,7 +36,8 @@ try {
         $baseArgs += @("--issue", [string]$controller,
                        "--mandate-comment", [string]$mandate,
                        "--mandate-sha256", $pin,
-                       "--seconds", "7200")
+                       "--seconds", "$Seconds",
+                       "--poll-interval", "$PollInterval")
         Write-Host "TEL99 | Running existing GitHub local-code supervisor, stop by Mode Stop"
     }
     & $python @baseArgs

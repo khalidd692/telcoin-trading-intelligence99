@@ -491,6 +491,8 @@ def main(argv=None):
     parser.add_argument("--campaign", action="store_true", help="discover two separately approved synthetic issues")
     parser.add_argument("--seconds", type=int, choices=range(1, 3601), metavar="1..3600", default=300)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--poll-interval", type=int, default=30, metavar="SECONDS",
+                        help="idle re-discovery sweep interval (default 30)")
     args = parser.parse_args(argv)
     if args.action == "preflight":
         if not all((args.issue, args.mandate_comment, args.mandate_sha256)):
@@ -526,7 +528,8 @@ def main(argv=None):
                                        campaign=args.campaign)
             handoff.check_github_identity()
             run_session(runtime, handoff.poll, once=args.once,
-                        done=lambda: handoff.github_rate_limited or args.campaign and handoff.complete())
+                    done=lambda: handoff.github_rate_limited or args.campaign and handoff.complete(),
+                    poll_interval=args.poll_interval)
             complete = handoff.complete() and not handoff.github_rate_limited
         except (Blocked, OSError, ValueError) as exc:
             print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
