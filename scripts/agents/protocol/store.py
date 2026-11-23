@@ -287,6 +287,8 @@ def kv_env() -> tuple[str, str]:
     """Return ``(base, token)`` for the KV store, or ``("", "")``."""
     base = os.environ.get("AUTOMATION_API_URL", "").rstrip("/")
     token = os.environ.get("AUTOMATION_KV_TOKEN", "")
+    if token.strip() == "":
+        return base, ""
     return base, token
 
 
