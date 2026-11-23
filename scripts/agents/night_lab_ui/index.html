@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TEL99 · Supervision des agents</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script defer src="/dashboard.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="brand-mark">T</span><strong>TEL99 <span>Night Lab</span></strong></div>
+    <nav aria-label="Sections">
+      <a href="#missions">Missions</a>
+      <a href="#agents">Agents</a>
+      <a href="#evenements">Événements</a>
+      <a href="#pilotage">Pilotage</a>
+    </nav>
+    <button type="button" id="refresh">Actualiser</button>
+  </header>
+  <main>
+    <section class="overview" aria-labelledby="title">
+      <div>
+        <p class="eyebrow">Campagne GitHub locale</p>
+        <h1 id="title">Supervision des agents</h1>
+        <p id="freshness" class="muted" role="status">Lecture du registre…</p>
+      </div>
+      <div class="supervisor">
+        <span class="tag" id="supervisor-status">INDISPONIBLE</span>
+        <strong id="supervisor-stage">État du superviseur</strong>
+        <span id="heartbeat" class="muted"></span>
+        <span id="blocker" class="warning" hidden></span>
+      </div>
+    </section>
+    <dl class="metrics" aria-label="Résumé et ressources">
+      <div><dt>Missions livrées</dt><dd id="delivered">—</dd></div>
+      <div><dt>Agents actifs observés</dt><dd id="active-roles">—</dd></div>
+      <div><dt>Mémoire disponible</dt><dd id="memory">—</dd></div>
+      <div><dt>Processeurs logiques</dt><dd id="cpu">—</dd></div>
+    </dl>
+    <div class="columns">
+      <div>
+        <section class="panel" id="missions" aria-labelledby="missions-title">
+          <div class="heading">
+            <h2 id="missions-title">File des missions</h2>
+            <a id="mandate" target="_blank" rel="noopener noreferrer" hidden>Consulter le mandat</a>
+          </div>
+          <div id="mission-list" class="stack"></div>
+        </section>
+        <section class="panel" id="evenements" aria-labelledby="events-title">
+          <h2 id="events-title">Derniers checkpoints</h2>
+          <ol id="events" class="events"></ol>
+        </section>
+      </div>
+      <div>
+        <section class="panel" id="agents" aria-labelledby="agents-title">
+          <h2 id="agents-title">Équipe</h2>
+          <p id="role-observation" class="muted" hidden>L’analyse et le développement partagent un worker. Le rôle en cours reste inconnu.</p>
+          <div id="roles" class="roles"></div>
+        </section>
+        <section class="panel" id="pilotage" aria-labelledby="control-title">
+          <h2 id="control-title">Pilotage</h2>
+          <p id="control-state" class="muted">Lecture seule</p>
+          <button type="button" class="stop-button" id="open-stop" hidden>Demander un arrêt propre</button>
+        </section>
+      </div>
+    </div>
+  </main>
+  <dialog id="role-dialog" aria-labelledby="role-title">
+    <div class="heading">
+      <h2 id="role-title">Agent</h2>
+      <button type="button" id="close-role">Fermer</button>
+    </div>
+    <div id="role-detail"></div>
+  </dialog>
+  <dialog id="stop-dialog" aria-labelledby="stop-title">
+    <div class="heading">
+      <h2 id="stop-title">Arrêt de la campagne</h2>
+      <button type="button" id="close-stop">Annuler</button>
+    </div>
+    <p class="muted">Le superviseur conserve les checkpoints. Saisir le code affiché dans le terminal local.</p>
+    <label for="stop-code">Code de contrôle</label>
+    <input type="password" id="stop-code" maxlength="64" autocomplete="off" spellcheck="false">
+    <label class="checkbox"><input type="checkbox" id="stop-confirm"> Je confirme la demande d’arrêt.</label>
+    <p id="stop-result" class="warning" role="status"></p>
+    <button type="button" class="stop-button" id="send-stop">Confirmer l’arrêt</button>
+  </dialog>
+</body>
+</html>
