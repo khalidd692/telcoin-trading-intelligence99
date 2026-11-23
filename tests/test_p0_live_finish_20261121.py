@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sqlite3
 import tempfile
+from contextlib import closing
 import unittest
 from pathlib import Path
 
@@ -119,7 +120,7 @@ class HistoricalReadOnlyTests(unittest.TestCase):
         self.checkpoint(audit_module.MISSION_C, "REJECTED", model=audit_module.QWEN_MODEL)
         db = self.state / "Éléments # historiques" / "state.db"
         db.parent.mkdir()
-        with sqlite3.connect(db) as con:
+        with closing(sqlite3.connect(db)) as con, con:
             con.execute("CREATE TABLE session_model_usage (session_id TEXT, model TEXT, "
                         "billing_provider TEXT, estimated_cost_usd REAL, "
                         "actual_cost_usd REAL, cost_status TEXT, last_seen INTEGER)")
