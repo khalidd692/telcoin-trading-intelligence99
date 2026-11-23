@@ -102,6 +102,22 @@ try {
             $state.missions | Format-List
         }
     }
+    if ($Mode -eq "Team" -and $latest) {
+        $stateDir = Join-Path $latest.FullName "code-state"
+        $count = 0
+        if (Test-Path -LiteralPath $stateDir) {
+            foreach ($receiptFile in (Get-ChildItem -LiteralPath $stateDir -File -Filter "*.worker.json")) {
+                $receipt = Get-Content -LiteralPath $receiptFile.FullName -Raw | ConvertFrom-Json
+                $trace = $receipt.agent_trace
+                if ($null -ne $trace -and $null -ne $trace.analyst -and $null -ne $trace.developer) {
+                    $count++
+                    Write-Host "TEL99 | Handoff $($receiptFile.Name): $($trace.analyst.role) => $($trace.developer.role)"
+                    Write-Host "       Analyst SHA256: $($trace.analyst.sha256)"
+                }
+            }
+        }
+        Write-Host "TEL99 | Agent analyst/developer handoff receipts observed: $count"
+    }
     if ($runCode -ne 0) { throw "Night Lab incomplete or blocked (exit $runCode); inspect evidence" }
     Write-Host "TEL99 | Complete: all mandatory missions accepted"
 }
