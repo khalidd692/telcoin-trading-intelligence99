@@ -1,7 +1,7 @@
-"""Kilo transport extension of the existing Windows supervisor, without a second bus.
+"""Local mission transport of the existing Windows supervisor, using its durable bus.
 
-Only content-pinned synthetic text missions are executable. Registry approvals must
-be supplied by a trusted operator; seal() computes fingerprints, not signatures.
+Registry approvals for synthetic text and scoped code missions must be supplied
+by a trusted operator; seal() computes fingerprints, not signatures.
 """
 from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys, time
@@ -12,6 +12,7 @@ from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat,
 from protocol.handoff import Inbox, verify_mission
 from protocol.store import FileStore, StoreError
 from intelligence.memory import MemoryStore, Entry
+import local_codegen
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
 TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
@@ -29,6 +30,14 @@ def validate_contract(m,approvals):
         raise ValueError("historical mission C is permanently excluded")
     if approvals.get(m["id"]) != fingerprint(m):
         raise ValueError("unapproved or modified contract")
+    if m.get("owner") == "local":
+        if (not isinstance(m.get("objective"), str) or not 1 <= len(m["objective"]) <= 2000
+                or not isinstance(m.get("dependencies"), list)
+                or any(not isinstance(dep, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", dep)
+                       for dep in m["dependencies"])):
+            raise ValueError("invalid local code objective or dependencies")
+        local_codegen.validate_scope(m)
+        return True
     # Additive owner allowlist for the Hermes failover relay (hermes/relay-github-adapter-20261120).
     # The engine, bus, CAS, ACK and memory paths are unchanged; only the admitted owner set grows.
     if (m.get("project")!="synthetic" or m.get("synthetic_data") is not True
@@ -100,11 +109,16 @@ class Runtime(Supervisor):
         return ((self.root / "stop.request").exists()
                 or self.legacy_stop is not None and self.legacy_stop.exists())
     def worker_command(self,m):
+        if m.get("owner") == "local":
+            return [sys.executable, "-I", "-B", str(Path(__file__).with_name("local_codegen.py"))]
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
     def execute_worker(self,m):
         command=self.worker_command(m)
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
+        if m.get("owner") == "local":
+            env = {k: v for k, v in env.items() if k.upper() in
+                   {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
         output=self.root/f"{m['id']}.worker.json"
         error=self.root/f"{m['id']}.worker.err"
         with output.open("wb") as out,error.open("wb") as err:
@@ -124,16 +138,22 @@ class Runtime(Supervisor):
                 if p.poll() is None:p.kill();p.wait(timeout=10)
         if output.stat().st_size>1024*1024:raise Blocked("worker output too large")
         return json.loads(output.read_text(encoding="utf-8"))
-    @staticmethod
-    def verify_worker(m,result):
+    def verify_worker(self,m,result):
+        if m.get("owner") == "local":
+            return local_codegen.verify(m, result, self.root)
         from kilo_executor import verify
         return verify(m,result)
     def remember(self,m,saved):
         memory=MemoryStore(self.root/"memory")
         if memory.get(m["project"],m["id"]) is None:
+            code = m.get("owner") == "local"
+            evidence = {"contract_sha256": fingerprint(m), "artifact_sha256": saved["result"]["sha256"]}
+            if code:
+                evidence.update({key: saved["verification"][key] for key in
+                                 ("base_sha", "path", "candidate_sha256", "diff_sha256", "test_sha256")})
             memory.record(Entry(id=m["id"],project=m["project"],kind="fact",
-                title="Verified synthetic artifact "+m["id"],
-                body=json.dumps({"contract_sha256":fingerprint(m),"artifact_sha256":saved["result"]["sha256"]}),
+                title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
+                body=json.dumps(evidence),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
                 confidence=1.0))
@@ -195,14 +215,21 @@ class Runtime(Supervisor):
             return
         checks = verified.get("checks")
         artifact = saved["result"].get("artifact") if isinstance(saved["result"], dict) else None
+        code = m.get("owner") == "local"
         ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
               and all(isinstance(check, dict) and check.get("ok") is True for check in checks)
               and isinstance(verified.get("verifier"), str) and bool(verified["verifier"])
               and isinstance(artifact, str)
               and hashlib.sha256(artifact.encode("utf-8")).hexdigest() == verified.get("artifact_sha256")
-              == saved["result"].get("sha256") == m["expected_sha256"])
+              == saved["result"].get("sha256")
+              and (verified.get("verifier") == local_codegen.VERIFIER
+                   and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                   and {c.get("name") for c in checks} == {
+                       "bounded-model-receipt", "approved-function-diff", "baseline-fails", "candidate-passes"}
+                   if code else saved["result"].get("sha256") == m["expected_sha256"]))
         verdict=verify_mission(conversation_finished=True,roles={m["specialist"]:{"reported":True}},
-             acceptance_checks=[{"id":"independent-text-contract","command":"fixed subprocess verifier",
+             acceptance_checks=[{"id":"independent-code-contract" if code else "independent-text-contract",
+                   "command":"isolated Docker baseline and candidate" if code else "fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
         if verdict["validated"]:
             try:self.remember(m,{**saved, "verification": verified})
@@ -276,6 +303,7 @@ def main(argv=None):
     p.add_argument("--state",type=Path,required=True)
     p.add_argument("--registry",type=Path)
     p.add_argument("--registry-sha256")
+    p.add_argument("--local-code", action="store_true", help="admit approved local Python code missions")
     p.add_argument("--seconds",type=int,default=300)
     p.add_argument("--once",action="store_true")
     a=p.parse_args(argv);r=Runtime(a.state, legacy_stop=LEGACY_STOP)
@@ -287,7 +315,7 @@ def main(argv=None):
     if not 1<=a.seconds<=3600:p.error("seconds must be 1..3600")
     if r.stopped():print("STOP remains set; operator must explicitly acknowledge before run");return 2
     try:
-        r.bind_transport("kilo-local")
+        r.bind_transport("local-code" if a.local_code else "kilo-local")
     except (Blocked, OSError, ValueError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
         return 2
@@ -300,10 +328,11 @@ def main(argv=None):
         if hashlib.sha256(raw).hexdigest()!=a.registry_sha256:raise ValueError("registry changed")
         data = json.loads(raw)
         missions = data.get("missions") if isinstance(data, dict) else None
+        owner = "local" if a.local_code else "kilo"
         if (not isinstance(missions, list) or not isinstance(data.get("approvals"), dict)
-                or any(not isinstance(m, dict) or m.get("owner") != "kilo"
+                or any(not isinstance(m, dict) or m.get("owner") != owner
                        or not isinstance(m.get("id"), str) for m in missions)):
-            raise ValueError("the local Kilo launcher requires Kilo contracts")
+            raise ValueError("registry owner does not match the selected local transport")
         expected = {m["id"] for m in missions}
         return data
     failed = run_session(r, lambda: r.poll(source), once=a.once)

@@ -2,9 +2,48 @@
 
 Delivery status: PARTIEL. Branch assist/autonomy-integration-20261119, base main 44ca6bd900505b587220244a15e14e789a8b501a. No service, scheduler, deployment or main merge.
 
+## Missions locales de programmation
+
+Le superviseur local peut traiter un registre de missions Python avec
+`--local-code` ou `-LocalCode` sous PowerShell. Utiliser un répertoire d'état dédié.
+Le registre porte le SHA Git de départ, le chemin du fichier, le nom d'une
+fonction de premier niveau, le modèle et son port sur `127.0.0.1`, le test
+indépendant et le digest de l'image Python déjà disponible dans Docker.
+Le projet est `tel99`, le propriétaire `local` et le spécialiste `tel99-dev`.
+Les autres champs sont `id`, `priority`, `dependencies` et `objective`.
+
+Démarrer un serveur local compatible OpenAI sur le port approuvé et épingler
+le SHA-256 du registre après revue de son contenu. Le test Python s'exécute
+dans Docker. Il doit lancer `/work/program.py` dans un processus distinct,
+lever `AssertionError` si le comportement est incorrect et utiliser
+`/scratch` pour ses fichiers temporaires.
+
+```bash
+python -B scripts/agents/automation/autonomy_runtime.py run --local-code \
+  --state "$TEL99_STATE" --registry "$TEL99_REGISTRY" \
+  --registry-sha256 "$TEL99_REGISTRY_SHA256" --seconds 180 --once
+```
+
+```powershell
+.\start-agents.ps1 -Action RUN -LocalCode -State $state -Registry $registry -RegistrySha256 $pin -Seconds 180 -Once
+```
+
+Chaque mission fait au plus un appel au modèle local avec 384 jetons de sortie.
+Le modèle reçoit l'objectif et la fonction d'origine. Le superviseur vérifie
+la portée du changement et exige que le même test échoue sur la base et
+réussisse sur le fichier modifié. Docker exécute ces deux versions sans réseau,
+avec le fichier source en lecture seule. Le résultat et le diff sont enregistrés
+dans `verified-code/<id>/`, les verdicts dans le journal et les empreintes dans
+la mémoire TEL99. Une mission dépendante attend le statut `ACCEPTED`.
+
+Pour reprendre un arrêt contrôlé, utiliser `status`, archiver le marqueur
+`stop.request` après observation de `STOPPED`, puis relancer la même commande.
+Un reçu `WORKER_EXITED` déclenche la vérification sans nouvel appel au modèle.
+Un état `RUNNING` sans reçu demande une réconciliation humaine.
+
 ## What runs
 
-start-agents.ps1 invokes Runtime, an extension of the existing PR119 Windows Supervisor. It reuses FileStore CAS and Inbox from PR118/119, the PR120 anonymous Kilo free provider, PR121 project memory and PR122 evaluation safeguards. The original Codex transport is imported as a dependency; this launcher never calls Codex or its paid models.
+In the historical Kilo text mode, start-agents.ps1 invokes Runtime, an extension of the existing PR119 Windows Supervisor. It reuses FileStore CAS and Inbox from PR118/119, the PR120 anonymous Kilo free provider, PR121 project memory and PR122 evaluation safeguards. The original Codex transport is imported as a dependency; this launcher never calls Codex or its paid models.
 
 Supported queue contracts are synthetic text artifacts for tel99-analyst, tel99-dev and tel99-verifier. These are specialist identities passed to the real native model gateway, not separate connected Kilo Agent Manager sessions. Nine other historical roles are reserved. General coding work, Hermes and cloud missions are not admitted by this adapter. Existing native CLI separately generates programs and verifies them in Docker.
 

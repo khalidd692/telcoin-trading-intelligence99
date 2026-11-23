@@ -1,0 +1,34 @@
+{
+  "source": "TEL99 Windows Qwen Docker; sanitized from owner-supplied final report",
+  "source_report_sha256": "5075979768127c1fcecdd48611e322368c839dafb79fa9dab9fdafbb5f1f0948",
+  "source_archive_sha256": "a1df6788511475deeb70cc13746bb619689192a81302fe637d57920f17a814ba",
+  "implementation_diff_sha256": "33be85dbf9a7ddfabea84c94816ce46be493e2f6c7a8b3825edeedba19e44a66",
+  "base_sha": "2671228398ecfc18e506332bb9d5011266ceedd5",
+  "timestamp_utc": "2026-11-23T03:52:44.559564+01:00",
+  "status": "PASS_BEHAVIOR_NO_NETWORK_COUNT",
+  "first_exit": 2,
+  "stop_sent": true,
+  "checkpoint_a": "WORKER_EXITED",
+  "checkpoint_b_present": false,
+  "resume_exit": 0,
+  "a_receipt_unchanged": true,
+  "replay_exit": 0,
+  "accepted_missions": [
+    "tel99-code-a",
+    "tel99-code-b"
+  ],
+  "cumulative": {
+    "sha256": "d028c54d06fb85f429a20408496edf24179096b9a51e779416c1bd9a296d5620",
+    "docker_code_a_pass": true,
+    "docker_code_b_pass": true,
+    "test_a_sha256": "81598f59c315672f3cb2f7738fea6d122768e3e29c98f9afbe56cf21f8ce737a",
+    "test_b_sha256": "689942ecf04650fc0d9bb60b3f94d99efa6210672275d6dc18e6730ea066c4f1"
+  },
+  "model_call_count_verified": false,
+  "limitations": [
+    "No independent HTTP request count: do not claim zero model calls on replay",
+    "Only bounded two-function Python CODE demo; not 12 autonomous agents",
+    "Untrusted-code sandbox isolation needs an additional security audit",
+    "Local model requires PC and Docker to remain running"
+  ]
+}
