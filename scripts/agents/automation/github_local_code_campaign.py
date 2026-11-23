@@ -195,18 +195,15 @@ class LocalCodeCampaign(KiloGitHubHandoff):
             graph[mid] = set(dependencies)
         if len(candidates) == len(contracts):
             roots = [mid for mid, deps in graph.items() if not deps]
-            linked = {dep for deps in graph.values() for dep in deps}
-            if len(roots) != 1 or linked != set(candidates) - {mid for mid in candidates
-                                                                 if all(mid not in deps for deps in graph.values())}:
-                # More directly: one root, one terminal node, and every other
-                # mission has exactly one successor and one predecessor.
-                successors = {dep: 0 for dep in graph}
-                for deps in graph.values():
-                    for dep in deps:
-                        successors[dep] += 1
-                if (len(roots) != 1 or sum(count == 0 for count in successors.values()) != 1
-                        or any(count > 1 for count in successors.values())):
-                    raise ValueError("hour campaign requires one ordered dependency chain")
+            successors = {mid: 0 for mid in graph}
+            for deps in graph.values():
+                for dep in deps:
+                    if dep not in successors:
+                        raise ValueError("missing approved predecessor")
+                    successors[dep] += 1
+            if (len(roots) != 1 or sum(count == 0 for count in successors.values()) != 1
+                    or any(count > 1 for count in successors.values())):
+                raise ValueError("hour campaign requires one ordered dependency chain")
             if any(dep not in graph for deps in graph.values() for dep in deps):
                 raise ValueError("missing approved predecessor")
             TopologicalSorter(graph).prepare()
