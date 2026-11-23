@@ -10,17 +10,21 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat, heartbeat_status
 from protocol.handoff import Inbox, verify_mission
-from protocol.store import FileStore, StoreError
+from protocol.store import CASConflict, FileStore, StoreError
 from intelligence.memory import MemoryStore, Entry
 from intelligence import catalog
 import local_codegen
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
 TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
-CHECKPOINT_STATUSES = TERMINAL | {"ACK", "RUNNING", "WORKER_EXITED"}
+CHECKPOINT_STATUSES = TERMINAL | {"PREPARING", "ACK", "RUNNING", "WORKER_EXITED"}
 REJECTED_MISSION = "HERMES-QWEN4-20261121-C"
 LEGACY_STOP = Path(__file__).resolve().parents[3] / ".kilo" / "STOP"
 LOCAL_VERIFICATION_SECONDS = 75
+EXECUTION_STATUS = {
+    "PREPARING": "NOT_STARTED", "ACK": "NOT_STARTED", "RUNNING": "RUNNING",
+    "WORKER_EXITED": "COMPLETED", "ACCEPTED": "COMPLETED", "REJECTED": "COMPLETED",
+}
 
 
 class WorkerInterrupted(Blocked):
@@ -130,15 +134,49 @@ class Runtime(Supervisor):
         old=self.state(m)
         value={**old,"id":m["id"],"project":m["project"],"status":status,
                "contract_sha256":fingerprint(m),"at":time.time(),
-               "execution_status":("RUNNING" if status=="RUNNING" else "COMPLETED" if status in {"WORKER_EXITED","ACCEPTED","REJECTED"} else "NOT_STARTED" if status=="ACK" else "UNKNOWN"),**details}
+               "execution_status":EXECUTION_STATUS.get(status, "UNKNOWN"),**details}
         if not self.store.put_cas(f"kilo-local/{m['id']}",value,old or None):
             raise Blocked("checkpoint CAS conflict")
-        self.observe(STATE=status,ACTIVE_TASK=m["id"] if status=="RUNNING" else None)
+        self.observe(STATE=status, ACTIVE_TASK=m["id"] if status=="RUNNING" else None,
+                     PHASE="WORKER" if status=="RUNNING" else None)
         print(json.dumps({"mission_id":m["id"],"status":status}),flush=True)
         return value
     def claim(self,m):
         return self.store.put_cas(f"kilo-claims/{m['id']}",
              {"contract_sha256":fingerprint(m),"project":m["project"],"at":time.time()},None)
+
+    def claim_matches(self, mission):
+        claim = self.store.get(f"kilo-claims/{mission['id']}")
+        return (isinstance(claim, dict) and claim.get("contract_sha256") == fingerprint(mission)
+                and claim.get("project") == mission["project"])
+
+    def prepare_ack(self, mission, saved):
+        mid = mission["id"]
+        missing = object()
+        try:
+            claim = self.store.read(f"kilo-claims/{mid}", default=missing)
+        except (OSError, ValueError) as exc:
+            raise Blocked("invalid mission claim") from exc
+        if not saved:
+            if claim is not missing or self.inbox.seen(mid):
+                self.save(mission, "AWAITING_HUMAN", reason="existing claim or ACK requires reconciliation")
+                return None
+            self.save(mission, "PREPARING")
+        # PREPARING is only persisted before any ACK or worker launch. The
+        # queue lock makes it safe to finish a partial claim after restart.
+        if claim is missing:
+            self.claim(mission)
+        if not self.claim_matches(mission):
+            self.save(mission, "AWAITING_HUMAN", reason="missing or mismatched claim")
+            return None
+        receipt = self.inbox.receive({"request_id": mid})["ack"]
+        # receive() runs without an action here. Even a partial inbox claim
+        # can be completed by the durable runtime ACK below.
+        if (receipt.get("request_id") != mid or receipt.get("receiver") != self.inbox.receiver_id
+                or receipt.get("status") not in {"claimed", "ACK"} or receipt.get("action") is not None):
+            self.save(mission, "AWAITING_HUMAN", reason="existing ACK requires reconciliation")
+            return None
+        return self.save(mission, "ACK")
     def expired(self):
         return self.deadline is not None and time.monotonic()>=self.deadline
     def stopped(self):
@@ -326,10 +364,11 @@ class Runtime(Supervisor):
             diagnostic["verification"] = verification
         history = [*saved.get("attempt_history", ()), diagnostic]
         retry = number < maximum
-        keep_receipt = retry and feedback["kind"] == "candidate-test" and "candidate_sha256" in feedback
+        keep_receipt = not retry or (
+            feedback["kind"] == "candidate-test" and "candidate_sha256" in feedback)
         self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
                   feedback=feedback if retry else None, reason=reason,
-                  result=saved["result"] if keep_receipt else None, verification=verification)
+                  result=saved.get("result") if keep_receipt else None, verification=verification)
         return True
 
     def _attempt(self, m, saved, maximum, escalation):
@@ -350,16 +389,10 @@ class Runtime(Supervisor):
                 return
         if saved.get("status")!="WORKER_EXITED":
             if saved.get("status") != "ACK":
-                if not self.claim(m):
-                    self.save(m,"AWAITING_HUMAN",reason="existing claim requires reconciliation")
+                saved = self.prepare_ack(m, saved)
+                if saved is None:
                     return
-                ack=self.inbox.receive({"request_id":m["id"]})
-                if not ack["accepted"]:
-                    self.save(m,"AWAITING_HUMAN",reason="existing ACK requires reconciliation");return
-                saved = self.save(m,"ACK",execution_status="NOT_STARTED")
-            claim = self.store.get(f"kilo-claims/{m['id']}")
-            if (not isinstance(claim, dict) or claim.get("contract_sha256") != fingerprint(m)
-                    or not self.inbox.seen(m["id"])):
+            if not self.claim_matches(m) or not self.inbox.seen(m["id"]):
                 self.save(m, "AWAITING_HUMAN", reason="missing or mismatched claim or local ACK")
                 return
             if self.stopped() or (self.before_execute is not None and not self.before_execute(m, saved)):
@@ -438,7 +471,11 @@ class Runtime(Supervisor):
             if routed:
                 effective = local_codegen.fixed_contract(m, saved.get("model_route"), **escalation)
             started = time.monotonic()
-            verified = self.verifier(effective, saved["result"])
+            self.observe(STATE="WORKER_EXITED", ACTIVE_TASK=m["id"], PHASE="VERIFICATION")
+            try:
+                verified = self.verifier(effective, saved["result"])
+            finally:
+                self.observe(ACTIVE_TASK=None, PHASE=None)
         except Exception as exc:
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable",error=type(exc).__name__);return
         if not isinstance(verified, dict) or verified.get("unavailable"):
@@ -540,9 +577,9 @@ class Runtime(Supervisor):
                         if self.stopped() or self.expired() or self.quota_exhausted or count>=max_tasks:break
                     if not progressed:break
                 self.observe(STATE="STOPPED" if self.stopped() else "BLOCKED" if invalid else "IDLE",ACTIVE_TASK=None)
-        except Blocked as exc:
+        except (Blocked, CASConflict, StoreError) as exc:
             self.observe(STATE="BUSY" if "superviseur" in str(exc) and "cette file" in str(exc) else "BLOCKED",
-                         BLOCKER=type(exc).__name__)
+                         BLOCKER=type(exc).__name__, ACTIVE_TASK=None, PHASE=None)
     def poll(self,source,max_tasks=20):
         try:
             data=source()

@@ -82,6 +82,20 @@ class RuntimeTests(unittest.TestCase):
         self.r.run_queue([a],seal([a]))
         self.assertEqual(self.calls,[])
         self.assertEqual(self.r.state(a)["status"],"AWAITING_HUMAN")
+    def test_legacy_claim_without_prelaunch_checkpoint_never_starts(self):
+        a = mission()
+        self.r.claim(a)
+        self.r.run_queue([a], seal([a]))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.r.state(a)["status"], "AWAITING_HUMAN")
+    def test_malformed_claim_stops_the_queue_without_launching(self):
+        a = mission()
+        path = self.r.store._path(f"kilo-claims/{a['id']}")
+        path.parent.mkdir(parents=True)
+        path.write_text("{", encoding="utf-8")
+        self.assertFalse(self.r.poll(lambda: {"missions": [a], "approvals": seal([a])}))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(path.read_text(encoding="utf-8"), "{")
     def test_crash_after_worker_receipt_resumes_verification(self):
         a=mission();self.r.claim(a);self.r.save(a,"WORKER_EXITED",result=result())
         self.r.run_queue([a],seal([a]))

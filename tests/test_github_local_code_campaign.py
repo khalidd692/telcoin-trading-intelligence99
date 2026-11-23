@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.agents.automation import github_local_code_campaign as bridge
 from scripts.agents.automation import local_code_pr, local_team
@@ -18,7 +19,9 @@ SECOND = 242
 MANDATE_ID = 4001
 TIMES = ("2026-11-23T18:00:00Z", "2026-11-23T18:01:00Z",
          "2026-11-23T18:02:00Z")
-EXPIRY = "2026-12-31T23:59:59Z"
+EXPIRY = "2099-12-31T23:59:59Z"
+NEW_BASE_REF = "agents/tel99-code-base-recipe-20261123"
+NEW_BASE_SHA = "a" * 40
 
 
 def block(marker, payload):
@@ -36,23 +39,25 @@ def comment(cid, issue, body, timestamp):
 
 
 class LocalFixture:
-    def __init__(self):
+    def __init__(self, *, base=bridge.BASE_REF, base_sha=bridge.BASE_SHA):
         source = json.loads(SOURCE.read_bytes())["missions"]
         a = next(m for m in source if m["function"] == "kv_env").copy()
         b = next(m for m in source if m["function"] == "load_tasks").copy()
         a.update(id="tel99-pilot-code-a", team=local_team.TEAM.copy(),
-                 model="qwen2.5-coder:7b", port=11434)
+                 model="qwen2.5-coder:7b", port=11434, base_sha=base_sha)
         b.update(id="tel99-pilot-code-b", team=local_team.TEAM.copy(),
-                 model="qwen2.5-coder:7b", port=11434, dependencies=[a["id"]])
+                 model="qwen2.5-coder:7b", port=11434, base_sha=base_sha,
+                 dependencies=[a["id"]])
         self.missions = (a, b)
         self.scope = {
             "repo": bridge.REPO, "issue": CONTROL, "label": bridge.CODE_LABEL,
-            "expires_at": EXPIRY, "base": bridge.BASE_REF, "base_sha": bridge.BASE_SHA,
+            "expires_at": EXPIRY, "base": base, "base_sha": base_sha,
             "contracts": {m["id"]: fingerprint(m) for m in self.missions},
         }
         self.mandate = comment(MANDATE_ID, CONTROL, block(bridge.MANDATE, self.scope), TIMES[0])
         self.pin = hashlib.sha256(self.mandate["body"].encode()).hexdigest()
         self.controller = {"number": CONTROL, "state": "open", "user": OWNER.copy()}
+        self.remote_base_sha = base_sha
         self.issues = {}
         self.comments = []
         self.events = []
@@ -82,8 +87,8 @@ class LocalFixture:
             return self.controller
         if path == f"issues/comments/{MANDATE_ID}":
             return self.mandate
-        if path == f"git/ref/heads/{bridge.BASE_REF}":
-            return {"object": {"sha": bridge.BASE_SHA, "type": "commit"}}
+        if path == f"git/ref/heads/{self.scope['base']}":
+            return {"object": {"sha": self.remote_base_sha, "type": "commit"}}
         if path.startswith("issues?"):
             return [self.controller, *self.issues.values()]
         if path.startswith("issues/comments/"):
@@ -104,10 +109,10 @@ class LocalFixture:
         self.comments.append(row)
         return row
 
-    def handoff(self, runtime=None):
+    def handoff(self, runtime=None, **options):
         return bridge.LocalCodeCampaign(
             runtime, CONTROL, MANDATE_ID, self.pin,
-            fetcher=self.fetch, publisher=self.post,
+            fetcher=self.fetch, publisher=self.post, **options,
         )
 
 
@@ -120,6 +125,41 @@ class LocalCodeGitHubTests(unittest.TestCase):
         self.assertEqual({a["issue"] for a in approved}, {FIRST, SECOND})
         self.assertEqual({a["id"] for a in approved},
                          {m["id"] for m in self.gh.missions})
+
+    def test_new_campaign_base_requires_matching_explicit_pin_and_github_ref(self):
+        fixture = LocalFixture(base=NEW_BASE_REF, base_sha=NEW_BASE_SHA)
+        with self.assertRaises(ValueError):
+            fixture.handoff().preflight()
+        with self.assertRaises(ValueError):
+            fixture.handoff(base_ref=NEW_BASE_REF)
+        with self.assertRaises(ValueError):
+            fixture.handoff(base_ref="main", base_sha=NEW_BASE_SHA)
+        with self.assertRaises(ValueError):
+            fixture.handoff(base_ref=NEW_BASE_REF, base_sha="refs/heads/main")
+        campaign = fixture.handoff(base_ref=NEW_BASE_REF, base_sha=NEW_BASE_SHA)
+        self.assertEqual(len(campaign.preflight()), 2)
+        fixture.remote_base_sha = "b" * 40
+        with self.assertRaises(ValueError):
+            campaign.preflight()
+
+    def test_ledger_pins_the_new_campaign_base_across_restarts(self):
+        fixture = LocalFixture(base=NEW_BASE_REF, base_sha=NEW_BASE_SHA)
+        with tempfile.TemporaryDirectory() as temp:
+            options = {"base_ref": NEW_BASE_REF, "base_sha": NEW_BASE_SHA}
+            fixture.handoff(Runtime(temp), **options)
+            config = Runtime(temp).store.get(bridge.CONFIG_KEY)
+            self.assertEqual((config["base_ref"], config["base_sha"]),
+                             (NEW_BASE_REF, NEW_BASE_SHA))
+            fixture.handoff(Runtime(temp), **options)
+            with self.assertRaises(ValueError):
+                fixture.handoff(Runtime(temp), base_ref=NEW_BASE_REF, base_sha="b" * 40)
+            with self.assertRaises(ValueError):
+                fixture.handoff(Runtime(temp))
+
+    def test_controller_issue_must_be_owner_authored(self):
+        self.gh.controller["user"]["id"] = 876
+        with self.assertRaises(ValueError):
+            self.gh.handoff().preflight()
 
     def test_mandate_changed_or_expired_is_refused(self):
         self.gh.mandate["body"] += "\nchanged"
@@ -145,6 +185,7 @@ class LocalCodeGitHubTests(unittest.TestCase):
         for wrong in (
             {"owner": "kilo"}, {"project": "synthetic"},
             {"team": ["tel99-dev"]}, {"base_sha": "f" * 40},
+            {"port": 8080}, {"model": "qwen2.5-coder-7b-instruct"},
         ):
             with self.subTest(wrong=wrong):
                 self.assertFalse(handler._mission_allowed(
@@ -175,6 +216,160 @@ class LocalCodeGitHubTests(unittest.TestCase):
             restart.run_queue(queue["missions"], queue["approvals"])
             self.assertEqual(len(calls), 1)
             self.assertEqual(restart.state(self.gh.missions[0])["status"], "AWAITING_HUMAN")
+
+    def test_restart_between_local_claim_and_inbox_ack(self):
+        first = self.gh.missions[0]
+        calls = []
+
+        def executor(mission):
+            self.assertEqual([event["phase"] for event in self.gh.events], ["ACK"])
+            calls.append(mission["id"])
+            return {"artifact": "unverified"}
+
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = Runtime(folder, executor=executor, verifier=lambda *_: {"unavailable": True})
+            handler = self.gh.handoff(runtime)
+            with patch.object(runtime.inbox, "receive", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    handler.poll()
+            self.assertIsNotNone(runtime.store.get(f"kilo-claims/{first['id']}"))
+            self.assertEqual(self.gh.events, [])
+            restart = Runtime(folder, executor=executor, verifier=lambda *_: {"unavailable": True})
+            self.gh.handoff(restart).poll()
+            self.assertEqual(calls, [first["id"]])
+
+    def test_restart_after_inbox_ack_before_worker(self):
+        first = self.gh.missions[0]
+        calls = []
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = Runtime(folder)
+            handler = self.gh.handoff(runtime)
+            save = runtime.save
+
+            def stop_before_ack(mission, status, **details):
+                if status == "ACK":
+                    raise KeyboardInterrupt
+                return save(mission, status, **details)
+
+            with patch.object(runtime, "save", side_effect=stop_before_ack):
+                with self.assertRaises(KeyboardInterrupt):
+                    handler.poll()
+            self.assertTrue(runtime.inbox.seen(first["id"]))
+            self.assertEqual(self.gh.events, [])
+            restart = Runtime(folder, executor=lambda mission: calls.append(mission["id"]),
+                              verifier=lambda *_: {"unavailable": True})
+            self.gh.handoff(restart).poll()
+            self.assertEqual(calls, [first["id"]])
+            self.assertEqual([event["phase"] for event in self.gh.events], ["ACK", "RESULT"])
+
+    def test_interrupted_worker_remains_uncertain_and_never_unblocks_dependency(self):
+        first, second = self.gh.missions
+        with tempfile.TemporaryDirectory() as folder:
+            calls = []
+
+            def interrupted(mission):
+                calls.append(mission["id"])
+                raise KeyboardInterrupt
+
+            handler = self.gh.handoff(Runtime(folder, executor=interrupted))
+            with self.assertRaises(KeyboardInterrupt):
+                handler.poll()
+            self.assertEqual(handler.runtime.state(first)["status"], "RUNNING")
+            restart = self.gh.handoff(Runtime(folder, executor=interrupted))
+            restart.poll()
+            self.assertEqual(calls, [first["id"]])
+            self.assertEqual(restart.runtime.state(first)["status"], "AWAITING_HUMAN")
+            self.assertEqual(restart.runtime.state(second), {})
+
+    def test_lost_ack_response_is_reconciled_before_launch(self):
+        first = self.gh.missions[0]
+        calls = []
+        with tempfile.TemporaryDirectory() as folder:
+            def new_runtime():
+                return Runtime(folder, executor=lambda mission: calls.append(mission["id"]),
+                               verifier=lambda *_: {"unavailable": True})
+            handler = self.gh.handoff(new_runtime())
+            post = self.gh.post
+
+            def lost_ack(issue, body):
+                post(issue, body)
+                raise OSError("response interrupted after recording ACK")
+
+            handler.post = lost_ack
+            self.assertFalse(handler.poll())
+            self.assertEqual(calls, [])
+            self.assertEqual(handler.runtime.state(first)["status"], "ACK")
+            self.gh.handoff(new_runtime()).poll()
+            self.assertEqual(calls, [first["id"]])
+            self.assertEqual([event["phase"] for event in self.gh.events], ["ACK", "RESULT"])
+
+    def test_accepted_checkpoint_resumes_publication_without_repeating_verification(self):
+        from tests.test_local_code_pr_publisher import fixture
+
+        first, second = self.gh.missions
+        url = f"https://github.com/{bridge.REPO}/pull/805"
+        calls = []
+        checked = []
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as proofs:
+            _, proof, _, _, _ = fixture(Path(proofs))
+
+            def execute(mission):
+                calls.append(mission["id"])
+                return proof["result"] if mission == first else {}
+
+            def verify(mission, result):
+                checked.append(mission["id"])
+                return proof["verification"] if mission == first else {"unavailable": True}
+
+            handler = self.gh.handoff(Runtime(folder, executor=execute, verifier=verify))
+            original_sync = handler.sync_results
+
+            def interrupt_after_verification():
+                if handler.runtime.state(first).get("status") == "ACCEPTED":
+                    raise KeyboardInterrupt
+                original_sync()
+
+            with patch.object(handler, "sync_results", side_effect=interrupt_after_verification):
+                with self.assertRaises(KeyboardInterrupt):
+                    handler.poll()
+            accepted = handler.runtime.state(first)
+            self.assertEqual(accepted["status"], "ACCEPTED")
+            self.assertEqual([(r["issue"], r["phase"]) for r in self.gh.events], [(FIRST, "ACK")])
+            restart = Runtime(folder, executor=execute, verifier=verify)
+            self.gh.handoff(restart, pr_publisher=lambda *args, **kwargs: url).poll()
+            self.assertEqual(restart.state(first), accepted)
+            self.assertEqual(calls, [first["id"], second["id"]])
+            self.assertEqual(checked, calls)
+            self.assertEqual([(r["issue"], r["phase"]) for r in self.gh.events[:4]],
+                             [(FIRST, "ACK"), (FIRST, "EVIDENCE"),
+                              (FIRST, "RESULT"), (SECOND, "ACK")])
+
+    def test_exhausted_repairs_publish_failure_without_a_draft(self):
+        from tests.test_local_code_pr_publisher import fixture
+
+        first, second = self.gh.missions
+        attempts = []
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as proofs:
+            _, proof, _, _, _ = fixture(Path(proofs))
+            verification = proof["verification"]
+            verification.update(ok=False, feedback={"kind": "candidate-test"})
+            verification["checks"][-1].update(ok=False, exit_code=1)
+
+            def execute(mission):
+                attempts.append(mission["id"])
+                return proof["result"]
+
+            handler = self.gh.handoff(
+                Runtime(folder, executor=execute, verifier=lambda *_: verification),
+                pr_publisher=lambda *args, **kwargs: self.fail("rejected code cannot create a draft"),
+            )
+            handler.poll()
+            self.assertEqual(attempts, [first["id"], first["id"]])
+            self.assertEqual(handler.runtime.state(first)["status"], "BLOCKED")
+            self.assertEqual(handler.runtime.state(second), {})
+            self.assertEqual([(r["issue"], r["phase"]) for r in self.gh.events],
+                             [(FIRST, "ACK"), (FIRST, "EVIDENCE"), (FIRST, "RESULT")])
+            self.assertEqual(self.gh.events[-1]["status"], "BLOCKED")
 
     def test_local_code_publisher_rejects_unverified_state(self):
         with tempfile.TemporaryDirectory() as folder:
