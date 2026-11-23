@@ -29,15 +29,15 @@ try {
     $source = "docs/agents/TEL99_QWEN_REPAIR_QUEUE_20261123.json"
     $pin = "dfc7ae6328f82894b97b2a5a6d7676096fb643d289bc50cba704b30a7ca01bf9"
 
-    $args = @(
+    $cliArgs = @(
         "-B", "-m", "scripts.agents.automation.prepare_local_code",
         $source, "--source-sha256", $pin
     )
 
     if ($Mode -eq "Gemma") {
-        $args += @("--mode", "fixed", "--binding", "local/ollama-gemma4-e4b", "11434")
+        $cliArgs += @("--mode", "fixed", "--binding", "local/ollama-gemma4-e4b", "11434")
     } else {
-        $args += @(
+        $cliArgs += @(
             "--mode", "routed",
             "--binding", "local/ollama-gemma4-e4b", "11434",
             "--binding", "local/ollama-qwen2.5-coder-7b", "11434",
@@ -45,7 +45,7 @@ try {
             "--escalate", "qwen-repair-metadata-shape-20261123"
         )
     }
-    $args += @("--prefix", $prefix, "--output", $registry)
+    $cliArgs += @("--prefix", $prefix, "--output", $registry)
     $out = & $python @args
     if ($LASTEXITCODE -ne 0) { throw "Failed to prepare a new approved mission registry" }
     $newPin = ($out | Select-Object -Last 1).Trim()
