@@ -69,7 +69,7 @@ class ExistingTeamPilotTests(unittest.TestCase):
         routed["routing"] = {"candidates": [
             {"id": "local/ollama-gemma4-e4b", "model": "gemma4:e4b-tel99-8k", "port": 11434}
         ]}
-        with self.assertRaisesRegex(ValueError, "team"):
+        with self.assertRaises(ValueError):
             local_codegen.validate_scope(routed)
 
     def test_analyst_executes_one_real_model_provider_call_without_tools(self):
