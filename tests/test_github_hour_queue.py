@@ -70,8 +70,9 @@ class HourCampaignTests(unittest.TestCase):
     def test_missing_predecessor_is_refused(self):
         f = three_issues()
         a, b, c = f.missions
-        broken = {a["id"]: {"mission": a}, c["id"]: {"mission": c}}
-        with self.assertRaisesRegex(ValueError, "missing approved predecessor"):
+        broken = {a["id"]: {"mission": a}, b["id"]: {"mission": b},
+                  c["id"]: {"mission": {**c, "dependencies": ["missing-contract"]}}}
+        with self.assertRaisesRegex(ValueError, "unknown or self-referential"):
             campaign.LocalCodeCampaign.check_campaign_graph(broken, f.scope)
 
     def test_no_complete_claim_without_three_real_result_receipts(self):
