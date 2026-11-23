@@ -116,7 +116,49 @@ class KiloCliAdapter:
         return self.run(mission, stop_check=stop_check, deadline=deadline)
 
     # -- worktree ----------------------------------------------------------
+    def __init__(self, *, model=KILO_MODEL, timeout=DEFAULT_TIMEOUT_S,
+                 worktree_root=None, launcher=None, kilo_executor=None,
+                 base_repo=None, base_sha=None):
+        if model != KILO_MODEL:
+            raise KiloCliError(f"only {KILO_MODEL} is allowed; no paid fallback")
+        self.model = model
+        self.timeout = int(timeout)
+        self.worktree_root = Path(worktree_root) if worktree_root else None
+        self.base_repo = Path(base_repo) if base_repo else None
+        self.base_sha = base_sha
+        self.kilo_executor = kilo_executor or str(
+            Path(__file__).resolve().parent / "kilo_executor.py")
+        self.launcher = launcher or self._launch_worker
+        self._worktree = None
+        self._git_worktree = False
+
+    # -- worktree ----------------------------------------------------------
     def _enter_worktree(self) -> Path:
+        if self.base_repo is not None and self.base_sha is not None:
+            import subprocess as _sp
+            # verify repo
+            check = _sp.run(["git", "-C", str(self.base_repo), "rev-parse", "--is-inside-work-tree"],
+                            capture_output=True, text=True)
+            if check.returncode != 0 or check.stdout.strip() != "true":
+                raise KiloCliError("base_repo is not a git work tree")
+            sha_check = _sp.run(["git", "-C", str(self.base_repo), "rev-parse", self.base_sha],
+                                capture_output=True, text=True)
+            if sha_check.returncode != 0:
+                raise KiloCliError("base_sha not found")
+            root = self.worktree_root if self.worktree_root else Path(tempfile.mkdtemp(prefix="tel99-kilo-wt-"))
+            root.mkdir(parents=True, exist_ok=True)
+            self._worktree = root / f"kilo-run-{os.getpid()}-{int(time.monotonic()*1000)}"
+            if self._worktree.exists():
+                raise KiloCliError("worktree path collision")
+            _sp.run(["git", "-C", str(self.base_repo), "worktree", "add", "--detach",
+                     str(self._worktree), self.base_sha], check=True, capture_output=True)
+            self._git_worktree = True
+            # verify
+            head = _sp.run(["git", "-C", str(self._worktree), "rev-parse", "HEAD"],
+                           capture_output=True, text=True)
+            if head.stdout.strip() != sha_check.stdout.strip():
+                raise KiloCliError("worktree HEAD mismatch")
+            return self._worktree
         if self.worktree_root is not None:
             self.worktree_root.mkdir(parents=True, exist_ok=True)
             self._worktree = (self.worktree_root
@@ -127,11 +169,7 @@ class KiloCliAdapter:
         return self._worktree
 
     def _leave_worktree(self) -> None:
-        if self._worktree is None:
-            return
-        if self.worktree_root is None:
-            import shutil
-            shutil.rmtree(self._worktree, ignore_errors=True)
+        # Preserve worktree for audit: never remove/prune automatically.
         self._worktree = None
 
     # -- subprocess --------------------------------------------------------
