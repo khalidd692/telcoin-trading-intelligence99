@@ -1,8 +1,8 @@
 # TEL99 native Ollama recipe. No Kilo, Codex or paid provider dependency.
-# Run with pwsh -NoProfile -File <path> -Mode Test|Gemma|Route.
+# Run with pwsh -NoProfile -File <path> -Mode Test|Gemma|Coder|Qwen35|Route.
 [CmdletBinding()]
 param(
-    [ValidateSet("Test", "Gemma", "Route")]
+    [ValidateSet("Test", "Gemma", "Coder", "Qwen35", "Route")]
     [string]$Mode = "Test"
 )
 $ErrorActionPreference = "Stop"
@@ -36,6 +36,10 @@ try {
 
     if ($Mode -eq "Gemma") {
         $cliArgs += @("--mode", "fixed", "--binding", "local/ollama-gemma4-e4b", "11434")
+    } elseif ($Mode -eq "Coder") {
+        $cliArgs += @("--mode", "fixed", "--binding", "local/ollama-qwen2.5-coder-7b", "11434")
+    } elseif ($Mode -eq "Qwen35") {
+        $cliArgs += @("--mode", "fixed", "--binding", "local/ollama-qwen3.5-9b", "11434")
     } else {
         $cliArgs += @(
             "--mode", "routed",
