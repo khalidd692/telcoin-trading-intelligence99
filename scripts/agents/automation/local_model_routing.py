@@ -251,7 +251,7 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
         eligible = [spec for spec in eligible if spec.id not in ineligible]
         for row in inventory:
             if row["id"] in ineligible and row["eligible"]:
-                row.update(eligible=False, reason="more than one heavy llama.cpp model served")
+                row.update(eligible=False, reason="more than one large llama.cpp model served")
 
     routed = router.route(task, verified_local=tuple(eligible), quota_remaining=mission.get("max_attempts", 1),
                           approved_models=frozenset(binding["id"] for binding in candidates)).to_dict()
