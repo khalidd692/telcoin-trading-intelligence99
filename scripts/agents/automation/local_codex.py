@@ -1120,15 +1120,23 @@ def accept_stop(root):
     return True
 
 
-def idle_wait(root, deadline):
-    until = time.monotonic() + 60
+def idle_wait(root, deadline, poll_interval=30):
+    """Sleep until stop, deadline, or poll_interval elapses.
+
+    Returns True if the caller should re-discover missions (poll timeout),
+    False if stop or deadline was reached.
+    """
+    if deadline is not None and time.monotonic() >= deadline:
+        return False  # deadline already reached — never treat as poll timeout
+    until = time.monotonic() + poll_interval
     if deadline is not None:
         until = min(until, deadline)
     while not (root / "stop.request").exists():
         remaining = until - time.monotonic()
         if remaining <= 0:
-            break
+            return True  # poll timeout — re-discover
         time.sleep(min(1, remaining))
+    return False
 
 
 def main():
@@ -1147,7 +1155,11 @@ def main():
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--approvals", type=Path)
     parser.add_argument("--codex", default=shutil.which("codex.exe"))
+    parser.add_argument("--poll-interval", type=int, default=30,
+                        help="Seconds between idle re-discovery sweeps (default 30).")
     args = parser.parse_args()
+    if args.poll_interval < 1 or args.poll_interval > 3600:
+        parser.error("--poll-interval must be 1..3600")
     if args.reconcile_g3_114 and (args.demo or args.code_demo or args.await_issue or args.discover_only
                                  or args.preflight or args.status_read or args.request_stop):
         parser.error("--reconcile-g3-114 est un mode autonome sans worker.")
@@ -1233,7 +1245,7 @@ def main():
                                                    NEXT=missions[0]["id"])
                                 print(f"AWAITING_HUMAN #{args.await_issue}: "
                                       f"{blockers[missions[0]['id']]}", flush=True)
-                                idle_wait(root, deadline)
+                                idle_wait(root, deadline, args.poll_interval)
                                 continue
                         ready = sum(mission["id"] not in blockers for mission in missions)
                         supervisor.observe(NEXT=next((mission["id"] for mission in missions
@@ -1262,7 +1274,7 @@ def main():
                         # to retry. Checkpoints with possible work are held.
                         saved = supervisor.state(missions[0])
                         if saved.get("status") in {"WAITING_COORDINATION", "WAITING_DEPENDENCY"}:
-                            idle_wait(root, deadline)
+                            idle_wait(root, deadline, args.poll_interval)
                             continue
                     if demo:
                         return 0 if all(
@@ -1274,7 +1286,11 @@ def main():
                     print(f"BLOCKED: {exc}", file=sys.stderr, flush=True)
                     if demo or args.once or args.await_issue or args.reconcile_g3_114:
                         return 2
-                idle_wait(root, deadline)
+                # idle_wait returns True on poll timeout → re-discover.
+                # Returns False only on stop.request or deadline reached.
+                if idle_wait(root, deadline, args.poll_interval):
+                    continue
+                return 0
     except KeyboardInterrupt:
         return 130
     except Blocked as exc:

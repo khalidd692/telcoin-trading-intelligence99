@@ -93,7 +93,7 @@ class LocalCodeCampaign(KiloGitHubHandoff):
                 or scope["issue"] != self.issue or scope["label"] != CODE_LABEL
                 or (scope["base"], scope["base_sha"]) != (self.base_ref, self.base_sha)
                 or not approval_is_current(scope, datetime.now(timezone.utc))
-                or not isinstance(scope["contracts"], dict) or len(scope["contracts"]) != 2
+                or not isinstance(scope["contracts"], dict) or not 2 <= len(scope["contracts"]) <= 10
                 or any(not isinstance(mid, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", mid)
                        or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
                        for mid, digest in scope["contracts"].items())
@@ -176,12 +176,74 @@ class LocalCodeCampaign(KiloGitHubHandoff):
             raise ValueError("multiple approval comments for the same approved mission")
         return {"missions": list(missions.values()), "approvals": digests, "sources": sources}
 
-    @staticmethod
-    def check_campaign_graph(candidates, scope):
-        KiloGitHubHandoff.check_campaign_graph(candidates, scope)
-        paths = [binding["mission"]["path"] for binding in candidates.values()]
+    def discover_candidates(self, scope):
+        result = super().discover_candidates(scope)
+        if len(result) > 10:
+            raise ValueError("code campaign is limited to at most ten distinct missions")
+        paths = [binding["mission"]["path"] for binding in result.values()]
         if len(paths) != len(set(paths)):
             raise ValueError("two independent draft PRs must modify different approved files")
+        return result
+
+    @staticmethod
+    def check_campaign_graph(candidates, scope):
+        """Accept only one bounded, strictly ordered chain of approved missions.
+
+        A partially discovered set may be carried for reconciliation but never
+        authorizes a new worker without its predecessor's RESULT on GitHub.
+        """
+        from graphlib import TopologicalSorter
+        contracts = set(scope["contracts"])
+        if not set(candidates) <= contracts:
+            raise ValueError("candidate is absent from the pinned mandate")
+        graph = {}
+        for mid, binding in candidates.items():
+            mission = binding["mission"]
+            dependencies = mission.get("dependencies")
+            if not isinstance(dependencies, list) or len(dependencies) > 1:
+                raise ValueError("hour campaign permits at most one dependency per mission")
+            if any(dep not in contracts or dep == mid for dep in dependencies):
+                raise ValueError("unknown or self-referential campaign dependency")
+            graph[mid] = set(dependencies)
+        if len(candidates) == len(contracts):
+            roots = [mid for mid, deps in graph.items() if not deps]
+            successors = {mid: 0 for mid in graph}
+            for deps in graph.values():
+                for dep in deps:
+                    if dep not in successors:
+                        raise ValueError("missing approved predecessor")
+                    successors[dep] += 1
+            if (len(roots) != 1 or sum(count == 0 for count in successors.values()) != 1
+                    or any(count > 1 for count in successors.values())):
+                raise ValueError("hour campaign requires one ordered dependency chain")
+            if any(dep not in graph for deps in graph.values() for dep in deps):
+                raise ValueError("missing approved predecessor")
+            TopologicalSorter(graph).prepare()
+        paths = [binding["mission"]["path"] for binding in candidates.values()]
+        if len(paths) != len(set(paths)):
+            raise ValueError("each approved mission must modify a distinct file")
+
+    def complete(self):
+        if not self.source_valid or self.waiting_for_github or self.github_rate_limited:
+            return False
+        try:
+            expected = set(self.check_mandate()["contracts"])
+        except (OSError, ValueError, KeyError):
+            return False
+        if self.admitted_ids != expected:
+            return False
+        states = list(self.states())
+        if {state.get("id") for state in states} != expected:
+            return False
+        for state in states:
+            receipt = self.runtime.store.get(f"kilo-github/outbox/{state['id']}/RESULT") or {}
+            event = receipt.get("event") or {}
+            if (state.get("status") != "ACCEPTED" or not receipt.get("url")
+                    or event.get("status") != "ACCEPTED"
+                    or not event.get("evidence_url")
+                    or not event.get("pull_request_url")):
+                return False
+        return True
 
     def event(self, phase, state, binding):
         record = super().event(phase, state, binding)
@@ -224,9 +286,13 @@ def main(argv=None):
     parser.add_argument("--mandate-sha256")
     parser.add_argument("--base-ref")
     parser.add_argument("--base-sha")
-    parser.add_argument("--seconds", type=int, choices=range(1, 7201), default=3600)
+    parser.add_argument("--seconds", type=int, choices=range(1, 3601), default=3600)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--poll-interval", type=int, default=30, metavar="SECONDS",
+                        help="idle re-discovery sweep interval (default 30)")
     args = parser.parse_args(argv)
+    if not 1 <= args.poll_interval <= 3600:
+        parser.error("--poll-interval must be 1..3600")
     if (args.base_ref is not None or args.base_sha is not None) and (
             args.action not in {"preflight", "run"} or not valid_campaign_base(args.base_ref, args.base_sha)):
         parser.error("--base-ref and --base-sha are required together for preflight or run")
@@ -239,7 +305,7 @@ def main(argv=None):
                                         args.mandate_sha256, **base_options)
             handler.check_github_identity()
             tasks = handler.preflight()
-            ok = len(tasks) == 2
+            ok = len(tasks) == len(handler.check_mandate()["contracts"])
             print(json.dumps({"preflight": "READY" if ok else "WAITING_APPROVALS",
                               "missions": tasks}))
             return 0 if ok else 2
@@ -266,8 +332,12 @@ def main(argv=None):
         campaign = LocalCodeCampaign(runtime, args.issue, args.mandate_comment,
                                      args.mandate_sha256, **base_options)
         campaign.check_github_identity()
+        # Multi-campaign: do NOT stop after the first campaign completes.
+        # The session continues until deadline, stop.request, or quota exhaustion.
+        # `done` only returns True on github_rate_limited or explicit operator stop.
         run_session(runtime, campaign.poll, once=args.once,
-                    done=lambda: campaign.github_rate_limited or campaign.complete())
+                    done=lambda: campaign.github_rate_limited,
+                    poll_interval=args.poll_interval)
         complete = campaign.complete() and not campaign.github_rate_limited
     except (OSError, ValueError, KeyError, Blocked) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))

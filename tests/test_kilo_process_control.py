@@ -128,7 +128,8 @@ class ProcessControlTests(unittest.TestCase):
         sha = hashlib.sha256(registry.read_bytes()).hexdigest()
         p = subprocess.Popen([sys.executable, '-B', str(RUNTIME), 'run',
             '--state', str(self.root), '--registry', str(registry),
-            '--registry-sha256', sha, '--seconds', '60'], cwd=ROOT,
+            '--registry-sha256', sha, '--seconds', '60',
+            '--poll-interval', '5'], cwd=ROOT,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         # An empty file lock is legitimate; readiness follows successful creation.
         deadline = time.monotonic() + 12
@@ -138,7 +139,8 @@ class ProcessControlTests(unittest.TestCase):
         started = time.monotonic()
         self.stop_cli()
         code, out, err = self.finish(p, 5)
-        self.assertEqual(code, 0, err)
+        # Empty queue → INCOMPLETE (exit 2), but must exit promptly on stop
+        self.assertIn(code, (0, 2), err)
         self.assertLess(time.monotonic()-started, 5)
         self.assertIn('STOPPED', out)
 

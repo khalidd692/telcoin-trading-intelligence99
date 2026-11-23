@@ -609,12 +609,16 @@ def main(argv=None):
     p.add_argument("--local-code", action="store_true", help="admit approved local Python code missions")
     p.add_argument("--seconds",type=int,default=300)
     p.add_argument("--once",action="store_true")
+    p.add_argument("--poll-interval",type=int,default=30,metavar="SECONDS",
+                   help="idle re-discovery sweep interval (default 30)")
     a=p.parse_args(argv);r=Runtime(a.state, legacy_stop=LEGACY_STOP)
     if a.action=="stop":
         (r.root/"stop.request").touch();print("STOP requested");return 0
     if a.action=="status":print(json.dumps(r.status(),ensure_ascii=True));return 0
     if not a.registry or not re.fullmatch(r"[0-9a-f]{64}",a.registry_sha256 or ""):
         p.error("trusted registry path and pinned SHA256 required")
+    if not 1 <= a.poll_interval <= 3600:
+        p.error("--poll-interval must be 1..3600")
     limit = 21600 if a.local_code else 3600
     if not 1 <= a.seconds <= limit:
         p.error(f"seconds must be 1..{limit}")
@@ -640,26 +644,35 @@ def main(argv=None):
             raise ValueError("registry owner does not match the selected local transport")
         expected = missions
         return data
-    failed = run_session(r, lambda: r.poll(source), once=a.once)
+    failed = run_session(r, lambda: r.poll(source), once=a.once, poll_interval=a.poll_interval)
     report=r.status()
     states = {mid: row["status"] for mid, row in report["missions"].items()}
     complete = (not failed and expected is not None and set(states) <= {m["id"] for m in expected}
                 and delivered(expected, states))
     report["delivery"] = "COMPLETE" if complete and expected else "EMPTY" if complete else "INCOMPLETE"
     print(json.dumps(report))
-    return 0 if complete else 2
+    return 0 if complete and expected else 2
 
 
-def run_session(runtime, poll, *, once=False, done=None):
-    """Run a bounded source poll using the existing lock and heartbeat."""
+def run_session(runtime, poll, *, once=False, done=None, poll_interval=30):
+    """Run a bounded source poll using the existing lock and heartbeat.
+
+    poll_interval controls how long the loop sleeps between re-discovery
+    sweeps when the queue is empty. A deadline is never mistaken for a
+    request to re-poll: expired() returns True, so the loop exits.
+    """
     failed = False
     with exclusive(runtime.root / "session.lock"), heartbeat(runtime):
         while not (runtime.stopped() or runtime.expired() or runtime.quota_exhausted):
             failed = not poll() or failed
             if once or runtime.quota_exhausted or (done is not None and done()):
                 break
-            until = min(runtime.deadline, time.monotonic() + 10)
+            if runtime.expired():
+                break
+            until = min(runtime.deadline, time.monotonic() + poll_interval)
             while not runtime.stopped() and time.monotonic() < until:
+                if runtime.expired():
+                    break
                 time.sleep(.1)
     return failed
 

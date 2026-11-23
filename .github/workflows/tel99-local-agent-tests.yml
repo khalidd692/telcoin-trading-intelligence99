@@ -5,6 +5,8 @@ on:
     paths:
       - "scripts/agents/automation/**"
       - "tests/test_github_local_code_campaign.py"
+      - "tests/test_github_hour_queue.py"
+      - "tests/test_github_multi_mandate_session.py"
       - "tests/test_local_code_pr_publisher.py"
       - "tests/test_multiagent_pilot.py"
       - ".github/workflows/tel99-local-agent-tests.yml"
@@ -31,4 +33,4 @@ jobs:
           python -m py_compile scripts/agents/automation/github_local_code_campaign.py scripts/agents/automation/local_code_pr.py
       - name: Offline admission, CAS, independent verifier and publisher tests
         run: |
-          python -B -m unittest -v tests.test_github_local_code_campaign tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
+          python -B -m unittest -v tests.test_github_local_code_campaign tests.test_github_hour_queue tests.test_github_multi_mandate_session tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
