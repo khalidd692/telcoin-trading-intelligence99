@@ -52,6 +52,7 @@ class TaskProfile:
     needs_tools: bool = True
     confidential: bool = False
     estimated_tokens: int = 0
+    code_complexity: int | None = None
 
 
 @dataclass
@@ -71,16 +72,19 @@ class Decision:
         return self.chosen is not None
 
     def to_dict(self) -> dict:
+        task = {
+            "kind": self.task.kind,
+            "touches_files": self.task.touches_files,
+            "needs_tools": self.task.needs_tools,
+            "confidential": self.task.confidential,
+            "estimated_tokens": self.task.estimated_tokens,
+        }
+        if self.task.code_complexity is not None:
+            task["code_complexity"] = self.task.code_complexity
         return {
             "decided_at": self.decided_at,
             "difficulty": self.difficulty,
-            "task": {
-                "kind": self.task.kind,
-                "touches_files": self.task.touches_files,
-                "needs_tools": self.task.needs_tools,
-                "confidential": self.task.confidential,
-                "estimated_tokens": self.task.estimated_tokens,
-            },
+            "task": task,
             "chosen": self.chosen.id if self.chosen else None,
             "fallbacks": [m.id for m in self.fallbacks],
             "rejected": self.rejected,
@@ -94,6 +98,13 @@ def classify_difficulty(task: TaskProfile) -> tuple[str, list[str]]:
     Returns the level and the list of signals that drove it, so the decision is
     auditable rather than a black box.
     """
+    complexity = task.code_complexity
+    if task.kind == "code" and complexity is not None:
+        if type(complexity) is not int or complexity < 0:
+            raise ValueError("code complexity must be a nonnegative integer")
+        level = EASY if complexity <= 2 else MEDIUM if complexity <= 6 else HARD
+        return level, [f"code_complexity={complexity}", f"=> {level}"]
+
     signals: list[str] = []
     score = 0
 
@@ -159,6 +170,7 @@ def route(
     journal: list[dict] | None = None,
     approved_models: frozenset[str] | None = None,
     allow_local: bool = True,
+    verified_local: tuple[ModelSpec, ...] | None = None,
 ) -> Decision:
     """Choose a model for ``task`` and explain the decision.
 
@@ -169,6 +181,10 @@ def route(
         unverified model is allowed but flagged, because a dry run spends
         nothing and its purpose is exactly to decide what to probe;
       * quota is checked fail-closed for a real run: an unknown quota refuses.
+
+    The local supervisor can explicitly supply its verified loopback inventory.
+    Only that inventory participates in its decision, with the same allowlist,
+    tools, context, quality and budget checks.
     """
     difficulty, signals = classify_difficulty(task)
     min_quality = MIN_QUALITY[difficulty]
@@ -177,7 +193,16 @@ def route(
     rejected: list[dict] = []
     eligible: list[ModelSpec] = []
 
-    for spec in catalog.MODEL_CATALOG:
+    scoped_inventory = verified_local is not None
+    candidates = verified_local if scoped_inventory else (
+        spec for spec in catalog.MODEL_CATALOG if "inventory-only" not in spec.tags
+    )
+    for spec in candidates:
+        if scoped_inventory and (not isinstance(spec, ModelSpec) or not spec.is_local
+                                 or spec.verified is not True):
+            rejected.append({"id": getattr(spec, "id", None),
+                             "reason": "model is not verified in the local inventory"})
+            continue
         if approved_models is not None and spec.id not in approved_models:
             rejected.append({"id": spec.id, "reason": "model not approved by the operator"})
             continue
@@ -206,10 +231,10 @@ def route(
             rejected.append({"id": spec.id, "reason": "availability not verified "
                              "(fail-closed on a real run)"})
             continue
-        if spec.is_local and (not allow_local or not dry_run):
-            # A local model is only reachable when the operator's machine is on.
-            rejected.append({"id": spec.id, "reason": "local model unreachable "
-                             "when the operator's PC is off"})
+        if spec.is_local and (not allow_local or not (dry_run or scoped_inventory)):
+            reason = ("local models are disabled" if scoped_inventory else
+                      "local model unreachable when the operator's PC is off")
+            rejected.append({"id": spec.id, "reason": reason})
             continue
         eligible.append(spec)
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -44,6 +45,59 @@ class RouterTests(unittest.TestCase):
             router.TaskProfile(kind="code", touches_files=1)
         )
         self.assertEqual(level, router.MEDIUM)
+
+    def test_scoped_code_complexity_drives_difficulty(self):
+        for complexity, expected in ((0, router.EASY), (2, router.EASY),
+                                     (3, router.MEDIUM), (6, router.MEDIUM),
+                                     (7, router.HARD)):
+            with self.subTest(complexity=complexity):
+                task = router.TaskProfile(kind="code", touches_files=1,
+                                          code_complexity=complexity)
+                level, signals = router.classify_difficulty(task)
+                self.assertEqual(level, expected)
+                self.assertIn(f"code_complexity={complexity}", signals)
+        for invalid in (True, -1, 2.5):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                router.classify_difficulty(router.TaskProfile(kind="code", code_complexity=invalid))
+
+    def test_local_inventory_prefers_small_model_until_quality_requires_larger_model(self):
+        fast = replace(catalog.by_id("local/llama-qwen2.5-3b"), verified=True)
+        strong = replace(catalog.by_id("local/llama-qwen2.5-coder-7b"), verified=True)
+        for complexity, preferred in ((2, fast), (4, fast), (8, strong)):
+            with self.subTest(complexity=complexity):
+                task = router.TaskProfile(kind="code", touches_files=1, confidential=True,
+                                          needs_tools=False, estimated_tokens=1024,
+                                          code_complexity=complexity)
+                decision = router.route(task, quota_remaining=2, verified_local=(strong, fast))
+                self.assertEqual(decision.chosen, preferred)
+                self.assertEqual(decision.to_dict()["task"]["code_complexity"], complexity)
+
+    def test_local_inventory_enforces_approval_evidence_cost_context_tools_and_quota(self):
+        spec = catalog.by_id("local/llama-qwen2.5-3b")
+        ready = replace(spec, verified=True)
+        cloud = replace(catalog.by_id("openhands/deepseek-v4.1-flash"), verified=True)
+        task = router.TaskProfile(kind="code", needs_tools=False, estimated_tokens=1000)
+        decision = router.route(task, quota_remaining=2, verified_local=(
+            cloud, spec, replace(ready, id="unknown-cost", cost_tier=catalog.COST_UNKNOWN),
+        ))
+        self.assertFalse(decision.ok)
+        self.assertEqual(len(decision.rejected), 3)
+        for overrides in ({"quota_remaining": None}, {"quota_remaining": 0},
+                          {"approved_models": frozenset()}, {"allow_local": False}):
+            with self.subTest(overrides=overrides):
+                self.assertFalse(router.route(task, **({"quota_remaining": 2,
+                    "verified_local": (ready,)} | overrides)).ok)
+        for unsuitable in (replace(task, needs_tools=True),
+                           replace(task, estimated_tokens=ready.context_tokens + 1)):
+            with self.subTest(unsuitable=unsuitable):
+                self.assertFalse(router.route(unsuitable, quota_remaining=2,
+                                              verified_local=(ready,)).ok)
+        self.assertFalse(router.route(task, quota_remaining=2, verified_local=()).ok)
+
+    def test_llama_catalogue_does_not_change_legacy_routing(self):
+        task = router.TaskProfile(kind="code", confidential=True)
+        self.assertFalse(router.route(task, dry_run=True).ok)
+        self.assertFalse(router.route(task, quota_remaining=2).ok)
 
     def test_router_never_chooses_a_non_free_model(self):
         # A hard task wants a strong model; gpt-5.6 is strong but not free, so
@@ -412,6 +466,17 @@ class CatalogueTests(unittest.TestCase):
     def test_by_id_finds_and_misses(self):
         self.assertIsNotNone(catalog.by_id("openhands/deepseek-v4.1-flash"))
         self.assertIsNone(catalog.by_id("does-not-exist"))
+
+    def test_llama_specs_are_declared_but_unverified(self):
+        small = catalog.by_id("local/llama-qwen2.5-3b")
+        large = catalog.by_id("local/llama-qwen2.5-coder-7b")
+        self.assertEqual(small.served_ids, ("qwen2.5-3b-instruct",))
+        self.assertEqual(large.served_ids, ("qwen2.5-coder-7b-instruct",))
+        self.assertGreater(large.memory_mib, small.memory_mib)
+        for model in (small, large):
+            with self.subTest(model=model.id):
+                self.assertFalse(model.verified)
+                self.assertTrue(model.is_local and model.is_free)
 
 
 if __name__ == "__main__":

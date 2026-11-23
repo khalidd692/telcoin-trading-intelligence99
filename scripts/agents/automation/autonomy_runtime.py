@@ -12,6 +12,7 @@ from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat,
 from protocol.handoff import Inbox, verify_mission
 from protocol.store import FileStore, StoreError
 from intelligence.memory import MemoryStore, Entry
+from intelligence import catalog
 import local_codegen
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
@@ -30,6 +31,33 @@ def fingerprint(m):
     return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
 def seal(missions):
     return {m["id"]:fingerprint(m) for m in missions}
+
+
+def mission_edges(mission):
+    predecessor = mission.get("escalates_from")
+    return [*mission["dependencies"], predecessor] if predecessor else mission["dependencies"]
+
+
+def escalation_matches(mission, parent):
+    keys = ("base_sha", "path", "function", "test", "sandbox_image", "objective")
+    return (parent is not None and "routing" in parent
+            and parent.get("max_attempts") == 2 and all(parent.get(key) == mission[key] for key in keys))
+
+
+def delivered(missions, states):
+    pending = {m["id"] for m in missions if states.get(m["id"]) != "ACCEPTED"}
+    by_id = {m["id"]: m for m in missions}
+    for mission in missions:
+        prior = mission.get("escalates_from")
+        if prior is None or not escalation_matches(mission, by_id.get(prior)):
+            continue
+        if states.get(prior) == "ACCEPTED":
+            pending.discard(mission["id"])
+        elif states.get(prior) == "BLOCKED" and states.get(mission["id"]) == "ACCEPTED":
+            pending.discard(prior)
+    return not pending
+
+
 def validate_contract(m,approvals):
     if not isinstance(m,dict) or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}",str(m.get("id",""))):
         raise ValueError("invalid mission id")
@@ -188,7 +216,7 @@ class Runtime(Supervisor):
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
                 confidence=1.0))
-    def _process(self,m,approvals):
+    def _process(self, m, approvals, *, escalation=None):
         validate_contract(m,approvals)
         saved=self.state(m)
         if saved and saved.get("contract_sha256")!=fingerprint(m):
@@ -205,8 +233,76 @@ class Runtime(Supervisor):
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
         maximum = m.get("max_attempts", 1) if m.get("owner") == "local" else 1
-        while self._attempt(m, saved, maximum):
+        while self._attempt(m, saved, maximum, escalation or {}):
             saved = self.state(m)
+
+    def escalation_options(self, mission, by_id):
+        """Admit an approved successor only after a matching independent failure."""
+        predecessor = mission.get("escalates_from")
+        if predecessor is None:
+            return {}
+        parent = by_id.get(predecessor)
+        if not escalation_matches(mission, parent):
+            return None
+        state = self.state(parent)
+        route = state.get("model_route")
+        selected = route.get("selection") if isinstance(route, dict) else None
+        history = state.get("attempt_history")
+        expected_attempts = parent.get("max_attempts", 1)
+        if (state.get("status") != "BLOCKED" or state.get("contract_sha256") != fingerprint(parent)
+                or expected_attempts != 2 or type(state.get("attempt")) is not int
+                or state["attempt"] != expected_attempts
+                or selected not in parent["routing"]["candidates"]
+                or not isinstance(history, list) or len(history) != expected_attempts):
+            return None
+        test_sha = hashlib.sha256(parent["test"].encode("utf-8")).hexdigest()
+        for number, attempt in enumerate(history, 1):
+            proof = attempt.get("verification") if isinstance(attempt, dict) else None
+            if (not isinstance(proof, dict) or type(attempt.get("number")) is not int or attempt["number"] != number
+                    or proof.get("verifier") != local_codegen.VERIFIER
+                    or proof.get("base_sha") != parent["base_sha"] or proof.get("path") != parent["path"]
+                    or proof.get("test_sha256") != test_sha or proof.get("model") != selected["model"]
+                    or proof.get("ok") is not False or not isinstance(proof.get("checks"), list)):
+                return None
+            checks = {c["name"]: c for c in proof["checks"]
+                      if isinstance(c, dict) and isinstance(c.get("name"), str)}
+            failed = checks.get("candidate-passes", {})
+            if (any(checks.get(name, {}).get("ok") is not True for name in
+                    ("bounded-model-receipt", "approved-function-diff", "baseline-fails"))
+                    or failed.get("ok") is not False or type(failed.get("exit_code")) is not int
+                    or failed["exit_code"] != 1):
+                return None
+        if history[-1]["verification"] != state.get("verification"):
+            return None
+        spec = catalog.by_id(selected["id"])
+        if spec is None:
+            return None
+        return {"exclude": (selected["id"],), "minimum_memory_mib": spec.memory_mib + 1}
+
+    def local_generation_times(self, mission):
+        """Reuse the latest verified generation timings for these same local bindings."""
+        rows = []
+        for key in self.store.keys("kilo-local"):
+            row = self.store.get(key)
+            if not isinstance(row, dict) or row.get("status") not in {"ACCEPTED", "BLOCKED"}:
+                continue
+            route, proof = row.get("model_route"), row.get("verification")
+            selection = route.get("selection") if isinstance(route, dict) else None
+            if selection not in mission["routing"]["candidates"] or not isinstance(proof, dict):
+                continue
+            decision = route.get("decision")
+            level = decision.get("difficulty") if isinstance(decision, dict) else None
+            seconds, at = proof.get("generation_seconds"), row.get("at")
+            if (proof.get("verifier") == local_codegen.VERIFIER and proof.get("model") == selection["model"]
+                    and level in ("easy", "medium", "hard")
+                    and type(seconds) in (int, float) and 0 <= seconds <= 80
+                    and type(at) in (int, float) and 0 <= at < float("inf")):
+                rows.append((at, level, selection["id"], seconds))
+        samples = {}
+        for _, level, model, seconds in sorted(rows, reverse=True)[:20]:
+            samples.setdefault(level, {}).setdefault(model, []).append(seconds)
+        return {level: {model: round(sum(values) / len(values), 3) for model, values in models.items()}
+                for level, models in samples.items()}
 
     def _retry(self, m, saved, maximum, *, reason, feedback, verification=None):
         if maximum == 1 or not local_codegen.valid_feedback(feedback):
@@ -223,7 +319,9 @@ class Runtime(Supervisor):
                   result=saved["result"] if keep_receipt else None, verification=verification)
         return True
 
-    def _attempt(self, m, saved, maximum):
+    def _attempt(self, m, saved, maximum, escalation):
+        routed = "routing" in m
+        effective = m
         if maximum > 1:
             history = saved.get("attempt_history", [])
             expected = len(history) if isinstance(history, list) else maximum
@@ -260,6 +358,36 @@ class Runtime(Supervisor):
                 return
             details = ({"attempt": len(saved.get("attempt_history", ())) + 1,
                         "reason": None, "verification": None} if maximum > 1 else {})
+            if routed:
+                route = saved.get("model_route")
+                if escalation and isinstance(route, dict) and route.get("selection") is None:
+                    route = None  # A deferred successor has no binding to restore.
+                if route is None and saved.get("attempt_history"):
+                    self.save(m, "AWAITING_HUMAN", reason="missing checkpoint model binding")
+                    return
+                try:
+                    if route is None:
+                        timings = self.local_generation_times(m)
+                        options = {**escalation, **({"measured_seconds": timings} if timings else {})}
+                        route = local_codegen.choose_route(m, **options)
+                        if route.get("selection") is None:
+                            status = "ACK" if escalation else "BLOCKED"
+                            self.save(m, status, reason="no eligible verified local model", model_route=route)
+                            return
+                    effective = local_codegen.fixed_contract(m, route, **escalation)
+                except (Blocked, OSError, ValueError, SyntaxError) as exc:
+                    self.save(m, "AWAITING_HUMAN", reason="local model binding unavailable", error=type(exc).__name__)
+                    return
+                if self.stopped() or self.expired():
+                    self.save(m, "ACK", model_route=route)
+                    return
+                if not local_codegen.check_selected(route["selection"]):
+                    self.save(m, "AWAITING_HUMAN", reason="checkpoint model is no longer ready", model_route=route)
+                    return
+                if self.stopped() or self.expired():
+                    self.save(m, "ACK", model_route=route)
+                    return
+                details["model_route"] = route
             running = self.save(m, "RUNNING", **details)
             if self.stopped():
                 self.save(m, "ACK")  # This process knows it has not launched the worker yet.
@@ -268,10 +396,10 @@ class Runtime(Supervisor):
                 if maximum > 1 and self.executor == self._default_executor:
                     previous = running.get("result")
                     retry_context = {"previous": previous["artifact"]} if isinstance(previous, dict) else {}
-                    result = self.execute_worker(m, feedback=running.get("feedback"),
+                    result = self.execute_worker(effective, feedback=running.get("feedback"),
                                                  attempt=running["attempt"], **retry_context)
                 else:
-                    result = self.executor(m)
+                    result = self.executor(effective)
             except QuotaBlocked as exc:
                 self.quota_exhausted = True
                 self.save(m, "BLOCKED", reason=getattr(exc, "reason", "BLOCKED_PROVIDER_RATE_LIMIT"))
@@ -294,13 +422,18 @@ class Runtime(Supervisor):
                 and self.deadline - time.monotonic() < LOCAL_VERIFICATION_SECONDS):
             return  # Keep the receipt for verification on explicit resume.
         try:
-            verified=self.verifier(m,saved["result"])
+            if routed:
+                effective = local_codegen.fixed_contract(m, saved.get("model_route"), **escalation)
+            started = time.monotonic()
+            verified = self.verifier(effective, saved["result"])
         except Exception as exc:
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable",error=type(exc).__name__);return
         if not isinstance(verified, dict) or verified.get("unavailable"):
             self.save(m,"AWAITING_HUMAN",reason="independent verifier unavailable");return
         if self.stopped() or self.expired():
             return
+        if m.get("owner") == "local":
+            verified = {**verified, "verification_seconds": round(time.monotonic() - started, 3)}
         checks = verified.get("checks")
         artifact = saved["result"].get("artifact") if isinstance(saved["result"], dict) else None
         code = m.get("owner") == "local"
@@ -312,6 +445,7 @@ class Runtime(Supervisor):
               == saved["result"].get("sha256")
               and (verified.get("verifier") == local_codegen.VERIFIER
                    and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                   and (not routed or verified.get("model") == effective["model"] == saved["result"].get("model"))
                    and {c.get("name") for c in checks} == {
                        "bounded-model-receipt", "approved-function-diff", "baseline-fails", "candidate-passes"}
                    if code else saved["result"].get("sha256") == m["expected_sha256"]))
@@ -324,6 +458,7 @@ class Runtime(Supervisor):
                 and verified.get("ok") is False and isinstance(checks, list)
                 and verified.get("verifier") == local_codegen.VERIFIER
                 and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                and (not routed or verified.get("model") == effective["model"] == saved["result"].get("model"))
                 and isinstance(artifact, str)
                 and hashlib.sha256(artifact.encode("utf-8")).hexdigest()
                 == verified.get("artifact_sha256") == saved["result"].get("sha256")
@@ -371,7 +506,7 @@ class Runtime(Supervisor):
                         by_id[m["id"]]=m
                     except (ValueError,TypeError):
                         invalid=True
-                TopologicalSorter({mid: m["dependencies"] for mid, m in by_id.items()}).prepare()
+                TopologicalSorter({mid: mission_edges(m) for mid, m in by_id.items()}).prepare()
                 pending=sorted(by_id.values(),key=lambda m:(str(m.get("priority","P9")),m["id"]))
                 while pending and count<max_tasks and not self.stopped() and not self.expired() and not self.quota_exhausted:
                     progressed=False
@@ -384,7 +519,10 @@ class Runtime(Supervisor):
                                                   or self.state(by_id[d]).get("contract_sha256")!=fingerprint(by_id[d])
                                                   for d in m["dependencies"]):
                             continue
-                        self._process(m,approvals)
+                        escalation = self.escalation_options(m, by_id)
+                        if escalation is None:
+                            continue
+                        self._process(m, approvals, escalation=escalation)
                         pending.remove(m);count+=1;progressed=True
                         if self.stopped() or self.expired() or self.quota_exhausted or count>=max_tasks:break
                     if not progressed:break
@@ -450,13 +588,13 @@ def main(argv=None):
                 or any(not isinstance(m, dict) or m.get("owner") != owner
                        or not isinstance(m.get("id"), str) for m in missions)):
             raise ValueError("registry owner does not match the selected local transport")
-        expected = {m["id"] for m in missions}
+        expected = missions
         return data
     failed = run_session(r, lambda: r.poll(source), once=a.once)
     report=r.status()
-    accepted = {mid for mid, row in report["missions"].items() if row["status"] == "ACCEPTED"}
-    complete = (not failed and expected is not None and expected <= accepted
-                and len(accepted) == len(report["missions"]))
+    states = {mid: row["status"] for mid, row in report["missions"].items()}
+    complete = (not failed and expected is not None and set(states) <= {m["id"] for m in expected}
+                and delivered(expected, states))
     report["delivery"] = "COMPLETE" if complete and expected else "EMPTY" if complete else "INCOMPLETE"
     print(json.dumps(report))
     return 0 if complete else 2

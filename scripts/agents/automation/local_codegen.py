@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 import tokenize
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +21,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from local_codex import Blocked, git_committed_blob
+from scripts.agents.automation import local_model_routing
+from scripts.agents.intelligence import catalog
 from scripts.agents.native import sandbox
 from scripts.agents.native.mission import MissionError, valid_artifact_name
 from scripts.agents.native.provider import OpenAICompatibleProvider, ProviderError
@@ -84,7 +87,10 @@ def validate_scope(mission):
     path = mission.get("path")
     port = mission.get("port")
     max_attempts = mission.get("max_attempts", 1)
-    if (mission.keys() - {"max_attempts"} != FIELDS
+    route = "routing" in mission
+    fields = (FIELDS - {"model", "port"}) | {"routing"} if route else FIELDS
+    optional = {"max_attempts", "escalates_from"} if route else {"max_attempts"}
+    if (mission.keys() - optional != fields
             or type(max_attempts) is not int or not 1 <= max_attempts <= 2
             or mission["owner"] != "local"
             or mission["project"] != "tel99" or mission["specialist"] != "tel99-dev"
@@ -95,10 +101,22 @@ def validate_scope(mission):
             or not all(valid_artifact_name(part) for part in path.split("/"))
             or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", str(mission["function"]))
             or not isinstance(mission["test"], str) or not 1 <= len(mission["test"]) <= 8000
-            or not sandbox.valid_image(mission["sandbox_image"])
-            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", str(mission["model"]))
-            or type(port) is not int or not 1024 <= port <= 65535):
+            or not sandbox.valid_image(mission["sandbox_image"])):
         raise ValueError("invalid local code scope")
+    if route:
+        routing = mission["routing"]
+        if not isinstance(routing, dict) or routing.keys() != {"candidates"}:
+            raise ValueError("invalid local routing contract")
+        local_model_routing.validate_candidates(routing["candidates"])
+        if "escalates_from" in mission and (
+                not isinstance(mission["escalates_from"], str)
+                or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", mission["escalates_from"])
+                or mission["escalates_from"] == mission["id"]):
+            raise ValueError("invalid predecessor for model escalation")
+    elif (not isinstance(mission["model"], str)
+          or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", mission["model"])
+          or type(port) is not int or not 1024 <= port <= 65535):
+        raise ValueError("invalid fixed local model or port")
 
 
 def _sha(text):
@@ -128,6 +146,29 @@ def _physical_lines(source):
 
 def _function_source(source, node):
     return "".join(_physical_lines(source)[node.lineno - 1:node.end_lineno])
+
+
+def choose_route(mission, **options):
+    source = _source(mission)
+    function = _function_source(source, _function(source, mission["function"]))
+    if len(function) > 4000:
+        raise ValueError("approved function exceeds the model input limit")
+    return local_model_routing.choose(mission, function, **options)
+
+
+def check_selected(binding):
+    return local_model_routing.check_selected(binding)
+
+
+def fixed_contract(mission, route, *, exclude=(), minimum_memory_mib=0):
+    selection = route.get("selection") if isinstance(route, dict) else None
+    if selection not in mission["routing"]["candidates"]:
+        raise ValueError("checkpoint model is outside the approved contract")
+    spec = catalog.by_id(selection["id"])
+    if spec is None or selection["id"] in exclude or spec.memory_mib < minimum_memory_mib:
+        raise ValueError("checkpoint model is outside the approved escalation")
+    fixed = {key: value for key, value in mission.items() if key not in {"routing", "escalates_from"}}
+    return {**fixed, "model": selection["model"], "port": selection["port"]}
 
 
 def replace_function(source, name, reply):
@@ -240,6 +281,8 @@ def _repair_prompt(mission, feedback, previous, source, function):
 
 def execute(mission, feedback=None, previous=None):
     validate_scope(mission)
+    if "routing" in mission:
+        raise ValueError("worker requires a selected local model")
     if feedback is not None and (mission.get("max_attempts", 1) != 2 or not valid_feedback(feedback)):
         raise ValueError("invalid local code retry feedback")
     if feedback is None and previous is not None:
@@ -257,6 +300,8 @@ def execute(mission, feedback=None, previous=None):
         model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",
         timeout=80, max_tokens=384,
     )
+    memory_before = local_model_routing.available_memory_mib()
+    started = time.monotonic()
     reply = provider.complete(
         system=(
             "You are tel99-dev. Return only the updated Python function with its existing signature, "
@@ -272,7 +317,9 @@ def execute(mission, feedback=None, previous=None):
     if not isinstance(reply, str) or len(reply.encode("utf-8")) > 16_000:
         raise ValueError("invalid or oversized local Qwen completion")
     return {"artifact": reply, "sha256": _sha(reply), "specialist_id": mission["specialist"],
-            "provider": PROVIDER, "model": model}
+            "provider": PROVIDER, "model": model, "generation_seconds": round(time.monotonic() - started, 3),
+            "host_memory_before_mib": memory_before,
+            "host_memory_after_mib": local_model_routing.available_memory_mib()}
 
 
 def _behavior(image, source, test):
@@ -326,6 +373,8 @@ def _publish(directory, path, candidate, diff):
 
 def verify(mission, result, root):
     validate_scope(mission)
+    if "routing" in mission:
+        raise ValueError("verifier requires a selected local model")
     reply = result.get("artifact")
     if (not isinstance(reply, str) or not reply.strip() or len(reply.encode("utf-8")) > 16_000
             or result.get("sha256") != _sha(reply) or result.get("specialist_id") != "tel99-dev"
@@ -334,9 +383,17 @@ def verify(mission, result, root):
     report = {
         "verifier": VERIFIER, "artifact_sha256": _sha(reply), "ok": False,
         "base_sha": mission["base_sha"], "path": mission["path"], "function": mission["function"],
+        "model": mission["model"],
         "test_sha256": _sha(mission["test"]), "sandbox_image": mission["sandbox_image"],
         "checks": [{"name": "bounded-model-receipt", "ok": True}],
     }
+    seconds = result.get("generation_seconds")
+    if type(seconds) in (float, int) and 0 <= seconds <= 180:
+        report["generation_seconds"] = seconds
+    for key in ("host_memory_before_mib", "host_memory_after_mib"):
+        value = result.get(key)
+        if type(value) is int and 0 <= value <= 16_777_216:
+            report[key] = value
     source = _source(mission)
     try:
         candidate = replace_function(source, mission["function"], reply)
