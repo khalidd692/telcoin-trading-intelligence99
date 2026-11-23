@@ -108,6 +108,7 @@ try {
         if (Test-Path -LiteralPath $stateDir) {
             foreach ($receiptFile in (Get-ChildItem -LiteralPath $stateDir -File -Filter "*.worker.json")) {
                 $receipt = Get-Content -LiteralPath $receiptFile.FullName -Raw | ConvertFrom-Json
+                if ($null -eq $receipt.PSObject.Properties["agent_trace"]) { continue }
                 $trace = $receipt.agent_trace
                 if ($null -ne $trace -and $null -ne $trace.analyst -and $null -ne $trace.developer) {
                     $count++
