@@ -2,9 +2,96 @@
 
 Delivery status: PARTIEL. Branch assist/autonomy-integration-20261119, base main 44ca6bd900505b587220244a15e14e789a8b501a. No service, scheduler, deployment or main merge.
 
+## Missions locales de programmation
+
+Le superviseur local peut traiter un registre de missions Python avec
+`--local-code` ou `-LocalCode` sous PowerShell. Utiliser un répertoire d'état dédié.
+Le registre porte le SHA Git de départ, le chemin du fichier, le nom d'une
+fonction de premier niveau, le modèle et son port sur `127.0.0.1`, le test
+indépendant et le digest de l'image Python déjà disponible dans Docker.
+Le projet est `tel99`, le propriétaire `local` et le spécialiste `tel99-dev`.
+Les autres champs sont `id`, `priority`, `dependencies` et `objective`.
+
+Démarrer un serveur local compatible OpenAI sur le port approuvé et épingler
+le SHA-256 du registre après revue de son contenu. Le test Python s'exécute
+dans Docker. Il doit lancer `/work/program.py` dans un processus distinct,
+lever `AssertionError` si le comportement est incorrect et utiliser
+`/scratch` pour ses fichiers temporaires.
+
+```bash
+python -B scripts/agents/automation/autonomy_runtime.py run --local-code \
+  --state "$TEL99_STATE" --registry "$TEL99_REGISTRY" \
+  --registry-sha256 "$TEL99_REGISTRY_SHA256" --seconds 180 --once
+```
+
+```powershell
+.\start-agents.ps1 -Action RUN -LocalCode -State $state -Registry $registry -RegistrySha256 $pin -Seconds 180 -Once
+```
+
+Chaque tentative fait un appel au modèle local avec 384 jetons de sortie.
+Le champ facultatif `max_attempts` du contrat fixe une limite de une ou deux
+tentatives, avec une tentative par défaut. Le modèle reçoit l'objectif et la
+fonction d'origine. Quand une seconde tentative est autorisée, une réponse
+vide, un diff hors contrat ou un test indépendant échoué peut déclencher la
+correction. Le diagnostic transmis contient un type d'échec et, si disponible,
+la ligne et le libellé approuvé du test. Le superviseur vérifie
+la portée du changement et exige que le même test échoue sur la base et
+réussisse sur le fichier modifié. Docker exécute ces deux versions sans réseau,
+avec le fichier source en lecture seule. Le résultat et le diff sont enregistrés
+dans `verified-code/<id>/`, les verdicts dans le journal et les empreintes dans
+la mémoire TEL99. Une mission dépendante attend le statut `ACCEPTED`.
+
+Pour reprendre un arrêt contrôlé, utiliser `status`, archiver le marqueur
+`stop.request` après observation de `STOPPED`, puis relancer la même commande.
+Un reçu `WORKER_EXITED` déclenche la vérification sans nouvel appel au modèle.
+Un état `RUNNING` sans reçu demande une réconciliation humaine.
+
+### Campagne Windows du 23 novembre 2026
+
+Le registre `TEL99_NIGHT_QUEUE_20261123.json` contient six contrats autorisés
+par le mandat local du propriétaire. Son SHA-256 épingle les octets du
+registre et les empreintes internes lient chaque identité à son contrat.
+L'autorisation GitHub conserve son mécanisme d'authentification distinct.
+
+Depuis le worktree isolé contenant cette version, sous PowerShell 7, avec
+Qwen sur `127.0.0.1:18089` et Docker démarrés, lancer cette commande.
+
+```powershell
+python -B .\scripts\agents\night_lab_20261123.py run --registry .\docs\agents\TEL99_NIGHT_QUEUE_20261123.json --registry-sha256 866c2fa94b59d420fc0a7a19b74460f172e6e4a5a38c46204f7454ce19bb3bbe --hours 6
+```
+
+- Le dossier `TEL99_AUTONOMIE_NUIT_…` du Bureau contient le registre exact,
+  les checkpoints, les rapports du réveil, les journaux numérotés et les
+  propositions validées dans `code-state/verified-code/<id>/`.
+- Le cockpit sur `http://127.0.0.1:8791/` et `status.json` montrent les PID
+  observés, le premier ACK/RUNNING et la progression. La commande
+  `serve --session <dossier>` rouvre le cockpit d'une session terminée.
+- Pour arrêter, appeler le même script avec `stop --session <dossier>`.
+  Pour reprendre dans le budget initial après un STOP contrôlé, reprendre la
+  commande de lancement avec `--resume --session <dossier> --acknowledge-stop`.
+  Les marqueurs d'arrêt sont archivés et les reçus restent en place.
+- Une tentative réserve au plus 100 secondes pour le worker, puis 75 secondes
+  avant de démarrer la vérification indépendante. En cas d'arrêt après le
+  reçu, la vérification peut reprendre depuis ce reçu. Deux échecs corrigibles
+  conduisent à `BLOCKED`. Un arrêt avec résultat du worker incertain conduit à
+  `AWAITING_HUMAN`.
+- Le lanceur termine quand la file ne peut plus avancer et réserve un délai
+  d'arrêt dans le budget maximal de six heures. Il permet une relance bornée
+  après une sortie anormale du superviseur. Après redémarrage du PC, la
+  reprise requiert la même commande avec `--resume` et le même registre.
+
+Le développeur exécuté est le worker Qwen local. Le superviseur porte la
+coordination, les dépendances et les écritures de mémoire. Docker vérifie
+les propositions dans une image épinglée, avec les assertions dans un
+processus distinct du candidat. Le catalogue du cockpit recense douze
+domaines et les fichiers Skills disponibles. L'appel natif des autres
+spécialistes et le chargement dynamique de Skills restent à démontrer.
+Les propositions sont isolées par mission et doivent être revues avant
+toute application cumulée.
+
 ## What runs
 
-start-agents.ps1 invokes Runtime, an extension of the existing PR119 Windows Supervisor. It reuses FileStore CAS and Inbox from PR118/119, the PR120 anonymous Kilo free provider, PR121 project memory and PR122 evaluation safeguards. The original Codex transport is imported as a dependency; this launcher never calls Codex or its paid models.
+In the historical Kilo text mode, start-agents.ps1 invokes Runtime, an extension of the existing PR119 Windows Supervisor. It reuses FileStore CAS and Inbox from PR118/119, the PR120 anonymous Kilo free provider, PR121 project memory and PR122 evaluation safeguards. The original Codex transport is imported as a dependency; this launcher never calls Codex or its paid models.
 
 Supported queue contracts are synthetic text artifacts for tel99-analyst, tel99-dev and tel99-verifier. These are specialist identities passed to the real native model gateway, not separate connected Kilo Agent Manager sessions. Nine other historical roles are reserved. General coding work, Hermes and cloud missions are not admitted by this adapter. Existing native CLI separately generates programs and verifies them in Docker.
 

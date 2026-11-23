@@ -1,7 +1,7 @@
-"""Kilo transport extension of the existing Windows supervisor, without a second bus.
+"""Local mission transport of the existing Windows supervisor, using its durable bus.
 
-Only content-pinned synthetic text missions are executable. Registry approvals must
-be supplied by a trusted operator; seal() computes fingerprints, not signatures.
+Registry approvals for synthetic text and scoped code missions must be supplied
+by a trusted operator; seal() computes fingerprints, not signatures.
 """
 from __future__ import annotations
 import argparse, hashlib, json, os, re, subprocess, sys, time
@@ -12,12 +12,20 @@ from local_codex import Supervisor, exclusive, Blocked, QuotaBlocked, heartbeat,
 from protocol.handoff import Inbox, verify_mission
 from protocol.store import FileStore, StoreError
 from intelligence.memory import MemoryStore, Entry
+import local_codegen
 
 ROLES=("tel99-analyst","tel99-dev","tel99-verifier")
 TERMINAL={"ACCEPTED","REJECTED","BLOCKED","AWAITING_HUMAN"}
 CHECKPOINT_STATUSES = TERMINAL | {"ACK", "RUNNING", "WORKER_EXITED"}
 REJECTED_MISSION = "HERMES-QWEN4-20261121-C"
 LEGACY_STOP = Path(__file__).resolve().parents[3] / ".kilo" / "STOP"
+LOCAL_VERIFICATION_SECONDS = 75
+
+
+class WorkerInterrupted(Blocked):
+    pass
+
+
 def fingerprint(m):
     return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
 def seal(missions):
@@ -25,10 +33,18 @@ def seal(missions):
 def validate_contract(m,approvals):
     if not isinstance(m,dict) or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}",str(m.get("id",""))):
         raise ValueError("invalid mission id")
-    if m["id"] == REJECTED_MISSION:
-        raise ValueError("historical mission C is permanently excluded")
+    if m["id"] in {REJECTED_MISSION, "night-mixed-ids"}:
+        raise ValueError("historical rejected mission is permanently excluded")
     if approvals.get(m["id"]) != fingerprint(m):
         raise ValueError("unapproved or modified contract")
+    if m.get("owner") == "local":
+        if (not isinstance(m.get("objective"), str) or not 1 <= len(m["objective"]) <= 2000
+                or not isinstance(m.get("dependencies"), list)
+                or any(not isinstance(dep, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", dep)
+                       for dep in m["dependencies"])):
+            raise ValueError("invalid local code objective or dependencies")
+        local_codegen.validate_scope(m)
+        return True
     # Additive owner allowlist for the Hermes failover relay (hermes/relay-github-adapter-20261120).
     # The engine, bus, CAS, ACK and memory paths are unchanged; only the admitted owner set grows.
     if (m.get("project")!="synthetic" or m.get("synthetic_data") is not True
@@ -46,7 +62,8 @@ class Runtime(Supervisor):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
-        self.executor=executor or self.execute_worker
+        self._default_executor = self.execute_worker
+        self.executor = executor or self._default_executor
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
@@ -100,40 +117,66 @@ class Runtime(Supervisor):
         return ((self.root / "stop.request").exists()
                 or self.legacy_stop is not None and self.legacy_stop.exists())
     def worker_command(self,m):
+        if m.get("owner") == "local":
+            return [sys.executable, "-I", "-B", str(Path(__file__).with_name("local_codegen.py"))]
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
-    def execute_worker(self,m):
+    def execute_worker(self, m, *, feedback=None, attempt=1):
         command=self.worker_command(m)
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
-        output=self.root/f"{m['id']}.worker.json"
-        error=self.root/f"{m['id']}.worker.err"
+        if m.get("owner") == "local":
+            env = {k: v for k, v in env.items() if k.upper() in
+                   {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
+        scoped_retry = m.get("owner") == "local" and m.get("max_attempts", 1) > 1
+        name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
+        output = self.root / f"{name}.worker.json"
+        error = self.root / f"{name}.worker.err"
+        request = {"mission": m, "feedback": feedback} if feedback is not None else m
         with output.open("wb") as out,error.open("wb") as err:
             p=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=out,stderr=err,env=env,cwd=self.root)
             try:
-                p.stdin.write(json.dumps(m).encode());p.stdin.close()
+                p.stdin.write(json.dumps(request).encode());p.stdin.close()
                 deadline=min(time.monotonic()+100,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
                         p.kill();p.wait(timeout=10)
-                        raise Blocked("worker stopped or timed out; no automatic replay")
+                        raise WorkerInterrupted("worker stopped or timed out; no automatic replay")
                     time.sleep(.1)
                 if p.returncode == 5:
                     raise QuotaBlocked("Kilo free provider HTTP 429")
-                if p.returncode:raise Blocked("free specialist unavailable; no fallback")
+                if p.returncode and not (m.get("owner") == "local" and p.returncode == 4):
+                    raise Blocked("free specialist unavailable; no fallback")
             finally:
                 if p.poll() is None:p.kill();p.wait(timeout=10)
         if output.stat().st_size>1024*1024:raise Blocked("worker output too large")
-        return json.loads(output.read_text(encoding="utf-8"))
-    @staticmethod
-    def verify_worker(m,result):
+        response = json.loads(output.read_text(encoding="utf-8"))
+        if p.returncode == 4:
+            if not isinstance(response, dict) or response.get("status") != "BLOCKED":
+                raise Blocked("invalid local generator failure receipt")
+            reason = response.get("reason")
+            if not isinstance(reason, str) or not 1 <= len(reason) <= 200:
+                raise Blocked("invalid local generator diagnostic")
+            feedback = response.get("feedback")
+            raise local_codegen.GenerationBlocked(
+                reason, feedback if feedback == {"kind": "empty-completion"} else None,
+            )
+        return response
+    def verify_worker(self,m,result):
+        if m.get("owner") == "local":
+            return local_codegen.verify(m, result, self.root)
         from kilo_executor import verify
         return verify(m,result)
     def remember(self,m,saved):
         memory=MemoryStore(self.root/"memory")
         if memory.get(m["project"],m["id"]) is None:
+            code = m.get("owner") == "local"
+            evidence = {"contract_sha256": fingerprint(m), "artifact_sha256": saved["result"]["sha256"]}
+            if code:
+                evidence.update({key: saved["verification"][key] for key in
+                                 ("base_sha", "path", "candidate_sha256", "diff_sha256", "test_sha256")})
             memory.record(Entry(id=m["id"],project=m["project"],kind="fact",
-                title="Verified synthetic artifact "+m["id"],
-                body=json.dumps({"contract_sha256":fingerprint(m),"artifact_sha256":saved["result"]["sha256"]}),
+                title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
+                body=json.dumps(evidence),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
                 confidence=1.0))
@@ -153,6 +196,37 @@ class Runtime(Supervisor):
         if saved.get("status")=="RUNNING":
             self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
             return
+        maximum = m.get("max_attempts", 1) if m.get("owner") == "local" else 1
+        while self._attempt(m, saved, maximum):
+            saved = self.state(m)
+
+    def _retry(self, m, saved, maximum, *, reason, feedback, verification=None):
+        if maximum == 1 or not local_codegen.valid_feedback(feedback):
+            return False
+        number = saved["attempt"]
+        diagnostic = {"number": number, "reason": reason, "feedback": feedback}
+        if verification is not None:
+            diagnostic["verification"] = verification
+        history = [*saved.get("attempt_history", ()), diagnostic]
+        retry = number < maximum
+        self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
+                  feedback=feedback if retry else None, reason=reason,
+                  result=None, verification=verification)
+        return True
+
+    def _attempt(self, m, saved, maximum):
+        if maximum > 1:
+            history = saved.get("attempt_history", [])
+            expected = len(history) if isinstance(history, list) else maximum
+            feedback = saved.get("feedback")
+            if (expected >= maximum or (expected > 0 and saved.get("status") == "ACK"
+                    and (not local_codegen.valid_feedback(feedback)
+                         or not isinstance(history[-1], dict)
+                         or history[-1].get("number") != expected
+                         or history[-1].get("feedback") != feedback))
+                    or (saved.get("status") == "WORKER_EXITED" and saved.get("attempt") != expected + 1)):
+                self.save(m, "AWAITING_HUMAN", reason="invalid retry checkpoint; reconciliation required")
+                return
         if saved.get("status")!="WORKER_EXITED":
             if saved.get("status") != "ACK":
                 if not self.claim(m):
@@ -170,21 +244,42 @@ class Runtime(Supervisor):
             if self.stopped() or (self.before_execute is not None and not self.before_execute(m, saved)):
                 return
             if self.stopped():return  # Keep the ACK so an explicit resume can start once.
-            if self.expired():self.save(m,"AWAITING_HUMAN",reason="session deadline after claim");return
-            self.save(m,"RUNNING")
+            if self.expired():
+                if m.get("owner") != "local":
+                    self.save(m, "AWAITING_HUMAN", reason="session deadline after claim")
+                return
+            details = ({"attempt": len(saved.get("attempt_history", ())) + 1,
+                        "reason": None, "verification": None} if maximum > 1 else {})
+            running = self.save(m, "RUNNING", **details)
             if self.stopped():
                 self.save(m, "ACK")  # This process knows it has not launched the worker yet.
                 return
-            try:result=self.executor(m)
+            try:
+                if maximum > 1 and self.executor == self._default_executor:
+                    result = self.execute_worker(m, feedback=running.get("feedback"), attempt=running["attempt"])
+                else:
+                    result = self.executor(m)
             except QuotaBlocked as exc:
                 self.quota_exhausted = True
                 self.save(m, "BLOCKED", reason=getattr(exc, "reason", "BLOCKED_PROVIDER_RATE_LIMIT"))
+                return
+            except local_codegen.GenerationBlocked as exc:
+                if self._retry(m, running, maximum, reason=exc.reason, feedback=exc.feedback):
+                    return self.state(m)["status"] == "ACK"
+                self.save(m, "BLOCKED", reason=exc.reason)
+                return
+            except WorkerInterrupted as exc:
+                self.save(m, "AWAITING_HUMAN" if m.get("owner") == "local" else "BLOCKED",
+                          reason=str(exc))
                 return
             except Exception as exc:
                 self.save(m,"BLOCKED",reason=type(exc).__name__);return
             saved=self.save(m,"WORKER_EXITED",result=result)
         if self.stopped() or self.expired():
             return
+        if (maximum > 1 and self.deadline is not None
+                and self.deadline - time.monotonic() < LOCAL_VERIFICATION_SECONDS):
+            return  # Keep the receipt for verification on explicit resume.
         try:
             verified=self.verifier(m,saved["result"])
         except Exception as exc:
@@ -195,20 +290,53 @@ class Runtime(Supervisor):
             return
         checks = verified.get("checks")
         artifact = saved["result"].get("artifact") if isinstance(saved["result"], dict) else None
+        code = m.get("owner") == "local"
         ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
               and all(isinstance(check, dict) and check.get("ok") is True for check in checks)
               and isinstance(verified.get("verifier"), str) and bool(verified["verifier"])
               and isinstance(artifact, str)
               and hashlib.sha256(artifact.encode("utf-8")).hexdigest() == verified.get("artifact_sha256")
-              == saved["result"].get("sha256") == m["expected_sha256"])
+              == saved["result"].get("sha256")
+              and (verified.get("verifier") == local_codegen.VERIFIER
+                   and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                   and {c.get("name") for c in checks} == {
+                       "bounded-model-receipt", "approved-function-diff", "baseline-fails", "candidate-passes"}
+                   if code else saved["result"].get("sha256") == m["expected_sha256"]))
         verdict=verify_mission(conversation_finished=True,roles={m["specialist"]:{"reported":True}},
-             acceptance_checks=[{"id":"independent-text-contract","command":"fixed subprocess verifier",
+             acceptance_checks=[{"id":"independent-code-contract" if code else "independent-text-contract",
+                   "command":"isolated Docker baseline and candidate" if code else "fixed subprocess verifier",
                    "exit_code":0 if ok else 1,"reproducible":True,"output_digest":fingerprint(verified)}])
+        feedback = verified.get("feedback")
+        if (not verdict["validated"] and code and local_codegen.valid_feedback(feedback)
+                and verified.get("ok") is False and isinstance(checks, list)
+                and verified.get("verifier") == local_codegen.VERIFIER
+                and verified.get("base_sha") == m["base_sha"] and verified.get("path") == m["path"]
+                and isinstance(artifact, str)
+                and hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+                == verified.get("artifact_sha256") == saved["result"].get("sha256")):
+            outcomes = {c["name"]: c.get("ok") for c in checks
+                        if isinstance(c, dict) and isinstance(c.get("name"), str)}
+            correctable = (
+                feedback["kind"] == "candidate-diff" and outcomes.get("approved-function-diff") is False
+                or feedback["kind"] == "candidate-test" and outcomes.get("baseline-fails") is True
+                and outcomes.get("candidate-passes") is False
+            )
+            if correctable:
+                if self._retry(m, saved, maximum, reason="independent verification rejected the candidate",
+                               feedback=feedback, verification=verified):
+                    return self.state(m)["status"] == "ACK"
         if verdict["validated"]:
             try:self.remember(m,{**saved, "verification": verified})
             except (OSError,ValueError):
                 self.save(m,"AWAITING_HUMAN",reason="memory persistence unavailable");return
-        self.save(m,"ACCEPTED" if verdict["validated"] else "REJECTED",verification=verified,verdict=verdict)
+        status = "ACCEPTED" if verdict["validated"] else "REJECTED"
+        details = {}
+        if maximum > 1:
+            details["feedback"] = None
+            if status == "REJECTED" and saved["attempt"] >= maximum:
+                status = "BLOCKED"
+                details["reason"] = "attempt limit reached without independent verification"
+        self.save(m, status, verification=verified, verdict=verdict, **details)
     def run_queue(self,missions,approvals,max_tasks=20):
         # Shared queue lock also prevents a second watcher declaring a live RUNNING
         # worker orphaned. Per-mission permanent CAS protects independent claimers.
@@ -276,6 +404,7 @@ def main(argv=None):
     p.add_argument("--state",type=Path,required=True)
     p.add_argument("--registry",type=Path)
     p.add_argument("--registry-sha256")
+    p.add_argument("--local-code", action="store_true", help="admit approved local Python code missions")
     p.add_argument("--seconds",type=int,default=300)
     p.add_argument("--once",action="store_true")
     a=p.parse_args(argv);r=Runtime(a.state, legacy_stop=LEGACY_STOP)
@@ -284,10 +413,12 @@ def main(argv=None):
     if a.action=="status":print(json.dumps(r.status(),ensure_ascii=True));return 0
     if not a.registry or not re.fullmatch(r"[0-9a-f]{64}",a.registry_sha256 or ""):
         p.error("trusted registry path and pinned SHA256 required")
-    if not 1<=a.seconds<=3600:p.error("seconds must be 1..3600")
+    limit = 21600 if a.local_code else 3600
+    if not 1 <= a.seconds <= limit:
+        p.error(f"seconds must be 1..{limit}")
     if r.stopped():print("STOP remains set; operator must explicitly acknowledge before run");return 2
     try:
-        r.bind_transport("kilo-local")
+        r.bind_transport("local-code" if a.local_code else "kilo-local")
     except (Blocked, OSError, ValueError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}))
         return 2
@@ -300,10 +431,11 @@ def main(argv=None):
         if hashlib.sha256(raw).hexdigest()!=a.registry_sha256:raise ValueError("registry changed")
         data = json.loads(raw)
         missions = data.get("missions") if isinstance(data, dict) else None
+        owner = "local" if a.local_code else "kilo"
         if (not isinstance(missions, list) or not isinstance(data.get("approvals"), dict)
-                or any(not isinstance(m, dict) or m.get("owner") != "kilo"
+                or any(not isinstance(m, dict) or m.get("owner") != owner
                        or not isinstance(m.get("id"), str) for m in missions)):
-            raise ValueError("the local Kilo launcher requires Kilo contracts")
+            raise ValueError("registry owner does not match the selected local transport")
         expected = {m["id"] for m in missions}
         return data
     failed = run_session(r, lambda: r.poll(source), once=a.once)

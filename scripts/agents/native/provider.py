@@ -112,7 +112,8 @@ class OpenAICompatibleProvider:
 
     def __init__(self, *, model: str, base_url: str, api_key: str = "",
                  timeout: int = 60, name: str = "openai-compatible",
-                 included_local_model: str = "", synthetic_data: bool = False) -> None:
+                 included_local_model: str = "", synthetic_data: bool = False,
+                 max_tokens: int | None = None) -> None:
         if not isinstance(base_url, str):
             raise ProviderConfigError("base_url must be an http(s) URL")
         try:
@@ -141,6 +142,7 @@ class OpenAICompatibleProvider:
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self.timeout = int(timeout)
+        self.max_tokens = max_tokens
         self.name = "kilo-auto-free" if self._kilo_free else name
         self.last_completion_evidence: dict | None = None
         handlers = [urllib.request.ProxyHandler({})] if local or self._kilo_free else []
@@ -191,6 +193,8 @@ class OpenAICompatibleProvider:
         }
         if self._kilo_free:
             payload["max_tokens"] = 8192
+        elif self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode(),

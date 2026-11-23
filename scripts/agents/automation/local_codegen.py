@@ -1,0 +1,307 @@
+"""Generate one approved Python function and verify its behavior in local Docker."""
+
+from __future__ import annotations
+
+import ast
+import difflib
+import hashlib
+import io
+import json
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from local_codex import Blocked, git_committed_blob
+from scripts.agents.native import sandbox
+from scripts.agents.native.mission import MissionError, valid_artifact_name
+from scripts.agents.native.provider import OpenAICompatibleProvider, ProviderError
+
+FIELDS = {
+    "id", "owner", "project", "specialist", "priority", "dependencies", "objective",
+    "base_sha", "path", "function", "test", "sandbox_image", "model", "port",
+}
+VERIFIER = "tel99-local-docker-code-v1"
+PROVIDER = "loopback-code"
+FEEDBACK_MESSAGES = {
+    "candidate-diff": "The proposal was not a valid change to the one approved function. Check Python syntax and preserve its exact signature.",
+    "candidate-test": "The proposal failed an independent behavior check. Reconsider the requested behavior and its edge cases.",
+    "empty-completion": "The previous response contained no function. Return the complete updated function.",
+}
+
+
+class GenerationBlocked(Blocked):
+    """A local worker reported a bounded generation failure."""
+
+    def __init__(self, reason, feedback=None):
+        super().__init__(reason)
+        self.reason = reason
+        self.feedback = feedback
+
+
+def valid_feedback(feedback):
+    if not isinstance(feedback, dict) or not isinstance(feedback.get("kind"), str):
+        return False
+    if feedback["kind"] not in FEEDBACK_MESSAGES:
+        return False
+    if feedback.keys() == {"kind"}:
+        return True
+    return (feedback.keys() == {"kind", "line"} and feedback["kind"] == "candidate-test"
+            and type(feedback["line"]) is int and 1 <= feedback["line"] <= 8000)
+
+
+def validate_scope(mission):
+    if not isinstance(mission, dict):
+        raise ValueError("invalid local code scope")
+    path = mission.get("path")
+    port = mission.get("port")
+    max_attempts = mission.get("max_attempts", 1)
+    if (mission.keys() - {"max_attempts"} != FIELDS
+            or type(max_attempts) is not int or not 1 <= max_attempts <= 2
+            or mission["owner"] != "local"
+            or mission["project"] != "tel99" or mission["specialist"] != "tel99-dev"
+            or not isinstance(mission["id"], str)
+            or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}", mission["id"])
+            or not re.fullmatch(r"[0-9a-f]{40}", str(mission["base_sha"]))
+            or not isinstance(path, str) or not path.endswith(".py") or len(path) > 200
+            or not all(valid_artifact_name(part) for part in path.split("/"))
+            or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", str(mission["function"]))
+            or not isinstance(mission["test"], str) or not 1 <= len(mission["test"]) <= 8000
+            or not sandbox.valid_image(mission["sandbox_image"])
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", str(mission["model"]))
+            or type(port) is not int or not 1024 <= port <= 65535):
+        raise ValueError("invalid local code scope")
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _source(mission):
+    data = git_committed_blob(ROOT, mission["base_sha"], mission["path"], timeout=5)
+    if len(data) > 100_000:
+        raise ValueError("source file exceeds the local code limit")
+    return data.decode("utf-8")
+
+
+def _function(source, name):
+    matches = [
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    if len(matches) != 1 or matches[0].decorator_list:
+        raise ValueError("the approved function must be a unique, undecorated top-level function")
+    return matches[0]
+
+
+def _physical_lines(source):
+    return io.StringIO(source, newline="").readlines()
+
+
+def _function_source(source, node):
+    return "".join(_physical_lines(source)[node.lineno - 1:node.end_lineno])
+
+
+def replace_function(source, name, reply):
+    original = _function(source, name)
+    code = reply.strip()
+    if re.search(r"^```", code, re.MULTILINE):
+        blocks = re.findall(
+            r"^```(?:python|py)?[ \t]*\r?\n(.*?)\r?\n^```[ \t]*\r?$",
+            code, re.MULTILINE | re.DOTALL,
+        )
+        if len(blocks) != 1 or len(re.findall(r"^```", code, re.MULTILINE)) != 2:
+            raise ValueError("candidate must provide exactly one Python code block")
+        code = blocks[0]
+    body = ast.parse(code).body
+    if (len(body) != 1 or not isinstance(body[0], ast.FunctionDef) or body[0].name != name
+            or body[0].decorator_list or ast.dump(body[0].args) != ast.dump(original.args)
+            or (ast.dump(body[0].returns) if body[0].returns else None)
+            != (ast.dump(original.returns) if original.returns else None)
+            or getattr(body[0], "type_params", ()) or getattr(original, "type_params", ())
+            or ast.dump(body[0]) == ast.dump(original)):
+        raise ValueError("candidate must change one function with its existing signature")
+    lines = _physical_lines(source)
+    replacement = _function_source(code, body[0])
+    if not replacement.endswith(("\r", "\n")):
+        replacement += "\n"
+    candidate = "".join(lines[:original.lineno - 1]) + replacement + "".join(lines[original.end_lineno:])
+    compile(candidate, "<candidate>", "exec")
+    return candidate
+
+
+def execute(mission, feedback=None):
+    validate_scope(mission)
+    prompt = f"Task: {mission['objective']}"
+    if feedback is not None:
+        if mission.get("max_attempts", 1) != 2 or not valid_feedback(feedback):
+            raise ValueError("invalid local code retry feedback")
+        prompt += f"\n\nPrevious attempt: {FEEDBACK_MESSAGES[feedback['kind']]}"
+        if "line" in feedback:
+            prompt += f" The failing assertion is at line {feedback['line']} of the approved test."
+            lines = _physical_lines(mission["test"])
+            if feedback["line"] <= len(lines):
+                # The optional case label belongs to the approved test, not the model's output.
+                case = re.search(r"# case: ([a-z0-9-]{1,80})$", lines[feedback["line"] - 1].rstrip())
+                if case:
+                    prompt += f" Approved case: {case[1]}."
+    sandbox.require_local_image(mission["sandbox_image"])
+    source = _source(mission)
+    function = _function_source(source, _function(source, mission["function"]))
+    if len(function) > 4000:
+        raise ValueError("approved function exceeds the model input limit")
+    model = mission["model"]
+    provider = OpenAICompatibleProvider(
+        model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",
+        timeout=80, max_tokens=384,
+    )
+    reply = provider.complete(
+        system=(
+            "You are tel99-dev. Return only the updated Python function with its existing signature, "
+            "including annotations. Start with def. Do not add or repeat module-level imports. "
+            "Use only Python's standard library. You have no tools. "
+            "Do not output other code, claims about tests, or deployment and trading actions."
+        ),
+        prompt=f"{prompt}\n\nExisting function:\n{function}",
+    )
+    if reply is None or isinstance(reply, str) and not reply.strip():
+        raise GenerationBlocked("local Qwen returned an empty completion", {"kind": "empty-completion"})
+    if not isinstance(reply, str) or len(reply.encode("utf-8")) > 16_000:
+        raise ValueError("invalid or oversized local Qwen completion")
+    return {"artifact": reply, "sha256": _sha(reply), "specialist_id": mission["specialist"],
+            "provider": PROVIDER, "model": model}
+
+
+def _behavior(image, source, test):
+    # The approval pins the test. It invokes /work/program.py as a child process.
+    runner = (
+        "try:\n"
+        f"    exec(compile({test!r}, '<independent-test>', 'exec'))\n"
+        "except AssertionError as exc:\n"
+        "    line = None\n"
+        "    frame = exc.__traceback__\n"
+        "    while frame is not None:\n"
+        "        if frame.tb_frame.f_code.co_filename == '<independent-test>':\n"
+        "            line = frame.tb_lineno\n"
+        "        frame = frame.tb_next\n"
+        "    print('TEL99_TEST_FAIL' if line is None else f'TEL99_TEST_FAIL {line}')\n"
+        "    raise SystemExit(1)\n"
+        "print('TEL99_TEST_PASS')\n"
+    )
+    with tempfile.TemporaryDirectory(prefix="tel99-code-test-") as directory:
+        path = Path(directory) / "program.py"
+        path.write_bytes(source.encode("utf-8"))
+        result = sandbox._run_container(image, path, 20, runner=runner)
+    if (result.returncode, result.stdout) == (0, b"TEL99_TEST_PASS\n"):
+        return True, None
+    if result.returncode == 1:
+        failure = re.fullmatch(rb"TEL99_TEST_FAIL(?: ([1-9][0-9]{0,3}))?\r?\n", result.stdout)
+        if failure:
+            line = int(failure[1]) if failure[1] else None
+            return False, line if line is not None and line <= 8000 else None
+    raise MissionError(f"no independent test verdict from Docker (exit {result.returncode})")
+
+
+def _publish(directory, path, candidate, diff):
+    if directory.resolve() != directory:
+        raise ValueError("redirected proof directory")
+    if directory.exists():
+        for name, content in ((path, candidate), ("change.diff", diff)):
+            target = directory / name
+            if target.resolve() != target or target.read_bytes() != content.encode("utf-8"):
+                raise ValueError("existing proof does not match the verified source")
+        return
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=directory.parent) as temp:
+        bundle = Path(temp) / "bundle"
+        target = bundle / path
+        target.parent.mkdir(parents=True)
+        target.write_bytes(candidate.encode("utf-8"))
+        (bundle / "change.diff").write_bytes(diff.encode("utf-8"))
+        bundle.rename(directory)
+
+
+def verify(mission, result, root):
+    validate_scope(mission)
+    reply = result.get("artifact")
+    if (not isinstance(reply, str) or not reply.strip() or len(reply.encode("utf-8")) > 16_000
+            or result.get("sha256") != _sha(reply) or result.get("specialist_id") != "tel99-dev"
+            or result.get("provider") != PROVIDER or result.get("model") != mission["model"]):
+        return {"ok": False, "checks": [{"name": "bounded-model-receipt", "ok": False}]}
+    report = {
+        "verifier": VERIFIER, "artifact_sha256": _sha(reply), "ok": False,
+        "base_sha": mission["base_sha"], "path": mission["path"], "function": mission["function"],
+        "test_sha256": _sha(mission["test"]), "sandbox_image": mission["sandbox_image"],
+        "checks": [{"name": "bounded-model-receipt", "ok": True}],
+    }
+    source = _source(mission)
+    try:
+        candidate = replace_function(source, mission["function"], reply)
+    except (SyntaxError, ValueError) as exc:
+        report["checks"].append({"name": "approved-function-diff", "ok": False,
+                                 "error": "invalid-python-syntax" if isinstance(exc, SyntaxError)
+                                 else "approved-function-change-required"})
+        report["feedback"] = {"kind": "candidate-diff"}
+        return report
+    report["checks"].append({"name": "approved-function-diff", "ok": True})
+    sandbox.require_local_image(mission["sandbox_image"])
+    before, baseline_line = _behavior(mission["sandbox_image"], source, mission["test"])
+    baseline = {"name": "baseline-fails", "ok": not before, "exit_code": 0 if before else 1}
+    if baseline_line is not None:
+        baseline["assertion_line"] = baseline_line
+    report["checks"].append(baseline)
+    if before:
+        return report
+    after, candidate_line = _behavior(mission["sandbox_image"], candidate, mission["test"])
+    check = {"name": "candidate-passes", "ok": after, "exit_code": 0 if after else 1}
+    if candidate_line is not None:
+        check["assertion_line"] = candidate_line
+    report["checks"].append(check)
+    if not after:
+        report["feedback"] = {"kind": "candidate-test"}
+        if candidate_line is not None:
+            report["feedback"]["line"] = candidate_line
+    else:
+        path = mission["path"]
+        changes = difflib.unified_diff(
+            _physical_lines(source), _physical_lines(candidate),
+            fromfile=f"a/{path}", tofile=f"b/{path}",
+        )
+        diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
+                       for line in changes)
+        _publish(root / "verified-code" / mission["id"], path, candidate, diff)
+        report.update(ok=True, base_file_sha256=_sha(source), candidate_sha256=_sha(candidate),
+                      diff_sha256=_sha(diff))
+    return report
+
+
+def main():
+    try:
+        raw = sys.stdin.buffer.read(100_001)
+        if len(raw) > 100_000:
+            raise ValueError("worker input exceeds the limit")
+        data = json.loads(raw)
+        if isinstance(data, dict) and data.keys() == {"mission", "feedback"}:
+            result = execute(data["mission"], feedback=data["feedback"])
+        else:
+            result = execute(data)
+        print(json.dumps(result), flush=True)
+        return 0
+    except GenerationBlocked as exc:
+        report = {"status": "BLOCKED", "reason": exc.reason}
+        if valid_feedback(exc.feedback):
+            report["feedback"] = exc.feedback
+        print(json.dumps(report), flush=True)
+        return 4
+    except (Blocked, MissionError, OSError, ProviderError, SyntaxError, ValueError) as exc:
+        print(json.dumps({"status": "BLOCKED", "reason": str(exc)}), flush=True)
+        return 4
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

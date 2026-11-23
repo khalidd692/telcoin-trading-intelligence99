@@ -9,10 +9,12 @@ param(
  [long]$MandateComment,
  [string]$MandateSha256,
  [switch]$Campaign,
- [ValidateRange(1,3600)][int]$Seconds=300,
- [switch]$Once
+ [ValidateRange(1,21600)][int]$Seconds=300,
+ [switch]$Once,
+ [switch]$LocalCode
 )
 $ErrorActionPreference='Stop'
+if (-not $LocalCode -and $Seconds -gt 3600) { throw 'Seconds must be 1..3600 outside LocalCode' }
 try {
  if (-not $Python) {
   $managed=Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
@@ -32,6 +34,7 @@ try {
  exit 2
 }
 if ($Action -eq 'START') { $Action='RUN' }
+if ($LocalCode -and $GitHubIssue) { throw 'LocalCode requires a local registry' }
 if ($Campaign -and (-not $GitHubIssue -or ($MandateComment -le 0 -and -not $State))) {
  throw 'Campaign requires -GitHubIssue and either -MandateComment or -State'
 }
@@ -40,6 +43,8 @@ if (-not $State) {
   "kilo-campaign-$GitHubIssue-$MandateComment"
  } elseif ($GitHubIssue) {
   "kilo-github-$GitHubIssue"
+ } elseif ($LocalCode) {
+  'local-code'
  } else {
   'kilo'
  }
@@ -78,6 +83,7 @@ if ($Action -in @('RUN', 'PREFLIGHT')) {
   throw 'RUN requires an operator-approved registry and its pinned SHA256; no automatic approval'
   }
   $argv+=@('--registry',$Registry,'--registry-sha256',$RegistrySha256)
+  if ($LocalCode) { $argv+='--local-code' }
  }
  if ($Action -eq 'RUN') {
   $argv+=@('--seconds',"$Seconds")

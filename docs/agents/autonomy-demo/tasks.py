@@ -31,7 +31,7 @@ def save_tasks(db_path: str, tasks: list[dict]) -> None:
 def find_task_index(tasks: list[dict], task_id: str) -> int | None:
     """Retourne l'index de la tâche avec l'ID donné, ou None si introuvable."""
     for i, task in enumerate(tasks):
-        if task["id"] == task_id:
+        if isinstance(task, dict) and "id" in task and task["id"] == task_id:
             return i
     return None
 

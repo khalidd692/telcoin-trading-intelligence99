@@ -2,6 +2,7 @@ import hashlib, json, multiprocessing, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from scripts.agents.automation.autonomy_runtime import Blocked, Runtime, main, seal, validate_contract
+from tests.test_local_codegen import mission as code_mission
 
 def mission(i="demo-a", **kw):
     m=dict(id=i,project="synthetic",owner="kilo",priority="P0",dependencies=[],
@@ -207,4 +208,80 @@ class RuntimeTests(unittest.TestCase):
     def test_bad_role_scope_rejected(self):
         a=mission(specialist="shell-admin")
         self.assertRaises(ValueError,validate_contract,a,seal([a]))
+
+    def test_verified_retry_resumes_from_ack_then_releases_dependency(self):
+        from scripts.agents.automation.autonomy_runtime import local_codegen
+
+        a = code_mission(max_attempts=2)
+        b = code_mission(id="local-code-b", dependencies=[a["id"]], max_attempts=2)
+        marker = self.root / "stop.request"
+        source = b"def increment(value):\n    return value\n"
+        feedback = {"kind": "candidate-test", "line": 1}
+        calls = []
+
+        def worker(m, *, feedback=None, attempt=1):
+            calls.append((m["id"], feedback, attempt))
+            reply = f"def increment(value):\n    return value + {attempt}"
+            return {"artifact": reply, "sha256": hashlib.sha256(reply.encode()).hexdigest(),
+                    "specialist_id": m["specialist"], "provider": local_codegen.PROVIDER,
+                    "model": m["model"]}
+
+        def verify(m, receipt):
+            if m == a and calls[-1][2] == 1:
+                return {"verifier": local_codegen.VERIFIER, "base_sha": m["base_sha"],
+                        "path": m["path"], "artifact_sha256": receipt["sha256"],
+                        "checks": [{"name": "baseline-fails", "ok": True},
+                                   {"name": "candidate-passes", "ok": False}],
+                        "ok": False, "feedback": feedback}
+            return local_codegen.verify(m, receipt, self.root)
+
+        run = Runtime(self.root, verifier=verify)
+        save = run.save
+
+        def save_and_stop(m, status, **details):
+            checkpoint = save(m, status, **details)
+            if m == a and status == "ACK" and details.get("attempt_history"):
+                marker.touch()
+            return checkpoint
+
+        with patch.object(run, "execute_worker", side_effect=worker), patch.object(run, "save", side_effect=save_and_stop):
+            run.run_queue([a, b], seal([a, b]))
+        self.assertEqual(calls, [(a["id"], None, 1)])
+        self.assertEqual(run.state(a)["status"], "ACK")
+        self.assertEqual(run.state(b), {})
+
+        marker.rename(self.root / "stop.acknowledged")
+        resumed = Runtime(self.root, verifier=verify)
+        with (patch.object(resumed, "execute_worker", side_effect=worker),
+              patch.object(local_codegen, "git_committed_blob", return_value=source),
+              patch.object(local_codegen.sandbox, "require_local_image"),
+              patch.object(local_codegen, "_behavior",
+                           side_effect=[(False, 1), (True, None), (False, 1), (True, None)])):
+            resumed.run_queue([a, b], seal([a, b]))
+            resumed.run_queue([a, b], seal([a, b]))
+        self.assertEqual(calls, [(a["id"], None, 1), (a["id"], feedback, 2), (b["id"], None, 1)])
+        self.assertEqual(resumed.state(a)["status"], "ACCEPTED")
+        self.assertEqual(resumed.state(b)["status"], "ACCEPTED")
+        self.assertEqual(resumed.state(a)["attempt_history"][0]["feedback"], feedback)
+
+    def test_retry_exhaustion_is_terminal_and_independent_work_continues(self):
+        from scripts.agents.automation.autonomy_runtime import local_codegen
+
+        a = code_mission(max_attempts=2)
+        b = mission()
+        calls = []
+        def worker(m, *, feedback=None, attempt=1):
+            if m == b:
+                return result()
+            calls.append(attempt)
+            raise local_codegen.GenerationBlocked("completion was empty", {"kind": "empty-completion"})
+
+        with patch.object(Runtime, "execute_worker", side_effect=worker):
+            runtime = Runtime(self.root)
+            runtime.run_queue([a, b], seal([a, b]))
+            runtime.run_queue([a, b], seal([a, b]))
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(runtime.state(a)["status"], "BLOCKED")
+        self.assertEqual(len(runtime.state(a)["attempt_history"]), 2)
+        self.assertEqual(runtime.state(b)["status"], "ACCEPTED")
 if __name__=="__main__":unittest.main()
