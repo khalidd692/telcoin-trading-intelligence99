@@ -13,7 +13,7 @@ def load_tasks(db_path: str) -> list[dict]:
     if not os.path.exists(db_path):
         return []
     try:
-        with open(db_path, "r", encoding="utf-8") as f:
+        with open(db_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
             if not isinstance(data, list):
                 return []
