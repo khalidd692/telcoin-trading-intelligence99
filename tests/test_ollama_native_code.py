@@ -67,11 +67,50 @@ class OllamaNativeCodeTests(unittest.TestCase):
         self.assertEqual(client.url, "http://127.0.0.1:11434/api/generate")
         self.assertEqual(client.payload["model"], GEMMA["model"])
         self.assertEqual(client.payload["stream"], False)
+        self.assertIs(client.payload["think"], False)
         self.assertEqual(client.payload["keep_alive"], "0s")
         self.assertEqual(client.payload["options"]["num_ctx"], 8192)
         self.assertEqual(client.payload["options"]["num_predict"], 256)
         self.assertNotIn("tools", client.payload)
         self.assertTrue(mocked.called)
+
+    def test_empty_final_answer_does_not_turn_reasoning_into_code(self):
+        client = _Client({
+            "model": GEMMA["model"],
+            "response": "",
+            "thinking": "Internal reasoning text must never reach Docker or logs",
+            "done_reason": "length",
+            "eval_count": 768,
+        })
+        with patch("scripts.agents.automation.ollama_native.build_opener", return_value=client):
+            provider = OllamaNativeProvider(model=GEMMA["model"], timeout=40)
+            response = provider.complete(system="Only final code", prompt="Fix function")
+        self.assertEqual(response, "")
+        self.assertEqual(provider.last_metadata, {
+            "done_reason": "length",
+            "eval_count": 768,
+            "thinking_present": True,
+        })
+
+    def test_local_codegen_reports_empty_reason_without_exposing_thinking(self):
+        original = next(row for row in json.loads(REGISTRY.read_bytes())["missions"]
+                        if row["function"] == "load_json")
+        mission = {**original, "model": GEMMA["model"], "port": 11434}
+        fake_source = "def load_json(path):\n    return {}\n"
+        with (patch.object(local_codegen.sandbox, "require_local_image"),
+              patch.object(local_codegen, "_source", return_value=fake_source),
+              patch.object(local_codegen, "OllamaNativeProvider") as provider_class):
+            provider = provider_class.return_value
+            provider.complete.return_value = ""
+            provider.last_metadata = {
+                "done_reason": "length", "eval_count": 768, "thinking_present": True
+            }
+            with self.assertRaises(local_codegen.GenerationBlocked) as raised:
+                local_codegen.execute(mission)
+        self.assertEqual(raised.exception.feedback, {"kind": "empty-completion"})
+        self.assertIn("done_reason=length", raised.exception.reason)
+        self.assertIn("thinking_present=True", raised.exception.reason)
+        self.assertNotIn("Internal reasoning", raised.exception.reason)
 
     def test_wrong_served_model_and_unknown_model_fail_closed(self):
         with self.assertRaises(ProviderError):
