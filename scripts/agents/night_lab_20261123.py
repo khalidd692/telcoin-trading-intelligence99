@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -33,6 +34,7 @@ from local_codex import Blocked, exclusive
 from protocol.store import FileStore
 from scripts.agents.native import sandbox
 from scripts.agents.native.mission import MissionError
+from scripts.agents import night_lab_cockpit
 from scripts.agents.team_config import role_catalog
 
 STOP_GRACE = 70
@@ -74,35 +76,102 @@ def audit_skills(root):
     return rows[:300]
 
 
-def cockpit(session, port):
-    path = session / "status.json"
+def cockpit(session, port, *, github_state=None, stop_code=None):
+    path = session / "status.json" if session is not None else None
+    if github_state is not None:
+        github_state = github_state.resolve()
+    assets = {
+        "/": ("index.html", "text/html"),
+        "/dashboard.js": ("dashboard.js", "application/javascript"),
+        "/dashboard.css": ("dashboard.css", "text/css"),
+    }
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(5)
+
+        def authorized_host(self):
+            actual_port = self.server.server_port
+            if self.headers.get("Host") not in (f"127.0.0.1:{actual_port}", f"localhost:{actual_port}"):
                 self.send_error(403)
-                return
-            if self.path == "/":
-                body, kind = HTML.encode(), "text/html"
-            elif self.path == "/dashboard.js":
-                body, kind = JS.encode(), "application/javascript"
-            elif self.path == "/status.json":
-                try:
-                    body = FileStore._retry_file_access(path.read_bytes)
-                except OSError:
-                    self.send_error(503)
-                    return
-                kind = "application/json"
-            else:
-                self.send_error(404)
-                return
-            self.send_response(200)
+                return False
+            return True
+
+        def send_body(self, status, body, kind):
+            self.send_response(status)
             self.send_header("Content-Type", kind + "; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            styles = "'self'" if github_state is not None else "'unsafe-inline'"
+            self.send_header("Content-Security-Policy", "default-src 'self'; object-src 'none'; "
+                             f"base-uri 'none'; frame-ancestors 'none'; form-action 'none'; style-src {styles}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_GET(self):
+            if not self.authorized_host():
+                return
+            try:
+                if self.path == "/status.json":
+                    if github_state is not None:
+                        data = night_lab_cockpit.snapshot(github_state, allow_stop=stop_code is not None)
+                        body = json.dumps(data, ensure_ascii=True, allow_nan=False).encode("utf-8")
+                    else:
+                        def read_status():
+                            with path.open("rb") as handle:
+                                return handle.read(night_lab_cockpit.MAX_RECORD_BYTES + 1)
+                        body = FileStore._retry_file_access(read_status)
+                        if len(body) > night_lab_cockpit.MAX_RECORD_BYTES:
+                            raise ValueError("Night Lab report exceeds bound")
+                    kind = "application/json"
+                elif github_state is not None and self.path in assets:
+                    name, kind = assets[self.path]
+                    body = (night_lab_cockpit.ASSETS / name).read_bytes()
+                elif github_state is None and self.path == "/":
+                    body, kind = HTML.encode(), "text/html"
+                elif github_state is None and self.path == "/dashboard.js":
+                    body, kind = JS.encode(), "application/javascript"
+                else:
+                    self.send_error(404)
+                    return
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                self.send_error(503)
+                return
+            self.send_body(200, body, kind)
+
+        def do_POST(self):
+            if not self.authorized_host():
+                return
+            if self.path != "/actions/stop" or github_state is None or stop_code is None:
+                self.send_error(405)
+                return
+            if self.headers.get("Origin") != "http://" + self.headers["Host"]:
+                self.send_error(403)
+                return
+            length = self.headers.get("Content-Length", "")
+            if (self.headers.get("Content-Type") != "application/json" or self.headers.get("Transfer-Encoding")
+                    or not re.fullmatch(r"[1-9][0-9]{0,2}", length) or int(length) > 512):
+                self.send_error(400)
+                return
+            try:
+                action = json.loads(self.rfile.read(int(length)))
+                code = action.get("code") if isinstance(action, dict) else None
+                if (not isinstance(code, str) or not code.isascii()
+                        or not secrets.compare_digest(code, stop_code)
+                        or action.get("confirm") is not True):
+                    self.send_error(403)
+                    return
+                accepted = night_lab_cockpit.request_stop(github_state)
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                self.send_error(503)
+                return
+            if not accepted:
+                self.send_error(409)
+                return
+            self.send_body(202, b'{"status":"STOP_REQUESTED"}', "application/json")
 
         def log_message(self, *args):
             pass
@@ -582,6 +651,8 @@ def main(argv=None):
     parser.add_argument("command", choices=["run", "serve", "stop", "selftest"])
     parser.add_argument("--repo", type=Path, default=ROOT)
     parser.add_argument("--session", type=Path)
+    parser.add_argument("--github-state", type=Path)
+    parser.add_argument("--allow-stop", action="store_true")
     parser.add_argument("--registry", type=Path)
     parser.add_argument("--registry-sha256")
     parser.add_argument("--hours", type=float, default=6)
@@ -593,14 +664,21 @@ def main(argv=None):
         assert len(role_catalog()) == 12 and STOP_GRACE < .25 * 3600
         print("NIGHT_LAB_SELFTEST_OK")
         return 0
-    if args.command in {"serve", "stop"} or args.resume:
+    if args.github_state is not None and (args.command != "serve" or args.session is not None):
+        parser.error("--github-state est réservé à serve et remplace --session")
+    if args.allow_stop and args.github_state is None:
+        parser.error("--allow-stop exige serve --github-state")
+    if (args.command in {"serve", "stop"} or args.resume) and args.github_state is None:
         if args.session is None or not args.session.is_dir():
             parser.error("--session doit désigner un dossier existant")
     if not 1024 <= args.port <= 65535:
         parser.error("--port doit être compris entre 1024 et 65535")
     if args.command == "serve":
-        with cockpit(args.session, args.port) as server:
+        stop_code = secrets.token_urlsafe(24) if args.allow_stop else None
+        with cockpit(args.session, args.port, github_state=args.github_state, stop_code=stop_code) as server:
             print(f"TEL99 DASHBOARD http://127.0.0.1:{args.port}/", flush=True)
+            if stop_code:
+                print(f"Code de contrôle local pour cet arrêt : {stop_code}", flush=True)
             server.serve_forever()
         return 0
     if args.command == "stop":
