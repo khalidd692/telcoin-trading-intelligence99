@@ -32,13 +32,18 @@ class OllamaNativeProvider:
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.last_metadata = {}
 
     def complete(self, *, system: str, prompt: str) -> str:
+        self.last_metadata = {}
         body = json.dumps({
             "model": self.model,
             "system": system,
             "prompt": prompt,
             "stream": False,
+            # Code-only repair tasks need final code, not a reasoning trace.
+            # Ollama otherwise can consume num_predict in the thinking field.
+            "think": False,
             "keep_alive": "0s",
             "options": {
                 "num_ctx": 8192,
@@ -72,4 +77,17 @@ class OllamaNativeProvider:
         answer = result.get("response")
         if not isinstance(answer, str):
             raise ProviderError("Ollama response contains no text completion")
+        # Store only bounded technical metadata. Never treat model thinking as code
+        # and never write the raw thinking trace into a receipt or checkpoint.
+        done_reason = result.get("done_reason")
+        if done_reason not in ("stop", "length", "unload"):
+            done_reason = "unknown"
+        count = result.get("eval_count")
+        if type(count) is not int or not 0 <= count <= 1_000_000:
+            count = None
+        self.last_metadata = {
+            "done_reason": done_reason,
+            "eval_count": count,
+            "thinking_present": bool(result.get("thinking")),
+        }
         return answer
