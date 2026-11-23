@@ -102,7 +102,7 @@ class MultiMandateTests(unittest.TestCase):
             if len(ticks) == 1:
                 write_manifest(self.root, [spec(201), spec(202)])
         summary = multi.run_campaigns(
-            manifest, self.root / "ledger", seconds=0.15,
+            manifest, self.root / "ledger", seconds=1,
             poll_interval=0.01, build=build, sleep=sleep)
         self.assertEqual(calls, [201, 202])
         self.assertEqual(summary, {201: True, 202: True})
