@@ -58,6 +58,18 @@ class _Client:
 
 
 class OllamaNativeCodeTests(unittest.TestCase):
+    def setUp(self):
+        memory = patch.object(local_model_routing, "available_memory_mib", return_value=12_000)
+        memory.start()
+        self.addCleanup(memory.stop)
+
+    def test_fixed_model_checks_host_ram_before_starting_ollama(self):
+        with (patch.object(local_model_routing, "available_memory_mib", return_value=7000),
+              patch("scripts.agents.automation.ollama_native.build_opener") as opener):
+            with self.assertRaisesRegex(ProviderError, "physical memory"):
+                OllamaNativeProvider(model=GEMMA["model"]).complete(system="Code only", prompt="Fix function")
+            opener.assert_not_called()
+
     def test_provider_calls_only_native_loopback_without_tools(self):
         client = _Client({"model": GEMMA["model"], "response": "def test():\n    return 42"})
         with patch("scripts.agents.automation.ollama_native.build_opener", return_value=client) as mocked:
@@ -152,7 +164,7 @@ class OllamaNativeCodeTests(unittest.TestCase):
                 {"name": REASONER["model"]},
             ]}
         with patch.object(local_model_routing, "_probe_json", side_effect=probe), patch.object(
-            local_model_routing, "available_memory_mib", return_value=5000
+            local_model_routing, "available_memory_mib", return_value=12_000
         ):
             self.assertTrue(local_model_routing.check_selected(GEMMA))
             self.assertTrue(local_model_routing.check_selected(QWEN))
