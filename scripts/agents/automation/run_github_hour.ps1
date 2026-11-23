@@ -9,6 +9,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($Mode -eq "Run") {
+    throw "Historical campaign #178 is completed. Never rerun #179-#181; use run_github_multi_mandate.ps1 with new owner-approved controllers."
+}
 Set-StrictMode -Version Latest
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
