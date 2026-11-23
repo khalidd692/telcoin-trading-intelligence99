@@ -266,6 +266,15 @@ def main(argv=None):
     report = runtime.status()
     report["delivery"] = "COMPLETE" if complete else "INCOMPLETE"
     report["github_code"] = runtime.store.get(CONFIG_KEY)
+    report["github_receipts"] = {
+        key: row.get("url") or ("NOT_SENT" if row.get("not_sent") else "PENDING_RECONCILIATION")
+        for key in runtime.store.keys("kilo-github/outbox")
+        if isinstance((row := runtime.store.get(key)), dict)
+    }
+    report["draft_prs"] = {
+        key: row.get("pr_url") for key in runtime.store.keys("github-local-code/PR")
+        if isinstance((row := runtime.store.get(key)), dict) and row.get("pr_url")
+    }
     print(json.dumps(report))
     return 0 if complete else 2
 
