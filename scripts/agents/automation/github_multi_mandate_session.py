@@ -54,7 +54,7 @@ def load_manifest(path):
 
 def make_campaign(spec, root, deadline):
     runtime = Runtime(root / f"campaign-{spec['issue']}",
-                      legacy_stop=root / "stop.request")
+                      legacy_stop=LEGACY_STOP)
     runtime.deadline = deadline
     return LocalCodeCampaign(
         runtime, spec["issue"], spec["mandate_comment"],
@@ -92,11 +92,13 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
     deadline = time.monotonic() + seconds
     summary = {}
     with exclusive(root / "multi-session.lock"):
-        while not (root / "stop.request").exists() and time.monotonic() < deadline:
+        while (not (root / "stop.request").exists() and not LEGACY_STOP.exists()
+               and time.monotonic() < deadline):
             specs = load_manifest(manifest)
             campaigns = preflight_campaigns(specs, root, deadline, build=build)
             for spec, campaign in zip(specs, campaigns):
-                if (root / "stop.request").exists() or time.monotonic() >= deadline:
+                if ((root / "stop.request").exists() or LEGACY_STOP.exists()
+                        or time.monotonic() >= deadline):
                     break
                 if not campaign.complete():
                     if not campaign.poll() or campaign.github_rate_limited:
@@ -141,6 +143,9 @@ def main(argv=None):
     if args.action == "stop":
         root.mkdir(parents=True, exist_ok=True)
         (root / "stop.request").touch()
+        for ledger in root.glob("campaign-*"):
+            if ledger.is_dir():
+                (ledger / "stop.request").touch()
         print("STOP requested")
         return 0
     if args.action == "status":
@@ -148,8 +153,8 @@ def main(argv=None):
         return 0
     if args.manifest is None:
         parser.error("preflight/run require --manifest with owner-pinned controllers")
-    if (root / "stop.request").exists():
-        print(json.dumps({"status": "BLOCKED", "reason": "stop.request exists"}))
+    if (root / "stop.request").exists() or LEGACY_STOP.exists():
+        print(json.dumps({"status": "BLOCKED", "reason": "stop.request or legacy STOP exists"}))
         return 2
     try:
         if args.action == "preflight":
