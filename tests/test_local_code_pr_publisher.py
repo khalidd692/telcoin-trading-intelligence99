@@ -146,8 +146,11 @@ def fixture(root):
     folder = root / "verified-code" / m["id"]
     candidate_path = folder / m["path"]
     candidate_path.parent.mkdir(parents=True)
-    candidate_path.write_text(candidate, encoding="utf-8")
-    (folder / "change.diff").write_text(diff, encoding="utf-8")
+    # Preserve the exact bytes emitted by the production verifier, including
+    # LF newlines. Path.write_text translates LF to CRLF on Windows and would
+    # make the SHA-256 / byte-for-byte publication guard reject this fixture.
+    candidate_path.write_bytes(candidate.encode("utf-8"))
+    (folder / "change.diff").write_bytes(diff.encode("utf-8"))
     fake = FakeAPI(proof=proof, blob=hashlib.sha1(
         f"blob {len(candidate.encode())}\0".encode() + candidate.encode(),
         usedforsecurity=False).hexdigest(), issue=FIRST)
