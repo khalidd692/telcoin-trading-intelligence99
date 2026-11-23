@@ -402,6 +402,10 @@ def _publish(directory, path, candidate, diff):
 
 
 def verify(mission, result, root):
+    # Windows temporary folders can contain noncanonical parent components.
+    # Anchor proofs to the resolved, existing supervisor state directory while
+    # retaining _publish's no-redirection check for every proof subdirectory.
+    root = Path(root).resolve(strict=True)
     validate_scope(mission)
     if "routing" in mission:
         raise ValueError("verifier requires a selected local model")
