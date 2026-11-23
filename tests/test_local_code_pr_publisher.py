@@ -192,6 +192,23 @@ class CodePublisherTests(unittest.TestCase):
             self.assertEqual(result, f"https://github.com/{REPO}/pull/805")
             self.assertEqual(len([name for name, _ in fake.created if name == "pulls"]), 1)
 
+    def test_crlf_translated_materialization_is_rejected_before_github_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store, state, url, fake, source = fixture(root)
+            path = (root / "verified-code" / state["id"]
+                    / store.get(f"kilo-github/approvals/{state['id']}")["mission"]["path"])
+            original = path.read_bytes()
+            self.assertIn(b"\n", original)
+            path.write_bytes(original.replace(b"\n", b"\r\n"))
+            with patch.object(local_codegen, "_source", return_value=source):
+                answer = local_code_pr.publish_verified_code_pr(
+                    REPO, FIRST, local_code_pr.BASE_REF, BASE,
+                    state, url, api=fake, store=store, root=root,
+                )
+            self.assertIsNone(answer)
+            self.assertFalse(fake.created)
+
     def test_tampered_docker_or_receipt_fails_before_gh_network(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
