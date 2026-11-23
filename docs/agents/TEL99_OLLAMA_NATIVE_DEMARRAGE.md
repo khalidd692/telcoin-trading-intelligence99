@@ -39,6 +39,27 @@ Limite une heure; aucun push ni merge; aucun ordre de trading.
 Garder la console ouverte pendant le test.
 Deux propositions maximum par mission, puis verdict Docker independant.
 
+## Nouvelle campagne Qwen2.5-Coder 7B (comparaison indépendante)
+
+Après les trois ACCEPTED et deux BLOCKED de Gemma (deuxième campagne),
+tester le modèle de programmation spécialisé sans modifier les anciens
+checkpoints, sans changer les tests et sans assouplir la sécurité :
+
+~~~powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$checkout\scripts\agents\automation\run_ollama_native.ps1" -Mode Coder
+~~~
+
+Le lanceur scelle cinq nouvelles identités et cinq contrats fixes sur
+qwen2.5-coder:7b. Le superviseur, les vérifications Docker et les journaux
+restent les mêmes. Les preuves anciennes sont conservées.
+Il est également possible d'exécuter une campagne séparée avec
+-Mode Qwen35, mais elle n'est pas encore validée sur le PC.
+
+Attention : la mission Gemma 04 a deux refus de tests Docker.
+La mission Gemma 05 a un refus Docker suivi d'un refus de forme du
+correctif. Le routeur strict n'autorise donc pas encore l'escalade
+automatique de la 05 : ne pas contourner la règle de deux échecs Docker.
+
 ## Routeur trois modeles — apres validation du mode Gemma
 
 ~~~powershell
