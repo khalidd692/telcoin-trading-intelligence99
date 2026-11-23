@@ -332,9 +332,13 @@ def build_runtime(root, *, adapter=None, launcher=None, worktree_root=None,
     """
     from scripts.agents.automation.autonomy_runtime import Runtime, QuotaBlocked
 
+    import subprocess as _sp
+    base_repo = Path(__file__).resolve().parents[3]
+    r = _sp.run(["git", "-C", str(base_repo), "rev-parse", "HEAD"], capture_output=True, text=True)
+    base_sha = r.stdout.strip() if r.returncode == 0 else None
     if adapter is None:
         adapter = KiloCliAdapter(timeout=timeout, worktree_root=worktree_root,
-                                 launcher=launcher)
+                                 launcher=launcher, base_repo=base_repo, base_sha=base_sha)
     runtime = Runtime(root, legacy_stop=legacy_stop)
 
     def execute(mission):
