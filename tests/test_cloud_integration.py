@@ -54,6 +54,10 @@ class FileStoreTests(unittest.TestCase):
         self.store.put("envelopes/c", {})
         self.assertEqual(self.store.keys("missions/"), ["missions/a", "missions/b"])
 
+    def test_keys_nested_names_use_forward_slashes(self):
+        self.store.put("missions/group/a", {"ok": True})
+        self.assertEqual(self.store.keys("missions/"), ["missions/group/a"])
+
     def test_file_store_is_not_durable(self):
         self.assertFalse(self.store.durable())
         self.assertEqual(self.store.backend, "file")

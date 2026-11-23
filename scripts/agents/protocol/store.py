@@ -141,7 +141,7 @@ class FileStore:
             return []
         out = []
         for path in sorted(base.rglob("*.json")):
-            out.append(str(path.relative_to(self.root)).removesuffix(".json"))
+            out.append(path.relative_to(self.root).as_posix().removesuffix(".json"))
         return out
 
     def put_cas(self, key: str, value, expected) -> bool:
