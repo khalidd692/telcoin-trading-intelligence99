@@ -33,7 +33,7 @@ from scripts.agents.automation.kilo_executor import (  # noqa: E402
 )
 from scripts.agents.team_config import KILO_FREE_MODEL_ID  # noqa: E402
 
-KILO_MODEL = KILO_FREE_MODEL_ID
+KILO_MODEL = "kilo/kilo-auto/free"
 DEFAULT_TIMEOUT_S = 100
 HEX64 = re.compile(r"[0-9a-f]{64}")
 MISSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,48}")
@@ -155,7 +155,20 @@ class KiloCliAdapter:
             stderr=subprocess.PIPE, env=env, cwd=str(worktree),
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         try:
-            while proc.poll() is None:
+            result_holder = {}
+
+            def _comm():
+                try:
+                    out, err = proc.communicate()
+                    result_holder["out"] = out
+                    result_holder["err"] = err
+                except Exception as exc:  # pragma: no cover
+                    result_holder["exc"] = exc
+
+            import threading
+            t = threading.Thread(target=_comm, daemon=True)
+            t.start()
+            while proc.poll() is None and t.is_alive():
                 if stop_check is not None and stop_check():
                     self._terminate(proc)
                     raise KiloCliStopped("STOP requested during kilo run")
@@ -163,10 +176,18 @@ class KiloCliAdapter:
                     self._terminate(proc)
                     raise KiloCliTimeout("kilo run exceeded deadline")
                 time.sleep(0.1)
-            stdout, stderr = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            self._terminate(proc)
-            raise KiloCliTimeout("kilo run exceeded deadline")
+            t.join(timeout=10)
+            if t.is_alive():
+                self._terminate(proc)
+                raise KiloCliTimeout("kilo run exceeded deadline")
+            if "exc" in result_holder:
+                raise result_holder["exc"]
+            stdout = result_holder.get("out", b"")
+            stderr = result_holder.get("err", b"")
+        except KiloCliStopped:
+            raise
+        except KiloCliTimeout:
+            raise
         finally:
             if proc.poll() is None:
                 self._terminate(proc)
