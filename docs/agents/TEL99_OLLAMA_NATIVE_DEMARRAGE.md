@@ -60,6 +60,42 @@ La mission Gemma 05 a un refus Docker suivi d'un refus de forme du
 correctif. Le routeur strict n'autorise donc pas encore l'escalade
 automatique de la 05 : ne pas contourner la règle de deux échecs Docker.
 
+## Selection par preuves : une seule campagne avec deux modeles
+
+Les deux campagnes Windows achevees le 23 novembre 2026 montrent une
+couverture complementaire : Gemma a valide 01/02/03, Qwen Coder a valide
+02/04/05. Le mode Evidence ne se contente PAS de lire les statuts affiches :
+il reverifie les deux sessions, leurs registres SHA-256, les contrats
+independants, les reçus workers, les correctifs, les tests Docker et les
+preuves de chaque mission via compare_local_code. Il accepte deux checkouts
+HEAD differents UNIQUEMENT si les cinq sources et tests epingles sont
+strictement les memes. Le comparateur historique reste inchangé.
+
+Il prepare alors cinq NOUVEAUX contrats fixes, chacun liant le modele
+ayant effectivement reussi son test Docker, et scelle les autorisations.
+La selection choisit une reussite en moins de tentatives, puis le temps
+de generation observe quand disponible. Elle refuse le lancement si une
+seule mission n'a pas de reussite verifiable, si les preuves divergent,
+ou si une source historique a ete modifiee.
+
+Lancer depuis la nouvelle branche de travail, apres tests :
+
+~~~powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$checkout\scripts\agents\automation\run_ollama_native.ps1" -Mode Evidence
+~~~
+
+Le lanceur utilise les deux dossiers de preuves du 23 novembre et leurs
+empreintes SHA-256 connues. Il affiche la selection fonction -> modele
+avant le demarrage. Le meme superviseur Night Lab executera les cinq
+missions a la suite ; Docker verifiera chaque proposition. Une nouvelle
+session avec checkpoints et preuves est creee ; les preuves historiques
+restent intouchables.
+
+Cette campagne teste la reutilisation pratique de resultats fiables pour
+une file connue. Elle ne prouve pas la generalisation du routage a de
+nouvelles tâches ni le changement dynamique de modele pendant une mission.
+Aucune fusion Git, aucune publication de correctifs et aucun trading.
+
 ## Routeur trois modeles — apres validation du mode Gemma
 
 ~~~powershell
