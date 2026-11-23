@@ -39,6 +39,15 @@ def verdict(contract, result, ok):
 
 
 class RoutedRuntimeTests(unittest.TestCase):
+    def test_saved_escalation_binding_is_checked_against_predecessor(self):
+        child = routed(id="route-escalation", escalates_from="route-parent")
+        with self.assertRaisesRegex(ValueError, "approved escalation"):
+            runtime.local_codegen.fixed_contract(child, {"selection": SMALL},
+                                                 exclude=(SMALL["id"],), minimum_memory_mib=4096)
+        self.assertEqual(runtime.local_codegen.fixed_contract(
+            child, {"selection": LARGE}, exclude=(SMALL["id"],), minimum_memory_mib=4096
+        )["model"], LARGE["model"])
+
     def test_delivery_can_use_an_accepted_predecessor_or_its_authorized_successor(self):
         parent = routed(id="route-parent")
         followup = routed(id="route-escalation", escalates_from=parent["id"])
@@ -84,6 +93,7 @@ class RoutedRuntimeTests(unittest.TestCase):
         approvals = runtime.seal([parent, next_contract])
         with tempfile.TemporaryDirectory() as temporary:
             calls = []
+            large_ready = False
 
             def worker(effective):
                 calls.append((effective["id"], effective["model"]))
@@ -95,7 +105,7 @@ class RoutedRuntimeTests(unittest.TestCase):
                     return {"selection": SMALL}
                 self.assertEqual(kwargs["exclude"], (SMALL["id"],))
                 self.assertGreater(kwargs["minimum_memory_mib"], 0)
-                return {"selection": LARGE}
+                return {"selection": LARGE if large_ready else None}
 
             with (patch.object(runtime.local_codegen, "choose_route", side_effect=choose),
                   patch.object(runtime.local_codegen, "check_selected", return_value=True)):
@@ -104,6 +114,10 @@ class RoutedRuntimeTests(unittest.TestCase):
                 run.run_queue([next_contract, parent], approvals)
                 before = run.state(parent)
                 self.assertEqual(before["status"], "BLOCKED")
+                self.assertEqual(run.state(next_contract)["status"], "ACK")
+                self.assertEqual(calls, [(parent["id"], SMALL["model"])] * 2)
+                large_ready = True
+                run.run_queue([next_contract, parent], approvals)
                 self.assertEqual(run.state(next_contract)["status"], "ACCEPTED")
                 self.assertEqual(calls, [(parent["id"], SMALL["model"])] * 2
                                  + [(next_contract["id"], LARGE["model"])])

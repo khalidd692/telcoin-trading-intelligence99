@@ -247,26 +247,32 @@ class Runtime(Supervisor):
         state = self.state(parent)
         route = state.get("model_route")
         selected = route.get("selection") if isinstance(route, dict) else None
-        proof = state.get("verification")
+        history = state.get("attempt_history")
         expected_attempts = parent.get("max_attempts", 1)
         if (state.get("status") != "BLOCKED" or state.get("contract_sha256") != fingerprint(parent)
                 or expected_attempts != 2 or type(state.get("attempt")) is not int
                 or state["attempt"] != expected_attempts
                 or selected not in parent["routing"]["candidates"]
-                or not isinstance(proof, dict)
-                or proof.get("verifier") != local_codegen.VERIFIER
-                or proof.get("base_sha") != parent["base_sha"] or proof.get("path") != parent["path"]
-                or proof.get("test_sha256") != hashlib.sha256(parent["test"].encode("utf-8")).hexdigest()
-                or proof.get("model") != selected["model"]
-                or proof.get("ok") is not False or not isinstance(proof.get("checks"), list)):
+                or not isinstance(history, list) or len(history) != expected_attempts):
             return None
-        checks = {c["name"]: c for c in proof["checks"]
-                  if isinstance(c, dict) and isinstance(c.get("name"), str)}
-        failed = checks.get("candidate-passes", {})
-        if (any(checks.get(name, {}).get("ok") is not True for name in
-                ("bounded-model-receipt", "approved-function-diff", "baseline-fails"))
-                or failed.get("ok") is not False or type(failed.get("exit_code")) is not int
-                or failed["exit_code"] != 1):
+        test_sha = hashlib.sha256(parent["test"].encode("utf-8")).hexdigest()
+        for number, attempt in enumerate(history, 1):
+            proof = attempt.get("verification") if isinstance(attempt, dict) else None
+            if (not isinstance(proof, dict) or type(attempt.get("number")) is not int or attempt["number"] != number
+                    or proof.get("verifier") != local_codegen.VERIFIER
+                    or proof.get("base_sha") != parent["base_sha"] or proof.get("path") != parent["path"]
+                    or proof.get("test_sha256") != test_sha or proof.get("model") != selected["model"]
+                    or proof.get("ok") is not False or not isinstance(proof.get("checks"), list)):
+                return None
+            checks = {c["name"]: c for c in proof["checks"]
+                      if isinstance(c, dict) and isinstance(c.get("name"), str)}
+            failed = checks.get("candidate-passes", {})
+            if (any(checks.get(name, {}).get("ok") is not True for name in
+                    ("bounded-model-receipt", "approved-function-diff", "baseline-fails"))
+                    or failed.get("ok") is not False or type(failed.get("exit_code")) is not int
+                    or failed["exit_code"] != 1):
+                return None
+        if history[-1]["verification"] != state.get("verification"):
             return None
         spec = catalog.by_id(selected["id"])
         if spec is None:
@@ -354,6 +360,8 @@ class Runtime(Supervisor):
                         "reason": None, "verification": None} if maximum > 1 else {})
             if routed:
                 route = saved.get("model_route")
+                if escalation and isinstance(route, dict) and route.get("selection") is None:
+                    route = None  # A deferred successor has no binding to restore.
                 if route is None and saved.get("attempt_history"):
                     self.save(m, "AWAITING_HUMAN", reason="missing checkpoint model binding")
                     return
@@ -363,9 +371,10 @@ class Runtime(Supervisor):
                         options = {**escalation, **({"measured_seconds": timings} if timings else {})}
                         route = local_codegen.choose_route(m, **options)
                         if route.get("selection") is None:
-                            self.save(m, "BLOCKED", reason="no eligible verified local model", model_route=route)
+                            status = "ACK" if escalation else "BLOCKED"
+                            self.save(m, status, reason="no eligible verified local model", model_route=route)
                             return
-                    effective = local_codegen.fixed_contract(m, route)
+                    effective = local_codegen.fixed_contract(m, route, **escalation)
                 except (Blocked, OSError, ValueError, SyntaxError) as exc:
                     self.save(m, "AWAITING_HUMAN", reason="local model binding unavailable", error=type(exc).__name__)
                     return
@@ -414,7 +423,7 @@ class Runtime(Supervisor):
             return  # Keep the receipt for verification on explicit resume.
         try:
             if routed:
-                effective = local_codegen.fixed_contract(m, saved.get("model_route"))
+                effective = local_codegen.fixed_contract(m, saved.get("model_route"), **escalation)
             started = time.monotonic()
             verified = self.verifier(effective, saved["result"])
         except Exception as exc:

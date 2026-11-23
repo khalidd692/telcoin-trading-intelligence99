@@ -88,8 +88,11 @@ Le worker reste limité à 100 secondes et le modèle à 384 jetons en sortie.
 Le choix reste lié
 au checkpoint pour les deux tentatives et après une reprise. La
 mission supplémentaire de l'exemple est autorisée par son propre
-contrat. Elle peut choisir un modèle de classe supérieure après le
-second échec indépendant de la mission qu'elle référence.
+contrat. Elle peut choisir un modèle de classe supérieure après deux
+échecs Docker indépendants de la mission qu'elle référence. Si ce
+modèle est indisponible, le successeur attend en ACK. Après avoir chargé
+le modèle, reprendre le même dossier avec le même registre et
+`--resume --session '<dossier>'` dans le budget initial.
 
 ## Mesurer deux modèles sur les mêmes tâches
 

@@ -22,6 +22,7 @@ if __package__ in (None, ""):
 
 from local_codex import Blocked, git_committed_blob
 from scripts.agents.automation import local_model_routing
+from scripts.agents.intelligence import catalog
 from scripts.agents.native import sandbox
 from scripts.agents.native.mission import MissionError, valid_artifact_name
 from scripts.agents.native.provider import OpenAICompatibleProvider, ProviderError
@@ -159,10 +160,13 @@ def check_selected(binding):
     return local_model_routing.check_selected(binding)
 
 
-def fixed_contract(mission, route):
+def fixed_contract(mission, route, *, exclude=(), minimum_memory_mib=0):
     selection = route.get("selection") if isinstance(route, dict) else None
     if selection not in mission["routing"]["candidates"]:
         raise ValueError("checkpoint model is outside the approved contract")
+    spec = catalog.by_id(selection["id"])
+    if spec is None or selection["id"] in exclude or spec.memory_mib < minimum_memory_mib:
+        raise ValueError("checkpoint model is outside the approved escalation")
     fixed = {key: value for key, value in mission.items() if key not in {"routing", "escalates_from"}}
     return {**fixed, "model": selection["model"], "port": selection["port"]}
 
