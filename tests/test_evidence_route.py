@@ -84,6 +84,14 @@ class EvidenceRoutingTests(unittest.TestCase):
                     (SOURCE, PIN), "blocked", "gemma-session", GEMMA_PIN, "coder-session", CODER_PIN,
                 )
 
+    def test_final_verified_success_can_follow_earlier_empty_generation(self):
+        repaired = {"accepted": True, "attempts": [
+            {"generation_seconds": 20.0, "attributed_model_outcome": False},
+            {"generation_seconds": 30.0, "attributed_model_outcome": True},
+        ]}
+        rejected = observation(False)
+        self.assertEqual(evidence_route._winner((repaired, rejected)), 0)
+
     def test_tampered_historical_source_refused_before_evidence(self):
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             evidence_route._read_pinned_source(SOURCE, "0" * 64)
