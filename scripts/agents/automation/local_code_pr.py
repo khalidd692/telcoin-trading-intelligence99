@@ -22,6 +22,12 @@ EVENT = "kilo-relay-event/v1"
 REQUIRED = {"bounded-model-receipt", "approved-function-diff", "baseline-fails", "candidate-passes"}
 
 
+def valid_campaign_base(ref, sha):
+    return (_digest(sha, 40) and isinstance(ref, str)
+            and ((ref, sha) == (BASE_REF, BASE_SHA)
+                 or re.fullmatch(r"agents/tel99-code-base-[a-z0-9][a-z0-9-]{0,62}", ref) is not None))
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -39,7 +45,8 @@ def _read_local_verified(store, root, issue, state, base, base_sha):
             or not config["issue"] < issue
             or not isinstance(mission, dict) or mission.get("id") != mid
             or mission.get("owner") != "local" or mission.get("team") != local_team.TEAM
-            or mission.get("base_sha") != base_sha or (base, base_sha) != (BASE_REF, BASE_SHA)
+            or mission.get("base_sha") != base_sha
+            or (base, base_sha) != (config.get("base_ref", BASE_REF), config.get("base_sha", BASE_SHA))
             or binding.get("issue") != issue or binding.get("base") != base
             or binding.get("base_sha") != base_sha
             or binding.get("contract_sha256") != fingerprint(mission)
@@ -184,7 +191,7 @@ def _verify_existing_pr(pr, *, branch, commit, title, body, base, base_sha):
 def publish_verified_code_pr(repo, issue, base, base_sha, state, evidence_url, *,
                              api, store, root) -> str | None:
     """Publish and reconcile a single draft; return None on uncertainty, never merge."""
-    if (repo != REPO or (base, base_sha) != (BASE_REF, BASE_SHA)
+    if (repo != REPO or not valid_campaign_base(base, base_sha)
             or type(issue) is not int or issue <= 167):
         return None
 

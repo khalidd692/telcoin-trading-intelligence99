@@ -26,24 +26,31 @@ from scripts.agents.automation.kilo_github_adapter import (
 )
 from scripts.agents.automation.policy import is_eligible_mission
 from scripts.agents.automation import local_team
-from scripts.agents.automation.local_code_pr import publish_verified_code_pr
+from scripts.agents.automation.local_code_pr import (
+    BASE_REF, BASE_SHA, publish_verified_code_pr, valid_campaign_base,
+)
+from scripts.agents.automation.ollama_native import OllamaNativeProvider
+from scripts.agents.native.provider import ProviderError
 
 MANDATE = "tel99-code-campaign/v1"
 APPROVAL = "tel99-code-mission/v1"
 TRANSPORT = "github-local-code"
 CONFIG_KEY = "github-local-code/config"
 CODE_LABEL = "enhancement"
-BASE_REF = "agents/tel99-code-pilot-base-20261123"
-BASE_SHA = "934d9fd8a3fd498c6e3e69226007dd46276aa6da"
 
 
 class LocalCodeCampaign(KiloGitHubHandoff):
     """Reuse the Kilo receiver's discovery, durable CAS, ACK and result outbox."""
 
     def __init__(self, runtime, issue, mandate_id, mandate_sha, *, fetcher=None,
-                 publisher=None, pr_publisher=None):
+                 publisher=None, pr_publisher=None, base_ref=None, base_sha=None):
         if type(issue) is not int or issue <= 167:
             raise ValueError("use a new dedicated controller issue, never a historical issue")
+        if base_ref is None and base_sha is None:
+            base_ref, base_sha = BASE_REF, BASE_SHA
+        elif not valid_campaign_base(base_ref, base_sha):
+            raise ValueError("provide an isolated campaign base ref and exact commit SHA together")
+        self.base_ref, self.base_sha = base_ref, base_sha
         super().__init__(None, issue, mandate_id, mandate_sha, campaign=True,
                          fetcher=fetcher, publisher=publisher,
                          pr_publisher=pr_publisher or publish_verified_code_pr)
@@ -51,11 +58,12 @@ class LocalCodeCampaign(KiloGitHubHandoff):
         if runtime is None:
             return
         runtime.bind_transport(TRANSPORT)
-        runtime.before_execute = self.before_execute
         config = {
             "repo": REPO, "issue": issue, "mandate_id": mandate_id,
             "mandate_sha256": mandate_sha, "campaign": True, "profile": TRANSPORT,
         }
+        if (base_ref, base_sha) != (BASE_REF, BASE_SHA):
+            config.update(base_ref=base_ref, base_sha=base_sha)
         existing = runtime.store.get(CONFIG_KEY)
         if existing is None:
             if runtime.store.keys("kilo-local"):
@@ -63,12 +71,14 @@ class LocalCodeCampaign(KiloGitHubHandoff):
             runtime.store.put_cas(CONFIG_KEY, config, None)
         if runtime.store.get(CONFIG_KEY) != config:
             raise ValueError("runtime ledger is pinned to a different campaign")
+        runtime.before_execute = self.before_execute
 
     def check_mandate(self):
         issue = self.fetch(self.issue_endpoint)
         comment = self.comment(self.mandate_id)
         if (not isinstance(issue, dict) or issue.get("number") != self.issue
                 or issue.get("state") != "open" or "pull_request" in issue
+                or not is_owner(issue.get("user"))
                 or not self.trusted(comment, self.issue)
                 or comment["id"] != self.mandate_id):
             raise ValueError("invalid owner mandate issue/comment identity")
@@ -81,7 +91,7 @@ class LocalCodeCampaign(KiloGitHubHandoff):
                 or set(scope) != {"repo", "issue", "label", "expires_at", "base", "base_sha", "contracts"}
                 or scope["repo"] != REPO or type(scope["issue"]) is not int
                 or scope["issue"] != self.issue or scope["label"] != CODE_LABEL
-                or scope["base"] != BASE_REF or scope["base_sha"] != BASE_SHA
+                or (scope["base"], scope["base_sha"]) != (self.base_ref, self.base_sha)
                 or not approval_is_current(scope, datetime.now(timezone.utc))
                 or not isinstance(scope["contracts"], dict) or len(scope["contracts"]) != 2
                 or any(not isinstance(mid, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", mid)
@@ -94,7 +104,7 @@ class LocalCodeCampaign(KiloGitHubHandoff):
 
     def check_campaign_base(self):
         scope = self.check_mandate()
-        result = self.fetch(f"repos/{REPO}/git/ref/heads/{BASE_REF}")
+        result = self.fetch(f"repos/{REPO}/git/ref/heads/{self.base_ref}")
         obj = result.get("object") if isinstance(result, dict) else None
         if not isinstance(obj, dict) or (obj.get("sha"), obj.get("type")) != (scope["base_sha"], "commit"):
             raise ValueError("dedicated code base branch changed from approved commit")
@@ -135,11 +145,13 @@ class LocalCodeCampaign(KiloGitHubHandoff):
                 or mission.get("specialist") != "tel99-dev"
                 or mission.get("base_sha") != scope["base_sha"]
                 or mission.get("team") != local_team.TEAM
+                or mission.get("port") != 11434
                 or "routing" in mission):
             return False
         try:
             validate_contract(mission, {mission["id"]: fingerprint(mission)})
-        except (ValueError, TypeError, KeyError):
+            OllamaNativeProvider(model=mission["model"])
+        except (ValueError, TypeError, KeyError, ProviderError):
             return False
         return True
 
@@ -164,14 +176,12 @@ class LocalCodeCampaign(KiloGitHubHandoff):
             raise ValueError("multiple approval comments for the same approved mission")
         return {"missions": list(missions.values()), "approvals": digests, "sources": sources}
 
-    def discover_candidates(self, scope):
-        result = super().discover_candidates(scope)
-        if len(result) > 2:
-            raise ValueError("code campaign is limited to exactly two distinct missions")
-        paths = [binding["mission"]["path"] for binding in result.values()]
+    @staticmethod
+    def check_campaign_graph(candidates, scope):
+        KiloGitHubHandoff.check_campaign_graph(candidates, scope)
+        paths = [binding["mission"]["path"] for binding in candidates.values()]
         if len(paths) != len(set(paths)):
             raise ValueError("two independent draft PRs must modify different approved files")
-        return result
 
     def event(self, phase, state, binding):
         record = super().event(phase, state, binding)
@@ -182,7 +192,12 @@ class LocalCodeCampaign(KiloGitHubHandoff):
             record["base_sha"] = report.get("base_sha")
             record["path"] = report.get("path")
             record["test_sha256"] = report.get("test_sha256")
-            record["roles"] = local_team.TEAM
+            roles = []
+            if local_team.valid_trace(binding["mission"], state.get("result") or {}):
+                roles.extend(local_team.TEAM[:2])
+            if (report.get("verification_role") or {}).get("role") == local_team.TEAM[2]:
+                roles.append(local_team.TEAM[2])
+            record["roles"] = roles
         return record
 
     def publish_pull_request(self, state, binding, evidence):
@@ -200,19 +215,6 @@ class LocalCodeCampaign(KiloGitHubHandoff):
                                  state, evidence, api=authorized_api, store=self.runtime.store,
                                  root=self.runtime.root)
 
-    def preflight(self):
-        items = super().preflight()
-        if len(items) == 2:
-            scope = self.check_mandate()
-            result = self.discover_candidates(scope)
-            if len({row["mission"]["path"] for row in result.values()}) != 2:
-                raise ValueError("code approvals must target separate files")
-            for row in result.values():
-                if not self._mission_allowed(row["mission"], scope):
-                    raise ValueError("unsupported local-code issue contract")
-        return items
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("preflight", "run", "status", "stop"))
@@ -220,14 +222,21 @@ def main(argv=None):
     parser.add_argument("--issue", type=int)
     parser.add_argument("--mandate-comment", type=int)
     parser.add_argument("--mandate-sha256")
+    parser.add_argument("--base-ref")
+    parser.add_argument("--base-sha")
     parser.add_argument("--seconds", type=int, choices=range(1, 7201), default=3600)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if (args.base_ref is not None or args.base_sha is not None) and (
+            args.action not in {"preflight", "run"} or not valid_campaign_base(args.base_ref, args.base_sha)):
+        parser.error("--base-ref and --base-sha are required together for preflight or run")
+    base_options = {"base_ref": args.base_ref, "base_sha": args.base_sha}
     if args.action == "preflight":
         if not (args.issue and args.mandate_comment and args.mandate_sha256):
             parser.error("preflight requires a pinned GitHub owner mandate")
         try:
-            handler = LocalCodeCampaign(None, args.issue, args.mandate_comment, args.mandate_sha256)
+            handler = LocalCodeCampaign(None, args.issue, args.mandate_comment,
+                                        args.mandate_sha256, **base_options)
             handler.check_github_identity()
             tasks = handler.preflight()
             ok = len(tasks) == 2
@@ -255,7 +264,7 @@ def main(argv=None):
     runtime.deadline = time.monotonic() + args.seconds
     try:
         campaign = LocalCodeCampaign(runtime, args.issue, args.mandate_comment,
-                                     args.mandate_sha256)
+                                     args.mandate_sha256, **base_options)
         campaign.check_github_identity()
         run_session(runtime, campaign.poll, once=args.once,
                     done=lambda: campaign.github_rate_limited or campaign.complete())

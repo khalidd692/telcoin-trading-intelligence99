@@ -9,7 +9,9 @@ from unittest.mock import patch
 
 from scripts.agents.automation import local_code_pr, local_codegen, local_team
 from scripts.agents.automation.autonomy_runtime import Runtime, fingerprint
-from tests.test_github_local_code_campaign import LocalFixture, FIRST, OWNER, comment, block
+from tests.test_github_local_code_campaign import (
+    LocalFixture, FIRST, NEW_BASE_REF, NEW_BASE_SHA, OWNER, comment, block,
+)
 
 BASE = local_code_pr.BASE_SHA
 REPO = local_code_pr.REPO
@@ -21,15 +23,17 @@ def digest(s):
 
 
 class FakeAPI:
-    def __init__(self, *, proof, blob, issue, error_after_pr=False):
+    def __init__(self, *, proof, blob, issue, base, base_sha):
         self.proof = proof
         self.blob = blob
         self.issue = issue
         self.created = []
-        self.refs = {local_code_pr.BASE_REF: BASE}
+        self.base = base
+        self.base_sha = base_sha
+        self.refs = {base: base_sha}
         self.commit = "c" * 40
         self.prs = []
-        self.error_after_pr = error_after_pr
+        self.error_after_pr = None
 
     def __call__(self, endpoint, *, method="GET", payload=None):
         prefix = f"repos/{REPO}/"
@@ -43,8 +47,8 @@ class FakeAPI:
                 return ([{"ref": f"refs/heads/{name}",
                           "object": {"type": "commit", "sha": self.refs[name]}}]
                         if name in self.refs else [])
-            if path == f"git/commits/{BASE}":
-                return {"sha": BASE, "tree": {"sha": "a" * 40}}
+            if path == f"git/commits/{self.base_sha}":
+                return {"sha": self.base_sha, "tree": {"sha": "a" * 40}}
             if path.startswith("compare/"):
                 return {"status": "ahead", "ahead_by": 1, "behind_by": 0,
                         "total_commits": 1, "commits": [{"sha": self.commit}],
@@ -64,7 +68,7 @@ class FakeAPI:
             assert payload["tree"][0]["path"] == self.mission_path
             return {"sha": "b" * 40}
         if path == "git/commits":
-            assert payload["parents"] == [BASE]
+            assert payload["parents"] == [self.base_sha]
             return {"sha": self.commit}
         if path == "git/refs":
             self.refs[payload["ref"].removeprefix("refs/heads/")] = payload["sha"]
@@ -74,20 +78,20 @@ class FakeAPI:
             pr = {"number": 805, "user": OWNER.copy(), "state": "open", "draft": True,
                   "merged_at": None, "title": payload["title"], "body": payload["body"],
                   "html_url": f"https://github.com/{REPO}/pull/805",
-                  "base": {"ref": local_code_pr.BASE_REF, "sha": BASE,
+                  "base": {"ref": self.base, "sha": self.base_sha,
                            "repo": {"full_name": REPO}},
                   "head": {"ref": branch, "sha": self.commit,
                            "repo": {"full_name": REPO}}}
             self.prs.append(pr)
             if self.error_after_pr:
-                self.error_after_pr = False
-                raise OSError("GitHub created PR but response lost")
+                error, self.error_after_pr = self.error_after_pr, None
+                raise error
             return pr
         raise AssertionError(f"unapproved POST {path}")
 
 
-def fixture(root):
-    ticket = LocalFixture()
+def fixture(root, *, base=local_code_pr.BASE_REF, base_sha=BASE):
+    ticket = LocalFixture(base=base, base_sha=base_sha)
     m = ticket.missions[0]
     source = "def kv_env():\n    return ('', '')\n"
     artifact = "def kv_env():\n    return ('ready', 'token')\n"
@@ -107,7 +111,7 @@ def fixture(root):
               "agent_trace": local_team.trace(analysis, developer_model=m["model"], artifact=artifact)}
     verification = {
         "verifier": local_codegen.VERIFIER, "ok": True,
-        "artifact_sha256": digest(artifact), "base_sha": BASE,
+        "artifact_sha256": digest(artifact), "base_sha": base_sha,
         "path": m["path"], "function": m["function"], "model": m["model"],
         "test_sha256": digest(m["test"]), "sandbox_image": m["sandbox_image"],
         "base_file_sha256": digest(source), "candidate_sha256": digest(candidate),
@@ -126,11 +130,13 @@ def fixture(root):
     runtime = Runtime(root)
     store = runtime.store
     store.put(f"kilo-local/{m['id']}", state)
-    store.put("github-local-code/config", {"repo": REPO, "issue": 240,
-                                          "profile": "github-local-code", "campaign": True})
+    config = {"repo": REPO, "issue": 240, "profile": "github-local-code", "campaign": True}
+    if (base, base_sha) != (local_code_pr.BASE_REF, BASE):
+        config.update(base_ref=base, base_sha=base_sha)
+    store.put("github-local-code/config", config)
     store.put(f"kilo-github/approvals/{m['id']}", {
         "mission": m, "contract_sha256": fingerprint(m), "issue": FIRST,
-        "base": local_code_pr.BASE_REF, "base_sha": BASE,
+        "base": base, "base_sha": base_sha,
     })
     evidence_url = f"https://github.com/{REPO}/issues/{FIRST}#issuecomment-9001"
     event = {"event": local_code_pr.EVENT, "phase": "EVIDENCE", "issue": FIRST,
@@ -153,7 +159,7 @@ def fixture(root):
     (folder / "change.diff").write_bytes(diff.encode("utf-8"))
     fake = FakeAPI(proof=proof, blob=hashlib.sha1(
         f"blob {len(candidate.encode())}\0".encode() + candidate.encode(),
-        usedforsecurity=False).hexdigest(), issue=FIRST)
+        usedforsecurity=False).hexdigest(), issue=FIRST, base=base, base_sha=base_sha)
     fake.mission_path = m["path"]
     return store, state, evidence_url, fake, source
 
@@ -183,7 +189,7 @@ class CodePublisherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             store, state, url, fake, source = fixture(root)
-            fake.error_after_pr = True
+            fake.error_after_pr = OSError("GitHub created PR but response lost")
             with patch.object(local_codegen, "_source", return_value=source):
                 result = local_code_pr.publish_verified_code_pr(
                     REPO, FIRST, local_code_pr.BASE_REF, BASE,
@@ -191,6 +197,33 @@ class CodePublisherTests(unittest.TestCase):
                 )
             self.assertEqual(result, f"https://github.com/{REPO}/pull/805")
             self.assertEqual(len([name for name, _ in fake.created if name == "pulls"]), 1)
+
+    def test_reopened_ledger_reconciles_draft_on_the_explicitly_pinned_base(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store, state, url, fake, source = fixture(root, base=NEW_BASE_REF, base_sha=NEW_BASE_SHA)
+            fake.error_after_pr = KeyboardInterrupt()
+            args = (REPO, FIRST, NEW_BASE_REF, NEW_BASE_SHA, state, url)
+            with patch.object(local_codegen, "_source", return_value=source):
+                with self.assertRaises(KeyboardInterrupt):
+                    local_code_pr.publish_verified_code_pr(*args, api=fake, store=store, root=root)
+                opened = Runtime(root).store
+                resolved = local_code_pr.publish_verified_code_pr(*args, api=fake, store=opened, root=root)
+            self.assertEqual(resolved, f"https://github.com/{REPO}/pull/805")
+            self.assertEqual([payload["base"] for name, payload in fake.created if name == "pulls"],
+                             [NEW_BASE_REF])
+
+    def test_moved_pinned_base_prevents_any_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store, state, url, fake, source = fixture(root, base=NEW_BASE_REF, base_sha=NEW_BASE_SHA)
+            fake.refs[NEW_BASE_REF] = "d" * 40
+            with patch.object(local_codegen, "_source", return_value=source):
+                response = local_code_pr.publish_verified_code_pr(
+                    REPO, FIRST, NEW_BASE_REF, NEW_BASE_SHA, state, url, api=fake, store=store, root=root,
+                )
+            self.assertIsNone(response)
+            self.assertFalse(fake.created)
 
     def test_crlf_translated_materialization_is_rejected_before_github_write(self):
         with tempfile.TemporaryDirectory() as temp:

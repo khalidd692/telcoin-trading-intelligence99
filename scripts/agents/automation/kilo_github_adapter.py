@@ -290,7 +290,7 @@ class KiloGitHubHandoff:
                 event["reason"] = state["reason"]
         if phase == "EVIDENCE":
             report = state["verification"]
-            result = state["result"]
+            result = state.get("result") or {}
             cost = result.get("provider_evidence", {})
             event.update(artifact_sha256=report.get("artifact_sha256"),
                          verification_sha256=fingerprint(report),
