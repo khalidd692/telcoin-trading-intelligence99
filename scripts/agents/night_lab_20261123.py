@@ -264,12 +264,25 @@ class Campaign:
             self.check_stop()
             connection = HTTPConnection("127.0.0.1", port, timeout=5)
             try:
-                connection.request("GET", "/health")
-                response = connection.getresponse()
-                if response.status != 200 or json.loads(response.read(4096)).get("status") != "ok":
-                    raise ValueError(f"Qwen non prêt sur 127.0.0.1:{port}")
+                if port == 11434:
+                    connection.request("GET", "/api/tags")
+                    response = connection.getresponse()
+                    raw = response.read(16_385)
+                    if response.status != 200 or len(raw) > 16_384:
+                        raise ValueError("Ollama native non disponible")
+                    payload = json.loads(raw)
+                    rows = payload.get("models") if isinstance(payload, dict) else None
+                    installed = {row.get("name") for row in rows if isinstance(row, dict)} if isinstance(rows, list) else set()
+                    approved = {m["model"] for m in self.missions if m.get("port") == 11434}
+                    if not approved <= installed:
+                        raise ValueError("Modele Ollama approuve absent")
+                else:
+                    connection.request("GET", "/health")
+                    response = connection.getresponse()
+                    if response.status != 200 or json.loads(response.read(4096)).get("status") != "ok":
+                        raise ValueError(f"Modele local non pret sur 127.0.0.1:{port}")
             except (OSError, TypeError, AttributeError, json.JSONDecodeError) as exc:
-                raise ValueError(f"Contrôle Qwen indisponible sur 127.0.0.1:{port}") from exc
+                raise ValueError(f"Controle du modele indisponible sur 127.0.0.1:{port}") from exc
             finally:
                 connection.close()
         for image in sorted({mission["sandbox_image"] for mission in self.missions}):

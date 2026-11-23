@@ -22,6 +22,7 @@ if __package__ in (None, ""):
 
 from local_codex import Blocked, git_committed_blob
 from scripts.agents.automation import local_model_routing
+from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.intelligence import catalog
 from scripts.agents.native import sandbox
 from scripts.agents.native.mission import MissionError, valid_artifact_name
@@ -114,8 +115,14 @@ def validate_scope(mission):
                 or mission["escalates_from"] == mission["id"]):
             raise ValueError("invalid predecessor for model escalation")
     elif (not isinstance(mission["model"], str)
-          or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", mission["model"])
-          or type(port) is not int or not 1024 <= port <= 65535):
+          or type(port) is not int or not 1024 <= port <= 65535
+          or not (
+              re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", mission["model"])
+              or (port == 11434 and any(
+                  spec.provider == "ollama" and mission["model"] in spec.served_ids
+                  for spec in catalog.MODEL_CATALOG
+              ))
+          )):
         raise ValueError("invalid fixed local model or port")
 
 
@@ -296,10 +303,13 @@ def execute(mission, feedback=None, previous=None):
     if feedback is not None:
         prompt += "\n\nPrevious attempt:\n" + _repair_prompt(mission, feedback, previous, source, function)
     model = mission["model"]
-    provider = OpenAICompatibleProvider(
-        model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",
-        timeout=80, max_tokens=384,
-    )
+    if mission["port"] == 11434:
+        provider = OllamaNativeProvider(model=model, timeout=80, max_tokens=768)
+    else:
+        provider = OpenAICompatibleProvider(
+            model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",
+            timeout=80, max_tokens=384,
+        )
     memory_before = local_model_routing.available_memory_mib()
     started = time.monotonic()
     reply = provider.complete(
@@ -313,9 +323,18 @@ def execute(mission, feedback=None, previous=None):
         prompt=prompt,
     )
     if reply is None or isinstance(reply, str) and not reply.strip():
-        raise GenerationBlocked("local Qwen returned an empty completion", {"kind": "empty-completion"})
+        reason = "local model returned an empty completion"
+        metadata = getattr(provider, "last_metadata", {})
+        if isinstance(metadata, dict) and metadata:
+            # Expose only technical counters and termination state; never thoughts.
+            reason += " (done_reason={}, tokens={}, thinking_present={})".format(
+                metadata.get("done_reason", "unknown"),
+                metadata.get("eval_count"),
+                metadata.get("thinking_present", False),
+            )
+        raise GenerationBlocked(reason, {"kind": "empty-completion"})
     if not isinstance(reply, str) or len(reply.encode("utf-8")) > 16_000:
-        raise ValueError("invalid or oversized local Qwen completion")
+        raise ValueError("invalid or oversized local model completion")
     return {"artifact": reply, "sha256": _sha(reply), "specialist_id": mission["specialist"],
             "provider": PROVIDER, "model": model, "generation_seconds": round(time.monotonic() - started, 3),
             "host_memory_before_mib": memory_before,

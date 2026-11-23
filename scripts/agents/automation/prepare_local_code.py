@@ -69,8 +69,8 @@ def main(argv=None):
         bindings = []
         for model_id, port in args.binding:
             spec = by_id(model_id)
-            if spec is None or not spec.served_ids:
-                raise ValueError("unknown llama.cpp catalogue ID")
+            if spec is None or spec.provider not in ("llama.cpp", "ollama") or not spec.served_ids:
+                raise ValueError("unknown local model catalogue ID")
             bindings.append({"id": model_id, "model": spec.served_ids[0], "port": int(port)})
         data = prepare(original, args.prefix, args.mode, bindings, args.escalate)
         raw = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
