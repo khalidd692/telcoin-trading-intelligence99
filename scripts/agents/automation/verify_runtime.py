@@ -60,7 +60,8 @@ def load_json(path: pathlib.Path) -> dict:
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        content = path.read_text(encoding="utf-8-sig")
+        return json.loads(content)
     except (OSError, ValueError):
         return {}
 
