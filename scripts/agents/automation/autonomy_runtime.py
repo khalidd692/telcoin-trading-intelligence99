@@ -172,7 +172,10 @@ class Runtime(Supervisor):
             worker_input.seek(0)
             p=subprocess.Popen(command,stdin=worker_input,stdout=out,stderr=err,env=env,cwd=self.root)
             try:
-                deadline=min(time.monotonic()+100,self.deadline or float("inf"))
+                # Two sequential bounded Ollama calls only in the explicitly
+                # sealed 3-role pilot; legacy single-agent workers keep 100 s.
+                worker_seconds = 160 if m.get("team") else 100
+                deadline=min(time.monotonic()+worker_seconds,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
                         p.kill();p.wait(timeout=10)
