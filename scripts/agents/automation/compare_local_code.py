@@ -11,8 +11,11 @@ from pathlib import Path
 import re
 import sys
 
-from scripts.agents.automation.autonomy_runtime import fingerprint, local_codegen
+from scripts.agents.automation.autonomy_runtime import fingerprint, local_codegen, seal, validate_contract
+from scripts.agents.automation import local_model_routing
+from scripts.agents.intelligence import catalog, router
 from scripts.agents.intelligence.improvement import INCONCLUSIVE, Outcome, compare
+from scripts.agents.intelligence.memory import _write_new_private
 from scripts.agents.night_lab_20261123 import STATE_VERSION, load_registry
 from scripts.agents.project_kit import strict_json
 from scripts.agents.protocol.handoff import verify_mission
@@ -180,9 +183,12 @@ def _verification(mission, verification, artifact, source, state, *, accepted):
             or verification.get("ok") is not accepted):
         raise ValueError(f"{mid}: inconsistent Docker verdict")
     if not accepted:
-        return (checks.get("approved-function-diff", {}).get("ok") is False or
-                (checks.get("baseline-fails", {}).get("ok") is True and
-                 checks.get("candidate-passes", {}).get("ok") is False))
+        baseline, candidate = checks.get("baseline-fails", {}), checks.get("candidate-passes", {})
+        return (checks.get("approved-function-diff", {}).get("ok") is False
+                or (checks.get("approved-function-diff", {}).get("ok") is True
+                    and baseline.get("ok") is True and type(baseline.get("exit_code")) is int
+                    and baseline["exit_code"] == 1 and candidate.get("ok") is False
+                    and type(candidate.get("exit_code")) is int and candidate["exit_code"] == 1))
     if (checks.keys() != _REQUIRED_CHECKS or not all(check["ok"] for check in checks.values())
             or any(type(checks[name].get("exit_code")) is not int or checks[name]["exit_code"] != expected
                    for name, expected in (("baseline-fails", 1), ("candidate-passes", 0)))):
@@ -205,21 +211,33 @@ def _samples(record):
 
 
 def _observe(session, task, source):
-    state = session.root / "code-state"
     mid = task["id"]
+    state = session.root / "code-state"
     report = session.reports[mid]
+    checkpoint, claim = _checkpoint_and_claim(state, mid)
+    if (checkpoint.get("status") != report.get("status")
+            or checkpoint.get("status") != session.status["missions"][mid]
+            or any(report.get(k) != task[k] for k in ("path", "function", "dependencies"))
+            or report.get("checkpoint") != {k: v for k, v in checkpoint.items() if k != "result"}
+            or session.proofs["preuves_missions"][mid] != checkpoint.get("verification")):
+        raise ValueError(f"{mid}: inconsistent mission campaign report")
+    return _observe_checkpoint(state, task, source, checkpoint, claim)
+
+
+def _checkpoint_and_claim(state, mid):
     checkpoint = _object(_read(state, f"ledger/kilo-local/{mid}.json"), "mission checkpoint")
     claim = _object(_read(state, f"ledger/kilo-claims/{mid}.json"), "mission claim")
+    return checkpoint, claim
+
+
+def _observe_checkpoint(state, task, source, checkpoint, claim):
+    mid = task["id"]
     end, start = checkpoint.get("at"), claim.get("at")
     terminal = checkpoint.get("status")
     if (not isinstance(terminal, str) or terminal not in _TERMINAL
-            or terminal != report.get("status") or terminal != session.status["missions"][mid]
             or checkpoint.get("id") != mid or checkpoint.get("project") != task["project"]
             or claim.get("project") != task["project"]
             or checkpoint.get("contract_sha256") != fingerprint(task) or claim.get("contract_sha256") != fingerprint(task)
-            or any(report.get(k) != task[k] for k in ("path", "function", "dependencies"))
-            or report.get("checkpoint") != {k: v for k, v in checkpoint.items() if k != "result"}
-            or session.proofs["preuves_missions"][mid] != checkpoint.get("verification")
             or type(start) not in (int, float) or type(end) not in (int, float)
             or not 0 < start <= end or not 0 <= end - start <= 1_000_000):
         raise ValueError(f"{mid}: inconsistent or non-terminal mission checkpoint/claim")
@@ -274,7 +292,7 @@ def _observe(session, task, source):
         })
     return {
         "mission_id": mid, "status": terminal, "accepted": success, "reason": checkpoint.get("reason"),
-        "claim_to_terminal_seconds": end - start, "attempts": observed,
+        "observed_at": end, "claim_to_terminal_seconds": end - start, "attempts": observed,
     }
 
 
@@ -302,7 +320,92 @@ def _summary(session, observations):
     }
 
 
-def compare_sessions(baseline_path, baseline_pin, candidate_path, candidate_pin):
+def _confirm_session(session, rows):
+    complete = all(row["accepted"] for row in rows)
+    expected = ("COMPLETE", 0) if complete else ("BLOCKED", 2)
+    if (session.status["phase"], session.status["worker_exit"]) != expected:
+        raise ValueError("campaign exit does not match the observed mission outcomes")
+    if _read(session.root, "status.json") != session.snapshot:
+        raise ValueError("campaign status changed during verification")
+
+
+def read_calibration(root, pin):
+    """Read reusable model measurements from a pinned, finished Night Lab."""
+    session = _load_session(Path(root).resolve(strict=True), pin)
+    specs = [spec for spec in catalog.MODEL_CATALOG if session.model in spec.served_ids
+             and spec.provider in {"ollama", "llama.cpp"}]
+    if len(specs) != 1:
+        raise ValueError("calibration model is not in the approved local catalogue")
+    model = specs[0].id
+    observations, samples = [], []
+    for task in session.missions:
+        binding = {"id": model, "model": task["model"], "port": task["port"]}
+        local_model_routing.validate_candidates([binding])
+        source = local_codegen._source(task)
+        row = _observe(session, task, source)
+        observations.append(row)
+        attempts = row["attempts"]
+        if not attempts or not attempts[-1]["attributed_model_outcome"]:
+            continue
+        function = local_codegen._function_source(source, local_codegen._function(source, task["function"]))
+        profile = local_model_routing._task_profile(task, function)
+        difficulty, _ = router.classify_difficulty(profile)
+        samples.append({
+            "at": row["observed_at"], "mission": task["id"], "project": task["project"],
+            "base_sha": task["base_sha"], "scope": (task["path"], task["function"]),
+            "binding": binding, "difficulty": difficulty, "accepted": row["accepted"],
+            "seconds": attempts[-1]["generation_seconds"], "pin": pin,
+        })
+    _confirm_session(session, observations)
+    return samples
+
+
+def _check_holdout(missions, sources):
+    held_out_scopes = {(task["path"], task["function"]) for task in missions}
+    held_out_tests = {_sha(task["test"]) for task in missions}
+    pins = set()
+    for path, pin in sources:
+        path = Path(path).resolve(strict=True)
+        raw = _read(path.parent, path.name, limit=512_000)
+        if not _SHA.fullmatch(pin) or _sha(raw) != pin or pin in pins:
+            raise ValueError("Learning registry pin is invalid, changed or duplicated")
+        registry = _object(raw, "learning registry")
+        learning = registry.get("missions")
+        if (not isinstance(learning, list) or not 1 <= len(learning) <= 20
+                or any(not isinstance(task, dict) or task.get("owner") != "local"
+                       for task in learning)):
+            raise ValueError("Learning registry requires approved local code missions")
+        approved = registry.get("approvals")
+        if approved != seal(learning) or len(approved) != len(learning):
+            raise ValueError("Learning registry approval set is invalid")
+        for task in learning:
+            validate_contract(task, approved)
+            if ((task["path"], task["function"]) in held_out_scopes
+                    or _sha(task["test"]) in held_out_tests):
+                raise ValueError("held-out scopes overlap with learning functions or tests")
+        pins.add(pin)
+    return {"kind": "held-out", "excluded_registry_sha256": sorted(pins)}
+
+
+def _paired_verdict(cases, baseline_model, candidate_model):
+    outcomes = []
+    for case in cases:
+        for label, model in (("baseline", baseline_model), ("candidate", candidate_model)):
+            row = case[label]
+            outcomes.append(Outcome(case["case_sha256"], model, row["accepted"],
+                                    seconds=row["claim_to_terminal_seconds"]))
+    data = compare(outcomes, baseline_id=baseline_model, candidate_id=candidate_model).to_dict()
+    for metrics in data["paired_metrics"].values():
+        # Outcome currently requires an integer for tokens. Unobserved is not zero.
+        metrics["tokens"] = None
+    if any(not row["attempts"] or not all(attempt["attributed_model_outcome"] for attempt in row["attempts"])
+           for case in cases for row in (case["baseline"], case["candidate"])):
+        data["verdict"] = INCONCLUSIVE
+        data["reasons"] = ["one or more attempts lack attributable, independent model evidence"]
+    return data
+
+
+def compare_sessions(baseline_path, baseline_pin, candidate_path, candidate_pin, *, learning_sources=()):
     baseline_root, candidate_root = (Path(p).resolve(strict=True) for p in (baseline_path, candidate_path))
     if baseline_root.is_relative_to(candidate_root) or candidate_root.is_relative_to(baseline_root):
         raise ValueError("comparison requires two separate, non-nested session directories")
@@ -311,8 +414,10 @@ def compare_sessions(baseline_path, baseline_pin, candidate_path, candidate_pin)
     if baseline.model == candidate.model or baseline.checkout != candidate.checkout:
         raise ValueError("comparison requires distinct fixed models and the same checkout commit")
     left, right = _paired_cases(baseline.missions, candidate.missions)
+    cohort = (_check_holdout(baseline.missions, learning_sources) if learning_sources
+              else {"kind": "paired", "excluded_registry_sha256": []})
     observations = [[], []]
-    outcomes, cases = [], []
+    cases = []
     for key, before in left.items():
         after = right[key]
         source = local_codegen._source(before)
@@ -324,25 +429,12 @@ def compare_sessions(baseline_path, baseline_pin, candidate_path, candidate_pin)
             row = _observe(session, task, source)
             case[label] = row
             observations[index].append(row)
-            outcomes.append(Outcome(key, session.model, row["accepted"], seconds=row["claim_to_terminal_seconds"]))
         cases.append(case)
     for session, rows in zip((baseline, candidate), observations):
-        complete = all(row["accepted"] for row in rows)
-        if (session.status["phase"], session.status["worker_exit"]) != (("COMPLETE", 0) if complete else ("BLOCKED", 2)):
-            raise ValueError("campaign exit does not match the observed mission outcomes")
-        if _read(session.root, "status.json") != session.snapshot:
-            raise ValueError("campaign status changed during comparison")
-    comparison = compare(outcomes, baseline_id=baseline.model, candidate_id=candidate.model)
-    data = comparison.to_dict()
-    for metrics in data["paired_metrics"].values():
-        # Outcome currently requires an integer for tokens. Unobserved is not zero.
-        metrics["tokens"] = None
-    if any(not row["attempts"] or not all(a["attributed_model_outcome"] for a in row["attempts"])
-           for campaign in observations for row in campaign):
-        data["verdict"] = INCONCLUSIVE
-        data["reasons"] = ["one or more attempts lack attributable, independent model evidence"]
+        _confirm_session(session, rows)
+    data = _paired_verdict(cases, baseline.model, candidate.model)
     return {
-        "comparison": data, "cases": cases,
+        "cohort": cohort, "comparison": data, "cases": cases,
         "baseline": _summary(baseline, observations[0]), "candidate": _summary(candidate, observations[1]),
         "measurement_notes": [
             "Paired seconds are claim-to-terminal elapsed time, including verification and any interruption.",
@@ -353,15 +445,55 @@ def compare_sessions(baseline_path, baseline_pin, candidate_path, candidate_pin)
     }
 
 
+def compare_cohorts(pairs, *, learning_sources=()):
+    """Combine separate bounded sessions without treating repeated functions as new cases."""
+    if not 1 <= len(pairs) <= 4:
+        raise ValueError("evaluation requires one to four session pairs")
+    reports = [compare_sessions(*pair, learning_sources=learning_sources) for pair in pairs]
+    if len(reports) == 1:
+        return reports[0]
+    identities = {(row["baseline"]["model"], row["candidate"]["model"], row["baseline"]["checkout_sha"])
+                  for row in reports}
+    if len(identities) != 1:
+        raise ValueError("evaluation pairs must use the same two models and checkout commit")
+    cases = [case for report in reports for case in report["cases"]]
+    scopes = {(case["path"], case["function"]) for case in cases}
+    tests = {case["test_sha256"] for case in cases}
+    if len(scopes) != len(cases) or len(tests) != len(cases):
+        raise ValueError("evaluation pairs reused a function or test")
+    baseline, candidate, _ = identities.pop()
+    return {
+        "cohort": reports[0]["cohort"], "comparison": _paired_verdict(cases, baseline, candidate),
+        "cases": cases,
+        "pairs": [{key: row[key] for key in ("baseline", "candidate")} for row in reports],
+        "measurement_notes": reports[0]["measurement_notes"],
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for side in ("baseline", "candidate"):
         parser.add_argument(f"--{side}", type=Path, required=True)
         parser.add_argument(f"--{side}-sha256", required=True)
+    parser.add_argument("--learning-source", metavar=("REGISTRY", "SHA256"), nargs=2, action="append",
+                        help="exclude the functions and tests in a pinned registry; repeat for every learning cohort")
+    parser.add_argument("--pair", nargs=4, action="append",
+                        metavar=("BASELINE_DIR", "BASELINE_SHA256", "CANDIDATE_DIR", "CANDIDATE_SHA256"),
+                        help="add a distinct pair of approved, independently tested sessions")
+    parser.add_argument("--output", type=Path, help="write a new local evaluation report")
     args = parser.parse_args(argv)
     try:
-        data = compare_sessions(args.baseline, args.baseline_sha256, args.candidate, args.candidate_sha256)
-    except (Blocked, OSError, ValueError, SyntaxError, RecursionError) as exc:
+        pairs = [(args.baseline, args.baseline_sha256, args.candidate, args.candidate_sha256),
+                 *(args.pair or ())]
+        roots = [Path(pair[index]).resolve() for pair in pairs for index in (0, 2)]
+        if args.output and any(args.output.resolve().is_relative_to(root) for root in roots):
+            raise ValueError("write the evaluation report outside the evidence directories")
+        data = compare_cohorts(pairs, learning_sources=args.learning_source or ())
+        if args.output:
+            _write_new_private(args.output, {
+                "schema_version": 1, "kind": "tel99-paired-evaluation", "report": data,
+            })
+    except (Blocked, OSError, ValueError, KeyError, TypeError, SyntaxError, RecursionError) as exc:
         parser.exit(2, f"Comparison refused: {exc}\n")
     print(json.dumps(data, indent=2, sort_keys=True, allow_nan=False))
     return 0

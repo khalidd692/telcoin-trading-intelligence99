@@ -1,4 +1,4 @@
-"""Route approved code missions among already-loaded loopback llama.cpp models."""
+"""Route approved code missions among verified loopback llama.cpp and Ollama models."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ AVAILABLE_MEMORY_RESERVE_MIB = 1024
 LARGE_MODEL_MIB = 4096
 PROBE_TIMEOUT_SECONDS = 2.0
 MAX_PROBE_BYTES = 16_384
+MIN_MEASURED_TASKS = 5
+UNBENCHMARKED_OLLAMA = "local/ollama-qwen3.5-9b"
 
 
 class ProbeError(RuntimeError):
@@ -155,16 +157,24 @@ def _probe_ollama(model):
         return None, str(exc), round(1000 * (time.monotonic() - started), 2)
 
 
+def has_model_memory(spec, available):
+    """Check load and reserve requirements against measured available host RAM."""
+    # Ollama loads on demand. The llama.cpp probe attests an already loaded model.
+    required = AVAILABLE_MEMORY_RESERVE_MIB
+    if spec.provider == "ollama":
+        required += spec.memory_mib
+    return available is not None and available >= required
+
+
 def check_selected(binding):
     """Recheck a single previously selected, approval-bound model before generation."""
     try:
         validate_candidates([binding])
     except ValueError:
         return False
-    available = available_memory_mib()
-    if available is None or available < AVAILABLE_MEMORY_RESERVE_MIB:
-        return False
     spec = catalog.by_id(binding["id"])
+    if not has_model_memory(spec, available_memory_mib()):
+        return False
     if spec.provider == "ollama":
         served, _, _ = _probe_ollama(binding["model"])
     else:
@@ -194,11 +204,13 @@ def _generation_timing(spec, observations):
     return seconds, "slow"
 
 
-def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seconds=None):
+def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seconds=None,
+           measured_outcomes=None):
     """Inspect approved bindings and return a route without making a generation call.
 
     ``measured_seconds`` groups recent mean generation times by difficulty and
-    model. Probe RTT measures only the two endpoint checks.
+    model. ``measured_outcomes`` contains scoped, independently verified
+    mission results. Probe RTT measures only endpoint checks.
     """
     candidates = mission["routing"]["candidates"]
     validate_candidates(candidates)
@@ -207,6 +219,26 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
     task = _task_profile(mission, function)
     difficulty, _ = router.classify_difficulty(task)
     timings = measured_seconds.get(difficulty) if isinstance(measured_seconds, dict) else None
+    outcomes = measured_outcomes.get(difficulty) if isinstance(measured_outcomes, dict) else None
+    observed = outcomes if isinstance(outcomes, dict) else {}
+    timings = dict(timings) if isinstance(timings, dict) else {}
+    quality, sample_sizes, registry_pins = {}, {}, {}
+    for binding in candidates:
+        model = binding["id"]
+        outcome = observed.get(model)
+        if not isinstance(outcome, dict):
+            continue
+        tasks, rate = outcome.get("tasks"), outcome.get("success_rate")
+        if type(tasks) is int and 0 < tasks <= 20:
+            sample_sizes[model] = tasks
+            if tasks >= MIN_MEASURED_TASKS and type(rate) in (int, float) and 0 <= rate <= 1:
+                quality[model] = rate
+        pins = outcome.get("registry_sha256")
+        if isinstance(pins, list):
+            registry_pins[model] = [pin for pin in pins[:8]
+                                    if isinstance(pin, str) and re.fullmatch(r"[0-9a-f]{64}", pin)]
+        if "generation_seconds" in outcome:
+            timings[model] = outcome["generation_seconds"]
     available = available_memory_mib()
     probes = {}
     inventory = []
@@ -230,13 +262,18 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
             reason = "excluded from this attempt"
         elif not verified and reason is None:
             reason = "loopback API model ID did not match the approved binding"
-        elif verified and (available is None or available < AVAILABLE_MEMORY_RESERVE_MIB):
-            reason = "insufficient or unavailable physical memory reserve"
+        elif verified and not has_model_memory(spec, available):
+            reason = "insufficient or unavailable physical memory for model and reserve"
+        elif verified and model_id == UNBENCHMARKED_OLLAMA and model_id not in quality:
+            reason = "installed model lacks recent independently verified outcomes for this task difficulty"
         elif verified and spec.memory_mib < minimum_memory_mib:
             reason = "model is below the escalation memory class"
         inventory.append({**binding, "verified": verified, "eligible": reason is None,
                           "reason": reason, "probe_rtt_ms": rtt, "model_memory_mib": spec.memory_mib,
-                          "quality_prior": spec.quality_prior, "latency_tier_prior": spec.latency_tier,
+                          "quality_prior": spec.quality_prior, "success_rate_observed": quality.get(model_id),
+                          "observed_tasks": sample_sizes.get(model_id, 0),
+                          "calibration_registry_sha256": registry_pins.get(model_id, []),
+                          "latency_tier_prior": spec.latency_tier,
                           "generation_seconds_observed": generation_seconds, "latency_tier_effective": latency_tier})
         if reason is None:
             eligible.append(replace(spec, verified=True, latency_tier=latency_tier))
@@ -254,7 +291,8 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
                 row.update(eligible=False, reason="more than one large llama.cpp model served")
 
     routed = router.route(task, verified_local=tuple(eligible), quota_remaining=mission.get("max_attempts", 1),
-                          approved_models=frozenset(binding["id"] for binding in candidates)).to_dict()
+                          approved_models=frozenset(binding["id"] for binding in candidates),
+                          measured_quality=quality).to_dict()
     rejected = {row["id"]: row["reason"] for row in routed["rejected"]}
     routed["rejected"].extend({"id": row["id"], "reason": row["reason"]}
                               for row in inventory if not row["eligible"])

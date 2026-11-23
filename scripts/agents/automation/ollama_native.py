@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
+from scripts.agents.automation import local_model_routing
 from scripts.agents.intelligence import catalog
 from scripts.agents.native.provider import ProviderError
 
@@ -29,6 +30,7 @@ class OllamaNativeProvider:
         ]
         if len(approved) != 1 or not (1 <= max_tokens <= 1024) or not (1 <= timeout <= 90):
             raise ProviderError("unapproved Ollama model or generation limit")
+        self.spec = approved[0]
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
@@ -36,6 +38,8 @@ class OllamaNativeProvider:
 
     def complete(self, *, system: str, prompt: str) -> str:
         self.last_metadata = {}
+        if not local_model_routing.has_model_memory(self.spec, local_model_routing.available_memory_mib()):
+            raise ProviderError("insufficient or unavailable physical memory for Ollama model and reserve")
         payload = {
             "model": self.model,
             "system": system,

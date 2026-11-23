@@ -86,7 +86,7 @@ def validate_contract(m,approvals):
     return True
 
 class Runtime(Supervisor):
-    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None):
+    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None,calibration=()):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
@@ -95,6 +95,7 @@ class Runtime(Supervisor):
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
+        self.calibration = tuple(calibration)
         self.quota_exhausted = False
     def bind_transport(self, transport):
         """Pin a working ledger to one entry point while allowing same-transport restart."""
@@ -292,12 +293,22 @@ class Runtime(Supervisor):
             return None
         return {"exclude": (selected["id"],), "minimum_memory_mib": spec.memory_mib + 1}
 
-    def local_generation_times(self, mission):
-        """Reuse the latest verified generation timings for these same local bindings."""
-        rows = []
+    def local_model_observations(self, mission):
+        """Summarize recent independently verified outcomes for the same project/base."""
+        now = time.time()
+        target_scope = (mission.get("path"), mission.get("function"))
+        earliest = now - 30 * 86400
+        rows = [(sample["at"], sample["mission"], sample["difficulty"], sample["binding"]["id"],
+                 sample["scope"], sample["accepted"], sample["seconds"], sample["pin"])
+                for sample in self.calibration
+                if sample["project"] == mission["project"] and sample["base_sha"] == mission["base_sha"]
+                and sample["binding"] in mission["routing"]["candidates"]
+                and sample["scope"] != target_scope and earliest <= sample["at"] <= now]
         for key in self.store.keys("kilo-local"):
             row = self.store.get(key)
-            if not isinstance(row, dict) or row.get("status") not in {"ACCEPTED", "BLOCKED"}:
+            if (not isinstance(row, dict) or row.get("project") != mission["project"]
+                    or row.get("id") == mission["id"]
+                    or row.get("status") not in {"ACCEPTED", "BLOCKED", "REJECTED"}):
                 continue
             route, proof = row.get("model_route"), row.get("verification")
             selection = route.get("selection") if isinstance(route, dict) else None
@@ -306,16 +317,71 @@ class Runtime(Supervisor):
             decision = route.get("decision")
             level = decision.get("difficulty") if isinstance(decision, dict) else None
             seconds, at = proof.get("generation_seconds"), row.get("at")
-            if (proof.get("verifier") == local_codegen.VERIFIER and proof.get("model") == selection["model"]
-                    and level in ("easy", "medium", "hard")
-                    and type(seconds) in (int, float) and 0 <= seconds <= 80
-                    and type(at) in (int, float) and 0 <= at < float("inf")):
-                rows.append((at, level, selection["id"], seconds))
-        samples = {}
-        for _, level, model, seconds in sorted(rows, reverse=True)[:20]:
-            samples.setdefault(level, {}).setdefault(model, []).append(seconds)
-        return {level: {model: round(sum(values) / len(values), 3) for model, values in models.items()}
-                for level, models in samples.items()}
+            mid, digest = row.get("id"), row.get("contract_sha256")
+            if (not isinstance(mid, str) or key != f"kilo-local/{mid}"
+                    or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                    or proof.get("verifier") != local_codegen.VERIFIER
+                    or proof.get("model") != selection["model"]
+                    or proof.get("base_sha") != mission["base_sha"]
+                    or level not in ("easy", "medium", "hard")
+                    or type(at) not in (int, float) or not earliest <= at <= now):
+                continue
+            claim = self.store.get(f"kilo-claims/{mid}")
+            if (not isinstance(claim, dict) or claim.get("project") != mission["project"]
+                    or claim.get("contract_sha256") != digest):
+                continue
+            scope = (proof.get("path"), proof.get("function"))
+            test_digest = proof.get("test_sha256")
+            if (not all(isinstance(part, str) and part for part in scope) or scope == target_scope
+                    or not isinstance(test_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", test_digest)):
+                continue
+            checks = proof.get("checks")
+            if not isinstance(checks, list) or not all(
+                    isinstance(check, dict) and isinstance(check.get("name"), str) for check in checks):
+                continue
+            by_name = {check["name"]: check for check in checks}
+            if len(by_name) != len(checks):
+                continue
+            checks = by_name
+            if (checks.get("bounded-model-receipt", {}).get("ok") is not True
+                    or checks.get("approved-function-diff", {}).get("ok") is not True
+                    or checks.get("baseline-fails", {}).get("ok") is not True
+                    or type(checks["baseline-fails"].get("exit_code")) is not int
+                    or checks["baseline-fails"]["exit_code"] != 1):
+                continue
+            accepted = row["status"] == "ACCEPTED"
+            outcome = checks.get("candidate-passes", {})
+            if (proof.get("ok") is not accepted or outcome.get("ok") is not accepted
+                    or type(outcome.get("exit_code")) is not int
+                    or outcome["exit_code"] != (0 if accepted else 1)
+                    or (accepted and (not isinstance(row.get("verdict"), dict)
+                                      or row["verdict"].get("validated") is not True))):
+                continue
+            rows.append((at, mid, level, selection["id"], scope, accepted, seconds, ""))
+
+        observations, seen = {}, set()
+        for _, _, level, model, scope, accepted, timing, pin in sorted(
+                rows, key=lambda row: (row[0], row[1], row[7]), reverse=True):
+            key = (model, *scope)
+            if key in seen:
+                continue
+            samples = observations.setdefault(level, {}).setdefault(model, [])
+            if len(samples) < 20:
+                seen.add(key)
+                samples.append((accepted, timing, pin))
+        result = {}
+        for level, models in observations.items():
+            result[level] = {}
+            for model, samples in models.items():
+                timings = [seconds for _, seconds, _ in samples
+                           if type(seconds) in (int, float) and 0 <= seconds <= 80]
+                result[level][model] = {
+                    "tasks": len(samples),
+                    "success_rate": sum(accepted for accepted, _, _ in samples) / len(samples),
+                    "generation_seconds": round(sum(timings) / len(timings), 3) if timings else None,
+                    "registry_sha256": sorted({pin for _, _, pin in samples if pin}),
+                }
+        return result
 
     def _retry(self, m, saved, maximum, *, reason, feedback, verification=None):
         if maximum == 1 or not local_codegen.valid_feedback(feedback):
@@ -380,8 +446,8 @@ class Runtime(Supervisor):
                     return
                 try:
                     if route is None:
-                        timings = self.local_generation_times(m)
-                        options = {**escalation, **({"measured_seconds": timings} if timings else {})}
+                        observations = self.local_model_observations(m)
+                        options = {**escalation, **({"measured_outcomes": observations} if observations else {})}
                         route = local_codegen.choose_route(m, **options)
                         if route.get("selection") is None:
                             status = "ACK" if escalation else "BLOCKED"
@@ -572,7 +638,23 @@ def main(argv=None):
     p.add_argument("--local-code", action="store_true", help="admit approved local Python code missions")
     p.add_argument("--seconds",type=int,default=300)
     p.add_argument("--once",action="store_true")
-    a=p.parse_args(argv);r=Runtime(a.state, legacy_stop=LEGACY_STOP)
+    p.add_argument("--calibration-session", metavar=("NIGHT_LAB_DIR", "REGISTRY_SHA256"), nargs=2,
+                   action="append", help="use independently verified results from a prior local-code session")
+    a=p.parse_args(argv)
+    calibration = []
+    if a.calibration_session:
+        if a.action != "run" or not a.local_code or len(a.calibration_session) > 8:
+            p.error("calibration requires run --local-code and at most 8 completed sessions")
+        from scripts.agents.automation.compare_local_code import read_calibration
+        try:
+            for directory, pin in a.calibration_session:
+                root, state = Path(directory).resolve(), a.state.resolve()
+                if root.is_relative_to(state) or state.is_relative_to(root):
+                    raise ValueError("calibration and run require separate non-nested directories")
+                calibration.extend(read_calibration(root, pin))
+        except (Blocked, OSError, ValueError, KeyError, TypeError, SyntaxError, RecursionError) as exc:
+            p.error(f"calibration refused: {exc}")
+    r=Runtime(a.state, legacy_stop=LEGACY_STOP, calibration=calibration)
     if a.action=="stop":
         (r.root/"stop.request").touch();print("STOP requested");return 0
     if a.action=="status":print(json.dumps(r.status(),ensure_ascii=True));return 0

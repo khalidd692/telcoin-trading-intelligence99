@@ -25,15 +25,16 @@ def write(path, value):
     return sha(path.read_bytes())
 
 
-def completed(root, label, model, *, edit_test=False, tamper_model=False, repair_first=False, block_first=False):
+def completed(root, label, model, *, edit_test=False, tamper_model=False, repair_first=False, block_first=False, port=18089, functions=()):
     base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     tasks = [
         {
             "id": f"{label}-{i}", "owner": "local", "project": "tel99", "specialist": "tel99-dev",
             "priority": "P1", "dependencies": [], "objective": f"Test objective {i}",
-            "base_sha": base, "path": "scripts/agents/automation/policy.py", "function": "repository_allowed",
-            "test": f"# independent task {i}" + (" changed" if i == 1 and edit_test else ""),
-            "sandbox_image": IMAGE, "model": model, "port": 18089, "max_attempts": 2,
+            "base_sha": base, "path": "scripts/agents/automation/policy.py",
+            "function": functions[i - 1] if functions else "repository_allowed",
+            "test": f"# independent task {functions[i - 1] if functions else i}" + (" changed" if i == 1 and edit_test else ""),
+            "sandbox_image": IMAGE, "model": model, "port": port, "max_attempts": 2,
         }
         for i in range(1, 6)
     ]
@@ -44,7 +45,9 @@ def completed(root, label, model, *, edit_test=False, tamper_model=False, repair
     for i, task in enumerate(tasks, 1):
         mid = task["id"]
         source = local_codegen._source(task)
-        artifact = "def repository_allowed(repository: str) -> bool:\n    return False"
+        function = local_codegen._function(source, task["function"])
+        signature = "".join(source.splitlines(keepends=True)[function.lineno - 1:function.body[0].lineno - 1])
+        artifact = signature + "    return False"
         candidate = local_codegen.replace_function(source, task["function"], artifact)
         diff = "reviewable fixture diff\n"
         receipt = {
