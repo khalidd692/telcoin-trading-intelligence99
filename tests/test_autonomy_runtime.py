@@ -216,11 +216,13 @@ class RuntimeTests(unittest.TestCase):
         b = code_mission(id="local-code-b", dependencies=[a["id"]], max_attempts=2)
         marker = self.root / "stop.request"
         source = b"def increment(value):\n    return value\n"
-        feedback = {"kind": "candidate-test", "line": 1}
+        first_candidate = "def increment(value):\n    return value + 1"
+        feedback = {"kind": "candidate-test", "line": 1,
+                    "candidate_sha256": hashlib.sha256(first_candidate.encode()).hexdigest()}
         calls = []
 
-        def worker(m, *, feedback=None, attempt=1):
-            calls.append((m["id"], feedback, attempt))
+        def worker(m, *, feedback=None, attempt=1, previous=None):
+            calls.append((m["id"], feedback, attempt, previous))
             reply = f"def increment(value):\n    return value + {attempt}"
             return {"artifact": reply, "sha256": hashlib.sha256(reply.encode()).hexdigest(),
                     "specialist_id": m["specialist"], "provider": local_codegen.PROVIDER,
@@ -246,8 +248,10 @@ class RuntimeTests(unittest.TestCase):
 
         with patch.object(run, "execute_worker", side_effect=worker), patch.object(run, "save", side_effect=save_and_stop):
             run.run_queue([a, b], seal([a, b]))
-        self.assertEqual(calls, [(a["id"], None, 1)])
+        self.assertEqual(calls, [(a["id"], None, 1, None)])
         self.assertEqual(run.state(a)["status"], "ACK")
+        self.assertEqual(run.state(a)["result"]["artifact"], first_candidate)
+        self.assertNotIn("result", run.status()["missions"][a["id"]])
         self.assertEqual(run.state(b), {})
 
         marker.rename(self.root / "stop.acknowledged")
@@ -259,7 +263,9 @@ class RuntimeTests(unittest.TestCase):
                            side_effect=[(False, 1), (True, None), (False, 1), (True, None)])):
             resumed.run_queue([a, b], seal([a, b]))
             resumed.run_queue([a, b], seal([a, b]))
-        self.assertEqual(calls, [(a["id"], None, 1), (a["id"], feedback, 2), (b["id"], None, 1)])
+        self.assertEqual(calls, [(a["id"], None, 1, None),
+                                 (a["id"], feedback, 2, first_candidate),
+                                 (b["id"], None, 1, None)])
         self.assertEqual(resumed.state(a)["status"], "ACCEPTED")
         self.assertEqual(resumed.state(b)["status"], "ACCEPTED")
         self.assertEqual(resumed.state(a)["attempt_history"][0]["feedback"], feedback)

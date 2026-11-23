@@ -145,6 +145,55 @@ class LocalCodeTests(unittest.TestCase):
         self.assertEqual(exit_code, 4)
         self.assertEqual(report.get("feedback"), {"kind": "empty-completion"})
 
+    def test_repair_prompt_contains_only_approved_diagnostics_and_redacted_candidate(self):
+        approved = mission(
+            max_attempts=2,
+            test="assert False, 'PRIVATE_ASSERTION'  # case: increment-empty | expected: Add one to zero.",
+        )
+        base = "def increment(value):\n    return value\n"
+        previous = (
+            "def increment(value):\n"
+            "    # PRIVATE_COMMENT\n"
+            "    PRIVATE_IDENTIFIER = f'PRIVATE_LITERAL {value}'\n"
+            "    if PRIVATE_IDENTIFIER:\n"
+            "        return value + 3141592653\n"
+            "    return value\n"
+        )
+        digest = hashlib.sha256(previous.encode()).hexdigest()
+        feedback = {"kind": "candidate-test", "line": 1, "candidate_sha256": digest}
+        with (patch.object(local_codegen.sandbox, "require_local_image"),
+              patch.object(local_codegen, "_source", return_value=base),
+              patch.object(local_codegen, "OpenAICompatibleProvider") as provider):
+            complete = provider.return_value.complete
+            complete.return_value = "def increment(value):\n    return value + 1"
+            local_codegen.execute(approved, feedback=feedback, previous=previous)
+            prompt = complete.call_args.kwargs["prompt"]
+            self.assertIn("increment-empty", prompt)
+            self.assertIn("Add one to zero.", prompt)
+            self.assertIn("assertion failed", prompt)
+            self.assertIn(digest, prompt)
+            self.assertIn("Previous candidate (redacted", prompt)
+            self.assertIn("if _name_1", prompt)
+            for value in ("PRIVATE_ASSERTION", "PRIVATE_COMMENT", "PRIVATE_IDENTIFIER",
+                          "PRIVATE_LITERAL", "3141592653"):
+                self.assertNotIn(value, prompt)
+            with self.assertRaisesRegex(ValueError, "previous candidate"):
+                local_codegen.execute(approved, feedback=feedback, previous=previous + "# changed")
+            self.assertEqual(complete.call_count, 1)
+
+    def test_case_annotation_is_read_only_from_a_python_comment(self):
+        approved = mission(max_attempts=2, test="assert False, '# case: fake | expected: PRIVATE_LITERAL'")
+        base = "def increment(value):\n    return value\n"
+        with (patch.object(local_codegen.sandbox, "require_local_image"),
+              patch.object(local_codegen, "_source", return_value=base),
+              patch.object(local_codegen, "OpenAICompatibleProvider") as provider):
+            complete = provider.return_value.complete
+            complete.return_value = "def increment(value):\n    return value + 1"
+            local_codegen.execute(approved, feedback={"kind": "candidate-test", "line": 1})
+            prompt = complete.call_args.kwargs["prompt"]
+            self.assertNotIn("PRIVATE_LITERAL", prompt)
+            self.assertNotIn("Approved case:", prompt)
+
     def test_retry_diagnostic_captures_only_assertion_line(self):
         approved = mission(test="pass\nassert False, 'test-only detail'", max_attempts=2)
         reply = "def increment(value):\n    return value + 1"
@@ -164,7 +213,8 @@ class LocalCodeTests(unittest.TestCase):
         ):
             report = local_codegen.verify(approved, receipt, Path(directory))
         self.assertFalse(report["ok"])
-        self.assertEqual(report.get("feedback"), {"kind": "candidate-test", "line": 2})
+        self.assertEqual(report.get("feedback"), {"kind": "candidate-test", "line": 2,
+                                                  "candidate_sha256": receipt["sha256"]})
         self.assertNotIn("test-only detail", json.dumps(report))
 
     def test_invalid_candidate_has_feedback_before_docker_verification(self):
@@ -179,5 +229,7 @@ class LocalCodeTests(unittest.TestCase):
         ), patch.object(local_codegen.sandbox, "require_local_image") as docker:
             report = local_codegen.verify(approved, receipt, Path(directory))
         self.assertFalse(report["ok"])
-        self.assertEqual(report.get("feedback"), {"kind": "candidate-diff"})
+        self.assertEqual(report.get("feedback"), {"kind": "candidate-diff",
+                                                  "candidate_sha256": receipt["sha256"],
+                                                  "error": "invalid-python-syntax"})
         docker.assert_not_called()
