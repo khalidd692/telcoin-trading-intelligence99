@@ -10,6 +10,8 @@ import uuid
 
 def load_tasks(db_path: str) -> list[dict]:
     """Charge les tâches depuis le fichier JSON, ou retourne une liste vide si absent."""
+    import os
+    import json
     if not os.path.exists(db_path):
         return []
     try:
@@ -17,7 +19,7 @@ def load_tasks(db_path: str) -> list[dict]:
             data = json.load(f)
             if not isinstance(data, list):
                 return []
-            return data
+            return [item for item in data if isinstance(item, dict)]
     except (json.JSONDecodeError, OSError):
         return []
 
