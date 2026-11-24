@@ -107,6 +107,11 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
                 if not campaign.complete():
                     if not campaign.poll() or campaign.github_rate_limited:
                         raise Blocked(f"controller #{spec['issue']} blocked: inspect its ledger")
+                    states = getattr(campaign, "states", None)
+                    if callable(states) and any(
+                            row.get("status") in {"AWAITING_HUMAN", "BLOCKED", "REJECTED"}
+                            for row in states() if isinstance(row, dict)):
+                        raise Blocked(f"controller #{spec['issue']} needs human review; checkpoints preserved")
                 summary[spec["issue"]] = campaign.complete()
             if once:
                 break
