@@ -78,13 +78,15 @@ def preflight_campaigns(specs, root, deadline, *, build=make_campaign):
 
 
 def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
-                  once=False, build=make_campaign, sleep=time.sleep):
+                  once=False, build=make_campaign, sleep=time.sleep, discover=None):
     """One bounded session; later owner-pinned controllers may be added to manifest.
 
     A change to the pin of an existing controller is rejected by the dedicated
     durable ledger. Completed campaigns are never reexecuted; the existing
     GitHub publisher additionally reconciles uncertain receipts/PR writes.
     """
+    if (manifest is None) == (discover is None):
+        raise ValueError("choose exactly one owner-approved source: manifest or auto-feed")
     if not 1 <= seconds <= 3600 or not 1 <= poll_interval <= 3600:
         raise ValueError("seconds and poll interval must be within 1..3600")
     root = Path(root).resolve()
@@ -94,7 +96,9 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
     with exclusive(root / "multi-session.lock"):
         while (not (root / "stop.request").exists() and not LEGACY_STOP.exists()
                and time.monotonic() < deadline):
-            specs = load_manifest(manifest)
+            specs = discover(root) if discover is not None else load_manifest(manifest)
+            if len(specs) > MAX_CAMPAIGNS:
+                raise ValueError("too many owner-approved controllers")
             campaigns = preflight_campaigns(specs, root, deadline, build=build)
             for spec, campaign in zip(specs, campaigns):
                 if ((root / "stop.request").exists() or LEGACY_STOP.exists()
@@ -133,6 +137,8 @@ def main(argv=None):
     parser.add_argument("action", choices=("preflight", "run", "status", "stop"))
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--auto-feed", action="store_true",
+                        help="read-only discovery of new owner-approved GitHub controllers")
     parser.add_argument("--seconds", type=int, default=3600)
     parser.add_argument("--poll-interval", type=int, default=30)
     parser.add_argument("--once", action="store_true")
@@ -151,21 +157,26 @@ def main(argv=None):
     if args.action == "status":
         print(json.dumps(status(root, args.manifest)))
         return 0
-    if args.manifest is None:
-        parser.error("preflight/run require --manifest with owner-pinned controllers")
+    if (args.manifest is None) == (not args.auto_feed):
+        parser.error("choose exactly one: --manifest or --auto-feed")
+    discover = None
+    if args.auto_feed:
+        from scripts.agents.automation.github_owner_feed import pinned_owner_feed
+        discover = pinned_owner_feed
     if (root / "stop.request").exists() or LEGACY_STOP.exists():
         print(json.dumps({"status": "BLOCKED", "reason": "stop.request or legacy STOP exists"}))
         return 2
     try:
         if args.action == "preflight":
-            specs = load_manifest(args.manifest)
+            specs = discover(root) if discover is not None else load_manifest(args.manifest)
             campaigns = preflight_campaigns(specs, root, None)
-            print(json.dumps({"preflight": "READY", "controllers":
-                              [spec["issue"] for spec in specs],
+            print(json.dumps({"preflight": "READY" if specs else "WAITING_OWNER_APPROVAL",
+                              "controllers": [spec["issue"] for spec in specs],
                               "missions": [len(c.check_mandate()["contracts"]) for c in campaigns]}))
             return 0
         report = run_campaigns(args.manifest, root, seconds=args.seconds,
-                               poll_interval=args.poll_interval, once=args.once)
+                               poll_interval=args.poll_interval, once=args.once,
+                               discover=discover)
         print(json.dumps({"results": report, "all_complete": bool(report) and all(report.values()),
                           "bounded_seconds": args.seconds}))
         return 0 if report and all(report.values()) else 2
