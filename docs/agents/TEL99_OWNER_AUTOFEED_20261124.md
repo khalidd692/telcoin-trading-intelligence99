@@ -67,3 +67,11 @@ La CI vérifie les tests hors ligne sous Windows et Linux. La découverte
 effectivement alimentée **à chaud** par une nouvelle issue propriétaire
 et une heure complète avec Ollama/Docker restent à éprouver sur un PC
 allumé avec des mandats nouveaux.
+
+## Mandat de recette (nouveau, à exécuter localement)
+
+- Contrôleur GitHub [#205](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/205), marqué `tel99-autofeed-controller/v1` et doté d'un mandat propriétaire SHA-256.
+- Missions [#206](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/206) (`tool_names`) et [#207](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/207) (`dedup_key`), toutes deux approuvées séparément et dépendantes dans cet ordre.
+- Base Git isolée `agents/tel99-code-base-autofeed-20261124`, commit épinglé `934d9fd8a3fd498c6e3e69226007dd46276aa6da`.
+
+Le système doit reconnaître ce contrôleur **sans manifeste** depuis un nouveau dossier d'état et produire deux PR brouillons avec reçus indépendants. Les tests CI seuls ne remplacent pas cette recette réelle.
