@@ -114,6 +114,7 @@ def pinned_owner_feed(root, *, fetcher=default_fetch):
     remote = discover_owner_pins(fetcher=fetcher)
     store = FileStore(root / "feed-ledger")
     record = store.get(PIN_KEY)
+    previous_record = record
     if record is None:
         record = {"version": 1, "pins": []}
     if (not isinstance(record, dict) or set(record) != {"version", "pins"}
@@ -132,7 +133,7 @@ def pinned_owner_feed(root, *, fetcher=default_fetch):
         next_record = {"version": 1, "pins": sorted([*record["pins"], *added],
                                                       key=lambda item: item["issue"])}
         try:
-            if not store.put_cas(PIN_KEY, next_record, None if not existing else record):
+            if not store.put_cas(PIN_KEY, next_record, previous_record):
                 raise ValueError("owner-feed CAS conflict; reload before retry")
         except StoreError as exc:
             raise ValueError("owner-feed CAS persistence unavailable") from exc
