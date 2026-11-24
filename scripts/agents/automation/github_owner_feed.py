@@ -113,7 +113,10 @@ def pinned_owner_feed(root, *, fetcher=default_fetch):
     root = Path(root).resolve()
     remote = discover_owner_pins(fetcher=fetcher)
     store = FileStore(root / "feed-ledger")
-    record = store.get(PIN_KEY)
+    try:
+        record = store.read(PIN_KEY, default=None)
+    except (OSError, ValueError) as exc:
+        raise ValueError("corrupt durable owner-feed pin ledger") from exc
     previous_record = record
     if record is None:
         record = {"version": 1, "pins": []}
