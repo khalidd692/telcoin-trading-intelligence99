@@ -314,7 +314,57 @@ def sync_measured_quality(state_root: Path | str, output_path: Path | str | None
     quality_path = Path(output_path) if output_path is not None else (learning_dir / "measured_quality.json")
     _atomic_write_json(quality_path, report["measured_quality"])
     _atomic_write_json(learning_dir / "summary.json", report)
+    memory_root = learning_dir / "memory"
+    if memory_root.is_dir():
+        promoted = promote_verified_procedures(memory_root, "tel99")
+        report["promoted_procedures"] = promoted
     return report
+
+
+def promote_verified_procedures(memory_root: Path | str, project: str,
+                                *, min_verified_fixes: int = 1) -> list[str]:
+    """Promote verified repair entries into reusable project procedures & Markdown guide."""
+    mem_path = Path(memory_root)
+    if not mem_path.exists():
+        return []
+    store = MemoryStore(mem_path)
+    fixes = [
+        entry for entry in store.all_entries(project, include_common=False)
+        if entry.kind == "fix" and entry.verified and not entry.superseded_by
+    ]
+    if len(fixes) < min_verified_fixes:
+        return []
+    promoted: list[str] = []
+    lines = [
+        f"# Procédures apprises — {project}",
+        "",
+        "Procédures promues automatiquement à partir des réparations vérifiées par Docker.",
+        "",
+    ]
+    for fix in sorted(fixes, key=lambda e: e.id):
+        proc_id = f"proc-{fix.id}"
+        if store.get(project, proc_id) is None:
+            store.record(Entry(
+                id=proc_id,
+                project=project,
+                kind="procedure",
+                title=f"Procedure: {fix.title}",
+                body=f"Reusable verified fix pattern from {fix.id}: {fix.body}",
+                tags=tuple(sorted({*fix.tags, "procedure", "verified"})),
+                source=fix.source,
+                author="learning-loop",
+                verified=True,
+                verified_by=fix.verified_by or "tel99-local-docker-code-v1",
+                confidence=max(0.9, fix.confidence),
+            ), actor="learning-loop")
+            promoted.append(proc_id)
+        lines.append(f"- **{fix.title}** (`{fix.id}`): {fix.body}")
+    guide = mem_path.parent / "learned_procedures.md"
+    guide.parent.mkdir(parents=True, exist_ok=True)
+    tmp = guide.with_suffix(".md.tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    FileStore._retry_file_access(lambda: tmp.replace(guide))
+    return promoted
 
 
 def main(argv=None) -> int:

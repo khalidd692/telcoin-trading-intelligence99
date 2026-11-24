@@ -78,13 +78,66 @@ def preflight_campaigns(specs, root, deadline, *, build=make_campaign):
     return campaigns
 
 
+def detect_campaign_collisions(specs, root) -> dict[int, str]:
+    """Detect active incomplete controllers targeting the exact same (base_ref, path)."""
+    claimed_paths: dict[tuple[str, str], int] = {}
+    collisions: dict[int, str] = {}
+    for spec in specs:
+        issue = spec["issue"]
+        camp_dir = Path(root) / f"campaign-{issue}"
+        ledger_dir = camp_dir / "ledger"
+        if not ledger_dir.is_dir():
+            continue
+        from scripts.agents.protocol.store import FileStore
+        store = FileStore(ledger_dir)
+        approvals = [store.get(k) for k in store.keys("kilo-github/approvals")]
+        paths = []
+        done = bool(approvals)
+        for row in approvals:
+            if not isinstance(row, dict) or not isinstance(row.get("mission"), dict):
+                continue
+            mid = row["mission"].get("id")
+            path = row["mission"].get("path")
+            if isinstance(path, str):
+                paths.append(path)
+            st = store.get(f"kilo-local/{mid}") if mid else None
+            if not isinstance(st, dict) or st.get("status") != "ACCEPTED":
+                done = False
+        if done:
+            continue
+        for path in paths:
+            target = (spec["base_ref"], path)
+            owner_issue = claimed_paths.get(target)
+            if owner_issue is not None and owner_issue != issue:
+                collisions[issue] = (
+                    f"path collision on ({spec['base_ref']}, {path}) with active controller #{owner_issue}"
+                )
+                break
+            claimed_paths[target] = issue
+    return collisions
+
+
+def _controller_has_terminal_blocker(campaign) -> bool:
+    states = getattr(campaign, "states", None)
+    if not callable(states):
+        return False
+    return any(
+        isinstance(row, dict) and row.get("status") in {"AWAITING_HUMAN", "BLOCKED", "REJECTED"}
+        for row in states()
+    )
+
+
 def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
-                  once=False, build=make_campaign, sleep=time.sleep, discover=None):
+                  once=False, build=make_campaign, sleep=time.sleep, discover=None,
+                  isolate_blocked=False):
     """One bounded session; later owner-pinned controllers may be added to manifest.
 
     A change to the pin of an existing controller is rejected by the dedicated
     durable ledger. Completed campaigns are never reexecuted; the existing
     GitHub publisher additionally reconciles uncertain receipts/PR writes.
+    When ``isolate_blocked=True``, controllers that are already blocked or hit
+    a human checkpoint are isolated without replaying workers so other valid
+    controllers can still proceed.
     """
     if (manifest is None) == (discover is None):
         raise ValueError("choose exactly one owner-approved source: manifest or auto-feed")
@@ -94,26 +147,68 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
     root.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + seconds
     summary = {}
+    isolated: dict[int, str] = {}
     with exclusive(root / "multi-session.lock"):
         while (not (root / "stop.request").exists() and not LEGACY_STOP.exists()
                and time.monotonic() < deadline):
             specs = discover(root) if discover is not None else load_manifest(manifest)
             if len(specs) > MAX_CAMPAIGNS:
                 raise ValueError("too many owner-approved controllers")
-            campaigns = preflight_campaigns(specs, root, deadline, build=build)
-            for spec, campaign in zip(specs, campaigns):
+            collisions = detect_campaign_collisions(specs, root)
+            if collisions and not isolate_blocked:
+                first_issue = next(iter(collisions))
+                raise Blocked(f"controller #{first_issue}: {collisions[first_issue]}")
+            active_specs = []
+            active_campaigns = []
+            if not isolate_blocked:
+                active_specs = specs
+                active_campaigns = preflight_campaigns(specs, root, deadline, build=build)
+            else:
+                for spec in specs:
+                    issue = spec["issue"]
+                    if issue in collisions:
+                        isolated[issue] = collisions[issue]
+                        summary[issue] = False
+                        continue
+                    try:
+                        campaign = build(spec, root, deadline)
+                        if _controller_has_terminal_blocker(campaign):
+                            isolated[issue] = "existing checkpoint requires human review"
+                            summary[issue] = False
+                            continue
+                        campaign.check_github_identity()
+                        approved = campaign.preflight()
+                        expected = len(campaign.check_mandate()["contracts"])
+                        if len(approved) != expected:
+                            isolated[issue] = "lacks signed approvals"
+                            summary[issue] = False
+                            continue
+                        active_specs.append(spec)
+                        active_campaigns.append(campaign)
+                    except (OSError, ValueError, KeyError, Blocked) as exc:
+                        isolated[issue] = str(exc)
+                        summary[issue] = False
+            for spec, campaign in zip(active_specs, active_campaigns):
                 if ((root / "stop.request").exists() or LEGACY_STOP.exists()
                         or time.monotonic() >= deadline):
                     break
+                issue = spec["issue"]
                 if not campaign.complete():
                     if not campaign.poll() or campaign.github_rate_limited:
-                        raise Blocked(f"controller #{spec['issue']} blocked: inspect its ledger")
-                    states = getattr(campaign, "states", None)
-                    if callable(states) and any(
-                            row.get("status") in {"AWAITING_HUMAN", "BLOCKED", "REJECTED"}
-                            for row in states() if isinstance(row, dict)):
-                        raise Blocked(f"controller #{spec['issue']} needs human review; checkpoints preserved")
-                summary[spec["issue"]] = campaign.complete()
+                        msg = f"controller #{issue} blocked: inspect its ledger"
+                        if not isolate_blocked:
+                            raise Blocked(msg)
+                        isolated[issue] = msg
+                        summary[issue] = False
+                        continue
+                    if _controller_has_terminal_blocker(campaign):
+                        msg = f"controller #{issue} needs human review; checkpoints preserved"
+                        if not isolate_blocked:
+                            raise Blocked(msg)
+                        isolated[issue] = msg
+                        summary[issue] = False
+                        continue
+                summary[issue] = campaign.complete()
             if any((root / f"campaign-{spec['issue']}" / "ledger" / "kilo-local").is_dir() for spec in specs):
                 try:
                     from scripts.agents.automation import learning_loop
@@ -125,6 +220,9 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
             until = min(deadline, time.monotonic() + poll_interval)
             while not (root / "stop.request").exists() and time.monotonic() < until:
                 sleep(min(0.1, max(0, until - time.monotonic())))
+    if isolated and not any(summary.values()):
+        first_issue = next(iter(isolated))
+        raise Blocked(f"controller #{first_issue}: {isolated[first_issue]}")
     return summary
 
 
@@ -154,6 +252,8 @@ def main(argv=None):
     parser.add_argument("--seconds", type=int, default=3600)
     parser.add_argument("--poll-interval", type=int, default=30)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--isolate-blocked", action="store_true",
+                        help="isolate blocked/unapproved controllers without stopping healthy ones")
     args = parser.parse_args(argv)
     if not 1 <= args.seconds <= 3600 or not 1 <= args.poll_interval <= 3600:
         parser.error("--seconds and --poll-interval must be 1..3600")
@@ -188,7 +288,7 @@ def main(argv=None):
             return 0
         report = run_campaigns(args.manifest, root, seconds=args.seconds,
                                poll_interval=args.poll_interval, once=args.once,
-                               discover=discover)
+                               discover=discover, isolate_blocked=args.isolate_blocked)
         print(json.dumps({"results": report, "all_complete": bool(report) and all(report.values()),
                           "bounded_seconds": args.seconds}))
         return 0 if report and all(report.values()) else 2

@@ -104,6 +104,7 @@ def _probe_docker(image: str = DEFAULT_SANDBOX_IMAGE) -> dict:
 
 
 def diagnose(*, state_dir: Path | None = None, auto_feed: bool = False,
+             include_providers: bool = False,
              sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
              git_probe=_probe_git, gh_probe=_probe_github,
              ollama_probe=_probe_ollama, docker_probe=_probe_docker,
@@ -179,6 +180,10 @@ def diagnose(*, state_dir: Path | None = None, auto_feed: bool = False,
             checks["autofeed"] = {"ok": False, "error": str(exc)}
             blockers.append("AUTOFEED_DISCOVERY_ERROR")
 
+    if include_providers:
+        from scripts.agents.automation import provider_router
+        checks["providers"] = provider_router.probe_all_providers()["providers"]
+
     return {
         "schema_version": 1,
         "checked_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -192,8 +197,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, default=None)
     parser.add_argument("--auto-feed", action="store_true")
+    parser.add_argument("--include-providers", action="store_true")
     args = parser.parse_args(argv)
-    report = diagnose(state_dir=args.state, auto_feed=args.auto_feed)
+    report = diagnose(
+        state_dir=args.state,
+        auto_feed=args.auto_feed,
+        include_providers=args.include_providers,
+    )
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report["ready"] else 2
 

@@ -1,51 +1,46 @@
 ---
 name: tel99-autonomous-campaign
-description: Exploiter le cycle complet TEL99 Antigravity V2 (diagnostic, préparation de propositions vérifiées baseline-red, auto-feed des mandats GitHub approuvés, boucle d'apprentissage et cockpit).
+description: Exploiter le cycle complet TEL99 (diagnostic, planification d'objectifs, routeur multi-fournisseurs, auto-feed GitHub, boucle d'apprentissage, reprise sûre et cockpit).
 ---
 
-# Cycle d'exploitation autonome TEL99 V2
+# Cycle d'exploitation autonome TEL99
 
-Ce Skill décrit le flux opérationnel standard pour exécuter des campagnes autonomes multi-agents sans copier-coller, tout en respectant les garde-fous propriétaire (aucune auto-approbation, aucune fusion automatique, aucun ordre réel ou simulé).
+Ce Skill décrit le flux opérationnel unifié pour piloter l'équipe d'agents TEL99 sans copier-coller, tout en respectant les garde-fous propriétaire (aucune auto-approbation, aucune fusion automatique vers `main`, aucune dépense API cachée, aucun ordre de trading).
 
-## 1. Diagnostic de l'environnement (`Doctor`)
-
-Avant toute session, vérifier Python, Git, GitHub CLI (`khalidd692` + permission push), Ollama (`gemma4:e4b-tel99-8k`), Docker (image Python épinglée), la RAM libre et l'absence de marqueurs `STOP` :
+## 1. Démarrage complet en une commande (`Start`)
 
 ```powershell
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Doctor -AutoFeed -StateDir "$HOME\Desktop\TEL99_ANTIGRAVITY_STATE"
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Start
 ```
 
-Code de sortie `0` = environnement prêt. Code `2` = un ou plusieurs bloqueurs listés dans `blockers`.
+Lit [tel99-config.json](../../scripts/agents/automation/tel99-config.json) et exécute :
+`Doctor` → `Preflight -AutoFeed` → `Run -AutoFeed -IsolateBlocked` → `Learn` (mesures + promotion des procédures).
 
-## 2. Préparation locale de propositions (`DraftProposal`)
-
-Avant qu'un propriétaire publie ou approuve un nouveau lot de 2 à 10 missions sur GitHub, valider localement le graphe, les SHA-256 canoniques et le test **baseline-red** dans Docker (élimine les faux tests déjà verts) :
+## 2. Modèles, quotas et routage (`Providers`)
 
 ```powershell
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode DraftProposal -SpecPath path\to\spec.json -VerifyBaseline -OutputPath proposal.json
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Providers
 ```
 
-Cet outil est strictement en lecture seule vis-à-vis de GitHub (`github_writes_performed: 0`). Le propriétaire relit `proposal.json` et publie/approuve lui-même les issues sur GitHub.
+Vérifie en lecture seule : Ollama (`LOCAL_FREE`), Codex CLI (`SUBSCRIPTION_VERIFIED` via RPC + réserve 10 %), Antigravity (`SUBSCRIPTION_OPT_IN` uniquement avec `allow_subscription_cli=True`), Claude (`BILLING_UNVERIFIED` bloqué par défaut), Gemini (`NOT_INSTALLED`), Kilo (`FREE_GATEWAY` synthétique uniquement).
 
-## 3. Découverte et exécution auto-feed (`Preflight` puis `Run`)
+## 3. Planification et proposition vérifiée (`Plan` / `DraftProposal`)
 
 ```powershell
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Preflight -AutoFeed -StateDir "$HOME\Desktop\TEL99_ANTIGRAVITY_STATE"
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Run -AutoFeed -StateDir "$HOME\Desktop\TEL99_ANTIGRAVITY_STATE" -Minutes 60 -PollInterval 30
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Plan -SpecPath goal.json -VerifyBaseline -OutputPath plan.json
 ```
 
-Pipeline exécuté pour chaque mission approuvée :
-`tel99-coordination` (scope SHA-256) → `tel99-analyst` (Ollama + leçons mémoire vérifiées) → `tel99-dev` (Ollama) → `tel99-security` (diff confiné à la fonction, 0 import externe non-stdlib) → `tel99-verifier` (Docker baseline-red / candidate-green) → reçus GitHub (`ACK`, `EVIDENCE`, `RESULT`) + PR brouillon.
+Décompose l'objectif, vérifie l'AST et l'ordre topologique, confirme `baseline-red` dans Docker et produit un registre scellé + un brouillon GitHub prêt à relire (zéro écriture GitHub).
 
-## 4. Apprentissage mesuré & Cockpit d'observation
+## 4. Cockpit et reprise après incident (`Cockpit`, `Stop`, `Recover`)
 
 ```powershell
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Learn -StateDir "$HOME\Desktop\TEL99_ANTIGRAVITY_STATE"
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Cockpit -StateDir "$HOME\Desktop\TEL99_ANTIGRAVITY_STATE" -Port 8765
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Cockpit -AllowControls
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Stop
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Recover
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Recover -ClearStop
 ```
 
-## 5. Arrêt sûr et reprise après incident
-
-- Arrêt propre : `-Mode Stop -StateDir ...` (écrit `stop.request` parent et par campagne).
-- Reprise : ne jamais supprimer le ledger CAS ni les reçus ; auditer les missions `AWAITING_HUMAN`, supprimer explicitement les marqueurs `stop.request` après contrôle, puis relancer `Run`.
+- `Recover` inspecte les `stop.request`, les checkpoints `BLOCKED`/`AWAITING_HUMAN`/`RUNNING` et les outbox en attente.
+- `-ClearStop` vérifie l'absence de verrous actifs et supprime uniquement `stop.request`, sans jamais toucher au ledger CAS ni aux reçus.
 - Pour un nouveau projet hors TEL99 : `python -B -m scripts.agents.project_kit scaffold --project <nom> --repository <owner/repo> --directory <dossier>`.
