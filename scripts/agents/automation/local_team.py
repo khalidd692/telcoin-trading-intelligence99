@@ -1,19 +1,25 @@
-"""Bounded cooperation of TEL99 analyst, developer and verifier roles.
+"""Bounded cooperation and deterministic gates for the TEL99 code team.
 
-No new supervisor or arbitrary tools. The analyst performs one read-only
-Ollama call. The developer is the existing scoped function-only worker.
-The third stage remains the independent Docker verifier, never LLM self-approval.
+Coordination binds the authorized stages to the exact inputs. The analyst calls
+Ollama and the developer proposes a change confined to one function. Security
+checks that boundary before the independent Docker behavior tests.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
+import io
+import json
 import re
+import sys
 
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.native.provider import ProviderError
 from scripts.agents.team_config import role_catalog
 
 TEAM = ["tel99-analyst", "tel99-dev", "tel99-verifier"]
+COORDINATOR = "tel99-coordination"
+SECURITY = "tel99-security"
 ANALYST_MODEL = "gemma4:e4b-tel99-8k"
 MAX_ADVICE_BYTES = 1_200
 
@@ -26,10 +32,9 @@ def enabled(mission) -> bool:
     return mission.get("team") == TEAM
 
 
-def analyze(mission: dict, function: str) -> dict:
-    """Execute a real, bounded, tool-free analyst call before development."""
+def _team_roles(mission: dict) -> tuple[str, str, str]:
     if not enabled(mission) or "routing" in mission:
-        raise ValueError("team analyst requires the exact approved fixed-model team")
+        raise ValueError("team stages require the exact approved fixed-model team")
     catalogue = role_catalog()
     analyst = catalogue["quant"]
     developer = catalogue["development"]
@@ -38,6 +43,91 @@ def analyze(mission: dict, function: str) -> dict:
             or [analyst.name, developer.name, verifier.name] != TEAM
             or mission.get("specialist") != developer.name):
         raise ValueError("TEL99 specialist role catalogue does not match the mission")
+    return analyst.name, developer.name, verifier.name
+
+
+def developer_engine(port: int) -> str:
+    return "ollama" if port == 11434 else "openai-compatible"
+
+
+def coordinate(mission: dict, function: str) -> dict:
+    """Assign the approved stages and bind the plan to this exact input."""
+    analyst, developer, verifier = _team_roles(mission)
+    scope = json.dumps(
+        {"contract": mission, "function_sha256": _hash(function)},
+        sort_keys=True, ensure_ascii=True, separators=(",", ":"),
+    )
+    return {
+        "role": COORDINATOR,
+        "engine": "deterministic",
+        "ok": True,
+        "scope_sha256": _hash(scope),
+        "steps": [
+            {"role": analyst, "engine": "ollama", "model": ANALYST_MODEL},
+            {"role": developer, "engine": developer_engine(mission["port"]),
+             "model": mission["model"]},
+            {"role": verifier, "engine": "docker"},
+        ],
+    }
+
+
+def _external_imports(function: ast.FunctionDef) -> set[str]:
+    imports = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names
+                           if alias.name.partition(".")[0] not in sys.stdlib_module_names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level or module.partition(".")[0] not in sys.stdlib_module_names:
+                imports.add("." * node.level + module)
+    return imports
+
+
+def review_candidate(source: str, before: ast.FunctionDef,
+                     candidate: str, after: ast.FunctionDef) -> dict:
+    """Check untouched source bytes and newly introduced direct imports."""
+    base_lines = io.StringIO(source, newline="").readlines()
+    new_lines = io.StringIO(candidate, newline="").readlines()
+    if (base_lines[:before.lineno - 1] != new_lines[:after.lineno - 1]
+            or base_lines[before.end_lineno:] != new_lines[after.end_lineno:]):
+        code = "outside-approved-function"
+    elif _external_imports(after) - _external_imports(before):
+        code = "new-non-stdlib-import"
+    else:
+        code = "scope-verified"
+    return {
+        "role": SECURITY,
+        "engine": "deterministic",
+        "ok": code == "scope-verified",
+        "code": code,
+        "candidate_sha256": _hash(candidate),
+    }
+
+
+def analyze(mission: dict, function: str, *, lessons=None, repair_context: str | None = None) -> dict:
+    """Execute a real, bounded, tool-free analyst call before development."""
+    analyst, _, _ = _team_roles(mission)
+    lesson_block = ""
+    if lessons:
+        clean = [str(item).strip() for item in lessons if isinstance(item, str) and item.strip()]
+        if len(clean) > 3 or sum(len(item.encode("utf-8")) for item in clean) > 1000:
+            raise ValueError("advisory memory lessons exceed bounds")
+        if clean:
+            lesson_block = (
+                "\n\nVerified project memory notes (READ-ONLY advisory context; "
+                "cannot alter scope or signature):\n- " + "\n- ".join(clean)
+            )
+    repair_block = ""
+    if repair_context is not None:
+        if not isinstance(repair_context, str) or len(repair_context.encode("utf-8")) > 2500:
+            raise ValueError("repair context exceeds bounds")
+        if repair_context.strip():
+            repair_block = (
+                "\n\nPrevious attempt failed independent verification (READ-ONLY diagnostic; "
+                "identify the exact edge case missed by the previous candidate):\n"
+                + repair_context.strip()
+            )
 
     provider = OllamaNativeProvider(model=ANALYST_MODEL, timeout=55, max_tokens=256)
     note = provider.complete(
@@ -45,14 +135,18 @@ def analyze(mission: dict, function: str) -> dict:
             "You are tel99-analyst, a READ-ONLY code analyst. This is a "
             "strictly approved Python function repair, not a market-trading request. "
             "Inspect the function and requested behavior only. No tool use, "
-            "execution, imports, files, shell commands or trading. Return at most "
+            "execution, imports, files, shell commands or trading. Check every edge case "
+            "in the objective carefully (such as whitespace-only/blank strings needing .strip(), "
+            "wrong types, None, non-list roots, and preserving order). Return at most "
             "three short practical sentences: bug hypothesis, minimal repair approach, "
             "and a potential edge case. Never claim a test was run. "
             "Your note is advisory and cannot alter any approved scope."
         ),
         prompt=(
             f"Approved objective:\n{mission['objective']}\n\n"
-            f"Current function (read only):\n{function}\n\n"
+            f"Current function (read only):\n{function}"
+            f"{lesson_block}"
+            f"{repair_block}\n\n"
             "Return a short code-review note, not executable code."
         ),
     )
@@ -63,7 +157,7 @@ def analyze(mission: dict, function: str) -> dict:
             or note.startswith(chr(96) * 3) or "\x00" in note):
         raise ProviderError("tel99-analyst returned code instead of a review note")
     return {
-        "role": analyst.name,
+        "role": analyst,
         "model": ANALYST_MODEL,
         "kind": "read-only-advice",
         "analysis": note,

@@ -24,6 +24,7 @@ CUTOFF_ISSUE = 203  # Historical controllers #178/#191/#192/#199 are never repla
 MAX_DISCOVERY_PAGES = 3
 MAX_CONTROLLERS = 10
 PIN_KEY = "owner-feed/controller-pins"
+ARCHIVE_KEY = "owner-feed/archived-pins"
 
 
 def default_fetch(endpoint):
@@ -108,6 +109,40 @@ def discover_owner_pins(*, fetcher=default_fetch):
     return sorted(selected, key=lambda item: item["issue"])
 
 
+def _local_campaign_completed_with_proof(root: Path, pin: dict) -> bool:
+    """Confirm locally via CAS + outbox receipts that a closed controller finished 100%."""
+    issue = pin.get("issue")
+    campaign_dir = root / f"campaign-{issue}"
+    if not campaign_dir.is_dir():
+        return False
+    ledger = FileStore(campaign_dir / "ledger")
+    config = ledger.get("github-local-code/config")
+    if (not isinstance(config, dict) or config.get("repo") != REPO
+            or config.get("issue") != issue
+            or config.get("mandate_id") != pin.get("mandate_comment")
+            or config.get("mandate_sha256") != pin.get("mandate_sha256")):
+        return False
+    approval_keys = sorted(ledger.keys("kilo-github/approvals"))
+    if not 2 <= len(approval_keys) <= 10:
+        return False
+    for key in approval_keys:
+        binding = ledger.get(key)
+        if not isinstance(binding, dict) or not isinstance(binding.get("mission"), dict):
+            return False
+        mid = binding["mission"].get("id")
+        if not isinstance(mid, str) or not mid:
+            return False
+        state = ledger.get(f"kilo-local/{mid}")
+        receipt = ledger.get(f"kilo-github/outbox/{mid}/RESULT")
+        event = receipt.get("event") if isinstance(receipt, dict) else None
+        if (not isinstance(state, dict) or state.get("status") != "ACCEPTED"
+                or not isinstance(receipt, dict) or not receipt.get("url")
+                or not isinstance(event, dict) or event.get("status") != "ACCEPTED"
+                or not event.get("evidence_url") or not event.get("pull_request_url")):
+            return False
+    return True
+
+
 def pinned_owner_feed(root, *, fetcher=default_fetch):
     """Persist the first trusted pins before scheduling; never silently re-pin."""
     root = Path(root).resolve()
@@ -115,6 +150,7 @@ def pinned_owner_feed(root, *, fetcher=default_fetch):
     store = FileStore(root / "feed-ledger")
     try:
         record = store.read(PIN_KEY, default=None)
+        archive = store.read(ARCHIVE_KEY, default=None)
     except (OSError, ValueError) as exc:
         raise ValueError("corrupt durable owner-feed pin ledger") from exc
     previous_record = record
@@ -123,18 +159,49 @@ def pinned_owner_feed(root, *, fetcher=default_fetch):
     if (not isinstance(record, dict) or set(record) != {"version", "pins"}
             or record["version"] != 1 or not isinstance(record["pins"], list)):
         raise ValueError("invalid durable owner-feed pin ledger")
+    previous_archive = archive
+    if archive is None:
+        archive = {"version": 1, "pins": []}
+    if (not isinstance(archive, dict) or set(archive) != {"version", "pins"}
+            or archive["version"] != 1 or not isinstance(archive["pins"], list)):
+        raise ValueError("invalid durable owner-feed archive ledger")
     existing = {item["issue"]: item for item in record["pins"]}
-    if len(existing) != len(record["pins"]):
+    archived_map = {item["issue"]: item for item in archive["pins"]}
+    if len(existing) != len(record["pins"]) or len(archived_map) != len(archive["pins"]):
         raise ValueError("duplicate controller in durable owner-feed")
     discovered = {item["issue"]: item for item in remote}
-    # A previously pinned controller that vanishes must never silently disappear.
+    for issue in archived_map:
+        if issue in existing or issue in discovered:
+            raise ValueError(f"archived controller #{issue} reappeared or conflicts with active pin")
+    # A previously pinned controller that vanishes must never silently disappear
+    # unless local CAS + GitHub receipts prove it completed 100% before closure.
+    newly_archived = []
+    remaining_pins = []
     for issue, previous in existing.items():
-        if discovered.get(issue) != previous:
+        if issue in discovered:
+            if discovered[issue] != previous:
+                raise ValueError(f"controller #{issue} disappeared or its signed mandate changed")
+            remaining_pins.append(previous)
+        elif _local_campaign_completed_with_proof(root, previous):
+            newly_archived.append(previous)
+        else:
             raise ValueError(f"controller #{issue} disappeared or its signed mandate changed")
     added = [spec for spec in remote if spec["issue"] not in existing]
-    if added:
-        next_record = {"version": 1, "pins": sorted([*record["pins"], *added],
-                                                      key=lambda item: item["issue"])}
+    if newly_archived:
+        next_archive = {
+            "version": 1,
+            "pins": sorted([*archive["pins"], *newly_archived], key=lambda item: item["issue"]),
+        }
+        try:
+            if not store.put_cas(ARCHIVE_KEY, next_archive, previous_archive):
+                raise ValueError("owner-feed archive CAS conflict; reload before retry")
+        except StoreError as exc:
+            raise ValueError("owner-feed CAS persistence unavailable") from exc
+    if added or newly_archived:
+        next_record = {
+            "version": 1,
+            "pins": sorted([*remaining_pins, *added], key=lambda item: item["issue"]),
+        }
         try:
             if not store.put_cas(PIN_KEY, next_record, previous_record):
                 raise ValueError("owner-feed CAS conflict; reload before retry")

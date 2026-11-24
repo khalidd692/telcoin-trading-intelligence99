@@ -90,7 +90,7 @@ def validate_contract(m,approvals):
     return True
 
 class Runtime(Supervisor):
-    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None):
+    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None,shared_memory_root=None):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
@@ -99,6 +99,7 @@ class Runtime(Supervisor):
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
+        self.shared_memory_root = Path(shared_memory_root).resolve() if shared_memory_root is not None else (self.root / "memory")
         self.quota_exhausted = False
     def bind_transport(self, transport):
         """Pin a working ledger to one entry point while allowing same-transport restart."""
@@ -197,12 +198,21 @@ class Runtime(Supervisor):
         name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
         output = self.root / f"{name}.worker.json"
         error = self.root / f"{name}.worker.err"
+        lessons = []
+        if m.get("owner") == "local" and self.shared_memory_root.exists():
+            try:
+                from scripts.agents.automation import learning_loop
+                lessons = learning_loop.retrieve_lessons(self.shared_memory_root, m["project"], m)
+            except (OSError, ValueError):
+                lessons = []
         if feedback is None:
             if previous is not None:
                 raise Blocked("previous candidate requires verifier feedback")
-            request = m
+            request = {"mission": m, "lessons": lessons} if lessons else m
         else:
             request = {"mission": m, "feedback": feedback}
+            if lessons:
+                request["lessons"] = lessons
         if previous is not None:
             request["previous"] = previous
         with tempfile.TemporaryFile() as worker_input, output.open("wb") as out, error.open("wb") as err:
@@ -261,12 +271,20 @@ class Runtime(Supervisor):
                         raise ValueError("verified team trace is incomplete")
                     evidence["analyst_sha256"] = analyst["sha256"]
                     evidence["roles"] = m["team"]
-            memory.record(Entry(id=m["id"],project=m["project"],kind="fact",
+            entry = Entry(id=m["id"],project=m["project"],kind="fact",
                 title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
                 body=json.dumps(evidence),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
-                confidence=1.0))
+                confidence=1.0)
+            memory.record(entry)
+            if self.shared_memory_root != self.root / "memory":
+                try:
+                    shared = MemoryStore(self.shared_memory_root)
+                    if shared.get(m["project"], m["id"]) is None:
+                        shared.record(Entry(**entry.to_dict()), actor="runtime-shared-memory")
+                except (OSError, ValueError):
+                    pass
     def _process(self, m, approvals, *, escalation=None):
         validate_contract(m,approvals)
         saved=self.state(m)
@@ -366,9 +384,15 @@ class Runtime(Supervisor):
         retry = number < maximum
         keep_receipt = not retry or (
             feedback["kind"] == "candidate-test" and "candidate_sha256" in feedback)
-        self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
-                  feedback=feedback if retry else None, reason=reason,
-                  result=saved.get("result") if keep_receipt else None, verification=verification)
+        saved_state = self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
+                                feedback=feedback if retry else None, reason=reason,
+                                result=saved.get("result") if keep_receipt else None, verification=verification)
+        if not retry and m.get("owner") == "local":
+            try:
+                from scripts.agents.automation import learning_loop
+                learning_loop.record_outcome(self.shared_memory_root, m, saved_state)
+            except (OSError, ValueError):
+                pass
         return True
 
     def _attempt(self, m, saved, maximum, escalation):
@@ -414,7 +438,16 @@ class Runtime(Supervisor):
                 try:
                     if route is None:
                         timings = self.local_generation_times(m)
-                        options = {**escalation, **({"measured_seconds": timings} if timings else {})}
+                        measured_quality = {}
+                        quality_file = self.shared_memory_root.parent / "measured_quality.json"
+                        if quality_file.is_file():
+                            from scripts.agents.intelligence import router as intelligence_router
+                            measured_quality = intelligence_router.load_measured_quality(str(quality_file))
+                        options = {
+                            **escalation,
+                            **({"measured_seconds": timings} if timings else {}),
+                            **({"measured_quality": measured_quality} if measured_quality else {}),
+                        }
                         route = local_codegen.choose_route(m, **options)
                         if route.get("selection") is None:
                             status = "ACK" if escalation else "BLOCKED"
@@ -453,14 +486,27 @@ class Runtime(Supervisor):
             except local_codegen.GenerationBlocked as exc:
                 if self._retry(m, running, maximum, reason=exc.reason, feedback=exc.feedback):
                     return self.state(m)["status"] == "ACK"
-                self.save(m, "BLOCKED", reason=exc.reason)
+                blocked_state = self.save(m, "BLOCKED", reason=exc.reason)
+                if m.get("owner") == "local":
+                    try:
+                        from scripts.agents.automation import learning_loop
+                        learning_loop.record_outcome(self.shared_memory_root, m, blocked_state)
+                    except (OSError, ValueError):
+                        pass
                 return
             except WorkerInterrupted as exc:
                 self.save(m, "AWAITING_HUMAN" if m.get("owner") == "local" else "BLOCKED",
                           reason=str(exc))
                 return
             except Exception as exc:
-                self.save(m,"BLOCKED",reason=type(exc).__name__);return
+                blocked_state = self.save(m,"BLOCKED",reason=type(exc).__name__)
+                if m.get("owner") == "local":
+                    try:
+                        from scripts.agents.automation import learning_loop
+                        learning_loop.record_outcome(self.shared_memory_root, m, blocked_state)
+                    except (OSError, ValueError):
+                        pass
+                return
             saved=self.save(m,"WORKER_EXITED",result=result)
         if self.stopped() or self.expired():
             return
@@ -535,7 +581,13 @@ class Runtime(Supervisor):
             if status == "REJECTED" and saved["attempt"] >= maximum:
                 status = "BLOCKED"
                 details["reason"] = "attempt limit reached without independent verification"
-        self.save(m, status, verification=verified, verdict=verdict, **details)
+        final_state = self.save(m, status, verification=verified, verdict=verdict, **details)
+        if m.get("owner") == "local" and status in ("ACCEPTED", "REJECTED", "BLOCKED"):
+            try:
+                from scripts.agents.automation import learning_loop
+                learning_loop.record_outcome(self.shared_memory_root, m, final_state)
+            except (OSError, ValueError):
+                pass
     def run_queue(self,missions,approvals,max_tasks=20):
         # Shared queue lock also prevents a second watcher declaring a live RUNNING
         # worker orphaned. Per-mission permanent CAS protects independent claimers.

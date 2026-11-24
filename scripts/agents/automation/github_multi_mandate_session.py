@@ -54,7 +54,8 @@ def load_manifest(path):
 
 def make_campaign(spec, root, deadline):
     runtime = Runtime(root / f"campaign-{spec['issue']}",
-                      legacy_stop=LEGACY_STOP)
+                      legacy_stop=LEGACY_STOP,
+                      shared_memory_root=root / "learning" / "memory")
     runtime.deadline = deadline
     return LocalCodeCampaign(
         runtime, spec["issue"], spec["mandate_comment"],
@@ -113,6 +114,12 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
                             for row in states() if isinstance(row, dict)):
                         raise Blocked(f"controller #{spec['issue']} needs human review; checkpoints preserved")
                 summary[spec["issue"]] = campaign.complete()
+            if any((root / f"campaign-{spec['issue']}" / "ledger" / "kilo-local").is_dir() for spec in specs):
+                try:
+                    from scripts.agents.automation import learning_loop
+                    learning_loop.sync_measured_quality(root)
+                except (OSError, ValueError):
+                    pass
             if once:
                 break
             until = min(deadline, time.monotonic() + poll_interval)

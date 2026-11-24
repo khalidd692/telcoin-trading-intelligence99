@@ -131,12 +131,42 @@ def prepare(kit, contract):
     return capabilities.plan(contract, memory_store=MemoryStore(kit.memory))
 
 
+def scaffold_profile(project: str, repository: str, *,
+                     roles: list[str] | None = None,
+                     skills: list[str] | None = None,
+                     approved_models: list[str] | None = None) -> dict:
+    """Build and validate a portable project profile for any new repository."""
+    profile = {
+        "schema_version": 1,
+        "project": project,
+        "repository": repository,
+        "roles": list(roles) if roles is not None else ["quant", "development", "quality"],
+        "skills": list(skills) if skills is not None else [capabilities.PLAN_SKILL],
+        "approved_models": (
+            list(approved_models)
+            if approved_models is not None
+            else [
+                "local/ollama-gemma4-e4b",
+                "local/ollama-qwen2.5-coder-7b",
+                "openhands/deepseek-v4.1-flash",
+            ]
+        ),
+    }
+    _validate(profile)
+    return profile
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "status", "plan", "verify"):
+    for command in ("init", "status", "plan", "verify", "scaffold"):
         child = commands.add_parser(command)
-        child.add_argument("--directory", type=Path, required=True)
+        if command != "scaffold":
+            child.add_argument("--directory", type=Path, required=True)
+        else:
+            child.add_argument("--project", required=True)
+            child.add_argument("--repository", required=True)
+            child.add_argument("--directory", type=Path, default=None)
         if command == "init":
             child.add_argument("--profile", type=Path, required=True)
         elif command == "plan":
@@ -146,6 +176,18 @@ def main(argv=None):
             child.add_argument("--journal-sha256", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "scaffold":
+            profile = scaffold_profile(args.project, args.repository)
+            if args.directory is not None:
+                kit = install(args.directory, profile)
+                report = {
+                    "status": "SCAFFOLDED", "project": kit.profile["project"],
+                    "repository": kit.profile["repository"], "directory": str(kit.root),
+                }
+            else:
+                report = {"status": "PROFILE_READY", "profile": profile}
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+            return 0
         if args.command == "init":
             kit = install(args.directory, read_json(args.profile))
         else:
