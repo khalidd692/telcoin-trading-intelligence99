@@ -4,6 +4,7 @@ param(
     [ValidateSet("Preflight", "Run", "Status", "Stop")]
     [string]$Mode = "Preflight",
     [string]$Manifest,
+    [switch]$AutoFeed,
     [string]$StateDir = (Join-Path ([Environment]::GetFolderPath("Desktop")) "TEL99_MULTI_MANDATE_STATE"),
     [ValidateRange(1, 60)]
     [int]$Minutes = 60,
@@ -17,11 +18,18 @@ $python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
 $module = "scripts.agents.automation.github_multi_mandate_session"
 $argv = @("-B", "-m", $module, $Mode.ToLowerInvariant(), "--state", $StateDir)
 if ($Mode -in @("Preflight", "Run")) {
-    if (-not $Manifest -or -not (Test-Path -LiteralPath $Manifest -PathType Leaf)) {
-        throw "Provide -Manifest with new, owner-approved controller pins. Historical #178 is excluded."
+    if ($AutoFeed.IsPresent -eq [bool]$Manifest) {
+        throw "Choose either -AutoFeed or -Manifest, never both or neither."
     }
-    $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
-    $argv += @("--manifest", $manifestPath)
+    if ($AutoFeed.IsPresent) {
+        $argv += "--auto-feed"
+    } else {
+        if (-not (Test-Path -LiteralPath $Manifest -PathType Leaf)) {
+            throw "Approved controller manifest not found."
+        }
+        $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
+        $argv += @("--manifest", $manifestPath)
+    }
 }
 if ($Mode -eq "Run") {
     $argv += @("--seconds", [string]($Minutes * 60),
@@ -31,7 +39,13 @@ Push-Location -LiteralPath $repo
 try {
     if ($Mode -eq "Run") {
         Write-Host "TEL99 | verifying owner mandates before workers"
-        & $python -B -m $module preflight --state $StateDir --manifest $manifestPath
+        $preflight = @("-B", "-m", $module, "preflight", "--state", $StateDir)
+        if ($AutoFeed.IsPresent) {
+            $preflight += "--auto-feed"
+        } else {
+            $preflight += @("--manifest", $manifestPath)
+        }
+        & $python @preflight
         if ($LASTEXITCODE -ne 0) { throw "Preflight not READY; no workers launched" }
     }
     & $python @argv
