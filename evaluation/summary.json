@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795481844,
-  "observations": 536,
-  "valid_observations": 513,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795498345,
+  "observations": 537,
+  "valid_observations": 514,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 157,
-              "mean_pct": 0.17305
+              "count": 165,
+              "mean_pct": 0.33187
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795361055,
-      "previous_decision": "ATTENDRE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [
-        "\u2212 convergence"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795361586,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -337,6 +327,17 @@
       "data_valid": false,
       "changed_factors": [],
       "event": null
+    },
+    {
+      "observed_at": 1795498345,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence",
+        "+ volume"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -346,30 +347,30 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 9,
+        "episodes": 10,
         "detected": 2,
         "missed": 2,
-        "unknown": 5,
+        "unknown": 6,
         "detection_fraction_known": 0.5,
         "late_alerts": 6,
         "median_lead_minutes": 42.1,
         "median_late_minutes": 154.86666666666667
       },
       "3": {
-        "episodes": 8,
+        "episodes": 9,
         "detected": 1,
         "missed": 3,
-        "unknown": 4,
+        "unknown": 5,
         "detection_fraction_known": 0.25,
-        "late_alerts": 6,
+        "late_alerts": 7,
         "median_lead_minutes": 12.216666666666667,
-        "median_late_minutes": 165.94166666666666
+        "median_late_minutes": 154.4
       },
       "5": {
-        "episodes": 6,
+        "episodes": 7,
         "detected": 0,
         "missed": 3,
-        "unknown": 3,
+        "unknown": 4,
         "detection_fraction_known": 0.0,
         "late_alerts": 4,
         "median_lead_minutes": null,
@@ -388,9 +389,9 @@
     },
     "false_positives": {
       "count": 27,
-      "evaluable": 43,
+      "evaluable": 44,
       "pending": 0,
-      "unknown": 1,
+      "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
   }
