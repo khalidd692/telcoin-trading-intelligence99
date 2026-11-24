@@ -1,7 +1,7 @@
 # TEL99 unified PowerShell operator CLI (reads defaults from tel99-config.json).
 [CmdletBinding()]
 param(
-    [ValidateSet("Start", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal")]
+    [ValidateSet("Start", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal", "Specialists", "Leases")]
     [string]$Mode = "Start",
     [string]$Manifest,
     [switch]$AutoFeed,
@@ -13,6 +13,7 @@ param(
     [string]$SpecPath,
     [string]$OutputPath,
     [string]$StateDir,
+    [string]$Python,
     [ValidateRange(1, 60)]
     [int]$Minutes = 0,
     [ValidateRange(1, 3600)]
@@ -24,7 +25,15 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
-$python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+if (-not $Python -and $env:TEL99_PYTHON) {
+    $Python = $env:TEL99_PYTHON
+}
+if ($Python) {
+    $pythonCmd = Get-Command $Python -ErrorAction SilentlyContinue
+    $python = if ($pythonCmd) { $pythonCmd.Source } else { $Python }
+} else {
+    $python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+}
 $configPath = Join-Path $PSScriptRoot "tel99-config.json"
 $config = $null
 if (Test-Path -LiteralPath $configPath -PathType Leaf) {
@@ -121,6 +130,14 @@ try {
             if ($VerifyBaseline.IsPresent) { $argv += "--verify-baseline" }
             if ($OutputPath) { $argv += @("--output", $OutputPath) }
             & $python @argv
+            exit $LASTEXITCODE
+        }
+        "Specialists" {
+            & $python -B -m scripts.agents.specialist_dispatch list
+            exit $LASTEXITCODE
+        }
+        "Leases" {
+            & $python -B -m scripts.agents.automation.ide_coordination status --state $StateDir
             exit $LASTEXITCODE
         }
         default {

@@ -21,6 +21,7 @@ import re
 import sys
 import time
 
+from scripts.agents.automation import ide_coordination
 from scripts.agents.automation.autonomy_runtime import Runtime, LEGACY_STOP
 from scripts.agents.automation.github_local_code_campaign import LocalCodeCampaign
 from scripts.agents.automation.local_code_pr import valid_campaign_base
@@ -86,24 +87,34 @@ def detect_campaign_collisions(specs, root) -> dict[int, str]:
         issue = spec["issue"]
         camp_dir = Path(root) / f"campaign-{issue}"
         ledger_dir = camp_dir / "ledger"
-        if not ledger_dir.is_dir():
-            continue
-        from scripts.agents.protocol.store import FileStore
-        store = FileStore(ledger_dir)
-        approvals = [store.get(k) for k in store.keys("kilo-github/approvals")]
         paths = []
-        done = bool(approvals)
-        for row in approvals:
-            if not isinstance(row, dict) or not isinstance(row.get("mission"), dict):
-                continue
-            mid = row["mission"].get("id")
-            path = row["mission"].get("path")
-            if isinstance(path, str):
-                paths.append(path)
-            st = store.get(f"kilo-local/{mid}") if mid else None
-            if not isinstance(st, dict) or st.get("status") != "ACCEPTED":
-                done = False
+        done = False
+        if ledger_dir.is_dir():
+            from scripts.agents.protocol.store import FileStore
+            store = FileStore(ledger_dir)
+            approvals = [store.get(k) for k in store.keys("kilo-github/approvals")]
+            done = bool(approvals)
+            for row in approvals:
+                if not isinstance(row, dict) or not isinstance(row.get("mission"), dict):
+                    continue
+                mid = row["mission"].get("id")
+                path = row["mission"].get("path")
+                if isinstance(path, str):
+                    paths.append(path)
+                st = store.get(f"kilo-local/{mid}") if mid else None
+                if not isinstance(st, dict) or st.get("status") != "ACCEPTED":
+                    done = False
         if done:
+            continue
+        lease_conflicts = ide_coordination.check_conflicts(
+            root,
+            actor="tel99-cli",
+            resource_id=f"controller:{issue}",
+            branch=spec["base_ref"],
+            paths=paths,
+        )
+        if lease_conflicts:
+            collisions[issue] = "; ".join(lease_conflicts)
             continue
         for path in paths:
             target = (spec["base_ref"], path)

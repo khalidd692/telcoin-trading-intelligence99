@@ -18,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[3]
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
-from scripts.agents.automation import learning_loop, provider_router, recovery_tool
+from scripts.agents import specialist_dispatch
+from scripts.agents.automation import ide_coordination, learning_loop, provider_router, recovery_tool
 from scripts.agents.automation.autonomy_runtime import LEGACY_STOP
 from scripts.agents.automation.github_owner_feed import ARCHIVE_KEY, PIN_KEY
 from scripts.agents.automation.local_model_routing import available_memory_mib
@@ -65,6 +66,7 @@ a{color:#7dc3ff;text-decoration:none}a:hover{text-decoration:underline}
   <div class="card"><h3>Apprentissage, Mémoire & Procédures</h3><div id="learning"></div></div>
   <div class="card"><h3>Fournisseurs, Modèles & Quotas</h3><div id="providers"></div></div>
   <div class="card"><h3>Blocages & Reprise Sûre</h3><div id="recovery"></div></div>
+  <div class="card"><h3>Équipe (12 rôles) & Coordination IDE/CLI/Codex</h3><div id="coordination"></div></div>
 </section>
 <section class="card"><h3>Missions & Preuves</h3><table><thead><tr><th>Mission</th><th>Contrôleur</th><th>État</th><th>Modèle</th><th>Checks</th><th>PR / Reçus</th></tr></thead><tbody id="missions"></tbody></table></section>
 </main>
@@ -121,6 +123,18 @@ async function refresh() {
       recRows.push('Aucun blocage ni marqueur STOP actif.');
     }
     el('recovery').replaceChildren(...recRows.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }));
+    const team = d.team_catalog || {};
+    const coord = d.coordination || {};
+    const coordRows = [
+      `Spécialistes: ${team.total ?? 0} total (${team.active_count ?? 0} actifs / ${team.reserved_on_demand_count ?? 0} mobilisables à la demande)`,
+    ];
+    const activeLeases = coord.active || [];
+    if (activeLeases.length) {
+      for (const l of activeLeases) coordRows.push(`Bail ${l.actor} -> ${l.resource_id} (${(l.paths || []).join(', ') || l.branch || '*'})`);
+    } else {
+      coordRows.push('Aucun bail actif entre Antigravity IDE, CLI et Codex.');
+    }
+    el('coordination').replaceChildren(...coordRows.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }));
     el('missions').replaceChildren(...d.campaigns.flatMap(c => c.missions.map(m => {
       const tr = document.createElement('tr');
       tr.append(txt('td', m.id), txt('td', `#${c.issue} -> #${m.issue ?? "?"}`), txt('td', m.status, m.status), txt('td', m.model || "?"));
@@ -235,6 +249,16 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
     elif include_providers:
         providers = provider_router.probe_all_providers()["providers"]
 
+    specialists = specialist_dispatch.list_specialists()
+    team_catalog = {
+        "total": len(specialists),
+        "active_count": sum(1 for item in specialists if item["active"]),
+        "reserved_on_demand_count": sum(1 for item in specialists if not item["active"]),
+        "max_concurrent_specialists": specialist_dispatch.MAX_CONCURRENT_SPECIALISTS,
+        "agents": specialists,
+    }
+    coordination = ide_coordination.active_leases(root)
+
     snapshot = {
         "schema_version": 1,
         "read_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -251,6 +275,8 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
         "memory": _memory_summary(root),
         "recovery": recovery,
         "providers": providers,
+        "team_catalog": team_catalog,
+        "coordination": coordination,
         "summary": {
             "campaigns": len(campaigns),
             "missions_total": metrics["missions_total"],

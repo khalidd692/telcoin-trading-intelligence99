@@ -348,7 +348,7 @@ def execute(mission, feedback=None, previous=None, lessons=None):
         prompt += "\n\nPrevious attempt:\n" + repair_text
     model = mission["model"]
     if mission["port"] == 11434:
-        provider = OllamaNativeProvider(model=model, timeout=80, max_tokens=768)
+        provider = OllamaNativeProvider(model=model, timeout=90, max_tokens=768)
     else:
         provider = OpenAICompatibleProvider(
             model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",

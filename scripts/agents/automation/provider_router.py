@@ -176,8 +176,21 @@ def _probe_codex() -> dict:
         }
 
 
+def _resolve_agy_cli() -> str | None:
+    """Resolve the Antigravity CLI binary from PATH or user install location."""
+    found = shutil.which("agy")
+    if found:
+        return found
+    home = Path.home()
+    for rel in (Path(".gemini") / "bin" / "agy.exe", Path(".gemini") / "bin" / "agy"):
+        candidate = home / rel
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def _probe_agy() -> dict:
-    cli = shutil.which("agy")
+    cli = _resolve_agy_cli()
     if not cli:
         return {
             "provider": "agy", "installed": False, "available": False,
@@ -393,7 +406,7 @@ class AgyPrintAdapter:
     def __init__(self, model: str, *, timeout: int = 90):
         self.model = model
         self.timeout = timeout
-        self.cli = shutil.which("agy")
+        self.cli = _resolve_agy_cli()
         if not self.cli:
             raise ProviderError("agy CLI unavailable")
 

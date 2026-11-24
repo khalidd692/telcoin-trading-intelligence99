@@ -130,6 +130,8 @@ def analyze(mission: dict, function: str, *, lessons=None, repair_context: str |
             )
 
     provider = OllamaNativeProvider(model=ANALYST_MODEL, timeout=55, max_tokens=256)
+    if mission.get("model") == ANALYST_MODEL:
+        provider.keep_alive = "90s"
     note = provider.complete(
         system=(
             "You are tel99-analyst, a READ-ONLY code analyst. This is a "

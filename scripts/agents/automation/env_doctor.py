@@ -41,7 +41,20 @@ def _probe_git(root: Path = ROOT) -> dict:
         ).strip())
         return {"ok": True, "branch": branch, "head": head, "dirty": dirty}
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"ok": False, "error": str(exc)}
+        info = {"ok": False, "error": str(exc)}
+        dot_git = Path(root) / ".git"
+        if dot_git.is_file():
+            try:
+                raw = dot_git.read_text(encoding="utf-8", errors="replace").strip()
+                if raw.lower().startswith("gitdir:"):
+                    gitdir = raw.split(":", 1)[1].strip()
+                    info["worktree_gitdir"] = gitdir
+                    info["minimal_permission_hint"] = (
+                        f"Grant sandbox/worktree access to gitdir '{gitdir}' without disabling sandbox."
+                    )
+            except OSError:
+                pass
+        return info
 
 
 def _probe_github(fetcher=gh_json) -> dict:
@@ -114,7 +127,12 @@ def diagnose(*, state_dir: Path | None = None, auto_feed: bool = False,
     checks: dict[str, dict] = {}
     blockers: list[str] = []
 
-    checks["python"] = {"ok": sys.version_info >= (3, 11), "version": sys.version.split()[0]}
+    checks["python"] = {
+        "ok": sys.version_info >= (3, 11),
+        "version": sys.version.split()[0],
+        "executable": sys.executable,
+        "windowsapps_alias": "windowsapps" in sys.executable.lower(),
+    }
     if not checks["python"]["ok"]:
         blockers.append("PYTHON_VERSION_TOO_OLD")
 

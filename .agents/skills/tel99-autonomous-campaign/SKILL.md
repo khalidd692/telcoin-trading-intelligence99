@@ -44,3 +44,25 @@ pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Recover -C
 - `Recover` inspecte les `stop.request`, les checkpoints `BLOCKED`/`AWAITING_HUMAN`/`RUNNING` et les outbox en attente.
 - `-ClearStop` vérifie l'absence de verrous actifs et supprime uniquement `stop.request`, sans jamais toucher au ledger CAS ni aux reçus.
 - Pour un nouveau projet hors TEL99 : `python -B -m scripts.agents.project_kit scaffold --project <nom> --repository <owner/repo> --directory <dossier>`.
+
+## 5. Raccordement Antigravity IDE, 12 spécialistes et coordination multi-acteurs
+
+- **État partagé sans rejeu** : [tel99-config.json](../../scripts/agents/automation/tel99-config.json) pointe vers `~/Desktop/TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE` afin de conserver les épinglages et checkpoints historiques (`#205`/`#206` en `BLOCKED`).
+- **Mobilisation à la demande des 12 rôles** (`scripts/agents/specialist_dispatch.py`, plafond `<= 4` simultanés, sans altérer `.agents/agents/` ni `team_config.py`) :
+
+```powershell
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Specialists
+python -B -m scripts.agents.specialist_dispatch select --task "security audit and market data freshness" --max 3
+```
+
+- **Coordination sans collision IDE / CLI / Codex** (`scripts/agents/automation/ide_coordination.py`) :
+
+```powershell
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Leases
+python -B -m scripts.agents.automation.ide_coordination acquire --state "$HOME\Desktop\TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE" --actor antigravity-ide --resource mission:demo --branch agents/tel99-antigravity-v2-20261124 --path scripts/agents/automation/policy.py
+```
+
+- **Workflows, vérification et automatisations natives IDE** :
+  - Utiliser `plan-verification` (`python -IB .agents/skills/plan-verification/scripts/plan_checks.py`) pour planifier les contrôles sous budget avant lancement.
+  - Utiliser `scripts/agents/workflows/tel99_validation_workflow.py` avec `run_workflow` pour orchestrer une revue parallèle bornée (<= 3 spécialistes + vérificateur indépendant).
+  - Les automatisations `schedule` sont limitées aux vérifications bornées en cours de session ; aucun service permanent Windows ni fusion vers `main` n'est activé sans accord explicite.

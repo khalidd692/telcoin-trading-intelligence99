@@ -1,6 +1,8 @@
 """Offline tests for the unified TEL99 multi-provider router."""
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -180,6 +182,15 @@ class ProviderRouterTests(unittest.TestCase):
             self.assertIsInstance(adapter, pr.AgyPrintAdapter)
         with self.assertRaises(PermissionError):
             pr.build_adapter({"provider": "claude", "served_model": "claude-opus"})
+
+    def test_resolve_agy_cli_falls_back_to_user_gemini_bin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            agy_bin = fake_home / ".gemini" / "bin" / "agy.exe"
+            agy_bin.parent.mkdir(parents=True)
+            agy_bin.write_text("", encoding="utf-8")
+            with patch("shutil.which", return_value=None), patch("pathlib.Path.home", return_value=fake_home):
+                self.assertEqual(pr._resolve_agy_cli(), str(agy_bin))
 
 
 if __name__ == "__main__":
