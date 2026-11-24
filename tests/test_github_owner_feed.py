@@ -111,6 +111,33 @@ class OwnerFeedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "disappeared"):
             feed.pinned_owner_feed(self.root, fetcher=self.github)
 
+    def test_corrupt_pin_ledger_is_not_treated_as_empty(self):
+        path = self.root / "feed-ledger" / "owner-feed" / "controller-pins.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "corrupt"):
+            feed.pinned_owner_feed(self.root, fetcher=self.github)
+        self.assertEqual(path.read_text(encoding="utf-8"), "{")
+
+    def test_human_checkpoint_stops_session_without_replaying_worker(self):
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps({"version": 1, "campaigns": [
+            {"issue": 211, "mandate_comment": 50211, "mandate_sha256": "a"*64,
+             "base_ref": REF, "base_sha": BASE},
+        ]}), encoding="utf-8")
+        polls = []
+        class BlockedCampaign(FakeCampaign):
+            def states(self):
+                return iter([{"id": "pending", "status": "AWAITING_HUMAN"}])
+            def poll(self):
+                polls.append("invoked")
+                return True
+        with self.assertRaisesRegex(multi.Blocked, "human review"):
+            multi.run_campaigns(
+                manifest, self.root / "state", seconds=1, once=True,
+                build=lambda info, root, deadline: BlockedCampaign(info, {}, []))
+        self.assertEqual(polls, ["invoked"])
+
     def test_preflight_still_requires_complete_mission_approvals(self):
         pins = feed.discover_owner_pins(fetcher=self.github)
         calls = []
