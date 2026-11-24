@@ -106,18 +106,19 @@ def detect_campaign_collisions(specs, root) -> dict[int, str]:
                     done = False
         if done:
             continue
+        base_ref = str(spec.get("base_ref") or "")
         lease_conflicts = ide_coordination.check_conflicts(
             root,
             actor="tel99-cli",
             resource_id=f"controller:{issue}",
-            branch=spec["base_ref"],
+            branch=base_ref,
             paths=paths,
         )
         if lease_conflicts:
             collisions[issue] = "; ".join(lease_conflicts)
             continue
         for path in paths:
-            target = (spec["base_ref"], path)
+            target = (base_ref, path)
             owner_issue = claimed_paths.get(target)
             if owner_issue is not None and owner_issue != issue:
                 collisions[issue] = (
