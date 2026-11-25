@@ -72,9 +72,28 @@ GROQ_FREE_ALLOWLIST: dict[str, dict] = {
 }
 
 DEFAULT_CLOUD_DAILY_BUDGETS: dict[str, dict[str, int]] = {
-    "groq": {"max_requests_per_day": 950, "max_tokens_per_day": 450_000},
+    # Aggregate display ceiling, not a reservation bucket for new Groq calls.
+    "groq": {"max_requests_per_day": 3000, "max_tokens_per_day": 600_000},
     "openrouter": {"max_requests_per_day": 45, "max_tokens_per_day": 45_000},
 }
+
+# Organization limits confirmed by the owner (2026-11-25).
+# Project/provider limits may be lower; real 429s still govern availability.
+GROQ_MODEL_LIMITS = {
+    model: {"max_requests_per_day": 1000, "max_tokens_per_day": 200_000}
+    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b")
+}
+GROQ_OWNER_RESERVE_TOKENS = 40_000
+GROQ_OWNER_RESERVE_REQUESTS = 200
+DEFAULT_CLOUD_DAILY_BUDGETS.update({
+    f"groq/{model}": dict(limits) for model, limits in GROQ_MODEL_LIMITS.items()
+})
+
+
+def estimate_cloud_tokens(system: str, prompt: str, max_tokens: int) -> int:
+    # Conservative estimate; reconcile against provider usage after success.
+    return max(256, (len(system) + len(prompt) + 2) // 3 + int(max_tokens))
+
 
 _CLOUD_SECRET_PATTERNS = (
     re.compile(r"(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9\-_]{16,}|gsk_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z\-_]{20,})"),
@@ -165,6 +184,14 @@ class CloudBudgetLedger:
             path = ide_coordination.default_coordination_state_root() / "cloud_free_budgets.json"
         self.path = Path(path)
         self.budgets = budgets or DEFAULT_CLOUD_DAILY_BUDGETS
+        self._model_scoped = budgets is None
+
+    def scope_for_model(self, provider: str, model: str) -> str:
+        if provider != "groq" or not self._model_scoped:
+            return provider
+        if model not in GROQ_MODEL_LIMITS:
+            raise PermissionError(f"No owner-confirmed Groq limits for {model!r}")
+        return f"groq/{model}"
 
     @staticmethod
     def _today_utc() -> str:
@@ -209,10 +236,37 @@ class CloudBudgetLedger:
         return st
 
     def _status_from_data(self, data: dict, provider: str, ts: float) -> dict:
+        if self._model_scoped and provider == "groq":
+            legacy = self._provider_state(data, "groq")
+            models = {
+                model: self._status_from_data(data, f"groq/{model}", ts)
+                for model in GROQ_MODEL_LIMITS
+            }
+            rows = list(models.values())
+            return {
+                "date_utc": legacy["date_utc"],
+                "requests_today": int(legacy.get("requests_today", 0)) + sum(r["requests_today"] for r in rows),
+                "tokens_today": int(legacy.get("tokens_today", 0)) + sum(r["tokens_today"] for r in rows),
+                "rate_limit_hits": int(legacy.get("rate_limit_hits", 0)) + sum(r["rate_limit_hits"] for r in rows),
+                "max_requests_per_day": sum(r["max_requests_per_day"] for r in rows),
+                "max_tokens_per_day": sum(r["max_tokens_per_day"] for r in rows),
+                "remaining_requests_budget": sum(r["remaining_requests_budget"] for r in rows),
+                "remaining_tokens_budget": sum(r["remaining_tokens_budget"] for r in rows),
+                "remaining_background_requests_budget": sum(r["remaining_background_requests_budget"] for r in rows),
+                "remaining_background_tokens_budget": sum(r["remaining_background_tokens_budget"] for r in rows),
+                "cooldown_remaining_s": min(r["cooldown_remaining_s"] for r in rows),
+                "cooldown_until_ts": min(r["cooldown_until_ts"] for r in rows),
+                "last_headers": {},
+                "legacy_unattributed": any(r["legacy_unattributed"] for r in rows),
+                "legacy_requests_today": int(legacy.get("requests_today", 0)),
+                "legacy_tokens_today": int(legacy.get("tokens_today", 0)),
+                "models": models,
+                "corrupted": False,
+            }
         st = self._provider_state(data, provider)
         lim = self.budgets.get(provider, {"max_requests_per_day": 50, "max_tokens_per_day": 50_000})
         cooldown_rem = round(max(0.0, float(st.get("cooldown_until_ts") or 0.0) - ts), 1)
-        return {
+        view = {
             **st,
             "corrupted": False,
             "max_requests_per_day": lim["max_requests_per_day"],
@@ -221,6 +275,32 @@ class CloudBudgetLedger:
             "remaining_tokens_budget": max(0, lim["max_tokens_per_day"] - int(st["tokens_today"])),
             "cooldown_remaining_s": cooldown_rem,
         }
+        if self._model_scoped and provider.startswith("groq/"):
+            legacy = data["providers"].get("groq") or {}
+            # Never guess how same-day usage in the old aggregate ledger was
+            # distributed. Wait for the natural UTC rollover before enabling
+            # independent model quotas. The old ledger is not cleared.
+            locked = bool(
+                legacy.get("date_utc") == st["date_utc"]
+                and (int(legacy.get("requests_today", 0)) or int(legacy.get("tokens_today", 0)))
+            )
+            view["legacy_unattributed"] = locked
+            if locked or provider not in self.budgets:
+                view["remaining_requests_budget"] = 0
+                view["remaining_tokens_budget"] = 0
+            bg_r = int(st.get("background_requests_today", st["requests_today"]))
+            bg_t = int(st.get("background_tokens_today", st["tokens_today"]))
+            view["background_requests_today"] = bg_r
+            view["background_tokens_today"] = bg_t
+            view["remaining_background_requests_budget"] = min(
+                view["remaining_requests_budget"],
+                max(0, lim["max_requests_per_day"] - GROQ_OWNER_RESERVE_REQUESTS - bg_r),
+            )
+            view["remaining_background_tokens_budget"] = min(
+                view["remaining_tokens_budget"],
+                max(0, lim["max_tokens_per_day"] - GROQ_OWNER_RESERVE_TOKENS - bg_t),
+            )
+        return view
 
     def status(self, provider: str, *, now: float | None = None) -> dict:
         from scripts.agents.automation import local_deterministic_tools
@@ -247,17 +327,35 @@ class CloudBudgetLedger:
                 }
             return self._status_from_data(data, provider, ts)
 
-    def can_call(self, provider: str, *, estimated_tokens: int = 1500, now: float | None = None) -> tuple[bool, str]:
-        st = self.status(provider, now=now)
+    @staticmethod
+    def _budget_rejection(st: dict, estimated_tokens: int, purpose: str) -> str | None:
+        if purpose not in ("background", "interactive"):
+            return "invalid budget purpose"
         if st.get("corrupted"):
-            return False, "cloud budget ledger corrupted; fail-closed"
+            return "cloud budget ledger corrupted; fail-closed"
+        if st.get("legacy_unattributed"):
+            return "legacy Groq usage cannot be attributed per model; wait for UTC reset"
         if st["cooldown_remaining_s"] > 0:
-            return False, f"provider in 429 cooldown for {st['cooldown_remaining_s']}s"
-        if st["remaining_requests_budget"] <= 0:
-            return False, "daily free request budget exhausted"
-        if st["remaining_tokens_budget"] < max(1, estimated_tokens):
-            return False, "daily free token budget exhausted"
-        return True, "ok"
+            return f"provider in 429 cooldown for {st['cooldown_remaining_s']}s"
+        requests = st["remaining_requests_budget"]
+        tokens = st["remaining_tokens_budget"]
+        if purpose == "background":
+            requests = min(requests, st.get("remaining_background_requests_budget", requests))
+            tokens = min(tokens, st.get("remaining_background_tokens_budget", tokens))
+        if requests <= 0:
+            return "daily free request budget exhausted or reserved for owner"
+        if tokens < max(1, estimated_tokens):
+            return "daily free token budget exhausted or reserved for owner"
+        return None
+
+    def can_call(self, provider: str, *, estimated_tokens: int = 1500, now: float | None = None,
+                 purpose: str = "background") -> tuple[bool, str]:
+        st = self.status(provider, now=now)
+        if st.get("models"):
+            reasons = [self._budget_rejection(r, estimated_tokens, purpose) for r in st["models"].values()]
+            return (True, "ok") if any(r is None for r in reasons) else (False, "; ".join(dict.fromkeys(reasons)))
+        reason = self._budget_rejection(st, estimated_tokens, purpose)
+        return (False, reason) if reason else (True, "ok")
 
     def reserve_budget(
         self,
@@ -265,29 +363,36 @@ class CloudBudgetLedger:
         *,
         estimated_tokens: int = 1500,
         now: float | None = None,
+        purpose: str = "background",
     ) -> tuple[bool, str, dict | None]:
         """Atomically check AND reserve request+token budget under exclusive file lock (prevents concurrent over-spend)."""
         from scripts.agents.automation import local_deterministic_tools
         ts = time.time() if now is None else float(now)
         est = max(1, int(estimated_tokens))
+        if self._model_scoped and provider == "groq":
+            return False, "Groq model scope required", None
         with local_deterministic_tools.file_lock(self._lock_path):
             try:
                 data = self._load_locked()
             except CloudBudgetLedgerError:
                 return False, "cloud budget ledger corrupted; fail-closed", None
             st_view = self._status_from_data(data, provider, ts)
-            if st_view["cooldown_remaining_s"] > 0:
-                return False, f"provider in 429 cooldown for {st_view['cooldown_remaining_s']}s", None
-            if st_view["remaining_requests_budget"] <= 0:
-                return False, "daily free request budget exhausted", None
-            if st_view["remaining_tokens_budget"] < est:
-                return False, "daily free token budget exhausted", None
+            reason = self._budget_rejection(st_view, est, purpose)
+            if reason:
+                return False, reason, None
             st = self._provider_state(data, provider)
+            if self._model_scoped and provider.startswith("groq/"):
+                st.setdefault("background_requests_today", int(st["requests_today"]))
+                st.setdefault("background_tokens_today", int(st["tokens_today"]))
+                if purpose == "background":
+                    st["background_requests_today"] += 1
+                    st["background_tokens_today"] += est
             st["requests_today"] = int(st.get("requests_today") or 0) + 1
             st["tokens_today"] = int(st.get("tokens_today") or 0) + est
             self._save_locked(data)
             return True, "ok", {
                 "provider": provider,
+                "purpose": purpose,
                 "date_utc": st["date_utc"],
                 "reserved_tokens": est,
                 "last_headers": dict(st.get("last_headers") or {}),
@@ -310,7 +415,21 @@ class CloudBudgetLedger:
         with local_deterministic_tools.file_lock(self._lock_path):
             data = self._load_locked()
             st = self._provider_state(data, provider)
-            if reservation is None:
+            if reservation is not None and reservation.get("provider") != provider:
+                raise CloudBudgetLedgerError("reservation belongs to another budget scope")
+            new_day_charge = reservation is None or reservation.get("date_utc") != st["date_utc"]
+            if self._model_scoped and provider.startswith("groq/"):
+                st.setdefault("background_requests_today", int(st["requests_today"]))
+                st.setdefault("background_tokens_today", int(st["tokens_today"]))
+                if (reservation or {}).get("purpose", "background") == "background":
+                    if new_day_charge:
+                        st["background_requests_today"] += 1
+                        st["background_tokens_today"] += actual
+                    else:
+                        st["background_tokens_today"] = max(0, st["background_tokens_today"] + delta)
+            if new_day_charge:
+                # A reservation from yesterday must not subtract yesterday's
+                # estimate from today's counters.
                 st["requests_today"] = int(st.get("requests_today") or 0) + 1
                 st["tokens_today"] = int(st.get("tokens_today") or 0) + actual
             else:
@@ -627,7 +746,9 @@ def _probe_groq(*, budget_ledger: CloudBudgetLedger | None = None) -> dict:
         }
         models = []
         for mid, meta in GROQ_FREE_ALLOWLIST.items():
-            if mid in served_ids:
+            if mid in served_ids and (not ledger._model_scoped or mid in GROQ_MODEL_LIMITS) and ledger.can_call(
+                ledger.scope_for_model("groq", mid), estimated_tokens=512
+            )[0]:
                 models.append({
                     "id": f"groq/{mid}",
                     "served_model": mid,
@@ -1044,6 +1165,7 @@ class OpenAICompatFreeCloudAdapter:
         confidential: bool = False,
         fallback_ollama_model: str | None = "gemma4:e4b-tel99-8k",
         budget_ledger: CloudBudgetLedger | None = None,
+        budget_purpose: str = "background",
     ):
         if provider == "groq":
             if model not in GROQ_FREE_ALLOWLIST:
@@ -1065,6 +1187,10 @@ class OpenAICompatFreeCloudAdapter:
         self.confidential = bool(confidential)
         self.fallback_ollama_model = fallback_ollama_model
         self.budget = budget_ledger or CloudBudgetLedger()
+        if budget_purpose not in ("background", "interactive"):
+            raise ValueError("invalid cloud budget purpose")
+        self.budget_purpose = budget_purpose
+        self.budget_scope = self.budget.scope_for_model(provider, model)
         self.last_metadata: dict = {}
 
     def _fallback_to_ollama(self, *, system: str, prompt: str, reason: str, response_format=None) -> str:
@@ -1098,8 +1224,10 @@ class OpenAICompatFreeCloudAdapter:
         if not key:
             return self._fallback_to_ollama(system=system, prompt=prompt, reason=f"{self.env_name} missing", response_format=response_format)
 
-        est_tok = max(256, (len(system) + len(prompt)) // 4 + self.max_tokens // 2)
-        can_call, b_reason, reservation = self.budget.reserve_budget(self.provider, estimated_tokens=est_tok)
+        est_tok = estimate_cloud_tokens(system, prompt, self.max_tokens)
+        can_call, b_reason, reservation = self.budget.reserve_budget(
+            self.budget_scope, estimated_tokens=est_tok, purpose=self.budget_purpose
+        )
         if not can_call:
             return self._fallback_to_ollama(system=system, prompt=prompt, reason=b_reason, response_format=response_format)
 
@@ -1109,7 +1237,7 @@ class OpenAICompatFreeCloudAdapter:
             rem_tok = int(last_hdrs.get("x-ratelimit-remaining-tokens", "999999"))
             if rem_tok < max(1200, est_tok):
                 reset_s = _parse_reset_seconds(last_hdrs.get("x-ratelimit-reset-tokens"), default=4.0)
-                time.sleep(min(15.0, max(1.5, reset_s)))
+                time.sleep(min(65.0, max(1.5, reset_s)))
         except (ValueError, TypeError):
             pass
 
@@ -1146,7 +1274,7 @@ class OpenAICompatFreeCloudAdapter:
                 resp_headers = dict(resp.headers.items())
         except HTTPError as exc:
             try:
-                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+                self.budget.reconcile_usage(self.budget_scope, reservation, prompt_tokens=0, completion_tokens=0)
             except CloudBudgetLedgerError:
                 pass
             if exc.code == 429:
@@ -1157,7 +1285,7 @@ class OpenAICompatFreeCloudAdapter:
                 )
                 wait_s = min(65.0, _parse_reset_seconds(retry_hdr, default=30.0))
                 try:
-                    self.budget.record_rate_limit(self.provider, retry_after_s=wait_s)
+                    self.budget.record_rate_limit(self.budget_scope, retry_after_s=wait_s)
                 except CloudBudgetLedgerError:
                     pass
                 return self._fallback_to_ollama(
@@ -1168,7 +1296,7 @@ class OpenAICompatFreeCloudAdapter:
             )
         except (URLError, OSError, TimeoutError) as exc:
             try:
-                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+                self.budget.reconcile_usage(self.budget_scope, reservation, prompt_tokens=0, completion_tokens=0)
             except CloudBudgetLedgerError:
                 pass
             return self._fallback_to_ollama(
@@ -1182,7 +1310,7 @@ class OpenAICompatFreeCloudAdapter:
                 raise ValueError("empty content")
         except (ValueError, KeyError, IndexError, TypeError):
             try:
-                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+                self.budget.reconcile_usage(self.budget_scope, reservation, prompt_tokens=0, completion_tokens=0)
             except CloudBudgetLedgerError:
                 pass
             return self._fallback_to_ollama(system=system, prompt=prompt, reason="invalid cloud response JSON", response_format=response_format)
@@ -1192,7 +1320,7 @@ class OpenAICompatFreeCloudAdapter:
         c_tok = int(usage.get("completion_tokens") or 0)
         try:
             self.budget.reconcile_usage(
-                self.provider, reservation, prompt_tokens=p_tok, completion_tokens=c_tok, headers=resp_headers
+                self.budget_scope, reservation, prompt_tokens=p_tok, completion_tokens=c_tok, headers=resp_headers
             )
         except CloudBudgetLedgerError:
             pass
