@@ -11,6 +11,7 @@ param(
     [switch]$AllowControls,
     [switch]$ClearStop,
     [switch]$VerifyBaseline,
+    [switch]$UseSdkBackend,
     [string]$SpecPath,
     [string]$OutputPath,
     [string]$StateDir,
@@ -59,6 +60,12 @@ if ($Port -le 0) { $Port = if ($config -and $config.cockpit_port) { [int]$config
 
 $useAutoFeed = $AutoFeed.IsPresent -or (-not $Manifest -and $config -and [bool]$config.auto_feed)
 $useIsolate = $IsolateBlocked.IsPresent -or ($config -and [bool]$config.isolate_blocked)
+$cfgSdkEnabled = ($config -and $config.PSObject.Properties["sdk_backend"] -and $config.sdk_backend -and [bool]$config.sdk_backend.enabled)
+$useSdk = $UseSdkBackend.IsPresent -or $cfgSdkEnabled
+$prevBackendEnv = $env:TEL99_EXECUTION_BACKEND
+if ($useSdk) {
+    $env:TEL99_EXECUTION_BACKEND = "antigravity_sdk"
+}
 
 Push-Location -LiteralPath $repo
 try {
@@ -180,5 +187,10 @@ try {
         }
     }
 } finally {
+    if ($null -eq $prevBackendEnv) {
+        Remove-Item Env:TEL99_EXECUTION_BACKEND -ErrorAction SilentlyContinue
+    } else {
+        $env:TEL99_EXECUTION_BACKEND = $prevBackendEnv
+    }
     Pop-Location
 }

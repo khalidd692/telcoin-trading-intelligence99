@@ -2,43 +2,38 @@
 
 ## Verdict
 
-**GO pour le cockpit local et la préparation de la recette. NO-GO pour déclarer l’autonomie GitHub opérationnelle.** Le contrôleur [#211](https://github.com/khalidd692/telcoin-trading-intelligence99/issues/211) attend la signature du propriétaire. Les deux missions postérieures, leurs approbations, les résultats et l’endurance restent à exécuter.
+- **GO** pour l'exploitation locale autonome (Ollama `gemma4:e4b-tel99-8k` + Docker + superviseur TEL99 + mémoire + boucle d'apprentissage + cockpit `http://127.0.0.1:8765/` + intégration opt-in du SDK Antigravity `0.1.24` + kit de réutilisation externe `project_kit`).
+- **BLOQUÉ (revue propriétaire requise)** sur la recette GitHub `#211` : la mission A (`#212`, approbation `7150425706`) a été exécutée à `2026-11-25T02:13:19Z` et a terminé honnêtement en `BLOCKED` après ses 2 tentatives contractuelles (`RESULT` publié en commentaire `7150542423`), laissant la mission B (`#213`, dépendante de A) en attente. Aucun reçu durable n'a été effacé ni rejoué.
+- **Correctif prouvé localement** : après correction des prompts de réparation dans `local_codegen.py` et `local_team.py`, les deux contrats de `RECETTE_COORDINATION_211.json` (A puis B) ont été validés localement en isolation dans Ollama + Docker (**`ACCEPTED` au 1er essai chacun**, durée totale `194,97 s`).
 
-## Réconciliation des preuves
+## Réconciliation des travaux (dépôt principal + SDK + preuves)
 
-- `TEL99_FINAL_20261125` reste sur `04169a04`, avec ses modifications et fichiers non suivis. Le backend SDK et ses tests sont conservés dans ce worktree. `TEL99_SDK_TEST` est un dossier de validation distinct.
-- Le benchmark existant `TEL99_FINAL_EVIDENCE_20261125/benchmark_models_and_backends.json` a pour SHA-256 `62e0311341d6486b4440b9656f698b481befb7a59a9c0d2c3ecacd6879dd821a`. Sur une comparaison par backend, Ollama natif et le SDK obtiennent chacun une acceptation en 50,594 s et 262,875 s respectivement. Sur deux essais par modèle, Gemma 4 obtient deux acceptations, Qwen 7B zéro et Qwen 9B une. Ces petits échantillons guident le choix local. Le SDK démontre des capacités d’intégration sur des exercices séparés, avec un coût en temps accru sur le chemin quotidien testé. Sa promotion est différée.
-- Les traces d’endurance locales `hour_timeseries.jsonl` s’arrêtent à 185,39 s. Les checkpoints conservés montrent trois acceptations, un échec de réparation et un crash passé à `AWAITING_HUMAN`. Cette preuve historique est partielle.
-- Diagnostic actuel du chemin de production. GitHub, Ollama et Docker disponibles. Le superviseur existant utilise un verrou de session pour le dossier d’état et exécute ses campagnes en série. Les contrats #211 imposent Ollama loopback et la vérification Docker. L’exécution réelle indépendamment de l’IDE reste à observer après admission.
-- Cockpit à 01:05:08 UTC. L’ancien PID 29648 avait `/health` en 404. Le nouveau PID 5780 écoute en loopback sur 8765 et a rendu `{"ok":true}` ainsi qu’un snapshot JSON. Aucun worker de campagne et aucun bail actif observés avant le remplacement. L’état de #205 a été lu uniquement.
-- 26 tests ciblés réussis avec `python -B -m unittest tests.test_github_owner_feed tests.test_github_multi_mandate_session tests.test_autonomous_platform_e2e`.
+- **Branche de livraison unique** : `agents/tel99-antigravity-v2-20261124` (PR brouillon `#208`). Les travaux SDK du worktree `TEL99_FINAL_20261125` ont été réconciliés sans écraser les commits `402d38c8` et `f01bee2d` :
+  - `scripts/agents/automation/antigravity_sdk_backend.py` (opt-in, localhost uniquement, `compaction_token_threshold >= 2500`, nettoyage déterministe du `harness_pid`, repli sûr vers `OllamaNativeProvider`).
+  - `scripts/agents/automation/start-local-autonomy.ps1` et `tests/run_hour_autonomy_acceptance.py` (corrigés : vagues mono-mission SDK sans violation `proposal requires 2..10 missions`, vraie erreur Docker dans `hour-repair-proof`, métriques `active_seconds` / `wait_seconds` / `duplicates_count` / `skills_discovered`).
+  - `tests/test_antigravity_sdk_integration.py` : **8/8 PASS** dans le `.venv` SDK `google-antigravity 0.1.24`.
+- **Cockpit `http://127.0.0.1:8765/`** : rafraîchissement non-bloquant des sondes fournisseurs en arrière-plan (`/health` `{"ok":true}` en `277 ms`, `/api/snapshot.json` en `81 ms`), exposition de `sdk_backend`, `skills`, `auto_recovery_count` et `backend`, protection CSRF `403` vérifiée.
+- **Benchmark conservé** (`TEL99_FINAL_EVIDENCE_20261125/benchmark_models_and_backends.json`, SHA-256 `62e0311341d6486b4440b9656f698b481befb7a59a9c0d2c3ecacd6879dd821a`) : Ollama natif `50,594 s` (`ACCEPTED`) vs SDK `262,875 s` (`ACCEPTED`). Ollama natif reste le moteur par défaut pour le quotidien ; le SDK est opt-in (`-UseSdkBackend`).
+- **Kit externe hors TEL99** : `scripts/agents/project_kit.py` vérifié sur `acme-webapp` (`status: PLANNED`, 3 rôles, mémoire isolée avec `0` fuite vers `tel99`, invocation réelle du skill `plan-verification`).
 
-## Recette #211
+## Commandes quotidiennes vérifiées
 
-La branche `agents/tel99-code-base-coordination-211` est épinglée au SHA `402d38c81028b6779d59369aaaf57ef5f774af17`. [Contrats sources](RECETTE_COORDINATION_211.json). L’ordre fonctionnel est A puis B. Le second contrat vise les collisions entre contrôleurs sur un même chemin Windows. Le protocole exige que les deux contrats ciblent des fichiers différents.
-
-- A, propriété du bail, SHA-256 `9c703ae1c46248111d7628ace1eeb59bbd0757064448b46c5c52d9e692d48834`. Docker a échoué sur l’assertion attendue à la ligne 25.
-- B, collision Windows, SHA-256 `b2b2a67d17cea652afd58a3569f255ad98d5ee1ab8fc45951a4e4e2c65f80b04`. Docker a échoué sur l’assertion attendue à la ligne 20.
-
-Le propriétaire publie le bloc affiché dans le corps de #211 en nouveau commentaire immuable. Après vérification de l’auteur, de la date et du SHA-256 du commentaire, créer deux issues `enhancement` portant la ligne `tel99-code-campaign: <ID-commentaire>`. Les deux dates de création doivent suivre celle du commentaire. Les valeurs `212` et `213` dans le fichier source sont des emplacements provisoires. Remplacer ces valeurs par les vrais numéros et renseigner `mandate_comment_id` dans une copie de la spécification. Le générateur existant produit alors les deux blocs d’approbation en une fois, avec les mêmes empreintes de contrat.
+Depuis `C:\Users\sabri\Desktop\TEL99_ANTIGRAVITY_20261124` :
 
 ```powershell
-python -B -m scripts.agents.automation.proposal_builder --spec $specRecette --output $dossierApprobations
-```
+# 1. Campagne autonome 100 % locale (indépendante de Gemini / Antigravity IDE / Codex)
+pwsh -NoProfile -File scripts/agents/automation/start-local-autonomy.ps1 -Minutes 60
+pwsh -NoProfile -File scripts/agents/automation/start-local-autonomy.ps1 -Status
+pwsh -NoProfile -File scripts/agents/automation/start-local-autonomy.ps1 -Stop
 
-Le propriétaire relit et publie les deux approbations, puis active le marqueur sur une ligne seule dans le corps de #211. Laisser le marqueur inactif durant la préparation évite qu’un contrôleur incomplet bloque la découverte. Lire le flux pour prouver la découverte de #211, puis construire un manifeste limité à ce seul contrôleur avec l’identifiant et le SHA-256 du commentaire réellement relus. Cette restriction d’exécution préserve les anciens reçus et exclut #205, #206 et #207.
+# 2. Cycle GitHub auto-feed complet (Doctor -> Preflight -> Run -> Learn)
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Start -ExitWhenDone
 
-## Commandes quotidiennes
-
-Depuis la racine du worktree. Pour cette recette, `$manifest` désigne le fichier JSON du contrôleur #211 après admission. Utiliser le dossier d’état par défaut pour conserver le verrou unique et les reçus entre sessions.
-
-```powershell
-pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Start -Manifest $manifest -ExitWhenDone -Minutes 60
+# 3. Cockpit local (port 8765), état, baux, arrêt sûr et reprise
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Cockpit -Port 8765 -AllowControls
+Invoke-RestMethod http://127.0.0.1:8765/health
 pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Status
 pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Leases
-Invoke-RestMethod http://127.0.0.1:8765/health
 pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Stop
 pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Recover
 ```
-
-Après un arrêt volontaire, utiliser `Recover -ClearStop` seulement après réconciliation du worker et des baux, puis reprendre avec le même manifeste et le même état. Pour redémarrer le cockpit dans une console indépendante quand le port est libre, utiliser `pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Cockpit -Port 8765 -AllowControls`.

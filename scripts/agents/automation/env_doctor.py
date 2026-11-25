@@ -200,7 +200,12 @@ def diagnose(*, state_dir: Path | None = None, auto_feed: bool = False,
 
     if include_providers:
         from scripts.agents.automation import provider_router
-        checks["providers"] = provider_router.probe_all_providers()["providers"]
+        probe = provider_router.probe_all_providers()
+        checks["providers"] = probe["providers"]
+        checks["sdk_backend"] = probe.get("sdk_backend", {})
+    else:
+        from scripts.agents.automation.antigravity_sdk_backend import probe_sdk_backend
+        checks["sdk_backend"] = probe_sdk_backend()
 
     return {
         "schema_version": 1,

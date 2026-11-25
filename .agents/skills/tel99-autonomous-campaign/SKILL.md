@@ -15,6 +15,11 @@ pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Start
 
 Lit [tel99-config.json](../../scripts/agents/automation/tel99-config.json) et exécute :
 `Doctor` → `Preflight -AutoFeed` → `Run -AutoFeed -IsolateBlocked` → `Learn` (mesures + promotion des procédures).
+Le backend SDK `google-antigravity` (`0.1.24`) est opt-in (`-UseSdkBackend` ou `sdk_backend.enabled: true`) avec repli automatique sûr vers `OllamaNativeProvider` ; les fonctionnalités expérimentales instables sur Gemma 4 8k CPU (`skills_paths_on_gemma4_8k`, `multi_subagent_single_root_cpu`) restent désactivées par défaut.
+Pour une campagne 100 % locale détachée d'Antigravity/Gemini/Codex :
+```powershell
+pwsh -NoProfile -File scripts/agents/automation/start-local-autonomy.ps1 -Minutes 60
+```
 
 ## 2. Modèles, quotas et routage (`Providers`)
 

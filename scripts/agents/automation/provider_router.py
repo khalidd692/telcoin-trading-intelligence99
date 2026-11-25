@@ -21,6 +21,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
 from scripts.agents.automation import local_model_routing
+from scripts.agents.automation.antigravity_sdk_backend import (
+    AntigravitySDKProvider,
+    probe_sdk_backend,
+)
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.intelligence import catalog
 from scripts.agents.native.provider import ProviderError
@@ -303,6 +307,7 @@ def probe_all_providers(*, probes: dict | None = None) -> dict:
     return {
         "schema_version": 1,
         "billing_policy": "no-extra-spend",
+        "sdk_backend": probe_sdk_backend(),
         "providers": {
             "ollama": ollama,
             "codex": codex,
@@ -416,6 +421,27 @@ class OllamaAdapter:
         return self._provider.complete(system=system, prompt=prompt)
 
 
+class AntigravitySDKAdapter:
+    """Opt-in adapter using Google Antigravity SDK over local Ollama with safe native fallback."""
+
+    def __init__(self, model: str, *, timeout: int = 120, max_tokens: int = 768,
+                 fallback_to_ollama_native: bool = True):
+        self.model = model
+        self._provider = AntigravitySDKProvider(
+            model=model,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            fallback_to_ollama_native=fallback_to_ollama_native,
+        )
+
+    @property
+    def last_metadata(self) -> dict:
+        return dict(self._provider.last_metadata)
+
+    def complete(self, *, system: str, prompt: str) -> str:
+        return self._provider.complete(system=system, prompt=prompt)
+
+
 class AgyPrintAdapter:
     """Opt-in adapter for Antigravity CLI subscription print mode (no API keys)."""
 
@@ -457,13 +483,16 @@ class AgyPrintAdapter:
         return raw
 
 
-def build_adapter(selection: dict, *, allow_subscription_cli: bool = False):
+def build_adapter(selection: dict, *, allow_subscription_cli: bool = False,
+                  use_sdk_backend: bool = False):
     """Instantiate an authorized adapter from a router selection."""
     if not isinstance(selection, dict) or not selection.get("provider"):
         raise ValueError("valid provider selection required")
     provider = selection["provider"]
     model = selection.get("served_model") or selection.get("model")
     if provider == "ollama":
+        if use_sdk_backend:
+            return AntigravitySDKAdapter(model=model)
         return OllamaAdapter(model=model)
     if provider == "agy":
         if not allow_subscription_cli:

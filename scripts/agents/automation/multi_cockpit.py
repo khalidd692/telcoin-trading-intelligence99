@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import secrets
 import sys
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +21,7 @@ if __package__ in (None, ""):
 
 from scripts.agents import specialist_dispatch
 from scripts.agents.automation import ide_coordination, learning_loop, provider_router, recovery_tool
+from scripts.agents.automation.antigravity_sdk_backend import probe_sdk_backend
 from scripts.agents.automation.autonomy_runtime import LEGACY_STOP
 from scripts.agents.automation.github_owner_feed import ARCHIVE_KEY, PIN_KEY
 from scripts.agents.automation.local_model_routing import available_memory_mib
@@ -106,12 +108,13 @@ async function refresh() {
     for (const p of ((d.learning.improvement_proposals || {}).proposals || []).slice(0, 2)) learnRows.push(`Proposition: ${p.proposal}`);
     el('learning').replaceChildren(...(learnRows.length ? learnRows.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }) : [txt('div','Aucune mesure terminale encore enregistrée.','label')]));
     const provs = Object.entries(d.providers || {});
-    el('providers').replaceChildren(...(provs.length ? provs.map(([name,p]) => {
-      const box = txt('div','','label'); box.style.marginBottom = '6px';
+    const sdk = d.sdk_backend || {};
+    const provLines = provs.map(([name,p]) => {
       const qExtra = p.primary_used_percent != null ? ` · P=${p.primary_used_percent}% S=${p.secondary_used_percent}%` : (p.version ? ` · v${p.version}` : '');
-      box.textContent = `${name} [${p.billing_class}] · ${p.quota_status}${qExtra} · ${(p.models||[]).length} modèle(s)`;
-      return box;
-    }) : [txt('div','Sonde fournisseurs non activée dans ce cliché.','label')]));
+      return `${name} [${p.billing_class}] · ${p.quota_status}${qExtra} · ${(p.models||[]).length} modèle(s)`;
+    });
+    provLines.push(`SDK Antigravity: disponible=${Boolean(sdk.available)}${sdk.version ? ' v'+sdk.version : ''} (opt-in, compaction>=${sdk.min_safe_compaction_threshold ?? '?'})`);
+    el('providers').replaceChildren(...(provLines.length ? provLines.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }) : [txt('div','Sonde fournisseurs non activée dans ce cliché.','label')]));
     const rec = d.recovery || {};
     const recRows = [];
     if (rec.needs_attention) {
@@ -127,6 +130,7 @@ async function refresh() {
     const coord = d.coordination || {};
     const coordRows = [
       `Spécialistes: ${team.total ?? 0} total (${team.active_count ?? 0} actifs / ${team.reserved_on_demand_count ?? 0} mobilisables à la demande)`,
+      `Skills projet: ${(d.skills || []).join(', ') || 'aucun'}`,
       `Acteurs actifs: ${(coord.actors_active || []).join(', ') || 'aucun'}`,
     ];
     const activeLeases = coord.active || [];
@@ -186,6 +190,15 @@ def _memory_summary(root: Path) -> dict:
     }
 
 
+def _discover_project_skills() -> list[str]:
+    skills_dir = ROOT / ".agents" / "skills"
+    if not skills_dir.is_dir():
+        return []
+    return sorted(
+        p.parent.name for p in skills_dir.glob("*/SKILL.md") if p.is_file()
+    )
+
+
 def _improvement_proposals(root: Path) -> dict:
     path = root / "learning" / "improvement_proposals.json"
     if not path.is_file():
@@ -241,6 +254,8 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
                 "reason": cp.get("reason"),
                 "repaired": bool(cp.get("status") == "ACCEPTED" and history),
                 "attempt": cp.get("attempt"),
+                "auto_recovery_count": int(cp.get("auto_recovery_count") or 0),
+                "backend": res.get("backend") or res.get("provider") or "ollama-native",
                 "model": ver.get("model") or res.get("model") or mission.get("model"),
                 "generation_seconds": ver.get("generation_seconds") or res.get("generation_seconds"),
                 "verification_seconds": ver.get("verification_seconds"),
@@ -300,6 +315,8 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
         "memory": _memory_summary(root),
         "recovery": recovery,
         "providers": providers,
+        "sdk_backend": probe_sdk_backend(),
+        "skills": _discover_project_skills(),
         "team_catalog": team_catalog,
         "coordination": coordination,
         "summary": {
@@ -324,16 +341,46 @@ def make_server(state_root: Path | str, *, host: str = "127.0.0.1", port: int = 
                 allow_controls: bool = False, include_providers: bool = False) -> ThreadingHTTPServer:
     root = Path(state_root).resolve()
     csrf_token = secrets.token_hex(16) if allow_controls else None
-    provider_cache = {"at": 0.0, "data": {}}
+    provider_cache = {"at": 0.0, "data": {}, "refreshing": False}
+    provider_lock = threading.Lock()
+    provider_ready = threading.Event()
+
+    def _refresh_providers_bg() -> None:
+        try:
+            data = provider_router.probe_all_providers()["providers"]
+            with provider_lock:
+                provider_cache["data"] = data
+                provider_cache["at"] = time.monotonic()
+        except Exception:
+            pass
+        finally:
+            with provider_lock:
+                provider_cache["refreshing"] = False
+            provider_ready.set()
+
+    def _trigger_provider_refresh() -> None:
+        with provider_lock:
+            if provider_cache["refreshing"]:
+                return
+            provider_cache["refreshing"] = True
+        threading.Thread(target=_refresh_providers_bg, daemon=True).start()
+
+    if include_providers:
+        _trigger_provider_refresh()
 
     def cached_providers() -> dict:
         if not include_providers:
             return {}
         now = time.monotonic()
-        if now - provider_cache["at"] > 30.0 or not provider_cache["data"]:
-            provider_cache["data"] = provider_router.probe_all_providers()["providers"]
-            provider_cache["at"] = now
-        return provider_cache["data"]
+        with provider_lock:
+            stale = (now - provider_cache["at"] > 30.0) or not provider_cache["data"]
+            has_data = bool(provider_cache["data"])
+        if stale:
+            _trigger_provider_refresh()
+            if not has_data:
+                provider_ready.wait(timeout=1.5)
+        with provider_lock:
+            return dict(provider_cache["data"])
 
     class Handler(BaseHTTPRequestHandler):
         def _valid_loopback_host(self) -> bool:

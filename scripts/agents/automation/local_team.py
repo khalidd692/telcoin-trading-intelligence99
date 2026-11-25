@@ -10,9 +10,11 @@ import ast
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 
+from scripts.agents.automation.antigravity_sdk_backend import AntigravitySDKProvider
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.native.provider import ProviderError
 from scripts.agents.team_config import role_catalog
@@ -129,9 +131,17 @@ def analyze(mission: dict, function: str, *, lessons=None, repair_context: str |
                 + repair_context.strip()
             )
 
-    provider = OllamaNativeProvider(model=ANALYST_MODEL, timeout=55, max_tokens=256)
-    if mission.get("model") == ANALYST_MODEL:
-        provider.keep_alive = "90s"
+    if os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk":
+        provider = AntigravitySDKProvider(
+            model=ANALYST_MODEL,
+            timeout=90,
+            max_tokens=256,
+            fallback_to_ollama_native=(os.environ.get("TEL99_SDK_NO_FALLBACK") != "1"),
+        )
+    else:
+        provider = OllamaNativeProvider(model=ANALYST_MODEL, timeout=55, max_tokens=256)
+        if mission.get("model") == ANALYST_MODEL:
+            provider.keep_alive = "90s"
     note = provider.complete(
         system=(
             "You are tel99-analyst, a READ-ONLY code analyst. This is a "
@@ -139,7 +149,8 @@ def analyze(mission: dict, function: str, *, lessons=None, repair_context: str |
             "Inspect the function and requested behavior only. No tool use, "
             "execution, imports, files, shell commands or trading. Check every edge case "
             "in the objective carefully (such as whitespace-only/blank strings needing .strip(), "
-            "wrong types, None, non-list roots, and preserving order). Return at most "
+            "wrong types, None, non-list roots, and preserving order). Never contradict "
+            "the Approved objective, including when reviewing a failed previous attempt. Return at most "
             "three short practical sentences: bug hypothesis, minimal repair approach, "
             "and a potential edge case. Never claim a test was run. "
             "Your note is advisory and cannot alter any approved scope."

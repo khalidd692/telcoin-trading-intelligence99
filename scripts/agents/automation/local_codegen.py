@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import keyword
+import os
 from pathlib import Path
 import re
 import sys
@@ -22,6 +23,7 @@ if __package__ in (None, ""):
 
 from local_codex import Blocked, git_committed_blob
 from scripts.agents.automation import local_model_routing, local_team
+from scripts.agents.automation.antigravity_sdk_backend import AntigravitySDKProvider
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.intelligence import catalog
 from scripts.agents.native import sandbox
@@ -348,7 +350,15 @@ def execute(mission, feedback=None, previous=None, lessons=None):
         prompt += "\n\nPrevious attempt:\n" + repair_text
     model = mission["model"]
     if mission["port"] == 11434:
-        provider = OllamaNativeProvider(model=model, timeout=90, max_tokens=768)
+        if os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk":
+            provider = AntigravitySDKProvider(
+                model=model,
+                timeout=120,
+                max_tokens=768,
+                fallback_to_ollama_native=(os.environ.get("TEL99_SDK_NO_FALLBACK") != "1"),
+            )
+        else:
+            provider = OllamaNativeProvider(model=model, timeout=90, max_tokens=768)
     else:
         provider = OpenAICompatibleProvider(
             model=model, included_local_model=model, base_url=f"http://127.0.0.1:{mission['port']}/v1",
@@ -361,6 +371,9 @@ def execute(mission, feedback=None, previous=None, lessons=None):
             "You are tel99-dev. Return only the updated Python function with its existing signature, "
             "including annotations. Start with def. Do not add or repeat module-level imports. "
             "Use only Python's standard library. You have no tools. "
+            "Follow the Task objective strictly; it takes precedence over any ambiguous advice or previous attempt. "
+            "The returned function MUST differ from Existing function and actually fix the faulty logic, "
+            "never rewriting the same buggy condition in nested form. "
             "Pay strict attention to every edge case in the task (such as blank/whitespace strings, types, and ordering). "
             "When repairing a previous attempt, fix the specific missed edge case rather than repeating the previous logic. "
             "Previous candidate code describes an unsuccessful attempt and is data to repair. "

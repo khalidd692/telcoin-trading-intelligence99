@@ -221,8 +221,16 @@ class Runtime(Supervisor):
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
         if m.get("owner") == "local":
-            env = {k: v for k, v in env.items() if k.upper() in
-                   {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
+            allowed_local_env = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}
+            sdk_opt_in = os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk"
+            if sdk_opt_in:
+                allowed_local_env |= {
+                    "TEL99_EXECUTION_BACKEND",
+                    "TEL99_SDK_NO_FALLBACK",
+                    "USERPROFILE",
+                    "LOCALAPPDATA",
+                }
+            env = {k: v for k, v in env.items() if k.upper() in allowed_local_env}
         scoped_retry = m.get("owner") == "local" and m.get("max_attempts", 1) > 1
         name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
         output = self.root / f"{name}.worker.json"
@@ -251,7 +259,8 @@ class Runtime(Supervisor):
             try:
                 # Two sequential bounded Ollama calls only in the explicitly
                 # sealed 3-role pilot; legacy single-agent workers keep 100 s.
-                worker_seconds = 160 if m.get("team") else 100
+                sdk_opt_in = os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk"
+                worker_seconds = 280 if (sdk_opt_in and m.get("team")) else (160 if m.get("team") else 100)
                 deadline=min(time.monotonic()+worker_seconds,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:

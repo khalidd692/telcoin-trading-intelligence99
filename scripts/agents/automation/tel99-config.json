@@ -7,5 +7,16 @@
   "cockpit_port": 8765,
   "isolate_blocked": true,
   "allow_subscription_cli": false,
+  "sdk_backend": {
+    "enabled": false,
+    "fallback_to_ollama_native": true,
+    "compaction_token_threshold": 4500,
+    "tool_output_max_tokens": 600,
+    "max_concurrency": 1,
+    "experimental_features_disabled": [
+      "skills_paths_on_gemma4_8k",
+      "multi_subagent_single_root_cpu"
+    ]
+  },
   "notes": "Configuration simple TEL99. Reutilise TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE sans rejeu. Aucune fusion automatique dans main, aucun ordre de trading, aucune depense API non autorisee."
 }
