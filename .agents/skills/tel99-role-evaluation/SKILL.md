@@ -29,3 +29,8 @@ def brier_score(predictions):
             raise ValueError
     return round(sum((p - int(o)) ** 2 for p, o in predictions) / len(predictions), 4)
 ```
+
+## Durcissement généralisable post-V3
+- Toujours vérifier `if isinstance(x, bool):` AVANT `isinstance(x, (int, float))` et AVANT toute comparaison `== 0` ou `<= 0`.
+- Toujours encoder les `str` en `bytes` (`s.encode('utf-8')`) avant `hmac.new(...)` ou `hashlib.*`.
+- Respecter les préfixes optionnels (`v?X.Y.Z`) et initialiser toute variable locale avant les branches `if/else`.

@@ -28,3 +28,8 @@ def classify_ram_headroom(free_mb, *, model_resident=False):
     warn = 700 if model_resident else 1400
     return 'OK' if free_mb >= ok else 'WARN' if free_mb >= warn else 'CRITICAL'
 ```
+
+## Durcissement généralisable post-V3
+- Toujours vérifier `if isinstance(x, bool):` AVANT `isinstance(x, (int, float))` et AVANT toute comparaison `== 0` ou `<= 0`.
+- Toujours encoder les `str` en `bytes` (`s.encode('utf-8')`) avant `hmac.new(...)` ou `hashlib.*`.
+- Respecter les préfixes optionnels (`v?X.Y.Z`) et initialiser toute variable locale avant les branches `if/else`.

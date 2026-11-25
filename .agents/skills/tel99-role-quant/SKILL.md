@@ -26,3 +26,8 @@ def simple_returns(prices):
         raise ValueError
     return [round((prices[i] - prices[i - 1]) / prices[i - 1], 6) for i in range(1, len(prices))]
 ```
+
+## Durcissement généralisable post-V3
+- Toujours vérifier `if isinstance(x, bool):` AVANT `isinstance(x, (int, float))` et AVANT toute comparaison `== 0` ou `<= 0`.
+- Toujours encoder les `str` en `bytes` (`s.encode('utf-8')`) avant `hmac.new(...)` ou `hashlib.*`.
+- Respecter les préfixes optionnels (`v?X.Y.Z`) et initialiser toute variable locale avant les branches `if/else`.

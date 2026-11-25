@@ -100,19 +100,35 @@ def build_dossier(
     gen_proj = _summarize_project(gen_dir or (DESKTOP / "TEL99_GENERALIZATION_NOTES"))
     ai_radar_ok = (DESKTOP / "AI_RADAR" / "tests" / "verify_ai_radar.py").is_file()
 
-    # Extract certification facts honestly
-    v3_loc = v3.get("v3_local_after") or {}
-    v3_hyb = v3.get("v3_hybrid_after") or {}
-    v4_loc = v4.get("v4_local") or {}
-    v4_hyb = v4.get("v4_hybrid") or {}
-    mat_cov = matrix.get("coverage") or {}
+    # Extract certification facts honestly from real schemas on disk
+    v3_loc = v3.get("local_after") or v3.get("v3_local_after") or {}
+    v3_hyb = v3.get("hybrid_after") or v3.get("v3_hybrid_after") or {}
+    v4_loc = v4.get("local") or v4.get("v4_local") or {}
+    v4_hyb = v4.get("hybrid") or v4.get("v4_hybrid") or {}
+    mat_cov = matrix.get("global_metrics") or matrix.get("coverage") or {}
 
-    local_unseen_pct = float(v4_loc.get("pass_rate_pct") or v3_loc.get("pass_rate_pct") or 0.0)
-    hybrid_unseen_pct = float(v4_hyb.get("pass_rate_pct") or v3_hyb.get("pass_rate_pct") or 0.0)
-    local_sec_pct = float(v4_loc.get("critical_security_pct") or v3_loc.get("critical_security_pct") or 0.0)
-    hybrid_sec_pct = float(v4_hyb.get("critical_security_pct") or v3_hyb.get("critical_security_pct") or 0.0)
+    def _rate_pct(sec: dict[str, Any]) -> float:
+        if "pass_rate_pct" in sec:
+            return float(sec["pass_rate_pct"] or 0.0)
+        if "success_rate" in sec:
+            return round(float(sec["success_rate"] or 0.0) * 100.0, 2)
+        tot = int(sec.get("total") or 0)
+        return round((int(sec.get("passed") or 0) / tot) * 100.0, 2) if tot > 0 else 0.0
+
+    def _sec_pct(sec: dict[str, Any]) -> float:
+        if "critical_security_pct" in sec:
+            return float(sec["critical_security_pct"] or 0.0)
+        tot = int(sec.get("critical_security_total") or 0)
+        return round((int(sec.get("critical_security_passed") or 0) / tot) * 100.0, 2) if tot > 0 else 0.0
+
+    local_unseen_pct = _rate_pct(v4_loc if v4_loc else v3_loc)
+    hybrid_unseen_pct = _rate_pct(v4_hyb if v4_hyb else v3_hyb)
+    local_sec_pct = _sec_pct(v4_loc if v4_loc else v3_loc)
+    hybrid_sec_pct = _sec_pct(v4_hyb if v4_hyb else v3_hyb)
     full_144 = bool(mat_cov.get("full_144_covered"))
-    endurance_ok = bool(endurance.get("ok") and float(endurance.get("elapsed_minutes") or 0.0) >= 60.0)
+    end_mins = float(endurance.get("duration_minutes") or endurance.get("elapsed_minutes") or 0.0)
+    end_acc = int(endurance.get("missions_accepted") or 0)
+    endurance_ok = bool(end_mins >= 60.0 and end_acc > 0 and int(endurance.get("missions_blocked") or 0) == 0)
 
     # Strict dual verdict computation (NEVER inflate partial results!)
     op_blockers: list[str] = []
@@ -132,12 +148,12 @@ def build_dossier(
         cert_blockers.append(f"Local critical security {local_sec_pct:.2f}% < 100.00% target")
     if hybrid_sec_pct < 100.0:
         cert_blockers.append(f"Hybrid critical security {hybrid_sec_pct:.2f}% < 100.00% target")
-    if not v4:
-        cert_blockers.append("Independent frozen benchmark V4 not yet completed (queued in LocalChain Phase 2)")
+    if not v4_loc:
+        cert_blockers.append("Independent frozen benchmark V4 still running (LocalChain Phase 2 PID 21400)")
     if not full_144:
         cert_blockers.append(f"12x12 matrix full 144-cell coverage not yet complete ({mat_cov.get('cells_evaluated', 0)}/144)")
     if not endurance_ok:
-        cert_blockers.append("60-minute autonomous endurance RUN3 still running or not yet closed")
+        cert_blockers.append(f"60-minute autonomous endurance RUN3 did not meet 60-min acceptance ({end_mins:.2f} min, accepted={end_acc}/{endurance.get('missions_total', 0)})")
 
     dossier: dict[str, Any] = {
         "schema_version": 1,
@@ -189,7 +205,10 @@ def build_dossier(
             "local_chain_phase2_status": chain2.get("status"),
             "endurance_run3": {
                 "ok": endurance_ok,
-                "elapsed_minutes": endurance.get("elapsed_minutes"),
+                "duration_minutes": end_mins,
+                "missions_accepted": end_acc,
+                "missions_total": endurance.get("missions_total"),
+                "missions_blocked": endurance.get("missions_blocked"),
             },
         },
         "verdicts": {
@@ -226,11 +245,11 @@ def build_dossier(
         f"- **Généralisation Notes** (`{gen_proj['path']}`) : `status={gen_proj.get('status')}` (`{gen_proj.get('missions_accepted')}/{gen_proj.get('missions_total')}`), `ok={gen_proj.get('ok')}`",
         "",
         "## 3. Certification (instantané vérifié sur disque)",
-        f"- **V3 Local après apprentissage** : `{v3_loc.get('passed')}/{v3_loc.get('total')}` (`{v3_loc.get('pass_rate_pct')}%`), sécurité critique `{v3_loc.get('critical_security_passed')}/{v3_loc.get('critical_security_total')}`",
-        f"- **V3 Hybride après apprentissage** : `{v3_hyb.get('passed')}/{v3_hyb.get('total')}` (`{v3_hyb.get('pass_rate_pct')}%`), sécurité critique `{v3_hyb.get('critical_security_passed')}/{v3_hyb.get('critical_security_total')}`",
+        f"- **V3 Local après apprentissage** : `{v3_loc.get('passed')}/{v3_loc.get('total')}` (`{_rate_pct(v3_loc)}%`), sécurité critique `{v3_loc.get('critical_security_passed')}/{v3_loc.get('critical_security_total')}` (`{_sec_pct(v3_loc)}%`)",
+        f"- **V3 Hybride après apprentissage** : `{v3_hyb.get('passed')}/{v3_hyb.get('total')}` (`{_rate_pct(v3_hyb)}%`), sécurité critique `{v3_hyb.get('critical_security_passed')}/{v3_hyb.get('critical_security_total')}` (`{_sec_pct(v3_hyb)}%`)",
         f"- **Matrice 12x12** : `{mat_cov.get('cells_evaluated', 0)}/144` cellules évaluées (`full_144_covered={full_144}`)",
-        f"- **V4 gelé indépendant** : `present={bool(v4)}`",
-        f"- **Endurance 60 min RUN3** : `ok={endurance_ok}` (`elapsed_minutes={endurance.get('elapsed_minutes')}`)",
+        f"- **V4 gelé indépendant** : `present={bool(v4_loc)}`",
+        f"- **Endurance 60 min RUN3** : `ok={endurance_ok}` (`duration_minutes={end_mins}`, `accepted={end_acc}/{endurance.get('missions_total')}`)",
         f"- **LocalChain Phase 1 / Phase 2** : `{chain1.get('status')}` / `{chain2.get('status')}`",
         "",
     ]

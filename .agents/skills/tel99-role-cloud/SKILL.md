@@ -25,3 +25,8 @@ def is_loopback_url(url: str) -> bool:
     u = url.lower()
     return ('@' not in u) and (u.startswith('http://127.0.0.1') or u.startswith('http://localhost'))
 ```
+
+## Durcissement généralisable post-V3
+- Toujours vérifier `if isinstance(x, bool):` AVANT `isinstance(x, (int, float))` et AVANT toute comparaison `== 0` ou `<= 0`.
+- Toujours encoder les `str` en `bytes` (`s.encode('utf-8')`) avant `hmac.new(...)` ou `hashlib.*`.
+- Respecter les préfixes optionnels (`v?X.Y.Z`) et initialiser toute variable locale avant les branches `if/else`.
