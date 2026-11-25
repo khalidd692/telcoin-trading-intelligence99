@@ -413,11 +413,13 @@ def main(argv: list[str] | None = None) -> int:
     py = sys.executable
 
     def _record_step(name: str, res: dict) -> None:
-        report["steps"][name] = {
+        entry = {
             **res,
             "status": "PROVEN" if res.get("ok") else "FAILED",
             "finished_at": _now_iso(),
         }
+        report["steps"][name] = entry
+        report.setdefault("step_history", []).append({"step": name, **entry})
         _write_atomic(report_path, report)
 
     for step in steps_requested:
