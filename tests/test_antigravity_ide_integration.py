@@ -242,10 +242,10 @@ class IdeCoordinationAndCockpitTests(unittest.TestCase):
                 [sys.executable, "-B", "-c", code, str(root), "codex-cli"],
                 cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
-            out1, _ = p1.communicate(timeout=15)
-            out2, _ = p2.communicate(timeout=15)
+            out1, err1 = p1.communicate(timeout=15)
+            out2, err2 = p2.communicate(timeout=15)
             codes = sorted([p1.returncode, p2.returncode])
-            self.assertEqual(codes, [0, 3], (out1, out2))
+            self.assertEqual(codes, [0, 3], (out1, err1, out2, err2))
 
             ev = ide_coordination.record_handoff(
                 root,

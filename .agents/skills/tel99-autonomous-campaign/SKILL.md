@@ -59,6 +59,9 @@ python -B -m scripts.agents.specialist_dispatch select --task "security audit an
 - **Routage des modèles & quotas** (`scripts/agents/automation/provider_router.py`) :
   - Orchestration / planification : `agy/gemini-4-neon-medium` (si `allow_subscription_cli=True` et non confidentiel) ; exécution : `agy/gemini-4-hydrogen-medium` ; `gemini-4-neon-high` réservé à `difficulty="hard"`.
   - Tâches confidentielles ou mode local gratuit par défaut (`allow_subscription_cli: false`) : Ollama local (`gemma4:e4b-tel99-8k`) sans coût supplémentaire.
+  - Les candidats admissibles sont classés par score, y compris pour les tâches difficiles. Les profils Antigravity sont des préférences de rôle et nécessitent une vérification de disponibilité et d’abonnement. Le récepteur GitHub de code local utilise Ollama.
+
+- **Santé du cockpit** : `Invoke-RestMethod http://127.0.0.1:8765/health` vérifie la réponse du processus HTTP corrigé. Consulter `Status`, `Leases` et le snapshot pour l’état opérationnel. Voir [le rapport et le guide PowerShell](../../../REPORT_FINAL.md).
 
 - **Cycle autonome complet et arrêt propre (`-ExitWhenDone`)** :
 

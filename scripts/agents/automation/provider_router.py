@@ -39,13 +39,13 @@ SUBSCRIPTION_MODELS = {
     "agy": (
         {"id": "agy/gemini-4-hydrogen-medium", "model": "gemini-4-hydrogen-medium",
          "role_tier": "executor", "effort_tier": "medium",
-         "quality_prior": 0.86, "latency_tier": "fast", "supports_tools": True, "context_tokens": 128_000},
+         "quality_prior": 0.85, "latency_tier": "fast", "supports_tools": True, "context_tokens": 128_000},
         {"id": "agy/gemini-4-neon-medium", "model": "gemini-4-neon-medium",
          "role_tier": "orchestrator", "effort_tier": "medium",
-         "quality_prior": 0.88, "latency_tier": "medium", "supports_tools": True, "context_tokens": 128_000},
+         "quality_prior": 0.85, "latency_tier": "medium", "supports_tools": True, "context_tokens": 128_000},
         {"id": "agy/gemini-4-neon-high", "model": "gemini-4-neon-high",
          "role_tier": "hard_only", "effort_tier": "high",
-         "quality_prior": 0.92, "latency_tier": "slow", "supports_tools": True, "context_tokens": 128_000},
+         "quality_prior": 0.92, "latency_tier": "medium", "supports_tools": True, "context_tokens": 128_000},
     ),
 }
 
@@ -390,16 +390,7 @@ def select_executor(task_kind: str = "code", *, difficulty: str = "medium",
                 "score": score,
             })
 
-    # Prioritize high‑effort models when difficulty is "hard"
-    if difficulty == "hard":
-        # Sort: high effort first, then highest score, then id
-        candidates.sort(key=lambda row: (
-            row.get("effort_tier") != "high",  # False (high) comes first
-            -row["score"],
-            row["id"],
-        ))
-    else:
-        candidates.sort(key=lambda row: (-row["score"], row["id"]))
+    candidates.sort(key=lambda row: (-row["score"], row["id"]))
     chosen = candidates[0] if candidates else None
     fallbacks = candidates[1:] if chosen else []
     return {

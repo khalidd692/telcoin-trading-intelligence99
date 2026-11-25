@@ -355,6 +355,8 @@ def make_server(state_root: Path | str, *, host: str = "127.0.0.1", port: int = 
                 return
             if self.path == "/":
                 self._send_bytes(HTML.encode("utf-8"), "text/html; charset=utf-8")
+            elif self.path == "/health":
+                self._send_bytes(b'{"ok":true}', "application/json; charset=utf-8")
             elif self.path == "/api/snapshot.json":
                 snap = build_snapshot(
                     root,

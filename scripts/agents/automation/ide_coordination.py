@@ -8,6 +8,7 @@ supervisor.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, ExitStack
 from datetime import datetime, timezone
 import json
 import os
@@ -24,7 +25,7 @@ if str(ROOT) not in sys.path:
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from scripts.agents.automation.local_codex import exclusive
+from scripts.agents.automation.local_codex import Blocked, exclusive
 from scripts.agents.protocol.store import CASConflict, FileStore
 
 SDK_INTERFACE_VERSION = "tel99-coordination-v1"
@@ -39,6 +40,23 @@ DEFAULT_TTL_SECONDS = 1800
 
 class LeaseConflict(RuntimeError):
     """Raised when another actor already holds an active lease on the target scope."""
+
+
+@contextmanager
+def _lease_transaction(coord_dir: Path):
+    """Allow a concurrent transaction to finish before checking its lease."""
+    deadline = time.monotonic() + 1.0
+    with ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(exclusive(coord_dir / "leases.lock"))
+            except Blocked as exc:
+                if time.monotonic() >= deadline:
+                    raise LeaseConflict("coordination ledger is busy") from exc
+                time.sleep(0.02)
+            else:
+                break
+        yield
 
 
 def _utc_iso(ts: float | None = None) -> str:
@@ -243,7 +261,7 @@ def acquire_lease(
 
     cdir = _coord_dir(state_root)
     cdir.mkdir(parents=True, exist_ok=True)
-    with exclusive(cdir / "leases.lock"):
+    with _lease_transaction(cdir):
         raw, previous = _read_raw_leases(cdir)
         active, _ = _split_leases(raw, ts)
         conflicts = _find_conflicts(
@@ -309,7 +327,7 @@ def release_lease(
         return {"released": False, "reason": "no coordination ledger"}
 
     cdir.mkdir(parents=True, exist_ok=True)
-    with exclusive(cdir / "leases.lock"):
+    with _lease_transaction(cdir):
         raw, previous = _read_raw_leases(cdir)
         active, expired_before = _split_leases(raw, ts)
         target = next((row for row in active if row.get("lease_id") == lease_id), None)
@@ -376,7 +394,7 @@ def record_handoff(
     }
     cdir = _coord_dir(state_root)
     cdir.mkdir(parents=True, exist_ok=True)
-    with exclusive(cdir / "leases.lock"):
+    with _lease_transaction(cdir):
         _append_activity_locked(cdir, event)
     return event
 

@@ -236,7 +236,26 @@ class ProviderRouterTests(unittest.TestCase):
             task_kind="code", difficulty="hard", confidential=False,
             allow_subscription_cli=True, inventory=inv,
         )
-        self.assertEqual(hard["chosen"]["served_model"], "gemini-4-neon-high")
+        self.assertIn("gemini-4-neon-high", {
+            row["served_model"] for row in [hard["chosen"], *hard["fallbacks"]]
+        })
+
+        for high_quality, expected in (
+            (0.66, "gemini-4-hydrogen-medium"),
+            (1.0, "gemini-4-neon-high"),
+        ):
+            with self.subTest(high_quality=high_quality):
+                ranked = pr.select_executor(
+                    task_kind="code", difficulty="hard", confidential=False,
+                    allow_subscription_cli=True, inventory=inv,
+                    measured_quality={
+                        "agy/gemini-4-hydrogen-medium": 0.90,
+                        "agy/gemini-4-neon-high": high_quality,
+                    },
+                )
+                self.assertEqual(ranked["chosen"]["served_model"], expected)
+                scores = [row["score"] for row in [ranked["chosen"], *ranked["fallbacks"]]]
+                self.assertEqual(scores, sorted(scores, reverse=True))
 
     def test_agy_print_adapter_places_model_before_print_flag(self):
         with patch("shutil.which", return_value="C:/bin/agy.exe"), patch("subprocess.run") as mock_run:
