@@ -1693,4 +1693,41 @@ class CommandCenterService:
             },
             "memory_entries": mem_entries[-60:],
             "skills": sorted(p.parent.name for p in SKILLS_DIR.glob("*/SKILL.md") if p.is_file()),
+            "continuous_learning": _read_json_safe(self.state_root / "learning" / "continuous_learning_state.json") or {
+                "worker_configured": True,
+                "status": "IDLE",
+                "paused": (self.state_root / "learning" / "learning_pause.request").exists(),
+                "lora_training_enabled": False,
+            },
+            "proactive_g8": _read_json_safe(self.state_root / "learning" / "proactive_briefs_state.json") or {
+                "enabled": True,
+                "paused": (self.state_root / "learning" / "learning_pause.request").exists(),
+                "latest_brief": None,
+                "briefs_history": [],
+            },
         }
+
+    def control_learning_and_proactive(
+        self,
+        *,
+        action: str,
+        brief_id: str = "",
+        feedback: str = "",
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Control G5/G6 continuous learning & G8 proactive morning briefs from Command Center."""
+        from scripts.agents.automation.continuous_learning_worker import ContinuousLearningWorker
+
+        worker = ContinuousLearningWorker(self.state_root)
+        act = str(action or "").strip().lower()
+        if act == "pause":
+            return {"ok": True, "state": worker.pause()}
+        if act == "resume":
+            return {"ok": True, "state": worker.resume()}
+        if act == "proactive_enable":
+            return {"ok": True, "proactive": worker.set_proactive_enabled(True)}
+        if act == "proactive_disable":
+            return {"ok": True, "proactive": worker.set_proactive_enabled(False)}
+        if act == "feedback":
+            return worker.record_brief_feedback(brief_id, feedback, note=note)
+        raise ValueError(f"Unsupported learning/proactive action: {action!r}")

@@ -707,6 +707,15 @@ def make_server(
                         resume_rejected=bool(body.get("resume_rejected", False)),
                     )
                     self._send_json(res)
+                elif path == "/api/cc/learning/control":
+                    body = self._read_json_body()
+                    res = service.control_learning_and_proactive(
+                        action=str(body.get("action") or ""),
+                        brief_id=str(body.get("brief_id") or ""),
+                        feedback=str(body.get("feedback") or ""),
+                        note=str(body.get("note") or ""),
+                    )
+                    self._send_json(res)
                 else:
                     self.send_error(404)
             except KeyError as exc:
