@@ -141,6 +141,10 @@ def diagnose_error_pattern(exact_error: str, previous_code: str = "") -> str:
         hints.append(
             "Output had unbalanced CSS/JS braces (likely truncated): remove ALL comments (`/* ... */`, `// ...`) and write compact rules with matching `{` and `}`."
         )
+    if "baserequesthandler" in low or "raw_requestline" in low or ("magicmock" in low and "bytes" in low):
+        hints.append(
+            "NEVER instantiate a BaseHTTPRequestHandler directly with MagicMock(). Start a real loopback HTTPServer(('127.0.0.1', 0), Handler) in a daemon thread and call it with urllib.request / http.client.HTTPConnection('127.0.0.1', srv.server_port), or test pure data functions directly."
+        )
     if "innerhtml" in low:
         hints.append(
             "NEVER use `.innerHTML` (not even `el.innerHTML = ''`). Clear containers with `el.replaceChildren()` or `while (el.firstChild) el.removeChild(el.firstChild);`, and build DOM with `document.createElement` + `textContent`."

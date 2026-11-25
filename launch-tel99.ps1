@@ -22,6 +22,7 @@ param(
     [string]$WaitForPid = "",
     [switch]$Hybrid,
     [switch]$Confidential,
+    [switch]$ResumeFailed,
     [switch]$Detached,
     [switch]$DryRun,
     [switch]$OpenBrowser
@@ -65,6 +66,7 @@ try {
             if ($Role) { $argv += @("--role", $Role) }
             if ($Hybrid.IsPresent) { $argv += "--hybrid" }
             if ($Confidential.IsPresent) { $argv += "--confidential" }
+            if ($ResumeFailed.IsPresent) { $argv += "--resume-rejected" }
             if ($Detached.IsPresent) {
                 New-Item -ItemType Directory -Force -Path $Project | Out-Null
                 $logDir = Join-Path $Project "artifacts"
@@ -104,6 +106,7 @@ try {
             if ($Project) { $argv += @("--project", $Project) }
             if ($Hybrid.IsPresent) { $argv += "--hybrid" }
             if ($Confidential.IsPresent) { $argv += "--confidential" }
+            if ($ResumeFailed.IsPresent) { $argv += "--resume-rejected" }
             if ($DryRun.IsPresent) { $argv += "--dry-run" }
             & $Python @argv
             exit $LASTEXITCODE

@@ -757,6 +757,7 @@ def run_autonomous_project(
     hybrid: bool = False,
     confidential: bool = False,
     explicit_specialist: str | None = None,
+    resume_rejected: bool = False,
     plan_override: dict[str, Any] | None = None,
     custom_executor=None,
 ) -> dict[str, Any]:
@@ -1063,6 +1064,22 @@ def run_autonomous_project(
             "checks_passed": passed_names,
         }
 
+    if resume_rejected:
+        from scripts.agents.automation.local_codex import exclusive
+        from scripts.agents.protocol.store import FileStore
+        camp_dir.mkdir(parents=True, exist_ok=True)
+        with exclusive(camp_dir / "runtime.lock"):
+            st = FileStore(camp_dir / "ledger")
+            for c in contracts:
+                old = st.read(f"kilo-local/{c['id']}")
+                if old and old.get("status") in ("REJECTED", "BLOCKED"):
+                    hist = list(old.get("recovery_history") or [])
+                    hist.append({"recovered_at": time.time(), "previous_status": old["status"], "reason": "operator_resume_rejected"})
+                    upd = {**old, "status": "ACK", "execution_status": "NOT_STARTED", "at": time.time(), "recovery_history": hist}
+                    upd.pop("result", None)
+                    upd.pop("verification", None)
+                    st.put_cas(f"kilo-local/{c['id']}", upd, old)
+
     rt = Runtime(
         camp_dir,
         executor=custom_executor or _default_executor,
@@ -1176,6 +1193,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--role", type=str, default=None, help="Optional explicit specialist role")
     ap.add_argument("--hybrid", action="store_true", help="Allow free Groq mentor escalation ($0.00, non-confidential only)")
     ap.add_argument("--confidential", action="store_true", help="Force 100% local Ollama execution")
+    ap.add_argument("--resume-rejected", action="store_true", help="Requeue REJECTED/BLOCKED missions while strictly preserving ACCEPTED ones")
     ap.add_argument("--progress", action="store_true", help="Print durable progress and deliverables")
     ap.add_argument("--control", choices=["pause", "resume", "stop"], default=None, help="Pause/resume/stop project run")
     args = ap.parse_args(argv)
@@ -1196,6 +1214,7 @@ def main(argv: list[str] | None = None) -> int:
         hybrid=args.hybrid,
         confidential=args.confidential,
         explicit_specialist=args.role,
+        resume_rejected=args.resume_rejected,
     )
     print(json.dumps({
         "status": delivery.get("status"),
