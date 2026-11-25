@@ -239,6 +239,30 @@ def _prior_messages_for_job(messages: list[dict], job: dict) -> list[dict]:
     return []
 
 
+def plan_dialogue_delegation(text: str, *, mode: str, team_mode: bool) -> int:
+    """Bounded, deterministic consultation budget; never authorizes cloud.
+    Legacy deep mode preserves existing API behavior. UI defaults to auto.
+    """
+    if mode not in ("fast", "auto", "deep"):
+        raise ValueError("Mode de réponse inconnu.")
+    if not team_mode or mode == "fast" or _is_pure_team_inventory_query(text):
+        return 0
+    if mode == "deep":
+        return 2
+    norm = _normalized_dialogue(text)
+    explicit = re.search(r"\b(?:mobilise|consulte|delegue|fais intervenir)\b.{0,80}\b(?:agents?|specialistes?|equipe)\b", norm)
+    review = re.search(r"\b(?:audit|contre-expertise|verification independante|analyse approfondie|analyse contradictoire)\b", norm)
+    if explicit or review:
+        return 2
+    # Open-ended planning and ordinary questions need a complete answer,
+    # not three serial CPU inferences. Delegate only a genuinely technical
+    # multipart task, and consult at most one specialist in auto.
+    technical = re.search(r"\b(?:architecture|api|code|python|deploiement|migration|base de donnees)\b", norm)
+    if technical and (len(dialogue_contract(text)) >= 3 or len(text) > 700):
+        return 1
+    return 0
+
+
 def get_enriched_team_catalog() -> list[dict[str, Any]]:
     """Return all 12 official TEL99 agents with French metadata, real passport levels, and V3/V4 scores."""
     overview = agent_cli.get_team_overview()
@@ -705,6 +729,7 @@ class CommandCenterService:
         *,
         conv_id: str,
         message: str,
+        response_mode: str | None = None,
         role: str | None = None,
         team_mode: bool | None = None,
         confidential: bool | None = None,
@@ -732,6 +757,8 @@ class CommandCenterService:
         eff_conf = bool(conv.get("confidential", True))
         eff_hyb = bool(conv.get("hybrid", False) and not eff_conf)
         eff_team = bool(conv.get("team_mode", eff_role == "coordination"))
+        mode = "deep" if response_mode is None else str(response_mode)
+        delegation_budget = plan_dialogue_delegation(text, mode=mode, team_mode=eff_team)
 
         # Append user message durably immediately
         user_msg = {
@@ -779,6 +806,8 @@ class CommandCenterService:
             "error": None,
             "assistant_message": None,
             "prompt_text": text,
+            "response_mode": mode,
+            "delegation_budget": delegation_budget,
             "user_message_id": user_msg["id"],
         }
         with self._jobs_lock:
@@ -1003,7 +1032,11 @@ class CommandCenterService:
         contract_instruction = (" Réponds avec les rubriques explicites suivantes, chacune suivie d’un contenu concret : "
                                 + "; ".join(label for _, label in contract) + ".") if contract else ""
         eff_role = job["role"]
-        eff_team = bool(job["team_mode"])
+        requested_team = bool(job["team_mode"])
+        response_mode = str(job.get("response_mode") or "deep")
+        delegation_budget = int(job.get("delegation_budget", 2 if requested_team else 0))
+        # Never discard already persisted contributions on retry.
+        eff_team = requested_team and (delegation_budget > 0 or bool(job.get("delegated_specialists")))
         eff_conf = bool(job["confidential"])
         eff_hyb = bool(job["hybrid"])
 
@@ -1023,7 +1056,7 @@ class CommandCenterService:
 
         try:
             # Pure factual team/inventory query in Commander mode: answer directly with verified 12-agent grounding (no wasteful/confusing 2-agent delegation!)
-            if eff_team and _is_pure_team_inventory_query(user_text):
+            if requested_team and _is_pure_team_inventory_query(user_text):
                 self._set_job(job_id, status="RUNNING", phase="Synthèse factuelle de l'équipe (12 spécialistes vérifiés)…")
                 c_name, c_sys, c_usr = self._build_specialist_prompts(
                     role="coordination",
@@ -1053,12 +1086,12 @@ class CommandCenterService:
                 chosen_roles = list(job.get("chosen_roles") or [])
                 if not chosen_roles:
                     picks = specialist_dispatch.select_specialists(user_text, include_verifier=False, max_specialists=3)
-                    chosen_roles = [p["role"] for p in picks if p["role"] != "coordination"][:2]
-                    if len(chosen_roles) < 2:
+                    chosen_roles = [p["role"] for p in picks if p["role"] != "coordination"][:delegation_budget]
+                    if len(chosen_roles) < delegation_budget:
                         for fallback_r in ("development", "security", "documentation"):
                             if fallback_r not in chosen_roles and fallback_r != "coordination":
                                 chosen_roles.append(fallback_r)
-                            if len(chosen_roles) >= 2:
+                            if len(chosen_roles) >= delegation_budget:
                                 break
                     self._set_job(job_id, chosen_roles=list(chosen_roles))
 
@@ -1144,7 +1177,12 @@ class CommandCenterService:
                     role=eff_role,
                     user_text=user_text,
                     history_block=history_block,
-                    extra_instructions=contract_instruction,
+                    extra_instructions=(
+                        "Réponds directement, décide si le choix t’est confié, distingue faits, hypothèses et limites. "
+                        "Ne prétends pas avoir consulté d’autres agents. "
+                        + ("Sois concis sans omettre les exigences. " if response_mode == "fast" else "")
+                        + contract_instruction
+                    ),
                 )
                 final_res = self._invoke_model_with_retry(
                     job_id=job_id,
@@ -1166,7 +1204,7 @@ class CommandCenterService:
 
             reply_text = str(final_res.get("response") or "").strip()
             missing = dialogue_missing(contract, reply_text)
-            if missing and local_deterministic_tools.detect_secret_leak(reply_text)["safe"]:
+            if missing and response_mode != "fast" and local_deterministic_tools.detect_secret_leak(reply_text)["safe"]:
                 self._set_job(job_id, status="RUNNING", phase="Contrôle de couverture et correction de la réponse…")
                 _, repair_sys, repair_usr = self._build_specialist_prompts(
                     role=reply_role, user_text=user_text, history_block="",
@@ -1207,6 +1245,8 @@ class CommandCenterService:
                 "hybrid": eff_hyb,
                 "response_kind": "team_synthesis" if (eff_team and delegated_results) else "discussion",
                 "coverage_check": {"type": "structural_only", "requested_sections": len(contract), "missing_sections": missing},
+                "response_mode": response_mode,
+                "delegation_budget": delegation_budget,
                 "delegated_specialists": delegated_results,
                 "duration_seconds": dur,
                 "created_at": _now_iso(),
