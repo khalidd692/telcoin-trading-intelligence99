@@ -147,6 +147,7 @@ class OllamaNativeProvider:
         coordination_state_root: Path | str | None = None,
         use_coordination_lease: bool = True,
         lease_wait_timeout: float = 120.0,
+        priority: str = "background",
     ):
         approved = [
             spec for spec in catalog.MODEL_CATALOG
@@ -173,6 +174,7 @@ class OllamaNativeProvider:
         self.coordination_state_root = coordination_state_root
         self.use_coordination_lease = bool(use_coordination_lease) and os.environ.get("TEL99_DISABLE_INFERENCE_LEASE", "") != "1"
         self.lease_wait_timeout = float(lease_wait_timeout)
+        self.priority = str(priority or "background")
         self.max_response_bytes = min(MAX_RESPONSE_BYTES_CAP, max(65_536, max_tokens * 32))
         self.last_metadata = {}
 
@@ -217,6 +219,7 @@ class OllamaNativeProvider:
                 model=self.model,
                 wait_timeout=self.lease_wait_timeout,
                 ttl_seconds=max(120, self.timeout + 120),
+                priority=self.priority,
             )
             if self.use_coordination_lease
             else nullcontext(None)

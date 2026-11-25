@@ -684,6 +684,75 @@ def stop_idle_llama_server(
     return {"stopped": True, "pid": pid, "port": llama_port}
 
 
+def _owner_priority_path(state_root: Path | str | None = None) -> Path:
+    root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
+    return _coord_dir(root) / "owner_interactive_priority.json"
+
+
+def set_owner_interactive_priority(
+    state_root: Path | str | None = None,
+    *,
+    job_id: str,
+    ttl_seconds: int = 180,
+) -> Path:
+    """Signal background campaigns to yield politely between tasks for an interactive owner chat."""
+    path = _owner_priority_path(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    payload = {
+        "job_id": str(job_id),
+        "pid": os.getpid(),
+        "set_at": now,
+        "expires_at": now + max(15, min(300, int(ttl_seconds))),
+    }
+    tmp = path.parent / f"{path.name}.{os.getpid()}.tmp"
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def clear_owner_interactive_priority(
+    state_root: Path | str | None = None,
+    *,
+    job_id: str | None = None,
+) -> None:
+    """Clear the owner interactive priority signal if owned by this job (or unconditionally if job_id=None)."""
+    path = _owner_priority_path(state_root)
+    if not path.is_file():
+        return
+    if job_id is not None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("job_id") not in (None, str(job_id)):
+                return
+        except (OSError, ValueError):
+            pass
+    path.unlink(missing_ok=True)
+
+
+def owner_interactive_priority_active(
+    state_root: Path | str | None = None,
+    *,
+    now: float | None = None,
+) -> dict | None:
+    """Return active non-expired owner interactive priority metadata, or None."""
+    path = _owner_priority_path(state_root)
+    if not path.is_file():
+        return None
+    ts = time.time() if now is None else float(now)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        exp = float(data.get("expires_at") or 0.0)
+        if exp <= ts:
+            path.unlink(missing_ok=True)
+            return None
+        return data
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 @contextmanager
 def local_inference_lease(
     engine: str,
@@ -698,11 +767,13 @@ def local_inference_lease(
     probe_engines: bool = True,
     ollama_port: int = 11434,
     llama_port: int = 8080,
+    priority: str = "background",
 ):
     """Host-wide exclusive CAS mutex for ALL local inference engines (concurrency = 1).
 
     Reuses `acquire_lease`/`release_lease` on `LOCAL_INFERENCE_RESOURCE`:
     - Blocks Ollama when llama-server holds the lease, and blocks llama-server when Ollama holds it.
+    - Respects interactive owner chat priority (`priority="owner"`) so background campaigns yield cleanly between tasks.
     - Reclaims confirmed dead-PID orphan leases automatically.
     - Distinguishes pre-load RAM headroom vs already-resident model RAM headroom.
     - Safely frees idle competing engines when switching between Ollama and llama-server.
@@ -713,9 +784,16 @@ def local_inference_lease(
     actor = f"engine:{clean_engine}"
     root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
     deadline = time.monotonic() + max(0.0, float(wait_timeout))
+    yield_deadline = time.monotonic() + 90.0
     lease: dict | None = None
 
     while True:
+        if priority != "owner" and time.monotonic() < yield_deadline:
+            pri = owner_interactive_priority_active(root)
+            if pri is not None and int(pri.get("pid") or -1) != os.getpid():
+                if time.monotonic() < deadline:
+                    time.sleep(min(1.5, max(0.1, deadline - time.monotonic())))
+                    continue
         reclaim_orphan_leases(root, resource_id=LOCAL_INFERENCE_RESOURCE)
         try:
             lease = acquire_lease(

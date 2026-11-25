@@ -218,6 +218,116 @@ def _probe_ai_radar_live(port: int = 8780) -> dict[str, Any]:
         return {"online": False, "http_status": None, "url": url}
 
 
+_TEAM_META_RE = re.compile(
+    r"(?i)\b(12\s+agents?|collaborateurs?|équipe|equipe|spécialistes?|specialistes?|capacit[ée]s?|"
+    r"fonctionnement|comment\s+(?:tu|vous)\s+(?:fonctionne|appren)|apprentissage|m[ée]moire|limites?|"
+    r"scores?|benchmark|v3|v4|matrice|s[ée]curit[ée]\s+100|pr[ée]sente(?:-moi)?\s+(?:ton|tes|l['’]))"
+)
+_PURE_INVENTORY_RE = re.compile(
+    r"(?i)(pr[ée]sente(?:-moi)?\s+(?:tes|les|ton|l['’])|liste\s+(?:des|tes|les)\s+(?:12\s+)?(?:agents?|collaborateurs?|sp[ée]cialistes?)|"
+    r"qui\s+(?:sont|compose)|quels?\s+sont\s+(?:tes|les)\s+(?:12\s+)?(?:agents?|r[ôo]les?|collaborateurs?|capacit[ée]s?))"
+)
+_DOMAIN_REASONING_RE = re.compile(
+    r"(?i)\b(entreprise|commercial|business|rentabilit[ée]|client|march[ée]|application|construis|code|"
+    r"python|api|serveur|budget|abonnements?|projet\s+concret|plan\s+d['’]action|architecture)\b"
+)
+
+
+def _is_team_meta_query(text: str) -> bool:
+    return bool(_TEAM_META_RE.search(str(text or "")))
+
+
+def _is_pure_team_inventory_query(text: str) -> bool:
+    """True when the user asks a factual team/capabilities/learning inventory question without a separate business/domain project."""
+    raw = str(text or "")
+    return bool(_PURE_INVENTORY_RE.search(raw)) and not bool(_DOMAIN_REASONING_RE.search(raw))
+
+
+def build_factual_team_grounding_block() -> str:
+    """Build a compact, 100% deterministic, verified grounding summary of the 12-agent team & telemetry.
+
+    Never invents unverified numbers (never claims 'Sécurité 100%'); marks uncompleted evaluations honestly.
+    """
+    team = get_enriched_team_catalog()
+    roster_lines = [
+        f"- {a['label_fr']} (`{a['name']}`, rôle `{a['role']}`): {a['tagline']}"
+        for a in team
+    ]
+    v3 = _read_json_safe(BENCH_STATE / "artifacts" / "unseen_v3_report.json") or {}
+    v4 = _read_json_safe(BENCH_STATE / "artifacts" / "unseen_v4_report.json") or {}
+    matrix = _read_json_safe(BENCH_STATE / "artifacts" / "competency_matrix_12x12.json") or {}
+    end = _read_json_safe(DESKTOP / "TEL99_ENDURANCE_20261125_RUN3" / "hour_campaign_report.json") or {}
+
+    v3l = (v3.get("local_after") or {}) if isinstance(v3, dict) else {}
+    v3h = (v3.get("hybrid_after") or {}) if isinstance(v3, dict) else {}
+    v4l = (v4.get("local_after") or v4.get("local") or {}) if isinstance(v4, dict) else {}
+    v4b = (v4.get("local_before") or {}) if isinstance(v4, dict) else {}
+    gm = (matrix.get("global_metrics") or {}) if isinstance(matrix, dict) else {}
+
+    def _fmt_bench(label: str, sec: dict) -> str:
+        tot = int(sec.get("total") or 0)
+        if tot <= 0:
+            return f"{label}: inconnu/en cours"
+        p = int(sec.get("passed") or 0)
+        pct = round((p / tot) * 100.0, 2)
+        sp = int(sec.get("critical_security_passed") or 0)
+        st = int(sec.get("critical_security_total") or 0)
+        sec_str = f", sécurité critique {sp}/{st} ({round((sp/st)*100.0, 2)}%)" if st > 0 else ""
+        return f"{label}: {p}/{tot} ({pct}%){sec_str}"
+
+    end_dur = end.get("duration_minutes")
+    end_acc = end.get("missions_accepted")
+    end_tot = end.get("missions_total")
+    end_str = (
+        f"RUN3 non validée ({end_dur} min, {end_acc}/{end_tot} acceptées, arrêt RAM)"
+        if end_dur is not None
+        else "inconnu/non validée"
+    )
+    v4_str = (
+        _fmt_bench("V4 local après", v4l)
+        if v4l
+        else (f"V4 en cours (baseline avant: {v4b.get('passed')}/{v4b.get('total')})" if v4b else "V4 en cours")
+    )
+
+    lines = [
+        "=== DONNÉES VÉRIFIÉES DE L'ÉQUIPE TEL99 (NE PAS INVENTER NI MODIFIER) ===",
+        f"Effectif exact : {len(team)} spécialistes officiels disponibles :",
+        *roster_lines,
+        "Résultats vérifiés sur disque :",
+        f"- {_fmt_bench('V3 local après apprentissage', v3l)}",
+        f"- {_fmt_bench('V3 hybride après apprentissage', v3h)}",
+        f"- {v4_str}",
+        f"- Matrice 12x12 : {gm.get('cells_evaluated', 'inconnu')}/{gm.get('cells_total', 144)} cellules évaluées (complétion en cours)",
+        f"- Endurance 60 min : {end_str}",
+        "Architecture & limites réelles :",
+        "- Mode Conversations (chat simple) : conseil, analyse, planification, AUCUNE écriture de fichier ni commande shell.",
+        "- Mode « Confier un projet » : exécution autonome détachée (Runtime CAS + sandbox Docker OS fail-closed + tests indépendants).",
+        "- Apprentissage en 2 niveaux : (1) mémoire de session isolée par conversation dans la limite 8k ; (2) apprentissage durable vérifié via MemoryStore (procédures/correctifs promus uniquement après vérification), 12 Skills spécialisés (.agents/skills/tel99-role-*), bibliothèque d'échecs & transfert cloud->local (pas de réentraînement LoRA automatique).",
+        "- Ressources hôte : Windows 11, 16 Go RAM, CPU sans GPU dédié, Ollama local gemma4:e4b-tel99-8k (concurrence=1), mode local confidentiel par défaut (hybride gratuit uniquement sur opt-in explicite non confidentiel).",
+        "RÈGLES STRICTES : cite toujours les 12 rôles exacts si on te demande l'équipe ; ne dis JAMAIS « Sécurité 100% » tant que ce n'est pas 14/14 ou 21/21 vérifié ; distingue toujours les 12 spécialistes disponibles des 1 ou 2 spécialistes réellement consultés sur ce tour.",
+    ]
+    return "\n".join(lines)
+
+
+def _classify_chat_error(exc: Exception) -> tuple[str, bool, str]:
+    """Classify a model/infra error into (error_category, retryable, french_user_message)."""
+    msg = str(exc or "").strip()
+    low = msg.lower()
+    if isinstance(exc, (ide_coordination.ResourceBusyError, ide_coordination.LeaseConflict)) or "lease" in low or "busy" in low:
+        return "CONTENTION_BUSY", True, f"Ollama local occupé par une tâche en cours ({msg[:140]})."
+    if "insufficient free ram" in low or "memory" in low or "oom" in low:
+        return "RAM_TEMPORARY", True, f"RAM libre temporairement insuffisante ({msg[:140]})."
+    if "timed out" in low or "timeout" in low:
+        return "TIMEOUT_TRANSIENT", True, f"Délai dépassé sur le modèle local ({msg[:140]})."
+    if "429" in low or "cooldown" in low or "quota" in low or "budget" in low:
+        return "QUOTA_TRANSIENT", True, f"Quota gratuit temporairement atteint ({msg[:140]})."
+    if isinstance(exc, ollama_native.ResourceUnavailableError):
+        return "TIMEOUT_TRANSIENT", True, f"Ressource modèle temporairement indisponible ({msg[:140]})."
+    if isinstance(exc, ProviderError):
+        return "CONTENTION_BUSY", True, f"Fournisseur modèle temporairement indisponible ({msg[:140]})."
+    return "PERMANENT_ERROR", False, f"{type(exc).__name__}: {msg[:180]}"
+
+
 def _default_model_call(
     *,
     system: str,
@@ -226,8 +336,10 @@ def _default_model_call(
     hybrid: bool,
     confidential: bool,
     status_cb: Callable[[str], None] | None = None,
+    cancel_ev: threading.Event | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
-    """Invoke real local Ollama (concurrence=1 CAS) or opt-in free Groq mentor ($0.00, non-confidential only)."""
+    """Invoke real local Ollama (concurrence=1 CAS + owner priority) or opt-in free Groq mentor ($0.00)."""
     policy = local_deterministic_tools.check_cloud_escalation_policy(
         confidential=confidential,
         allow_cloud=hybrid,
@@ -266,42 +378,70 @@ def _default_model_call(
             "cloud_policy_reason": policy["reason"],
         }
 
-    # Check if local Ollama inference lease is held by another campaign
-    leases = ide_coordination.active_leases(ide_coordination.default_coordination_state_root())
-    active_inf = [l for l in (leases.get("active") or []) if "ollama" in str(l.get("resource_id") or "").lower()]
-    if active_inf and status_cb:
-        status_cb("WAITING_OLLAMA")
+    coord_root = ide_coordination.default_coordination_state_root()
+    pri_id = job_id or f"cc-{uuid.uuid4().hex[:8]}"
+    ide_coordination.set_owner_interactive_priority(coord_root, job_id=pri_id, ttl_seconds=210)
+    try:
+        # Wait politely in WAITING_OLLAMA (cancellable!) while another process holds LOCAL_INFERENCE_RESOURCE
+        wait_deadline = time.monotonic() + 150.0
+        while True:
+            if cancel_ev and cancel_ev.is_set():
+                raise InterruptedError("cancelled_by_user")
+            ide_coordination.reclaim_orphan_leases(coord_root, resource_id=ide_coordination.LOCAL_INFERENCE_RESOURCE)
+            leases = ide_coordination.active_leases(coord_root)
+            active_inf = [
+                l for l in (leases.get("active") or [])
+                if l.get("resource_id") == ide_coordination.LOCAL_INFERENCE_RESOURCE
+                and int(l.get("pid") or -1) != os.getpid()
+            ]
+            if not active_inf:
+                break
+            if status_cb:
+                status_cb("WAITING_OLLAMA")
+            if time.monotonic() >= wait_deadline:
+                raise ide_coordination.ResourceBusyError(
+                    f"Ollama occupé par PID {active_inf[0].get('pid')} depuis plus de 150s"
+                )
+            time.sleep(1.0)
 
-    eng = ide_coordination.probe_local_engines()
-    resident = LOCAL_MODEL in ((eng.get("ollama") or {}).get("loaded_models") or [])
-    budget = ollama_native.compute_adaptive_budget(
-        LOCAL_MODEL,
-        task_profile="module",
-        estimated_lines=55,
-        available_memory_mib=eng.get("available_memory_mib"),
-        model_is_resident=resident,
-    )
-    if status_cb:
-        status_cb("RUNNING_LOCAL")
-    provider = ollama_native.OllamaNativeProvider(
-        model=LOCAL_MODEL,
-        timeout=budget["timeout"],
-        max_tokens=min(1200, int(budget["max_tokens"])),
-        keep_alive="120s",
-        task_profile=budget["effective_profile"],
-        num_ctx=budget["num_ctx"],
-        num_thread=budget["num_thread"],
-    )
-    reply = provider.complete(system=system, prompt=prompt)
-    return {
-        "response": reply,
-        "provider_used": "ollama",
-        "model_used": LOCAL_MODEL,
-        "cloud_calls": 0,
-        "cost_usd": 0.0,
-        "duration_seconds": round(time.monotonic() - t0, 2),
-        "cloud_policy_reason": policy["reason"],
-    }
+        eng = ide_coordination.probe_local_engines()
+        resident = LOCAL_MODEL in ((eng.get("ollama") or {}).get("loaded_models") or [])
+        budget = ollama_native.compute_adaptive_budget(
+            LOCAL_MODEL,
+            task_profile="module",
+            estimated_lines=55,
+            available_memory_mib=eng.get("available_memory_mib"),
+            model_is_resident=resident,
+        )
+        if budget.get("insufficient_ram"):
+            raise ollama_native.ResourceUnavailableError(
+                f"insufficient free RAM ({eng.get('available_memory_mib')} MiB)"
+            )
+        if status_cb:
+            status_cb("RUNNING_LOCAL")
+        provider = ollama_native.OllamaNativeProvider(
+            model=LOCAL_MODEL,
+            timeout=min(240, max(140, int(budget["timeout"]))),
+            max_tokens=min(1200, int(budget["max_tokens"])),
+            keep_alive="120s",
+            task_profile=budget["effective_profile"],
+            num_ctx=budget["num_ctx"],
+            num_thread=budget["num_thread"],
+            lease_wait_timeout=180.0,
+            priority="owner",
+        )
+        reply = provider.complete(system=system, prompt=prompt)
+        return {
+            "response": reply,
+            "provider_used": "ollama",
+            "model_used": LOCAL_MODEL,
+            "cloud_calls": 0,
+            "cost_usd": 0.0,
+            "duration_seconds": round(time.monotonic() - t0, 2),
+            "cloud_policy_reason": policy["reason"],
+        }
+    finally:
+        ide_coordination.clear_owner_interactive_priority(coord_root, job_id=pri_id)
 
 
 class CommandCenterService:
@@ -316,17 +456,46 @@ class CommandCenterService:
         self.state_root = Path(state_root).resolve()
         self.cc_dir = self.state_root / "command_center"
         self.conv_dir = self.cc_dir / "conversations"
+        self.jobs_dir = self.cc_dir / "jobs"
         self.registry_path = self.cc_dir / "projects_registry.json"
         self.cc_dir.mkdir(parents=True, exist_ok=True)
         self.conv_dir.mkdir(parents=True, exist_ok=True)
+        self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self._model_caller = model_caller or _default_model_call
 
         self._jobs_lock = threading.Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._cancel_flags: dict[str, threading.Event] = {}
+        self._load_persisted_jobs()
         self._job_queue: queue.Queue[str] = queue.Queue()
         self._worker = threading.Thread(target=self._worker_loop, name="tel99-cc-chat-worker", daemon=True)
         self._worker.start()
+
+    def _job_path(self, job_id: str) -> Path:
+        clean = re.sub(r"[^a-zA-Z0-9_-]", "", str(job_id or ""))[:64]
+        return self.jobs_dir / f"{clean}.json"
+
+    def _persist_job_unlocked(self, job: dict[str, Any]) -> None:
+        try:
+            local_deterministic_tools.write_json_atomic_locked(self._job_path(job["job_id"]), job)
+        except OSError:
+            pass
+
+    def _load_persisted_jobs(self) -> None:
+        for p in sorted(self.jobs_dir.glob("*.json"))[-40:]:
+            data = _read_json_safe(p)
+            if not isinstance(data, dict) or not data.get("job_id"):
+                continue
+            # If server restarted mid-flight, mark cleanly retryable without losing partial specialist work
+            if data.get("status") in ("QUEUED", "WAITING_OLLAMA", "RUNNING", "DELEGATING"):
+                data["status"] = "ERROR"
+                data["error_category"] = "INTERRUPTED_RESTART"
+                data["retryable"] = True
+                data["phase"] = "Interrompu par redémarrage serveur (reprise possible)"
+                data["error"] = "Requête interrompue par redémarrage ; cliquez sur Réessayer pour reprendre sans doublon."
+                self._persist_job_unlocked(data)
+            self._jobs[data["job_id"]] = data
+            self._cancel_flags[data["job_id"]] = threading.Event()
 
     # ------------------------------------------------------------------
     # Conversations CRUD (isolated per session, atomic locked JSON)
@@ -506,6 +675,11 @@ class CommandCenterService:
             "confidential": eff_conf,
             "hybrid": eff_hyb,
             "delegated_specialists": [],
+            "chosen_roles": [],
+            "auto_retries": 0,
+            "retry_count": 0,
+            "error_category": None,
+            "retryable": False,
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
             "started_at": None,
@@ -520,8 +694,37 @@ class CommandCenterService:
         with self._jobs_lock:
             self._jobs[job_id] = job
             self._cancel_flags[job_id] = cancel_ev
+            self._persist_job_unlocked(job)
         self._job_queue.put(job_id)
         return self._public_job(job)
+
+    def retry_job(self, job_id: str) -> dict[str, Any]:
+        """Resume a failed/cancelled job from its preserved partial contributions WITHOUT duplicating the user message."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                raise KeyError(f"job introuvable: {job_id}")
+            if job["status"] in ("QUEUED", "WAITING_OLLAMA", "RUNNING", "DELEGATING"):
+                return self._public_job(dict(job))
+            if job["status"] == "DONE":
+                raise ValueError("Ce job est déjà terminé.")
+            ev = threading.Event()
+            self._cancel_flags[job_id] = ev
+            job["status"] = "QUEUED"
+            job["phase"] = (
+                f"Reprise en file ({len(job.get('delegated_specialists') or [])} contribution(s) préservée(s))…"
+            )
+            job["error"] = None
+            job["error_category"] = None
+            job["retryable"] = False
+            job["auto_retries"] = 0
+            job["retry_count"] = int(job.get("retry_count") or 0) + 1
+            job["finished_at"] = None
+            job["updated_at"] = _now_iso()
+            self._persist_job_unlocked(job)
+            pub = self._public_job(dict(job))
+        self._job_queue.put(job_id)
+        return pub
 
     @staticmethod
     def _public_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -551,11 +754,13 @@ class CommandCenterService:
             if job["status"] in ("QUEUED", "WAITING_OLLAMA"):
                 job["status"] = "CANCELLED"
                 job["phase"] = "Annulé par l'utilisateur"
+                job["retryable"] = True
                 job["finished_at"] = _now_iso()
                 job["updated_at"] = _now_iso()
             elif job["status"] in ("RUNNING", "DELEGATING"):
                 job["phase"] = "Annulation demandée…"
                 job["updated_at"] = _now_iso()
+            self._persist_job_unlocked(job)
             return self._public_job(dict(job))
 
     def _set_job(self, job_id: str, **fields: Any) -> None:
@@ -563,6 +768,66 @@ class CommandCenterService:
             if job_id in self._jobs:
                 self._jobs[job_id].update(fields)
                 self._jobs[job_id]["updated_at"] = _now_iso()
+                self._persist_job_unlocked(self._jobs[job_id])
+
+    def _invoke_model_with_retry(
+        self,
+        *,
+        job_id: str,
+        system: str,
+        prompt: str,
+        role: str,
+        hybrid: bool,
+        confidential: bool,
+        status_cb: Callable[[str], None],
+        cancel_ev: threading.Event | None,
+        max_auto_retries: int = 2,
+    ) -> dict[str, Any]:
+        import inspect
+        sig_params = inspect.signature(self._model_caller).parameters
+        accepts_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values())
+        call_kwargs: dict[str, Any] = {
+            "system": system,
+            "prompt": prompt,
+            "role": role,
+            "hybrid": hybrid,
+            "confidential": confidential,
+            "status_cb": status_cb,
+        }
+        if accepts_kw or "cancel_ev" in sig_params:
+            call_kwargs["cancel_ev"] = cancel_ev
+        if accepts_kw or "job_id" in sig_params:
+            call_kwargs["job_id"] = job_id
+
+        attempt = 0
+        while True:
+            if cancel_ev and cancel_ev.is_set():
+                raise InterruptedError("cancelled_by_user")
+            try:
+                return self._model_caller(**call_kwargs)
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                cat, retryable, fr_msg = _classify_chat_error(exc)
+                if not retryable or attempt >= max_auto_retries:
+                    exc._tel99_category = cat  # type: ignore[attr-defined]
+                    exc._tel99_retryable = retryable  # type: ignore[attr-defined]
+                    exc._tel99_fr_msg = fr_msg  # type: ignore[attr-defined]
+                    raise
+                attempt += 1
+                wait_s = min(10.0, 3.0 * attempt)
+                self._set_job(
+                    job_id,
+                    status="WAITING_OLLAMA",
+                    phase=f"Contention/ressource ({cat}) — nouvelle tentative auto {attempt}/{max_auto_retries} dans {int(wait_s)}s…",
+                    auto_retries=attempt,
+                    error_category=cat,
+                )
+                deadline = time.monotonic() + wait_s
+                while time.monotonic() < deadline:
+                    if cancel_ev and cancel_ev.is_set():
+                        raise InterruptedError("cancelled_by_user")
+                    time.sleep(0.25)
 
     def _build_specialist_prompts(
         self,
@@ -571,6 +836,7 @@ class CommandCenterService:
         user_text: str,
         history_block: str,
         extra_instructions: str = "",
+        include_full_team_grounding: bool = False,
     ) -> tuple[str, str, str]:
         spec = specialist_dispatch.resolve_specialist(role)
         fr = AGENT_FRENCH_PROFILE.get(spec.role) or {"label_fr": spec.role, "tagline": spec.description}
@@ -582,18 +848,26 @@ class CommandCenterService:
             memory_dir=mem_dir if mem_dir.is_dir() else None,
             objective=user_text,
         )
+        need_grounding = include_full_team_grounding or _is_team_meta_query(user_text)
+        grounding = build_factual_team_grounding_block() if need_grounding else (
+            "Rappel équipe : TEL99 compte 12 spécialistes officiels (development, quant, quality, security, "
+            "coordination, cloud, mobile, documentation, evaluation, market_data, monitoring, release). "
+            "N'invente jamais de score (ex: ne dis jamais « Sécurité 100% ») et distingue toujours les agents consultés de l'équipe totale."
+        )
         system = (
             f"Tu es {spec.name} ({fr['label_fr']} — {fr['tagline']}), spécialiste officiel de l'équipe TEL99.\n"
             "Réponds en français de manière claire, structurée, précise et honnête sur tes limites.\n"
             "Ne prétends jamais avoir exécuté des commandes ou écrit des fichiers en mode conversation simple.\n"
             "Sécurité stricte : aucun secret, aucune commande destructrice, aucun eval/exec/shell=True/0.0.0.0.\n"
             "Respecte fidèlement les informations et contraintes fournies dans l'historique de cette session.\n"
+            f"{grounding}\n"
             + (f"\n{extra_instructions}\n" if extra_instructions else "")
         )
+        ctx_limit = 900 if need_grounding else 1800
         prompt = (
             (f"{history_block}\n\n" if history_block else "")
             + f"Nouvelle demande de l'utilisateur :\n{user_text}\n\n"
-            + f"Contexte Skill & mémoire vérifiée :\n{ctx['context_text'][:1800]}"
+            + f"Contexte Skill & mémoire vérifiée :\n{ctx['context_text'][:ctx_limit]}"
         )
         return spec.name, system, prompt
 
@@ -607,6 +881,8 @@ class CommandCenterService:
                     job_id,
                     status="ERROR",
                     phase="Erreur interne",
+                    error_category="PERMANENT_ERROR",
+                    retryable=True,
                     error=f"{type(exc).__name__}: {str(exc)[:260]}",
                     finished_at=_now_iso(),
                 )
@@ -618,15 +894,14 @@ class CommandCenterService:
             job = dict(self._jobs.get(job_id) or {})
             cancel_ev = self._cancel_flags.get(job_id)
         if not job or job.get("status") == "CANCELLED" or (cancel_ev and cancel_ev.is_set()):
-            self._set_job(job_id, status="CANCELLED", phase="Annulé par l'utilisateur", finished_at=_now_iso())
+            self._set_job(job_id, status="CANCELLED", phase="Annulé par l'utilisateur", retryable=True, finished_at=_now_iso())
             return
 
         t0 = time.monotonic()
-        self._set_job(job_id, status="RUNNING", phase="Préparation du contexte…", started_at=_now_iso())
+        self._set_job(job_id, status="RUNNING", phase="Préparation du contexte…", started_at=job.get("started_at") or _now_iso())
 
         conv_id = job["conversation_id"]
         conv = self.get_conversation(conv_id)
-        # History EXCLUDING the very last user message we are answering right now
         all_msgs = list(conv.get("messages") or [])
         prior_msgs = all_msgs[:-1] if (all_msgs and all_msgs[-1].get("role") == "user") else all_msgs
         history_block = build_bounded_history_context(prior_msgs, max_chars=2400)
@@ -638,31 +913,64 @@ class CommandCenterService:
 
         def _status_cb(code: str) -> None:
             labels = {
-                "WAITING_OLLAMA": "En attente d'Ollama local (concurrence=1)…",
+                "WAITING_OLLAMA": "En attente d'un créneau Ollama local (priorité propriétaire active)…",
                 "RUNNING_LOCAL": f"Inférence locale ({LOCAL_MODEL})…",
                 "RUNNING_HYBRID_FREE": "Inférence hybride gratuite autorisée…",
             }
             st = "WAITING_OLLAMA" if code == "WAITING_OLLAMA" else ("DELEGATING" if eff_team else "RUNNING")
             self._set_job(job_id, status=st, phase=labels.get(code, code))
 
-        delegated_results: list[dict[str, Any]] = []
+        # Preserve already-completed specialist contributions across retries!
+        delegated_results: list[dict[str, Any]] = list(job.get("delegated_specialists") or [])
+        completed_roles = {str(d.get("role")) for d in delegated_results if isinstance(d, dict) and d.get("role")}
         total_cloud_calls = 0
 
         try:
-            if eff_team:
-                # Commander mode: pick 2 genuinely relevant specialists (never artificially all 12!)
-                picks = specialist_dispatch.select_specialists(user_text, include_verifier=False, max_specialists=3)
-                chosen_roles = [p["role"] for p in picks if p["role"] != "coordination"][:2]
-                if len(chosen_roles) < 2:
-                    for fallback_r in ("development", "security", "documentation"):
-                        if fallback_r not in chosen_roles and fallback_r != "coordination":
-                            chosen_roles.append(fallback_r)
-                        if len(chosen_roles) >= 2:
-                            break
+            # Pure factual team/inventory query in Commander mode: answer directly with verified 12-agent grounding (no wasteful/confusing 2-agent delegation!)
+            if eff_team and _is_pure_team_inventory_query(user_text):
+                self._set_job(job_id, status="RUNNING", phase="Synthèse factuelle de l'équipe (12 spécialistes vérifiés)…")
+                c_name, c_sys, c_usr = self._build_specialist_prompts(
+                    role="coordination",
+                    user_text=user_text,
+                    history_block=history_block,
+                    include_full_team_grounding=True,
+                    extra_instructions=(
+                        "Réponds directement en tant que Coordinateur en utilisant EXCLUSIVEMENT les données vérifiées ci-dessus : "
+                        "liste les 12 collaborateurs exacts, précise les scores vérifiés avec dénominateurs (sans jamais dire 100% sécurité), "
+                        "explique clairement les 2 niveaux d'apprentissage (session + mémoire procédurale durable/Skills vérifiés) et la différence Chat simple vs Mode Projet."
+                    ),
+                )
+                final_res = self._invoke_model_with_retry(
+                    job_id=job_id,
+                    system=c_sys,
+                    prompt=c_usr,
+                    role="coordination",
+                    hybrid=eff_hyb,
+                    confidential=eff_conf,
+                    status_cb=_status_cb,
+                    cancel_ev=cancel_ev,
+                )
+                total_cloud_calls += int(final_res.get("cloud_calls") or 0)
+                reply_agent = c_name
+                reply_role = "coordination"
+            elif eff_team:
+                chosen_roles = list(job.get("chosen_roles") or [])
+                if not chosen_roles:
+                    picks = specialist_dispatch.select_specialists(user_text, include_verifier=False, max_specialists=3)
+                    chosen_roles = [p["role"] for p in picks if p["role"] != "coordination"][:2]
+                    if len(chosen_roles) < 2:
+                        for fallback_r in ("development", "security", "documentation"):
+                            if fallback_r not in chosen_roles and fallback_r != "coordination":
+                                chosen_roles.append(fallback_r)
+                            if len(chosen_roles) >= 2:
+                                break
+                    self._set_job(job_id, chosen_roles=list(chosen_roles))
 
                 for s_role in chosen_roles:
+                    if s_role in completed_roles:
+                        continue
                     if cancel_ev and cancel_ev.is_set():
-                        self._set_job(job_id, status="CANCELLED", phase="Annulé avant délégation", finished_at=_now_iso())
+                        self._set_job(job_id, status="CANCELLED", phase="Annulé avant délégation", retryable=True, finished_at=_now_iso())
                         return
                     fr_lbl = (AGENT_FRENCH_PROFILE.get(s_role) or {}).get("label_fr", s_role)
                     self._set_job(job_id, status="DELEGATING", phase=f"Délégation réelle à {fr_lbl}…")
@@ -675,13 +983,15 @@ class CommandCenterService:
                             "Donne une contribution concrète, concise (<= 10 lignes), actionnable dans ton domaine."
                         ),
                     )
-                    s_res = self._model_caller(
+                    s_res = self._invoke_model_with_retry(
+                        job_id=job_id,
                         system=s_sys,
                         prompt=s_usr,
                         role=s_role,
                         hybrid=eff_hyb,
                         confidential=eff_conf,
                         status_cb=_status_cb,
+                        cancel_ev=cancel_ev,
                     )
                     total_cloud_calls += int(s_res.get("cloud_calls") or 0)
                     s_text = str(s_res.get("response") or "").strip()
@@ -696,10 +1006,11 @@ class CommandCenterService:
                         "duration_seconds": s_res.get("duration_seconds"),
                         "response": s_text,
                     })
+                    completed_roles.add(s_role)
                     self._set_job(job_id, delegated_specialists=list(delegated_results))
 
                 if cancel_ev and cancel_ev.is_set():
-                    self._set_job(job_id, status="CANCELLED", phase="Annulé avant synthèse", finished_at=_now_iso())
+                    self._set_job(job_id, status="CANCELLED", phase="Annulé avant synthèse", retryable=True, finished_at=_now_iso())
                     return
 
                 self._set_job(job_id, status="RUNNING", phase="Synthèse du Coordinateur…")
@@ -711,19 +1022,21 @@ class CommandCenterService:
                     role="coordination",
                     user_text=(
                         f"{user_text}\n\n"
-                        f"Contributions réelles reçues de tes spécialistes :\n{contrib_blob}\n\n"
-                        "Synthétise ces contributions en un plan concret, cohérent et actionnable en français, "
-                        "en indiquant clairement ce qui relève de la discussion et ce qui pourrait faire l'objet d'un projet autonome."
+                        f"Contributions réelles reçues des {len(delegated_results)} spécialistes consultés (sur les 12 disponibles dans l'équipe TEL99) :\n{contrib_blob}\n\n"
+                        "Synthétise ces contributions en un plan concret, réaliste et actionnable en français, "
+                        "en respectant strictement les contraintes matérielles/budgétaires de l'utilisateur et en indiquant clairement ce qui relève de la discussion vs d'un projet autonome."
                     ),
                     history_block=history_block,
                 )
-                final_res = self._model_caller(
+                final_res = self._invoke_model_with_retry(
+                    job_id=job_id,
                     system=c_sys,
                     prompt=c_usr,
                     role="coordination",
                     hybrid=eff_hyb,
                     confidential=eff_conf,
                     status_cb=_status_cb,
+                    cancel_ev=cancel_ev,
                 )
                 total_cloud_calls += int(final_res.get("cloud_calls") or 0)
                 reply_agent = c_name
@@ -734,20 +1047,22 @@ class CommandCenterService:
                     user_text=user_text,
                     history_block=history_block,
                 )
-                final_res = self._model_caller(
+                final_res = self._invoke_model_with_retry(
+                    job_id=job_id,
                     system=a_sys,
                     prompt=a_usr,
                     role=eff_role,
                     hybrid=eff_hyb,
                     confidential=eff_conf,
                     status_cb=_status_cb,
+                    cancel_ev=cancel_ev,
                 )
                 total_cloud_calls += int(final_res.get("cloud_calls") or 0)
                 reply_agent = a_name
                 reply_role = eff_role
 
             if cancel_ev and cancel_ev.is_set():
-                self._set_job(job_id, status="CANCELLED", phase="Annulé par l'utilisateur", finished_at=_now_iso())
+                self._set_job(job_id, status="CANCELLED", phase="Annulé par l'utilisateur", retryable=True, finished_at=_now_iso())
                 return
 
             reply_text = str(final_res.get("response") or "").strip()
@@ -768,7 +1083,7 @@ class CommandCenterService:
                 "cost_usd": 0.0,
                 "confidential": eff_conf,
                 "hybrid": eff_hyb,
-                "response_kind": "team_synthesis" if eff_team else "discussion",
+                "response_kind": "team_synthesis" if (eff_team and delegated_results) else "discussion",
                 "delegated_specialists": delegated_results,
                 "duration_seconds": dur,
                 "created_at": _now_iso(),
@@ -786,6 +1101,9 @@ class CommandCenterService:
                 job_id,
                 status="DONE",
                 phase="Terminé",
+                error=None,
+                error_category=None,
+                retryable=False,
                 provider_used=asst_msg["provider_used"],
                 model_used=asst_msg["model_used"],
                 duration_seconds=dur,
@@ -793,20 +1111,34 @@ class CommandCenterService:
                 assistant_message=asst_msg,
                 finished_at=_now_iso(),
             )
-        except ProviderError as exc:
+        except InterruptedError:
             self._set_job(
                 job_id,
-                status="ERROR",
-                phase="Ressource modèle indisponible",
-                error=f"Modèle temporairement indisponible : {str(exc)[:220]}",
+                status="CANCELLED",
+                phase="Annulé par l'utilisateur (contributions partielles conservées)",
+                retryable=True,
+                delegated_specialists=delegated_results,
                 finished_at=_now_iso(),
             )
         except Exception as exc:
+            cat = getattr(exc, "_tel99_category", None)
+            retryable = getattr(exc, "_tel99_retryable", None)
+            fr_msg = getattr(exc, "_tel99_fr_msg", None)
+            if cat is None:
+                cat, retryable, fr_msg = _classify_chat_error(exc)
+            preserved_note = (
+                f" ({len(delegated_results)} contribution(s) déjà calculée(s) conservée(s))"
+                if delegated_results
+                else ""
+            )
             self._set_job(
                 job_id,
                 status="ERROR",
-                phase="Erreur d'exécution",
-                error=f"{type(exc).__name__}: {str(exc)[:220]}",
+                phase=f"Échec ({cat}){preserved_note}",
+                error_category=cat,
+                retryable=bool(retryable),
+                error=f"{fr_msg}{preserved_note}",
+                delegated_specialists=delegated_results,
                 finished_at=_now_iso(),
             )
 

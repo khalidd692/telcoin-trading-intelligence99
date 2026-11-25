@@ -10,6 +10,7 @@
     activeConvId: null,
     activeConv: null,
     activeJobId: null,
+    retryableJobId: null,
     previewData: null,
     selectedFile: null,
   };
@@ -64,11 +65,13 @@
     });
   }
 
-  function setChatBanner(text, cls, showCancel) {
+  function setChatBanner(text, cls, showCancel, retryJobId) {
     const bar = $("chatStatusText");
     bar.textContent = text;
     bar.className = cls || "muted";
     $("btnCancelJob").classList.toggle("hidden", !showCancel);
+    state.retryableJobId = retryJobId || null;
+    $("btnRetryJob").classList.toggle("hidden", !state.retryableJobId);
   }
 
   function renderTopbar() {
@@ -187,6 +190,22 @@
       state.activeConv = conv;
       renderConversationsList();
       renderActiveConversation();
+      // Surface any retryable failed/interrupted job for this conversation so user can resume without duplicating!
+      if (!state.activeJobId && state.cc && Array.isArray(state.cc.chat_jobs)) {
+        const failed = state.cc.chat_jobs.find(
+          (j) => j.conversation_id === conv.id && (j.status === "ERROR" || j.status === "CANCELLED")
+        );
+        if (failed) {
+          setChatBanner(
+            `Dernière requête interrompue (${failed.error_category || failed.status}) : ${failed.error || failed.phase}`,
+            "status-err",
+            false,
+            failed.job_id
+          );
+        } else {
+          setChatBanner("Prêt — mode local confidentiel par défaut (aucun appel modèle automatique).", "muted", false, null);
+        }
+      }
     } catch (err) {
       setChatBanner(`Erreur chargement conversation : ${err.message}`, "status-err", false);
     }
@@ -305,14 +324,20 @@
         setChatBanner(`[${job.status}] ${job.phase || "Traitement en cours…"}${delInfo}`, "status-warn", true);
         setTimeout(pollActiveJob, 1200);
       } else {
+        const finishedId = state.activeJobId;
         state.activeJobId = null;
         $("btnSendChat").disabled = false;
         if (job.status === "DONE") {
-          setChatBanner(`Réponse reçue (${job.provider_used}/${job.model_used} en ${job.duration_seconds}s).`, "status-ok", false);
+          setChatBanner(`Réponse reçue (${job.provider_used}/${job.model_used} en ${job.duration_seconds}s).`, "status-ok", false, null);
         } else if (job.status === "CANCELLED") {
-          setChatBanner("Demande annulée proprement.", "muted", false);
+          setChatBanner("Demande annulée proprement (reprise sans doublon disponible).", "muted", false, finishedId);
         } else {
-          setChatBanner(`Erreur : ${job.error || job.phase || "échec"}`, "status-err", false);
+          setChatBanner(
+            `Erreur [${job.error_category || "ERREUR"}] : ${job.error || job.phase || "échec"}`,
+            "status-err",
+            false,
+            finishedId
+          );
         }
         if (state.activeConvId) {
           await selectConversation(state.activeConvId);
@@ -747,9 +772,23 @@
       if (!state.activeJobId) return;
       try {
         await apiMutate("POST", `/api/cc/jobs/${encodeURIComponent(state.activeJobId)}/cancel`, {});
-        setChatBanner("Annulation envoyée…", "muted", false);
+        setChatBanner("Annulation envoyée…", "muted", false, null);
       } catch (err) {
-        setChatBanner(`Erreur annulation : ${err.message}`, "status-err", false);
+        setChatBanner(`Erreur annulation : ${err.message}`, "status-err", false, null);
+      }
+    });
+    $("btnRetryJob").addEventListener("click", async () => {
+      if (!state.retryableJobId) return;
+      try {
+        const jid = state.retryableJobId;
+        $("btnSendChat").disabled = true;
+        setChatBanner("Reprise de la requête sans doublon…", "status-warn", true, null);
+        const job = await apiMutate("POST", `/api/cc/jobs/${encodeURIComponent(jid)}/retry`, {});
+        state.activeJobId = job.job_id;
+        pollActiveJob();
+      } catch (err) {
+        $("btnSendChat").disabled = false;
+        setChatBanner(`Erreur reprise : ${err.message}`, "status-err", false, state.retryableJobId);
       }
     });
     $("btnPreviewProject").addEventListener("click", previewProject);

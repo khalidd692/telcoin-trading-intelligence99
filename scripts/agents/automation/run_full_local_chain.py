@@ -251,6 +251,35 @@ def write_durable_resume_state(report_dir: Path = DEFAULT_REPORT_DIR) -> dict:
     return {"ok": True, "path": str(Path(report_dir) / "mandate_resume_state.json"), "state": state}
 
 
+def evaluate_endurance_report(report_path: Path, *, min_minutes: float = 60.0) -> dict:
+    """Strictly validate endurance business criteria (process exit 0 alone is NEVER sufficient)."""
+    if not report_path.is_file():
+        return {"ok": False, "reason": f"endurance report missing: {report_path}"}
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "reason": f"unreadable endurance report: {exc}"}
+    dur = float(data.get("duration_minutes") or data.get("elapsed_minutes") or 0.0)
+    acc = int(data.get("missions_accepted") or 0)
+    blk = int(data.get("missions_blocked") or 0)
+    tot = int(data.get("missions_total") or 0)
+    reasons: list[str] = []
+    if dur < float(min_minutes):
+        reasons.append(f"duration_minutes={dur:.2f} < {min_minutes:.1f}")
+    if acc <= 0:
+        reasons.append(f"missions_accepted={acc} (must be > 0)")
+    if blk > 0:
+        reasons.append(f"missions_blocked={blk}/{tot}")
+    return {
+        "ok": not reasons,
+        "duration_minutes": dur,
+        "missions_accepted": acc,
+        "missions_blocked": blk,
+        "missions_total": tot,
+        "reason": None if not reasons else "; ".join(reasons),
+    }
+
+
 def _check_pause_or_stop(state_dir: Path) -> str | None:
     if (state_dir / "stop.request").exists():
         return "STOPPED_BY_OPERATOR"
@@ -580,18 +609,25 @@ def main(argv: list[str] | None = None) -> int:
             _record_step("lora_corpus", res)
         elif step == "endurance":
             end_run3 = Path.home() / "Desktop" / "TEL99_ENDURANCE_20261125_RUN3"
+            end_rep_path = end_run3 / "hour_campaign_report.json"
             script = ROOT / "tests" / "run_hour_autonomy_acceptance.py"
             res = _run_subprocess(
                 [
                     py, "-B", str(script),
                     "--min-minutes", str(args.endurance_minutes),
                     "--state-root", str(end_run3 / "hour_campaign"),
-                    "--report", str(end_run3 / "hour_campaign_report.json"),
+                    "--report", str(end_rep_path),
                 ],
                 cwd=ROOT,
                 timeout=int(args.endurance_minutes * 60 + 900),
                 log_path=report_dir / "endurance.log",
             )
+            # Process exit 0 alone is NEVER sufficient: enforce real business endurance criteria!
+            end_ver = evaluate_endurance_report(end_rep_path, min_minutes=float(args.endurance_minutes))
+            res["endurance_validation"] = end_ver
+            if not end_ver["ok"]:
+                res["ok"] = False
+                res["error"] = end_ver["reason"]
             _record_step("endurance", res)
         else:
             _record_step(step, {"ok": False, "error": f"unknown step {step!r}"})

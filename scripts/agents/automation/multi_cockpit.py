@@ -106,7 +106,10 @@ HTML = r"""<!doctype html>
 
           <div class="chat-status-bar">
             <span id="chatStatusText" class="muted">Prêt — mode local confidentiel par défaut (aucun appel modèle automatique).</span>
-            <button id="btnCancelJob" class="btn danger sm hidden">Annuler</button>
+            <div class="row-inline">
+              <button id="btnRetryJob" class="btn primary sm hidden">Réessayer</button>
+              <button id="btnCancelJob" class="btn danger sm hidden">Annuler</button>
+            </div>
           </div>
 
           <div class="chat-composer">
@@ -550,16 +553,19 @@ def make_server(
             return data
 
         def _send_bytes(self, body: bytes, ctype: str, code: int = 200) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", STRICT_CSP)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", STRICT_CSP)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                pass
 
         def _send_json(self, payload: dict | list, code: int = 200) -> None:
             self._send_bytes(
@@ -665,6 +671,9 @@ def make_server(
                 elif path.startswith("/api/cc/jobs/") and path.endswith("/cancel"):
                     jid = unquote(path[len("/api/cc/jobs/") : -len("/cancel")]).strip("/")
                     self._send_json(service.cancel_job(jid))
+                elif path.startswith("/api/cc/jobs/") and path.endswith("/retry"):
+                    jid = unquote(path[len("/api/cc/jobs/") : -len("/retry")]).strip("/")
+                    self._send_json(service.retry_job(jid), code=202)
                 elif path == "/api/cc/projects/preview":
                     body = self._read_json_body()
                     res = service.preview_project_scope(

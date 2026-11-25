@@ -384,6 +384,142 @@ class CommandCenterTests(unittest.TestCase):
             # Business requirements missing from code/tests MUST NOT be VERIFIED!
             self.assertFalse(d["all_mandatory_requirements_verified"])
 
+    def test_05_factual_team_grounding_12_roles_honest_scores_and_direct_inventory(self):
+        # 1) Grounding block must contain all 12 official agent IDs & honest denominators (never invented 100% security)
+        block = cc_svc.build_factual_team_grounding_block()
+        for agent_id in (
+            "tel99-dev", "tel99-analyst", "tel99-verifier", "tel99-security",
+            "tel99-coordination", "tel99-cloud", "tel99-mobile", "tel99-documentation",
+            "tel99-evaluation", "tel99-market-data", "tel99-monitoring", "tel99-release",
+        ):
+            self.assertIn(agent_id, block)
+        self.assertIn("MemoryStore", block)
+        self.assertIn("Skills", block)
+        self.assertIn("ne dis JAMAIS « Sécurité 100% »", block)
+
+        # 2) Pure team inventory query in Commander mode answers directly with full 12-agent grounding (1 call, not 3)
+        calls: list[dict] = []
+
+        def fake_caller(*, system: str, prompt: str, role: str, hybrid: bool, confidential: bool, status_cb=None):
+            calls.append({"role": role, "system": system, "prompt": prompt})
+            return {
+                "response": "Voici les 12 collaborateurs TEL99 (tel99-dev ... tel99-release), avec apprentissage session + mémoire vérifiée.",
+                "provider_used": "ollama",
+                "model_used": "gemma4:e4b-tel99-8k",
+                "cloud_calls": 0,
+                "duration_seconds": 0.02,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = cc_svc.CommandCenterService(Path(tmp) / "state", model_caller=fake_caller)
+            conv = svc.create_conversation(title="Présentation équipe", role="coordination", team_mode=True)
+            job = svc.submit_chat_message(
+                conv_id=conv["id"],
+                message="Présente-moi tes 12 collaborateurs, leurs capacités actuelles, leur fonctionnement et leur apprentissage.",
+            )
+            for _ in range(40):
+                j = svc.get_job(job["job_id"])
+                if j["status"] == "DONE":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(j["status"], "DONE")
+            self.assertEqual(len(calls), 1, "Pure team inventory query must answer directly without wasteful 2-agent delegation")
+            self.assertEqual(calls[0]["role"], "coordination")
+            self.assertIn("tel99-release", calls[0]["system"])
+            self.assertIn("tel99-market-data", calls[0]["system"])
+
+    def test_06_contention_auto_retry_preserves_partial_delegations_and_manual_retry_no_duplicate(self):
+        from scripts.agents.automation import ollama_native
+
+        specialist_calls: list[str] = []
+        fail_plan = {"fail_count": 3}  # Fail 3 times on 2nd specialist so first run hits ERROR after 2 auto-retries, then manual retry succeeds!
+
+        def flaky_caller(*, system: str, prompt: str, role: str, hybrid: bool, confidential: bool, status_cb=None):
+            specialist_calls.append(role)
+            if len(specialist_calls) >= 2 and fail_plan["fail_count"] > 0:
+                fail_plan["fail_count"] -= 1
+                raise ollama_native.ResourceUnavailableError("Ollama request timed out")
+            return {
+                "response": f"Contribution réelle de {role}.",
+                "provider_used": "ollama",
+                "model_used": "gemma4:e4b-tel99-8k",
+                "cloud_calls": 0,
+                "duration_seconds": 0.02,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "state"
+            svc = cc_svc.CommandCenterService(root, model_caller=flaky_caller)
+            conv = svc.create_conversation(title="Contention test", role="coordination", team_mode=True)
+            job = svc.submit_chat_message(
+                conv_id=conv["id"],
+                message="Analyse la rentabilité et l'architecture Python d'une petite activité de conseil local sur PC 16 Go sans budget.",
+            )
+            # Wait for first run to exhaust 2 auto-retries and land cleanly in ERROR with specialist #1 preserved!
+            for _ in range(180):
+                j = svc.get_job(job["job_id"])
+                if j["status"] in ("ERROR", "DONE"):
+                    break
+                time.sleep(0.1)
+            self.assertEqual(j["status"], "ERROR", j)
+            self.assertEqual(j["error_category"], "TIMEOUT_TRANSIENT")
+            self.assertTrue(j["retryable"])
+            self.assertEqual(len(j["delegated_specialists"]), 1, "Specialist #1 contribution MUST be preserved!")
+            first_role = j["delegated_specialists"][0]["role"]
+
+            # Manual retry MUST NOT duplicate user message AND MUST NOT re-call already-completed specialist #1!
+            count_first_role_before = specialist_calls.count(first_role)
+            retried = svc.retry_job(job["job_id"])
+            self.assertEqual(retried["status"], "QUEUED")
+            for _ in range(80):
+                j2 = svc.get_job(job["job_id"])
+                if j2["status"] == "DONE":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(j2["status"], "DONE", j2)
+            self.assertEqual(len(j2["delegated_specialists"]), 2)
+            self.assertEqual(
+                specialist_calls.count(first_role),
+                count_first_role_before,
+                "Manual retry must skip already-computed specialist #1!",
+            )
+            reloaded_conv = svc.get_conversation(conv["id"])
+            user_msgs = [m for m in reloaded_conv["messages"] if m["role"] == "user"]
+            asst_msgs = [m for m in reloaded_conv["messages"] if m["role"] == "assistant"]
+            self.assertEqual(len(user_msgs), 1, "Retry must NEVER duplicate the user message")
+            self.assertEqual(len(asst_msgs), 1)
+
+    def test_07_owner_priority_and_honest_endurance_validation(self):
+        from scripts.agents.automation import ide_coordination, run_full_local_chain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "coord"
+            self.assertIsNone(ide_coordination.owner_interactive_priority_active(root))
+            ide_coordination.set_owner_interactive_priority(root, job_id="job-owner-1", ttl_seconds=60)
+            active = ide_coordination.owner_interactive_priority_active(root)
+            self.assertIsNotNone(active)
+            self.assertEqual(active["job_id"], "job-owner-1")
+            ide_coordination.clear_owner_interactive_priority(root, job_id="job-other")
+            self.assertIsNotNone(ide_coordination.owner_interactive_priority_active(root))
+            ide_coordination.clear_owner_interactive_priority(root, job_id="job-owner-1")
+            self.assertIsNone(ide_coordination.owner_interactive_priority_active(root))
+
+            # Honest endurance validation rejects RUN3-like 14.55 min / 0 accepted
+            bad_rep = Path(tmp) / "bad_endurance.json"
+            bad_rep.write_text(json.dumps({
+                "duration_minutes": 14.55, "missions_accepted": 0, "missions_blocked": 164, "missions_total": 164
+            }), encoding="utf-8")
+            ev_bad = run_full_local_chain.evaluate_endurance_report(bad_rep, min_minutes=60.0)
+            self.assertFalse(ev_bad["ok"])
+            self.assertIn("14.55", ev_bad["reason"])
+
+            good_rep = Path(tmp) / "good_endurance.json"
+            good_rep.write_text(json.dumps({
+                "duration_minutes": 61.2, "missions_accepted": 18, "missions_blocked": 0, "missions_total": 18
+            }), encoding="utf-8")
+            ev_good = run_full_local_chain.evaluate_endurance_report(good_rep, min_minutes=60.0)
+            self.assertTrue(ev_good["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
