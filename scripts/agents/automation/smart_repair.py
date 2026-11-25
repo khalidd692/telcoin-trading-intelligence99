@@ -7,14 +7,59 @@ Addresses three measured causes of local agent failure:
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
 from typing import Sequence
 
 MAX_ERROR_CHARS = 300
 MAX_CODE_CHARS = 2600
+MAX_DIFF_LINES = 36
 MAX_LESSONS = 3
 MAX_PRIOR_ATTEMPTS = 4
+
+
+def compute_bounded_diff(before_code: str, after_code: str, *, max_lines: int = MAX_DIFF_LINES) -> str:
+    """Return a bounded unified diff between two consecutive candidate attempts."""
+    diff = list(difflib.unified_diff(
+        (before_code or "").splitlines(),
+        (after_code or "").splitlines(),
+        fromfile="prev_attempt",
+        tofile="last_attempt",
+        lineterm="",
+        n=2,
+    ))
+    if len(diff) > max_lines:
+        diff = diff[:max_lines] + ["... [diff truncated]"]
+    return "\n".join(diff)
+
+
+def build_self_critique_checklist(role: str, target_file: str) -> str:
+    """Concise pre-verification self-critique checklist tailored to file type."""
+    ext = target_file.rsplit(".", 1)[-1].lower() if "." in target_file else ""
+    checks = ["All required exports/signatures present", "Edge cases (None, empty, invalid types) handled"]
+    if ext == "py":
+        checks.extend(["Stdlib-only imports & valid Python syntax", "No eval/exec/shell=True/0.0.0.0"])
+    elif ext in ("js", "html", "css"):
+        checks.extend(["Balanced braces/tags & valid ES6/DOM IDs", "No eval/new Function/document.write/inline script"])
+    return f"Self-critique ({role} on {target_file}): " + "; ".join(checks) + "."
+
+
+def suggest_repair_strategy(attempts_log: Sequence[dict], current_model: str) -> dict:
+    """Recommend next repair action: targeted_patch, switch_local_model, or decompose_task."""
+    if not attempts_log:
+        return {"strategy": "targeted_patch", "reason": "initial repair"}
+    repeated_count = sum(1 for row in attempts_log if row.get("repeated"))
+    trunc_count = sum(1 for row in attempts_log if row.get("done_reason") == "length")
+    if trunc_count >= 2:
+        return {"strategy": "decompose_task", "reason": "repeated token-length truncation; split module"}
+    if repeated_count >= 1 or len(attempts_log) >= 2:
+        return {
+            "strategy": "switch_local_model",
+            "reason": f"model {current_model} stalled or repeated across {len(attempts_log)} attempts",
+            "exclude_model": current_model,
+        }
+    return {"strategy": "targeted_patch", "reason": "single localized error"}
 
 
 def code_fingerprint(code: str) -> str:
@@ -72,6 +117,9 @@ def build_smart_repair_prompt(
     contract_constraints: Sequence[str] = (),
     prior_attempts: Sequence[dict] = (),
     memory_lessons: Sequence[str] = (),
+    previous_diff: str = "",
+    target_file: str = "",
+    role: str = "tel99-dev",
 ) -> str:
     """Build a bounded, anti-repetition repair prompt combining full diagnostic signal."""
     parts = [
@@ -92,6 +140,8 @@ def build_smart_repair_prompt(
             fp = str(row.get("code_sha256") or "")[:10]
             hist_lines.append(f"Attempt {num} [{fp}]: {err}")
         parts.append("Already-tried approaches (DO NOT REPEAT):\n- " + "\n- ".join(hist_lines))
+    if previous_diff and previous_diff.strip():
+        parts.append("Previous diff (what changed last time):\n" + previous_diff.strip()[:1000])
     if memory_lessons:
         parts.append(
             "Relevant verified memory lessons:\n- "
@@ -102,6 +152,8 @@ def build_smart_repair_prompt(
         if len(snippet) > MAX_CODE_CHARS:
             snippet = snippet[:MAX_CODE_CHARS] + "\n# [truncated for 8k context]"
         parts.append("Previous code to repair:\n" + snippet)
+    if target_file:
+        parts.append(build_self_critique_checklist(role, target_file))
     parts.append(
         "Fix the exact failed check while keeping all passing checks green. "
         "Output ONLY the complete corrected file."

@@ -16,7 +16,43 @@ from typing import Any
 from scripts.agents import specialist_dispatch
 from scripts.agents.automation import ollama_native, smart_repair
 
-# Calibration set (used to tune prompts/procedures) vs Held-out evaluation set (unseen during tuning)
+# Calibration set (used to tune prompts/procedures) — strictly separate from HELD_OUT_EVAL_EXERCISES
+CALIBRATION_EXERCISES: list[dict[str, Any]] = [
+    {
+        "id": "cal-dev-clamp-int",
+        "role": "development",
+        "difficulty": "easy",
+        "task_profile": "patch",
+        "objective": (
+            "Write a Python function `clamp_int(value, low, high)` that validates int (rejecting bool), "
+            "validates low <= high, and returns value clamped to [low, high]."
+        ),
+        "test_code": (
+            "assert clamp_int(5, 0, 10) == 5\n"
+            "assert clamp_int(-3, 0, 10) == 0\n"
+            "assert clamp_int(99, 0, 10) == 10\n"
+            "try:\n    clamp_int(True, 0, 10); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
+    {
+        "id": "cal-coord-dag-order",
+        "role": "coordination",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `plan_ready_tasks(tasks, completed_ids)` where each task is a dict "
+            "{'id': str, 'dependencies': list[str]}. Return sorted list of task ids not in completed_ids "
+            "whose dependencies are all in completed_ids."
+        ),
+        "test_code": (
+            "tasks = [{'id': 'b', 'dependencies': ['a']}, {'id': 'a', 'dependencies': []}, {'id': 'c', 'dependencies': ['a']}]\n"
+            "assert plan_ready_tasks(tasks, set()) == ['a']\n"
+            "assert plan_ready_tasks(tasks, {'a'}) == ['b', 'c']\n"
+        ),
+    },
+]
+
+# Held-out evaluation set (unseen during prompt/skill calibration to prevent overfitting)
 HELD_OUT_EVAL_EXERCISES: list[dict[str, Any]] = [
     {
         "id": "eval-dev-budget-guard",
@@ -77,19 +113,124 @@ HELD_OUT_EVAL_EXERCISES: list[dict[str, Any]] = [
 
 
 def audit_12_roles_curriculum() -> dict[str, Any]:
-    """Map all 12 official TEL99 roles to their competencies, skills, and evaluation focus."""
+    """Map all 12 official TEL99 roles to their competencies, skills, tracks, and evaluation focus."""
     specs = specialist_dispatch.list_specialists()
+    held_out_roles = {ex["role"] for ex in HELD_OUT_EVAL_EXERCISES}
+    calibration_roles = {ex["role"] for ex in CALIBRATION_EXERCISES}
     curriculum = []
     for row in specs:
+        role = row["role"]
         curriculum.append({
-            "role": row["role"],
+            "role": role,
             "name": row["name"],
             "active_default": row["active"],
+            "specialty": row.get("specialty", "code"),
             "skills": row["skills"],
             "preferred_tier": row["preferred_tier"],
+            "memory_scope": row.get("memory_scope", "project+role"),
             "eval_focus": row["acceptance_criteria"],
+            "levels": ("L1_basics", "L2_repair_and_guardrails", "L3_multi_file_coordination"),
+            "has_calibration_exercise": role in calibration_roles,
+            "has_held_out_exercise": role in held_out_roles,
         })
-    return {"total_roles": len(curriculum), "curriculum": curriculum}
+    return {
+        "total_roles": len(curriculum),
+        "calibration_count": len(CALIBRATION_EXERCISES),
+        "held_out_count": len(HELD_OUT_EVAL_EXERCISES),
+        "curriculum": curriculum,
+    }
+
+
+def evaluate_improvement_gate(
+    before_report: dict[str, Any],
+    after_report: dict[str, Any],
+    *,
+    min_delta: float = 0.0,
+) -> dict[str, Any]:
+    """Decide PROMOTE / KEEP_BASELINE / ROLLBACK strictly from held-out before/after metrics."""
+    b_rate = float(before_report.get("success_rate") or 0.0)
+    a_rate = float(after_report.get("success_rate") or 0.0)
+    b_fp = int(before_report.get("first_pass") or 0)
+    a_fp = int(after_report.get("first_pass") or 0)
+    delta_rate = round(a_rate - b_rate, 4)
+
+    b_by_id = {r["id"]: bool(r.get("ok")) for r in (before_report.get("results") or []) if isinstance(r, dict) and "id" in r}
+    a_by_id = {r["id"]: bool(r.get("ok")) for r in (after_report.get("results") or []) if isinstance(r, dict) and "id" in r}
+    regressions = sorted(ex_id for ex_id, ok in b_by_id.items() if ok and not a_by_id.get(ex_id, False))
+    improvements = sorted(ex_id for ex_id, ok in a_by_id.items() if ok and not b_by_id.get(ex_id, False))
+
+    if regressions and delta_rate <= 0.0:
+        decision = "ROLLBACK"
+        reason = f"Held-out regression detected on {', '.join(regressions)} (delta={delta_rate:+.4f})."
+    elif delta_rate > min_delta or (delta_rate >= min_delta and a_fp > b_fp and not regressions):
+        decision = "PROMOTE"
+        reason = f"Held-out gain verified: rate {b_rate:.2%} -> {a_rate:.2%}, first_pass {b_fp} -> {a_fp}."
+    elif delta_rate < 0.0:
+        decision = "ROLLBACK"
+        reason = f"Held-out success rate decreased ({b_rate:.2%} -> {a_rate:.2%})."
+    else:
+        decision = "KEEP_BASELINE"
+        reason = f"No net held-out improvement (rate={a_rate:.2%}, first_pass={a_fp})."
+
+    return {
+        "decision": decision,
+        "reason": reason,
+        "before_success_rate": b_rate,
+        "after_success_rate": a_rate,
+        "delta_success_rate": delta_rate,
+        "before_first_pass": b_fp,
+        "after_first_pass": a_fp,
+        "improvements": improvements,
+        "regressions": regressions,
+    }
+
+
+def snapshot_agent_profile_version(
+    store_dir: Path | str,
+    *,
+    version_id: str,
+    profile_data: dict[str, Any],
+    metrics: dict[str, Any] | None = None,
+) -> Path:
+    """Persist a versioned, rollback-capable agent prompt/skill/routing configuration snapshot."""
+    if not version_id or "/" in version_id or "\\" in version_id or ".." in version_id:
+        raise ValueError("invalid version_id")
+    root = Path(store_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "version_id": version_id,
+        "saved_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "security_guardrails_mutable": False,
+        "profile_data": profile_data,
+        "metrics": metrics or {},
+    }
+    dest = root / f"profile_{version_id}.json"
+    tmp = dest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(dest)
+    active = root / "active_profile.json"
+    tmp_active = active.with_suffix(".json.tmp")
+    tmp_active.write_text(json.dumps({"active_version": version_id, "snapshot_file": dest.name}, indent=2) + "\n", encoding="utf-8")
+    tmp_active.replace(active)
+    return dest
+
+
+def rollback_agent_profile_version(store_dir: Path | str, *, target_version: str) -> dict[str, Any]:
+    """Restore active_profile.json to a previously saved version snapshot without deleting history."""
+    root = Path(store_dir)
+    dest = root / f"profile_{target_version}.json"
+    if not dest.is_file():
+        raise FileNotFoundError(f"Profile version snapshot not found: {target_version}")
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    active = root / "active_profile.json"
+    tmp_active = active.with_suffix(".json.tmp")
+    tmp_active.write_text(
+        json.dumps({"active_version": target_version, "snapshot_file": dest.name, "rolled_back": True}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    tmp_active.replace(active)
+    return data
 
 
 def _verify_python_exercise(code: str, test_code: str) -> dict[str, Any]:

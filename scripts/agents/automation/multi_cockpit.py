@@ -93,8 +93,9 @@ async function refresh() {
     const kpis = [
       ['Contrôleurs actifs', d.feed.active_pins.length],
       ['Archivés complets', d.feed.archived_pins.length],
-      ['Missions acceptées', `${d.summary.accepted}/${d.summary.missions_total}`],
-      ['Mémoire / Procédures', `${d.memory.entries_total} (${d.memory.procedures} proc.)`],
+      ['Missions acceptées', `${d.summary.accepted}/${d.summary.missions_total} (${Math.round((d.summary.final_success_rate||0)*100)}%)`],
+      ['First-pass / Réparées', `${Math.round((d.summary.first_pass_rate||0)*100)}% · ${d.summary.repaired} rép.`],
+      ['Mémoire / Skills', `${d.memory.entries_total} (${d.memory.procedures} proc.) · ${d.summary.skills_count ?? (d.skills||[]).length} skills`],
     ];
     el('kpis').replaceChildren(...kpis.map(([k,v]) => { const c = txt('div','','card'); c.append(txt('div',v,'num'), txt('div',k,'label')); return c; }));
     el('campaigns').replaceChildren(...(d.campaigns.length ? d.campaigns.map(c => {
@@ -210,6 +211,43 @@ def _improvement_proposals(root: Path) -> dict:
         return {}
 
 
+def _read_optional_json(path: Path) -> dict | list | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _academy_summary(root: Path) -> dict | None:
+    data = _read_optional_json(root / "learning" / "academy_summary.json")
+    return data if isinstance(data, dict) else None
+
+
+def _evolution_telemetry(root: Path) -> dict:
+    """Surface real on-disk passports, calibration, failure library, trajectories & champion-challenger (zero fabricated stats)."""
+    learning_dir = root / "learning"
+    passports = _read_optional_json(learning_dir / "agent_passports.json")
+    calibration = _read_optional_json(learning_dir / "calibration_metrics.json")
+    champion = _read_optional_json(learning_dir / "champion_challenger.json")
+    failures = _read_optional_json(learning_dir / "failure_library.json")
+    traj_file = learning_dir / "trajectories.jsonl"
+    traj_count = 0
+    if traj_file.is_file():
+        try:
+            traj_count = sum(1 for line in traj_file.read_text(encoding="utf-8").splitlines() if line.strip())
+        except OSError:
+            traj_count = 0
+    return {
+        "passports": passports if isinstance(passports, dict) else None,
+        "calibration": calibration if isinstance(calibration, dict) else None,
+        "champion_challenger": champion if isinstance(champion, dict) else None,
+        "failure_library_count": len(failures) if isinstance(failures, list) else 0,
+        "trajectories_count": traj_count,
+    }
+
+
 def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
                    controls_enabled: bool = False, controls_token: str | None = None,
                    providers_override: dict | None = None) -> dict:
@@ -298,6 +336,11 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
     }
     coordination = ide_coordination.active_leases(root)
 
+    skills = _discover_project_skills()
+    terminal_tasks = sum(int(v.get("tasks") or 0) for v in (metrics.get("measured_quality") or {}).values())
+    first_pass_accepted = sum(int(v.get("first_pass_accepted") or 0) for v in (metrics.get("measured_quality") or {}).values())
+    final_accepted = sum(int(v.get("accepted") or 0) for v in (metrics.get("measured_quality") or {}).values())
+
     snapshot = {
         "schema_version": 1,
         "read_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -311,20 +354,26 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
         "learning": {
             "measured_quality": metrics["measured_quality"],
             "improvement_proposals": _improvement_proposals(root),
+            "academy_summary": _academy_summary(root),
+            "evolution": _evolution_telemetry(root),
         },
         "memory": _memory_summary(root),
         "recovery": recovery,
         "providers": providers,
         "sdk_backend": probe_sdk_backend(),
-        "skills": _discover_project_skills(),
+        "skills": skills,
         "team_catalog": team_catalog,
         "coordination": coordination,
         "summary": {
             "campaigns": len(campaigns),
             "missions_total": metrics["missions_total"],
             "accepted": metrics["accepted"],
+            "first_pass_accepted": first_pass_accepted,
+            "first_pass_rate": round(first_pass_accepted / terminal_tasks, 4) if terminal_tasks else 0.0,
+            "final_success_rate": round(final_accepted / terminal_tasks, 4) if terminal_tasks else 0.0,
             "repaired": metrics["repaired"],
             "pending": metrics["pending"],
+            "skills_count": len(skills),
         },
         "resources": {
             "available_memory_mib": available_memory_mib(),

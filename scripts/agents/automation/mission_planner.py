@@ -227,6 +227,58 @@ def assess_and_decompose_mission(
     }
 
 
+def revise_plan_after_failure(
+    subtasks: list[dict],
+    *,
+    failed_id: str,
+    error_class: str,
+    completed_ids: set[str] | list[str] = (),
+) -> dict:
+    """Revise an active plan after a failure while strictly preserving already-completed tasks."""
+    done = set(completed_ids)
+    if failed_id in done:
+        raise ValueError(f"cannot revise already completed task {failed_id!r}")
+    revised: list[dict] = []
+    replacement_tail: str | None = None
+    action = "keep"
+
+    for row in subtasks:
+        tid = row["id"]
+        if tid in done:
+            revised.append(dict(row))
+            continue
+        if tid == failed_id:
+            if error_class in ("MODEL_ERROR", "VERIFICATION_ERROR", "ENVIRONMENT_ERROR"):
+                split = assess_and_decompose_mission(
+                    {**row, "estimated_lines": max(int(row.get("estimated_lines") or 70), 90)},
+                    max_safe_lines=45,
+                    max_functions_per_subtask=1,
+                )
+                parts = split["subtasks"]
+                revised.extend(parts)
+                replacement_tail = parts[-1]["id"]
+                action = "split_failed_task"
+            else:
+                revised.append({**row, "retry_hint": f"address {error_class}"})
+                action = "annotate_retry"
+            continue
+        updated = dict(row)
+        if replacement_tail and failed_id in (updated.get("dependencies") or []):
+            updated["dependencies"] = [
+                replacement_tail if dep == failed_id else dep
+                for dep in updated["dependencies"]
+            ]
+        revised.append(updated)
+
+    return {
+        "action": action,
+        "failed_id": failed_id,
+        "error_class": error_class,
+        "preserved_completed": sorted(done),
+        "subtasks": revised,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)

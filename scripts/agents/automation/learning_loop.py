@@ -87,6 +87,86 @@ def retrieve_lessons(memory_root: Path | str, project: str, mission: dict,
     return notes
 
 
+def retrieve_scoped_lessons(
+    memory_root: Path | str,
+    project: str,
+    mission: dict,
+    *,
+    role: str | None = None,
+    verified_only: bool = False,
+    limit: int = 3,
+) -> dict:
+    """Retrieve deduplicated lessons segmented by scope (individual/project/collective/procedural)."""
+    empty = {
+        "lessons": [],
+        "by_scope": {"individual": [], "project": [], "collective": [], "procedural": []},
+        "total_bytes": 0,
+        "verified_only": bool(verified_only),
+    }
+    if not isinstance(project, str) or not project.strip() or not 1 <= limit <= 6:
+        return empty
+    root = Path(memory_root)
+    if not root.exists():
+        return empty
+    store = MemoryStore(root)
+    query_parts = [
+        str(mission.get("path", "")),
+        str(mission.get("target_file", "")),
+        str(mission.get("function", "")),
+        str(mission.get("objective", "")),
+    ]
+    query = " ".join(part for part in query_parts if part).strip()
+    if not query:
+        return empty
+    entries = store.search(
+        project,
+        query,
+        limit=limit * 4,
+        kinds=("fix", "error", "procedure", "fact"),
+        include_superseded=False,
+        include_common=(project != COMMON_PROJECT),
+    )
+    if verified_only:
+        entries = [e for e in entries if e.verified]
+    kind_rank = {"fix": 0, "procedure": 1, "error": 2, "decision": 3, "fact": 4}
+    entries.sort(key=lambda e: (not e.verified, kind_rank.get(e.kind, 9), e.id))
+
+    by_scope: dict[str, list[str]] = {"individual": [], "project": [], "collective": [], "procedural": []}
+    seen_ids: set[str] = set()
+    lessons: list[str] = []
+    total_bytes = 0
+    for entry in entries:
+        if entry.id in seen_ids:
+            continue
+        seen_ids.add(entry.id)
+        badge = "verified" if entry.verified else "advisory"
+        title = _clean_text(entry.title, limit=110)
+        summary = _clean_text(entry.body, limit=150)
+        line = _clean_text(f"[{entry.kind}|{badge}] {title}: {summary}", limit=MAX_LESSON_CHARS)
+
+        if entry.kind == "procedure":
+            bucket = "procedural"
+        elif role and entry.author == role:
+            bucket = "individual"
+        elif entry.project == COMMON_PROJECT:
+            bucket = "collective"
+        else:
+            bucket = "project"
+        by_scope[bucket].append(line)
+
+        encoded = len(line.encode("utf-8"))
+        if len(lessons) < limit and total_bytes + encoded <= MAX_LESSONS_BYTES:
+            lessons.append(line)
+            total_bytes += encoded
+
+    return {
+        "lessons": lessons,
+        "by_scope": by_scope,
+        "total_bytes": total_bytes,
+        "verified_only": bool(verified_only),
+    }
+
+
 def _failed_checks(verification: dict | None) -> list[str]:
     if not isinstance(verification, dict):
         return []
@@ -115,8 +195,8 @@ def record_outcome(memory_root: Path | str, mission: dict, state: dict) -> list[
     result = state.get("result") if isinstance(state.get("result"), dict) else {}
     model = verification.get("model") or result.get("model") or mission.get("model") or "unknown"
     history = state.get("attempt_history") if isinstance(state.get("attempt_history"), list) else []
-    path = str(mission.get("path", ""))
-    func = str(mission.get("function", ""))
+    path = str(mission.get("path") or mission.get("target_file") or "")
+    func = str(mission.get("function") or mission.get("target_file") or mid)
 
     if status == "ACCEPTED" and history:
         eid = f"fix-{mid}"

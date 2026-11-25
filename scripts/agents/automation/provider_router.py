@@ -483,6 +483,81 @@ class AgyPrintAdapter:
         return raw
 
 
+# Evidence-backed local specialty priors (updated from TEL99 57-min endurance & comparative benchmarks).
+LOCAL_SPECIALTY_BONUS: dict[str, dict[str, float]] = {
+    "local/ollama-gemma4-e4b": {
+        "python": 0.14, "javascript": 0.14, "analysis": 0.16, "planning": 0.16,
+        "repair": 0.14, "documentation": 0.18, "reasoning": 0.12, "tools": 0.04,
+    },
+    "local/ollama-qwen3.5-9b": {
+        "python": 0.16, "javascript": 0.12, "analysis": 0.10, "planning": 0.10,
+        "repair": 0.16, "documentation": 0.08, "reasoning": 0.18, "tools": 0.06,
+    },
+    "local/ollama-qwen2.5-coder-7b": {
+        "python": 0.02, "javascript": 0.04, "analysis": 0.0, "planning": 0.0,
+        "repair": 0.0, "documentation": 0.0, "reasoning": 0.0, "tools": 0.14,
+    },
+}
+
+
+def select_executor_for_specialty(
+    specialty: str,
+    *,
+    difficulty: str = "medium",
+    confidential: bool = True,
+    allow_subscription_cli: bool = False,
+    measured_quality: dict | None = None,
+    exclude: tuple[str, ...] | list[str] = (),
+    inventory: dict | None = None,
+) -> dict:
+    """Select best eligible model for a specific specialty while strictly enforcing no-extra-spend."""
+    task_kind = "orchestration" if specialty in ("planning", "coordination", "architecture") else "code"
+    base = select_executor(
+        task_kind=task_kind,
+        difficulty=difficulty,
+        confidential=confidential,
+        allow_subscription_cli=allow_subscription_cli,
+        measured_quality=measured_quality,
+        exclude=exclude,
+        inventory=inventory,
+    )
+    if not base.get("ok"):
+        return {**base, "specialty": specialty}
+    pool = [base["chosen"], *base["fallbacks"]]
+    ranked = []
+    for cand in pool:
+        bonus = LOCAL_SPECIALTY_BONUS.get(cand.get("id", ""), {}).get(specialty, 0.0)
+        ranked.append({**cand, "specialty_bonus": bonus, "score": round(cand["score"] + bonus, 4)})
+    ranked.sort(key=lambda row: (-row["score"], row["id"]))
+    return {
+        **base,
+        "specialty": specialty,
+        "chosen": ranked[0],
+        "fallbacks": ranked[1:],
+    }
+
+
+def select_fallback_model(
+    failed_models: tuple[str, ...] | list[str],
+    *,
+    specialty: str = "python",
+    difficulty: str = "medium",
+    confidential: bool = True,
+    measured_quality: dict | None = None,
+    inventory: dict | None = None,
+) -> dict:
+    """Switch to another authorized LOCAL_FREE model when the primary model fails (never escalates to paid APIs)."""
+    return select_executor_for_specialty(
+        specialty,
+        difficulty=difficulty,
+        confidential=confidential,
+        allow_subscription_cli=False,
+        measured_quality=measured_quality,
+        exclude=tuple(failed_models),
+        inventory=inventory,
+    )
+
+
 def build_adapter(selection: dict, *, allow_subscription_cli: bool = False,
                   use_sdk_backend: bool = False):
     """Instantiate an authorized adapter from a router selection."""

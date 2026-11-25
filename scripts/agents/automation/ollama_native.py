@@ -22,8 +22,8 @@ class _NoRedirect(HTTPRedirectHandler):
 ALLOWED_KEEP_ALIVE = frozenset({"0s", "60s", "90s", "120s"})
 TASK_PROFILE_LIMITS: dict[str, tuple[int, int]] = {
     "patch": (1024, 90),
-    "module": (2048, 180),
-    "large_module": (4096, 300),
+    "module": (2048, 240),
+    "large_module": (4096, 360),
 }
 MAX_RESPONSE_BYTES_CAP = 512 * 1024
 
@@ -57,12 +57,15 @@ def compute_adaptive_budget(
     ram_clamped = False
     effective_profile = task_profile
 
-    # Protect 16 GB host: clamp large_module (4096) down to module (2048) if free RAM < 2500 MiB.
-    if effective_profile == "large_module" and available_memory_mib is not None and available_memory_mib < 2500:
+    # Protect 16 GB host without falsely clamping an already-loaded 7.5B model:
+    # - large_module (4096) clamps to module (2048) if free RAM < 2200 MiB.
+    # - module (2048) only clamps to patch (1024) in true OOM danger (< 700 MiB),
+    #   because an already-resident Gemma 4 model legitimately leaves ~1100-1800 MiB free.
+    if effective_profile == "large_module" and available_memory_mib is not None and available_memory_mib < 2200:
         effective_profile = "module"
         max_cap, timeout_cap = TASK_PROFILE_LIMITS[effective_profile]
         ram_clamped = True
-    if effective_profile == "module" and available_memory_mib is not None and available_memory_mib < 1400:
+    if effective_profile == "module" and available_memory_mib is not None and available_memory_mib < 700:
         effective_profile = "patch"
         max_cap, timeout_cap = TASK_PROFILE_LIMITS[effective_profile]
         ram_clamped = True
@@ -71,14 +74,14 @@ def compute_adaptive_budget(
     if effective_profile == "patch":
         chosen_tokens = min(max_cap, max(512, est_tokens))
     elif effective_profile == "module":
-        chosen_tokens = min(max_cap, max(1024, 2048 if estimated_lines >= 60 else est_tokens))
+        chosen_tokens = min(max_cap, max(1024, 2048 if estimated_lines >= 75 else est_tokens))
     else:
         chosen_tokens = min(max_cap, max(2048, 4096 if estimated_lines >= 120 else est_tokens))
 
     tok_s = float(measured_tok_per_sec) if (measured_tok_per_sec and measured_tok_per_sec > 0.5) else (
-        6.0 if "9b" in model.lower() else 14.0
+        5.5 if "9b" in model.lower() else 9.5
     )
-    computed_timeout = int(round((chosen_tokens / tok_s) * 1.45 + 25))
+    computed_timeout = int(round((chosen_tokens / tok_s) * 1.35 + 30))
     chosen_timeout = max(30, min(timeout_cap, computed_timeout))
 
     return {
@@ -127,7 +130,7 @@ class OllamaNativeProvider:
         self.max_response_bytes = min(MAX_RESPONSE_BYTES_CAP, max(65_536, max_tokens * 32))
         self.last_metadata = {}
 
-    def complete(self, *, system: str, prompt: str) -> str:
+    def complete(self, *, system: str, prompt: str, response_format: str | dict | None = None) -> str:
         self.last_metadata = {}
         payload = {
             "model": self.model,
@@ -141,6 +144,10 @@ class OllamaNativeProvider:
                 "temperature": 0,
             },
         }
+        if response_format is not None:
+            if response_format != "json" and not isinstance(response_format, dict):
+                raise ProviderError("invalid Ollama response_format; expected 'json' or JSON schema dict")
+            payload["format"] = response_format
         # Request final code immediately for supported thinking models only.
         # Older code-only models need no thinking override.
         if self.model in ("gemma4:e4b-tel99-8k", "qwen3.5:9b-q4_K_M"):
@@ -159,7 +166,11 @@ class OllamaNativeProvider:
                 if response.status != 200:
                     raise ProviderError("Ollama returned a non-success HTTP status")
                 raw = response.read(self.max_response_bytes + 1)
+        except TimeoutError as exc:
+            raise ProviderError("Ollama request timed out") from exc
         except OSError as exc:
+            if isinstance(getattr(exc, "reason", None), TimeoutError) or "timed out" in str(exc).lower():
+                raise ProviderError("Ollama request timed out") from exc
             raise ProviderError("Ollama native API unavailable") from exc
         if len(raw) > self.max_response_bytes:
             raise ProviderError("Ollama response exceeds limit")
@@ -220,9 +231,10 @@ class OllamaNativeProvider:
             )
             if not cont or not cont.strip():
                 break
-            cleaned = re.sub(r"^```[a-zA-Z0-9_-]*[ \t]*\r?\n?", "", cont.strip())
-            cleaned = re.sub(r"\r?\n?```$", "", cleaned)
-            answer = answer.rstrip() + "\n" + cleaned
+            cleaned = re.sub(r"^```[a-zA-Z0-9_-]*[ \t]*\r?\n?", "", cont)
+            cleaned = re.sub(r"\r?\n?```\s*$", "", cleaned)
+            sep = " " if (not answer.endswith("\n") and answer.rstrip().endswith((",", "(", "=", "+", ".", "\\"))) else "\n"
+            answer = answer.rstrip("\r\n") + sep + cleaned.lstrip("\r\n")
             continuations += 1
         self.last_metadata["continuations"] = continuations
         return answer
