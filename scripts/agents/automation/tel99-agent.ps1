@@ -64,8 +64,13 @@ Push-Location -LiteralPath $repo
 try {
     switch ($Mode) {
         "Start" {
+            if ($AutoFeed.IsPresent -and $Manifest) {
+                throw "Choose either -AutoFeed or -Manifest, never both."
+            }
             Write-Host "TEL99 [1/4] Doctor..."
-            & $python -B -m scripts.agents.automation.env_doctor --state $StateDir --auto-feed
+            $doctorArgs = @("-B", "-m", "scripts.agents.automation.env_doctor", "--state", $StateDir)
+            if (-not $Manifest) { $doctorArgs += "--auto-feed" }
+            & $python @doctorArgs
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
             Write-Host "TEL99 [2/4] Preflight..."

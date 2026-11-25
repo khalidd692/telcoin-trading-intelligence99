@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[3]
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
-from scripts.agents.automation import local_codegen, local_team
 from scripts.agents.automation.autonomy_runtime import fingerprint, validate_contract
+from scripts.agents.automation import local_codegen, local_team
 from scripts.agents.automation.env_doctor import DEFAULT_SANDBOX_IMAGE
 from scripts.agents.automation.github_local_code_campaign import APPROVAL, MANDATE, LocalCodeCampaign
 from scripts.agents.automation.kilo_github_adapter import REPO
