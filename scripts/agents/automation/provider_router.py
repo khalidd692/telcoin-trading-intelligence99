@@ -153,8 +153,12 @@ def validate_cloud_egress_safe(system: str, prompt: str, *, confidential: bool) 
     return True, None
 
 
+class CloudBudgetLedgerError(RuntimeError):
+    """Raised internally when the durable cloud budget ledger is corrupted (fail-closed)."""
+
+
 class CloudBudgetLedger:
-    """Durable daily request/token budget and 429 cooldown tracker for free cloud providers."""
+    """Durable, file-locked, fail-closed daily request/token budget and 429 cooldown tracker."""
 
     def __init__(self, path: Path | str | None = None, *, budgets: dict[str, dict[str, int]] | None = None):
         if path is None:
@@ -166,22 +170,28 @@ class CloudBudgetLedger:
     def _today_utc() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    def _load(self) -> dict:
+    @property
+    def _lock_path(self) -> Path:
+        return self.path.parent / f"{self.path.name}.lock"
+
+    def _load_locked(self) -> dict:
         if not self.path.is_file():
             return {"schema_version": 1, "providers": {}}
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("providers"), dict):
-                return data
-        except (OSError, ValueError):
-            pass
-        return {"schema_version": 1, "providers": {}}
+            raw = self.path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, ValueError) as exc:
+            raise CloudBudgetLedgerError(f"corrupted cloud budget ledger: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("providers"), dict):
+            raise CloudBudgetLedgerError("corrupted cloud budget ledger: invalid schema")
+        return data
 
-    def _save(self, data: dict) -> None:
+    def _save_locked(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
+        import threading
+        tmp = self.path.parent / f"{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
         tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(self.path)
+        os.replace(tmp, self.path)
 
     def _provider_state(self, data: dict, provider: str) -> dict:
         today = self._today_utc()
@@ -198,14 +208,13 @@ class CloudBudgetLedger:
             data["providers"][provider] = st
         return st
 
-    def status(self, provider: str, *, now: float | None = None) -> dict:
-        ts = time.time() if now is None else float(now)
-        data = self._load()
+    def _status_from_data(self, data: dict, provider: str, ts: float) -> dict:
         st = self._provider_state(data, provider)
         lim = self.budgets.get(provider, {"max_requests_per_day": 50, "max_tokens_per_day": 50_000})
         cooldown_rem = round(max(0.0, float(st.get("cooldown_until_ts") or 0.0) - ts), 1)
         return {
             **st,
+            "corrupted": False,
             "max_requests_per_day": lim["max_requests_per_day"],
             "max_tokens_per_day": lim["max_tokens_per_day"],
             "remaining_requests_budget": max(0, lim["max_requests_per_day"] - int(st["requests_today"])),
@@ -213,8 +222,35 @@ class CloudBudgetLedger:
             "cooldown_remaining_s": cooldown_rem,
         }
 
+    def status(self, provider: str, *, now: float | None = None) -> dict:
+        from scripts.agents.automation import local_deterministic_tools
+        ts = time.time() if now is None else float(now)
+        lim = self.budgets.get(provider, {"max_requests_per_day": 50, "max_tokens_per_day": 50_000})
+        with local_deterministic_tools.file_lock(self._lock_path):
+            try:
+                data = self._load_locked()
+            except CloudBudgetLedgerError as exc:
+                return {
+                    "date_utc": self._today_utc(),
+                    "requests_today": lim["max_requests_per_day"],
+                    "tokens_today": lim["max_tokens_per_day"],
+                    "cooldown_until_ts": 0.0,
+                    "rate_limit_hits": 0,
+                    "last_headers": {},
+                    "corrupted": True,
+                    "error": str(exc),
+                    "max_requests_per_day": lim["max_requests_per_day"],
+                    "max_tokens_per_day": lim["max_tokens_per_day"],
+                    "remaining_requests_budget": 0,
+                    "remaining_tokens_budget": 0,
+                    "cooldown_remaining_s": 0.0,
+                }
+            return self._status_from_data(data, provider, ts)
+
     def can_call(self, provider: str, *, estimated_tokens: int = 1500, now: float | None = None) -> tuple[bool, str]:
         st = self.status(provider, now=now)
+        if st.get("corrupted"):
+            return False, "cloud budget ledger corrupted; fail-closed"
         if st["cooldown_remaining_s"] > 0:
             return False, f"provider in 429 cooldown for {st['cooldown_remaining_s']}s"
         if st["remaining_requests_budget"] <= 0:
@@ -223,30 +259,92 @@ class CloudBudgetLedger:
             return False, "daily free token budget exhausted"
         return True, "ok"
 
-    def record_usage(self, provider: str, *, prompt_tokens: int = 0, completion_tokens: int = 0, headers: dict | None = None) -> dict:
-        data = self._load()
-        st = self._provider_state(data, provider)
-        st["requests_today"] = int(st.get("requests_today") or 0) + 1
-        st["tokens_today"] = int(st.get("tokens_today") or 0) + max(0, int(prompt_tokens)) + max(0, int(completion_tokens))
-        if isinstance(headers, dict):
-            tracked = {
-                k.lower(): str(v)[:80]
-                for k, v in headers.items()
-                if k.lower().startswith("x-ratelimit-") or k.lower() == "retry-after"
+    def reserve_budget(
+        self,
+        provider: str,
+        *,
+        estimated_tokens: int = 1500,
+        now: float | None = None,
+    ) -> tuple[bool, str, dict | None]:
+        """Atomically check AND reserve request+token budget under exclusive file lock (prevents concurrent over-spend)."""
+        from scripts.agents.automation import local_deterministic_tools
+        ts = time.time() if now is None else float(now)
+        est = max(1, int(estimated_tokens))
+        with local_deterministic_tools.file_lock(self._lock_path):
+            try:
+                data = self._load_locked()
+            except CloudBudgetLedgerError:
+                return False, "cloud budget ledger corrupted; fail-closed", None
+            st_view = self._status_from_data(data, provider, ts)
+            if st_view["cooldown_remaining_s"] > 0:
+                return False, f"provider in 429 cooldown for {st_view['cooldown_remaining_s']}s", None
+            if st_view["remaining_requests_budget"] <= 0:
+                return False, "daily free request budget exhausted", None
+            if st_view["remaining_tokens_budget"] < est:
+                return False, "daily free token budget exhausted", None
+            st = self._provider_state(data, provider)
+            st["requests_today"] = int(st.get("requests_today") or 0) + 1
+            st["tokens_today"] = int(st.get("tokens_today") or 0) + est
+            self._save_locked(data)
+            return True, "ok", {
+                "provider": provider,
+                "date_utc": st["date_utc"],
+                "reserved_tokens": est,
+                "last_headers": dict(st.get("last_headers") or {}),
             }
-            if tracked:
-                st["last_headers"] = tracked
-        self._save(data)
-        return st
+
+    def reconcile_usage(
+        self,
+        provider: str,
+        reservation: dict | None,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        headers: dict | None = None,
+    ) -> dict:
+        """Adjust a prior atomic reservation to actual token usage and rate-limit headers."""
+        from scripts.agents.automation import local_deterministic_tools
+        actual = max(0, int(prompt_tokens)) + max(0, int(completion_tokens))
+        reserved = int((reservation or {}).get("reserved_tokens") or 0)
+        delta = actual - reserved
+        with local_deterministic_tools.file_lock(self._lock_path):
+            data = self._load_locked()
+            st = self._provider_state(data, provider)
+            if reservation is None:
+                st["requests_today"] = int(st.get("requests_today") or 0) + 1
+                st["tokens_today"] = int(st.get("tokens_today") or 0) + actual
+            else:
+                st["tokens_today"] = max(0, int(st.get("tokens_today") or 0) + delta)
+            if isinstance(headers, dict):
+                tracked = {
+                    k.lower(): str(v)[:80]
+                    for k, v in headers.items()
+                    if k.lower().startswith("x-ratelimit-") or k.lower() == "retry-after"
+                }
+                if tracked:
+                    st["last_headers"] = tracked
+            self._save_locked(data)
+            return st
+
+    def record_usage(self, provider: str, *, prompt_tokens: int = 0, completion_tokens: int = 0, headers: dict | None = None) -> dict:
+        return self.reconcile_usage(
+            provider,
+            None,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            headers=headers,
+        )
 
     def record_rate_limit(self, provider: str, *, retry_after_s: float = 60.0, now: float | None = None) -> dict:
+        from scripts.agents.automation import local_deterministic_tools
         ts = time.time() if now is None else float(now)
-        data = self._load()
-        st = self._provider_state(data, provider)
-        st["rate_limit_hits"] = int(st.get("rate_limit_hits") or 0) + 1
-        st["cooldown_until_ts"] = max(float(st.get("cooldown_until_ts") or 0.0), ts + max(5.0, float(retry_after_s)))
-        self._save(data)
-        return st
+        with local_deterministic_tools.file_lock(self._lock_path):
+            data = self._load_locked()
+            st = self._provider_state(data, provider)
+            st["rate_limit_hits"] = int(st.get("rate_limit_hits") or 0) + 1
+            st["cooldown_until_ts"] = max(float(st.get("cooldown_until_ts") or 0.0), ts + max(5.0, float(retry_after_s)))
+            self._save_locked(data)
+            return st
 
 
 def _parse_reset_seconds(header_val: str | None, default: float = 60.0) -> float:
@@ -1001,13 +1099,12 @@ class OpenAICompatFreeCloudAdapter:
             return self._fallback_to_ollama(system=system, prompt=prompt, reason=f"{self.env_name} missing", response_format=response_format)
 
         est_tok = max(256, (len(system) + len(prompt)) // 4 + self.max_tokens // 2)
-        can_call, b_reason = self.budget.can_call(self.provider, estimated_tokens=est_tok)
+        can_call, b_reason, reservation = self.budget.reserve_budget(self.provider, estimated_tokens=est_tok)
         if not can_call:
             return self._fallback_to_ollama(system=system, prompt=prompt, reason=b_reason, response_format=response_format)
 
         # Gentle TPM pacing based on real provider headers (avoids unnecessary 429s on 8k TPM free tiers)
-        bstat = self.budget.status(self.provider)
-        last_hdrs = bstat.get("last_headers") or {}
+        last_hdrs = (reservation or {}).get("last_headers") or {}
         try:
             rem_tok = int(last_hdrs.get("x-ratelimit-remaining-tokens", "999999"))
             if rem_tok < max(1200, est_tok):
@@ -1048,6 +1145,10 @@ class OpenAICompatFreeCloudAdapter:
                 raw = resp.read(512_000).decode("utf-8", errors="replace")
                 resp_headers = dict(resp.headers.items())
         except HTTPError as exc:
+            try:
+                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+            except CloudBudgetLedgerError:
+                pass
             if exc.code == 429:
                 retry_hdr = (
                     (exc.headers.get("Retry-After") or exc.headers.get("x-ratelimit-reset-tokens"))
@@ -1055,7 +1156,10 @@ class OpenAICompatFreeCloudAdapter:
                     else None
                 )
                 wait_s = min(65.0, _parse_reset_seconds(retry_hdr, default=30.0))
-                self.budget.record_rate_limit(self.provider, retry_after_s=wait_s)
+                try:
+                    self.budget.record_rate_limit(self.provider, retry_after_s=wait_s)
+                except CloudBudgetLedgerError:
+                    pass
                 return self._fallback_to_ollama(
                     system=system, prompt=prompt, reason=f"HTTP 429 cooldown {wait_s:.0f}s", response_format=response_format
                 )
@@ -1063,6 +1167,10 @@ class OpenAICompatFreeCloudAdapter:
                 system=system, prompt=prompt, reason=f"HTTP {exc.code}", response_format=response_format
             )
         except (URLError, OSError, TimeoutError) as exc:
+            try:
+                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+            except CloudBudgetLedgerError:
+                pass
             return self._fallback_to_ollama(
                 system=system, prompt=prompt, reason=f"network:{type(exc).__name__}", response_format=response_format
             )
@@ -1073,12 +1181,25 @@ class OpenAICompatFreeCloudAdapter:
             if not isinstance(content, str):
                 raise ValueError("empty content")
         except (ValueError, KeyError, IndexError, TypeError):
+            try:
+                self.budget.reconcile_usage(self.provider, reservation, prompt_tokens=0, completion_tokens=0)
+            except CloudBudgetLedgerError:
+                pass
             return self._fallback_to_ollama(system=system, prompt=prompt, reason="invalid cloud response JSON", response_format=response_format)
 
         usage = data.get("usage") or {}
         p_tok = int(usage.get("prompt_tokens") or 0)
         c_tok = int(usage.get("completion_tokens") or 0)
-        self.budget.record_usage(self.provider, prompt_tokens=p_tok, completion_tokens=c_tok, headers=resp_headers)
+        try:
+            self.budget.reconcile_usage(
+                self.provider, reservation, prompt_tokens=p_tok, completion_tokens=c_tok, headers=resp_headers
+            )
+        except CloudBudgetLedgerError:
+            pass
+        billing_verified_free = (
+            (self.provider == "groq" and self.model in GROQ_FREE_ALLOWLIST)
+            or (self.provider == "openrouter" and self.model.endswith(":free"))
+        )
         self.last_metadata = {
             "provider_used": self.provider,
             "model_used": self.model,
@@ -1086,7 +1207,8 @@ class OpenAICompatFreeCloudAdapter:
             "duration_seconds": round(time.monotonic() - t0, 2),
             "prompt_tokens": p_tok,
             "completion_tokens": c_tok,
-            "cost_usd": 0.0,
+            "billing_verified_free": billing_verified_free,
+            "cost_usd": 0.0 if billing_verified_free else None,
         }
         return content
 

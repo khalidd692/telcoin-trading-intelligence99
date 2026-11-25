@@ -123,6 +123,7 @@ class AutonomousProjectRunnerTests(unittest.TestCase):
             delivery = runner.run_autonomous_project(
                 goal_text="Build a mini calculator with tests and docs",
                 project_dir=proj,
+                require_sandbox=False,
                 plan_override=plan_override,
                 custom_executor=fake_executor,
             )
@@ -130,12 +131,14 @@ class AutonomousProjectRunnerTests(unittest.TestCase):
             self.assertEqual(delivery["status"], "DELIVERED")
             self.assertEqual(delivery["missions_accepted"], 3)
             self.assertTrue(delivery["post_build_verification"]["tests_ok"])
+            self.assertTrue(delivery["all_mandatory_requirements_verified"])
             self.assertEqual(calls, ["m-core", "m-tests", "m-doc"])
 
             # Re-running MUST NOT replay already ACCEPTED missions!
             delivery2 = runner.run_autonomous_project(
                 goal_text="Build a mini calculator with tests and docs",
                 project_dir=proj,
+                require_sandbox=False,
                 custom_executor=fake_executor,
             )
             self.assertEqual(calls, ["m-core", "m-tests", "m-doc"], "Must not replay ACCEPTED missions on resume")
@@ -154,20 +157,20 @@ class AutonomousProjectRunnerTests(unittest.TestCase):
             root = Path(tmp)
             # Unsafe Python eval()
             (root / "bad.py").write_text("def f(x): return eval(x)\n", encoding="utf-8")
-            self.assertFalse(runner.verify_delivered_file(root, "bad.py")["ok"])
+            self.assertFalse(runner.verify_delivered_file(root, "bad.py", require_sandbox=False)["ok"])
             # Unsafe HTML inline script
             (root / "bad.html").write_text("<html><body><script>alert(1)</script></body></html>", encoding="utf-8")
-            self.assertFalse(runner.verify_delivered_file(root, "bad.html")["ok"])
+            self.assertFalse(runner.verify_delivered_file(root, "bad.html", require_sandbox=False)["ok"])
             # Unsafe JS innerHTML
             (root / "bad.js").write_text("document.body.innerHTML = 'x';\n", encoding="utf-8")
-            self.assertFalse(runner.verify_delivered_file(root, "bad.js")["ok"])
+            self.assertFalse(runner.verify_delivered_file(root, "bad.js", require_sandbox=False)["ok"])
             # Failing unit test must fail independent verification
             (root / "tests").mkdir()
             (root / "tests" / "test_fail.py").write_text(
                 "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): self.assertEqual(1, 2)\n",
                 encoding="utf-8",
             )
-            v = runner.verify_delivered_file(root, "tests/test_fail.py")
+            v = runner.verify_delivered_file(root, "tests/test_fail.py", require_sandbox=False)
             self.assertFalse(v["ok"])
             self.assertIn("unittest failed", v["error"])
 

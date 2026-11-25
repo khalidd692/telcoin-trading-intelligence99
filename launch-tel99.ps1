@@ -23,6 +23,7 @@ param(
     [switch]$Hybrid,
     [switch]$Confidential,
     [switch]$ResumeFailed,
+    [switch]$RevisePlan,
     [switch]$Detached,
     [switch]$DryRun,
     [switch]$OpenBrowser
@@ -67,6 +68,7 @@ try {
             if ($Hybrid.IsPresent) { $argv += "--hybrid" }
             if ($Confidential.IsPresent) { $argv += "--confidential" }
             if ($ResumeFailed.IsPresent) { $argv += "--resume-rejected" }
+            if ($RevisePlan.IsPresent) { $argv += "--revise-plan" }
             if ($Detached.IsPresent) {
                 New-Item -ItemType Directory -Force -Path $Project | Out-Null
                 $logDir = Join-Path $Project "artifacts"
@@ -90,7 +92,21 @@ try {
         }
         "Resume" {
             if (-not $Project.Trim()) { throw "-Mode Resume requiert -Project <dossier>." }
-            & $Python -B -m scripts.agents.automation.autonomous_project_runner --project $Project --control resume
+            $argv = @("-B", "-m", "scripts.agents.automation.autonomous_project_runner", "--project", $Project, "--resume-process")
+            if ($Task.Trim()) { $argv += @("--task", $Task) }
+            if ($Role) { $argv += @("--role", $Role) }
+            if ($Hybrid.IsPresent) { $argv += "--hybrid" }
+            if ($Confidential.IsPresent) { $argv += "--confidential" }
+            if ($ResumeFailed.IsPresent) { $argv += "--resume-rejected" }
+            if ($RevisePlan.IsPresent) { $argv += "--revise-plan" }
+            if ($Detached.IsPresent) {
+                $logDir = Join-Path $Project "artifacts"
+                New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+                $proc = Start-Process -FilePath $Python -ArgumentList $argv -WorkingDirectory $Repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDir "runner.log") -RedirectStandardError (Join-Path $logDir "runner.err.log")
+                Write-Host "TEL99 Reprise autonome lancee en arriere-plan : pid=$($proc.Id) project=$Project"
+                exit 0
+            }
+            & $Python @argv
             exit $LASTEXITCODE
         }
         "Stop" {

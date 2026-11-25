@@ -20,10 +20,27 @@ import traceback
 from typing import Any, Callable
 
 FORBIDDEN_BUILTINS = frozenset({"eval", "exec", "compile", "__import__"})
-_EXAMPLE_MARKER_RE = re.compile(
-    r"^(?:if\s+__name__\s*==\s*['\"]__main__['\"]\s*:|#\s*(?:example|usage|test|demo)\b)",
-    re.IGNORECASE,
+_EXAMPLE_COMMENT_RE = re.compile(r"^#\s*(?:example|usage|test|demo)\b", re.IGNORECASE)
+_MAIN_GUARD_RE = re.compile(r"^if\s+__name__\s*==\s*['\"]__main__['\"]\s*:")
+_LEGIT_MAIN_SIGNALS = (
+    "argparse",
+    "ArgumentParser",
+    "serve_forever",
+    "make_server",
+    "create_server",
+    "run_server",
+    "HTTPServer",
+    "ThreadingHTTPServer",
+    "unittest.main",
+    "sys.argv",
+    "SystemExit",
+    "main(",
 )
+_WIN_RESERVED_DEVICE_NAMES = frozenset({
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+})
 _SECRET_TOKEN_RE = re.compile(
     r"(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9\-_]{16,}|"
     r"gsk_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z\-_]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
@@ -37,22 +54,40 @@ _DANGEROUS_OS_CALLS = frozenset({"system", "popen"})
 _DANGEROUS_PICKLE_CALLS = frozenset({"loads", "load"})
 
 
-def strip_trailing_example_blocks(code: str) -> str:
-    """Remove trailing top-level example/test/main stubs that local models append after defs.
+def _is_legitimate_main_block(tail_text: str) -> bool:
+    """Return True when a trailing `if __name__ == '__main__':` block is a real CLI/server/test entrypoint."""
+    return any(sig in tail_text for sig in _LEGIT_MAIN_SIGNALS)
 
-    Only strips a trailing block starting at column 0 when the preceding prefix already
-    contains at least one `def ` or `class ` and parses cleanly (or is strictly cleaner).
-    Never removes required function/class definitions.
+
+def strip_trailing_example_blocks(code: str, *, preserve_main: bool = False) -> str:
+    """Remove trailing top-level example/demo stubs that local models append after defs.
+
+    Preserves legitimate `if __name__ == "__main__":` CLI, server, and `unittest.main()`
+    entrypoints whenever the full file parses cleanly. Strips a trailing `__main__` block
+    ONLY if it is a trivial print/assert demo stub or if it contains a truncation SyntaxError
+    whose preceding prefix parses cleanly.
     """
     if not code or not code.strip():
         return code
     lines = code.splitlines()
+    full_parses = True
+    try:
+        ast.parse(code)
+    except SyntaxError:
+        full_parses = False
+
     cut_idx: int | None = None
     has_def_before = False
     for idx, line in enumerate(lines):
         if line.startswith(("def ", "class ")):
             has_def_before = True
-        elif has_def_before and _EXAMPLE_MARKER_RE.match(line):
+        elif has_def_before and _EXAMPLE_COMMENT_RE.match(line):
+            cut_idx = idx
+            break
+        elif has_def_before and _MAIN_GUARD_RE.match(line):
+            tail_text = "\n".join(lines[idx:])
+            if full_parses and (preserve_main or _is_legitimate_main_block(tail_text)):
+                continue
             cut_idx = idx
             break
     if cut_idx is None:
@@ -198,13 +233,36 @@ def require_number(
     return float(value)
 
 
-def safe_subpath(root_dir: str | Path, rel_path: str) -> Path:
-    if not isinstance(rel_path, str) or not rel_path.strip():
-        raise ValueError("rel_path must be non-empty string")
-    if rel_path.startswith(("/", "\\", "~")) or ":" in rel_path or ".." in Path(rel_path).parts:
+def safe_subpath(
+    root_dir: str | Path,
+    rel_path: str,
+    *,
+    blocked_top_dirs: frozenset[str] | set[str] | None = None,
+) -> Path:
+    if not isinstance(rel_path, str) or not rel_path.strip() or "\x00" in rel_path:
+        raise ValueError("rel_path must be non-empty string without null bytes")
+    norm = rel_path.replace("\\", "/")
+    if norm.startswith(("/", "~")) or ":" in norm:
         raise ValueError("path traversal or absolute path forbidden")
+    parts = norm.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ValueError("path traversal or empty path segment forbidden")
+    for part in parts:
+        if part != part.strip() or part.endswith("."):
+            raise ValueError(f"invalid Windows path segment: {part!r}")
+        stem = part.split(".", 1)[0].lower()
+        if stem in _WIN_RESERVED_DEVICE_NAMES:
+            raise ValueError(f"Windows reserved device name forbidden: {part!r}")
+    if blocked_top_dirs and parts[0].lower() in {d.lower() for d in blocked_top_dirs}:
+        raise ValueError(f"protected top-level path forbidden: {parts[0]!r}")
+
     root = Path(root_dir).resolve()
-    target = (root / rel_path).resolve()
+    cursor = root
+    for part in parts:
+        cursor = cursor / part
+        if cursor.is_symlink() or os.path.islink(cursor):
+            raise ValueError(f"symlink/junction escape forbidden: {rel_path!r}")
+    target = cursor.resolve()
     if target != root and root not in target.parents:
         raise ValueError("resolved path escapes root_dir")
     return target
