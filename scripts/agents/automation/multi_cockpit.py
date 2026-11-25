@@ -95,7 +95,8 @@ HTML = r"""<!doctype html>
         <div class="chat-main">
           <div class="chat-toolbar">
             <select id="chatRoleSelect" class="select" style="max-width:300px" aria-label="Agent sélectionné"></select>
-            <label class="toggle-label"><input type="checkbox" id="chatTeamToggle"> Mode Commandant (délégation réelle)</label>
+            <label class="toggle-label"><input type="checkbox" id="chatTeamToggle"> Mode Commandant (délégation possible)</label>
+            <label>Réponse <select id="chatResponseMode" class="select" aria-label="Mode de réponse"><option value="auto" selected>Intelligent — adaptatif</option><option value="fast">Rapide — un agent</option><option value="deep">Approfondi — équipe</option></select></label>
             <label class="toggle-label"><input type="checkbox" id="chatConfidentialToggle" checked> Local confidentiel</label>
             <label class="toggle-label"><input type="checkbox" id="chatHybridToggle" disabled> Hybride gratuit (opt-in)</label>
             <button id="btnRenameConv" class="btn sm">Renommer</button>
@@ -662,6 +663,7 @@ def make_server(
                     job = service.submit_chat_message(
                         conv_id=cid,
                         message=str(body.get("message") or ""),
+                        response_mode=body.get("response_mode"),
                         role=body.get("role"),
                         team_mode=body.get("team_mode"),
                         confidential=body.get("confidential"),
