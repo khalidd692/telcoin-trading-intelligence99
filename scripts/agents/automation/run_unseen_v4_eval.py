@@ -94,8 +94,9 @@ def _call_groq_safe(model: str, *, system: str, prompt: str, response_format: st
         fallback_ollama_model=None,
         budget_ledger=ledger,
     )
+    scope = ledger.scope_for_model("groq", model)
     for retry in range(6):
-        st = ledger.status("groq")
+        st = ledger.status(scope)
         if st["cooldown_remaining_s"] > 0:
             time.sleep(min(90.0, st["cooldown_remaining_s"] + 2.0))
         else:
@@ -108,7 +109,7 @@ def _call_groq_safe(model: str, *, system: str, prompt: str, response_format: st
         except Exception as exc:
             msg = str(exc).lower()
             if ("429" in msg or "cooldown" in msg) and retry < 5:
-                st2 = ledger.status("groq")
+                st2 = ledger.status(scope)
                 time.sleep(min(90.0, max(15.0, st2["cooldown_remaining_s"] + 2.0)))
                 continue
             raise
