@@ -16,6 +16,7 @@ Strict guarantees:
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -314,7 +315,7 @@ def evaluate_local_phase(tasks: list[dict], *, upgraded: bool, ckpt_path: Path) 
     return _summarize_phase(phase_name, tasks, results, cloud_calls=0, duration_s=time.monotonic() - t_all)
 
 
-def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, Any]:
+def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path, pause_on_infra: bool = False) -> dict[str, Any]:
     """Evaluate Unseen V4 with real local-first + 3-mentor Groq hybrid router ($0.00, zero oracle)."""
     done: dict[str, dict] = {}
     if ckpt_path.is_file():
@@ -327,6 +328,7 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
     results: list[dict] = []
     t_all = time.monotonic()
     total_cloud_calls = 0
+    deferred = None
 
     for task in tasks:
         tid = task["id"]
@@ -348,6 +350,7 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
         prev_out = ""
         last_ver: dict[str, Any] = {"ok": False, "error": "not run", "passed": [], "failed": []}
         task_cloud_calls = 0
+        infra_seen = False
 
         for att, (prov_kind, mdl) in enumerate(plan, start=1):
             t0 = time.monotonic()
@@ -369,6 +372,7 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
                     raw = local_deterministic_tools.strip_trailing_example_blocks(ollama_native.extract_code_block(raw))
                 ver = benchmark_unseen_v4.verify_unseen_v4_output(task, raw)
             except Exception as exc:
+                infra_seen = True
                 raw = ""
                 ver = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}", "passed": [], "failed": ["infra"]}
 
@@ -393,6 +397,14 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
             if ver["ok"]:
                 break
 
+        if pause_on_infra and not last_ver["ok"] and infra_seen:
+            deferred = {"id": tid, "error": last_ver.get("error"), "attempts_log": attempts_log}
+            local_deterministic_tools.write_json_atomic_locked(
+                ckpt_path, {"phase": "hybrid_after_hardening", "completed": len(results),
+                            "total": len(tasks), "results": results, "deferred": deferred}
+            )
+            break
+
         row = {
             "id": tid,
             "role": task["role"],
@@ -407,6 +419,7 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
             "seconds": round(sum(a["seconds"] for a in attempts_log), 2),
             "cost_usd": 0.0,
             "error": last_ver.get("error"),
+            "attempts_log": attempts_log,
         }
         results.append(row)
         local_deterministic_tools.write_json_atomic_locked(
@@ -415,14 +428,116 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
         print(json.dumps({"v4": "hybrid_after", "n": f"{len(results)}/{len(tasks)}", "id": tid, "role": task["role"], "ok": row["ok"], "att": row["attempts"], "mdl": row["model_used"], "cc": task_cloud_calls, "err": row["error"]}), flush=True)
 
     ide_coordination.unload_ollama_models([LOCAL_MODEL])
-    return _summarize_phase("hybrid_after_hardening", tasks, results, cloud_calls=total_cloud_calls, duration_s=time.monotonic() - t_all)
+    summary = _summarize_phase("hybrid_after_hardening", tasks, results, cloud_calls=total_cloud_calls, duration_s=time.monotonic() - t_all)
+    if pause_on_infra:
+        summary["deferred"] = deferred
+        summary["target_total"] = len(tasks)
+        summary["status"] = "WAITING_INFRA" if deferred else ("COMPLETE" if len(results) == len(tasks) else "PARTIAL")
+    return summary
+
+
+def select_quota_recovery_rows(original: dict, tasks: list[dict]) -> list[dict]:
+    """Recover only rows whose *final* attempt was blocked by the old Groq quota.
+    This is a targeted rerun, not a new independent unseen benchmark.
+    """
+    rows = original.get("results")
+    expected = {t["id"] for t in tasks}
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise ValueError("invalid original checkpoint")
+    if (original.get("phase") != "hybrid_after_hardening"
+            or original.get("completed") != len(tasks)
+            or original.get("total") != len(tasks)
+            or len(rows) != len(tasks)
+            or {r.get("id") for r in rows} != expected
+            or any(type(r.get("ok")) is not bool for r in rows)):
+        raise ValueError("original checkpoint is not a complete frozen V4 run")
+    return [r for r in rows if r["ok"] is False
+            and "daily free token budget exhausted" in str(r.get("error") or "")
+            and "groq unavailable" in str(r.get("error") or "")]
+
+
+def recover_quota_errors(*, art_dir: Path = ART_DIR, execute: bool = False) -> dict[str, Any]:
+    """Plan or resume in a SEPARATE directory; never rewrite original scores."""
+    tasks = benchmark_unseen_v4.get_tasks(per_role_limit=5)
+    manifest = benchmark_unseen_v4.unseen_v4_manifest()
+    source_path = art_dir / "ckpt_v4_hybrid_after.json"
+    frozen = json.loads((art_dir / "unseen_v4_manifest_frozen.json").read_text(encoding="utf-8"))
+    if frozen.get("seal_sha256") != manifest["seal_sha256"]:
+        raise ValueError("V4 manifest seal mismatch")
+    raw = source_path.read_bytes()
+    source = json.loads(raw)
+    eligible = select_quota_recovery_rows(source, tasks)
+    ids = {r["id"] for r in eligible}
+    selected = [t for t in tasks if t["id"] in ids]
+    original_passed = sum(r["ok"] is True for r in source["results"])
+    binding = {
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "seal_sha256": manifest["seal_sha256"],
+        "selected_ids": sorted(ids),
+        "original_total": len(tasks),
+        "original_passed": original_passed,
+        "original_failed": len(tasks) - original_passed,
+        "eligible_quota_errors": len(ids),
+        "independent_unseen_validation": False,
+    }
+    if not execute:
+        return {**binding, "status": "DRY_RUN"}
+    if not selected:
+        return {**binding, "status": "NO_ELIGIBLE_TASKS"}
+    out = art_dir / "v4_quota_recovery"
+    out.mkdir(parents=True, exist_ok=True)
+    with local_deterministic_tools.file_lock(out / "run.lock", timeout_s=1.0):
+        binding_path = out / "source_binding.json"
+        ckpt = out / "checkpoint.json"
+        if binding_path.exists():
+            if json.loads(binding_path.read_text(encoding="utf-8")) != binding:
+                raise ValueError("recovery source changed; refuse to mix runs")
+        else:
+            if ckpt.exists():
+                raise ValueError("recovery checkpoint has no source binding")
+            local_deterministic_tools.write_json_atomic_locked(binding_path, binding)
+        if ckpt.exists():
+            saved = json.loads(ckpt.read_text(encoding="utf-8"))
+            rows = saved.get("results")
+            if (not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows)
+                    or saved.get("phase") != "hybrid_after_hardening"
+                    or saved.get("total") != len(selected)
+                    or saved.get("completed") != len(rows)
+                    or len({r.get("id") for r in rows}) != len(rows)
+                    or any(r.get("id") not in ids or type(r.get("ok")) is not bool for r in rows)):
+                raise ValueError("invalid recovery checkpoint; refusing overwrite")
+        ledger = provider_router.CloudBudgetLedger()
+        # Do not begin work if none of the authorized free mentors has budget.
+        # A partial run stays resumable and never rewrites the original.
+        if not ledger.can_call("groq", estimated_tokens=2000)[0]:
+            return {**binding, "status": "WAITING_QUOTA"}
+        summary = evaluate_hybrid_phase(selected, ckpt_path=ckpt, pause_on_infra=True)
+        if hashlib.sha256(source_path.read_bytes()).hexdigest() != binding["source_sha256"]:
+            raise ValueError("original checkpoint changed during recovery")
+        report = {
+            **binding,
+            "status": summary["status"],
+            "recovery": summary,
+            "combined_passed_after_targeted_retry": original_passed + summary["passed"],
+            "combined_total": len(tasks),
+            "note": "Original score unchanged; combined score is a targeted retry, not independent validation.",
+        }
+        local_deterministic_tools.write_json_atomic_locked(out / "report.json", report)
+        return report
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--phase", choices=["local_before", "local_after", "hybrid_after", "all"], default="all")
     ap.add_argument("--per-role", type=int, default=5, help="Tasks per role (default 5 => 60 total)")
+    ap.add_argument("--recover-quota-errors", action="store_true", help="Separate targeted V4 retry plan")
+    ap.add_argument("--execute-recovery", action="store_true", help="Explicitly execute the recovery (otherwise dry run)")
     args = ap.parse_args(argv)
+    if args.execute_recovery and not args.recover_quota_errors:
+        ap.error("--execute-recovery requires --recover-quota-errors")
+    if args.recover_quota_errors:
+        print(json.dumps(recover_quota_errors(execute=args.execute_recovery), indent=2, ensure_ascii=False))
+        return 0
 
     manifest = benchmark_unseen_v4.unseen_v4_manifest()
     local_deterministic_tools.write_json_atomic_locked(ART_DIR / "unseen_v4_manifest_frozen.json", manifest)
