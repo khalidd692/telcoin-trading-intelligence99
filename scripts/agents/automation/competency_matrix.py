@@ -48,10 +48,7 @@ def _now_iso() -> str:
 
 
 def _write_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    local_deterministic_tools.write_json_atomic_locked(path, payload)
 
 
 def sync_cross_agent_shared_knowledge(memory_dir: Path = MEM_DIR) -> dict[str, Any]:
@@ -126,38 +123,61 @@ def build_competency_matrix(
 ) -> dict[str, Any]:
     """Assemble the honest 12-agent x 12-domain competency matrix strictly from verified runs."""
     specs = {s["role"]: s["name"] for s in specialist_dispatch.list_specialists()}
-    # Initialize 12x12 empty cells (never fabricate!)
+    # Initialize 12x12 empty cells (never fabricate! Unevaluated cells stay strictly PENDING.)
     cells: dict[str, dict[str, dict[str, Any]]] = {
         agent: {
-            dom: {"passed": 0, "total": 0, "rate": None, "status": "PENDING", "cloud_calls": 0}
+            dom: {
+                "passed": 0,
+                "total": 0,
+                "rate": None,
+                "status": "PENDING",
+                "proven_level": 0,
+                "cloud_calls": 0,
+                "local_without_cloud_ok": None,
+                "mission_ids": [],
+                "errors": [],
+                "skills_used": [],
+                "total_seconds": 0.0,
+            }
             for dom in ROLES_12
         }
         for agent in ROLES_12
     }
 
+    def _accumulate(cell: dict[str, Any], row: dict[str, Any], target_domain: str) -> None:
+        cell["total"] += 1
+        if row.get("ok"):
+            cell["passed"] += 1
+        elif row.get("error"):
+            err_s = str(row["error"])[:180]
+            if err_s not in cell["errors"] and len(cell["errors"]) < 5:
+                cell["errors"].append(err_s)
+        cell["cloud_calls"] += int(row.get("cloud_calls") or 0)
+        cell["total_seconds"] = round(cell["total_seconds"] + float(row.get("seconds") or 0.0), 2)
+        mid = row.get("task_id") or row.get("id")
+        if mid and mid not in cell["mission_ids"]:
+            cell["mission_ids"].append(mid)
+        sk = f"tel99-role-{target_domain.replace('_', '-')}"
+        if sk not in cell["skills_used"]:
+            cell["skills_used"].append(sk)
+
     # Populate diagonal (primary specialty, 100% local)
     for row in (primary_results or []):
         role = row.get("role")
         if role in cells:
-            c = cells[role][role]
-            c["total"] += 1
-            if row.get("ok"):
-                c["passed"] += 1
-            c["cloud_calls"] += int(row.get("cloud_calls") or 0)
+            _accumulate(cells[role][role], row, role)
 
     # Populate off-diagonal (cross-domain generalist, 100% local)
     for row in (cross_domain_results or []):
         ag = row.get("agent_role")
         dom = row.get("target_domain")
         if ag in cells and dom in cells[ag]:
-            c = cells[ag][dom]
-            c["total"] += 1
-            if row.get("ok"):
-                c["passed"] += 1
-            c["cloud_calls"] += int(row.get("cloud_calls") or 0)
+            _accumulate(cells[ag][dom], row, dom)
 
     # Finalize cell rates & per-agent aggregates
     agent_summaries: dict[str, dict[str, Any]] = {}
+    cells_evaluated = 0
+    cross_cells_evaluated = 0
     for ag in ROLES_12:
         p_pass = p_tot = x_pass = x_tot = 0
         eval_domains = 0
@@ -165,8 +185,20 @@ def build_competency_matrix(
         for dom in ROLES_12:
             c = cells[ag][dom]
             if c["total"] > 0:
+                cells_evaluated += 1
+                if ag != dom:
+                    cross_cells_evaluated += 1
                 c["rate"] = round(c["passed"] / c["total"], 4)
                 c["status"] = "PROVEN" if c["rate"] >= 0.80 else "NEEDS_TRAINING"
+                c["local_without_cloud_ok"] = bool(c["cloud_calls"] == 0 and c["rate"] >= 0.80)
+                if c["rate"] >= 0.90 and c["total"] >= 3:
+                    c["proven_level"] = 3
+                elif c["rate"] >= 0.80:
+                    c["proven_level"] = 2
+                elif c["passed"] > 0:
+                    c["proven_level"] = 1
+                else:
+                    c["proven_level"] = 0
                 eval_domains += 1
                 if c["rate"] < 0.85:
                     gaps.append(dom)
@@ -214,18 +246,35 @@ def build_competency_matrix(
             "cloud_calls_in_local_matrix": sum(
                 cells[ag][dom]["cloud_calls"] for ag in ROLES_12 for dom in ROLES_12
             ),
+            "cells_evaluated": cells_evaluated,
+            "cells_total": 144,
+            "coverage_rate": round(cells_evaluated / 144.0, 4),
+            "cross_domain_cells_evaluated": cross_cells_evaluated,
+            "cross_domain_cells_total": 132,
+            "full_144_covered": cells_evaluated == 144,
         },
         "agents": agent_summaries,
         "matrix_12x12": cells,
     }
 
 
+def _reconcile_v3_report() -> dict[str, Any]:
+    """Reconcile unseen_v3_report.json from separate phase checkpoints before reading."""
+    try:
+        from scripts.agents.automation import run_unseen_v3_eval
+        return run_unseen_v3_eval.rebuild_unseen_v3_report_from_checkpoints(art_dir=ART_DIR)
+    except Exception:
+        v3_path = ART_DIR / "unseen_v3_report.json"
+        return json.loads(v3_path.read_text(encoding="utf-8")) if v3_path.is_file() else {}
+
+
 def run_local_cross_domain_eval(
     *,
     rotations_per_agent: int = 2,
+    batch_size: int = 0,
     ckpt_path: Path = ART_DIR / "ckpt_v3_cross_domain_local.json",
 ) -> dict[str, Any]:
-    """Execute bounded 100% LOCAL (0 cloud) cross-domain generalist probes for all 12 agents."""
+    """Execute bounded, resumable 100% LOCAL (0 cloud) cross-domain generalist probes for all 12 agents."""
     sync_info = sync_cross_agent_shared_knowledge(MEM_DIR)
     assignments = plan_cross_domain_rotations(rotations_per_agent=rotations_per_agent)
 
@@ -238,12 +287,15 @@ def run_local_cross_domain_eval(
             pass
 
     results: list[dict] = []
+    executed_this_batch = 0
     t_all = time.monotonic()
 
     for item in assignments:
         pid = item["probe_id"]
         if pid in done:
             results.append(done[pid])
+            continue
+        if batch_size > 0 and executed_this_batch >= batch_size:
             continue
 
         task = item["task"]
@@ -256,6 +308,7 @@ def run_local_cross_domain_eval(
         )
 
         attempts_log: list[dict] = []
+        prior_hashes: list[str] = []
         last_out = ""
         prev_out = ""
         last_ver: dict[str, Any] = {"ok": False, "error": "not run", "passed": [], "failed": []}
@@ -321,12 +374,28 @@ def run_local_cross_domain_eval(
                     raw = local_deterministic_tools.extract_clean_json(raw)
                 else:
                     raw = local_deterministic_tools.strip_trailing_example_blocks(ollama_native.extract_code_block(raw))
-                ver = benchmark_unseen_v3.verify_unseen_output(task, raw)
+                sec_pre = local_deterministic_tools.deterministic_security_gate(raw, kind=task.get("kind", "python"))
+                if not sec_pre["ok"]:
+                    ver = {"ok": False, "error": "; ".join(sec_pre["issues"]), "passed": [], "failed": ["security_precheck"]}
+                else:
+                    ver = benchmark_unseen_v3.verify_unseen_output(task, sec_pre["cleaned"])
             except Exception as exc:
                 raw = ""
                 ver = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}", "passed": [], "failed": ["infra"]}
 
-            attempts_log.append({"attempt": att, "seconds": round(time.monotonic() - t0, 2), "ok": bool(ver["ok"]), "error": ver.get("error")})
+            fp = smart_repair.code_fingerprint(raw)
+            repeated = smart_repair.detect_repeated_attempt(raw, prior_hashes)
+            prior_hashes.append(fp)
+            if repeated and not ver["ok"]:
+                ver["error"] = f"REPEATED_ATTEMPT: {ver.get('error')}"
+            attempts_log.append({
+                "attempt": att,
+                "seconds": round(time.monotonic() - t0, 2),
+                "ok": bool(ver["ok"]),
+                "repeated": repeated,
+                "code_sha256": fp,
+                "error": ver.get("error"),
+            })
             prev_out = last_out
             last_out = raw
             last_ver = ver
@@ -348,23 +417,28 @@ def run_local_cross_domain_eval(
             "seconds": round(sum(a["seconds"] for a in attempts_log), 2),
             "error": last_ver.get("error"),
         }
+        done[pid] = row
         results.append(row)
-        _write_atomic(ckpt_path, {"completed": len(results), "total": len(assignments), "results": results})
-        print(json.dumps({"xdom_local": f"{len(results)}/{len(assignments)}", "agent": row["agent_role"], "domain": row["target_domain"], "ok": row["ok"], "att": row["attempts"], "s": row["seconds"], "err": row["error"]}), flush=True)
+        executed_this_batch += 1
+        _write_atomic(ckpt_path, {"completed": len(done), "total": len(assignments), "results": list(done.values())})
+        print(json.dumps({"xdom_local": f"{len(done)}/{len(assignments)}", "agent": row["agent_role"], "domain": row["target_domain"], "ok": row["ok"], "att": row["attempts"], "s": row["seconds"], "err": row["error"]}), flush=True)
 
-    ide_coordination.unload_ollama_models([LOCAL_MODEL])
+    if executed_this_batch > 0:
+        ide_coordination.unload_ollama_models([LOCAL_MODEL])
 
-    # Load existing Unseen V3 local_after & hybrid_after if available to build complete 12x12 matrix
-    v3_path = ART_DIR / "unseen_v3_report.json"
-    v3 = json.loads(v3_path.read_text(encoding="utf-8")) if v3_path.is_file() else {}
+    # Reconcile V3 checkpoints before building complete 12x12 matrix
+    v3 = _reconcile_v3_report()
+    all_x_rows = list(done.values())
     matrix = build_competency_matrix(
         primary_results=v3.get("details_local_after") or [],
-        cross_domain_results=results,
+        cross_domain_results=all_x_rows,
         hybrid_results=v3.get("details_hybrid_after") or [],
     )
     matrix["shared_knowledge_sync"] = sync_info
     matrix["cross_domain_duration_seconds"] = round(time.monotonic() - t_all, 2)
-    matrix["cross_domain_results"] = results
+    matrix["batch_executed_now"] = executed_this_batch
+    matrix["rotations_requested"] = rotations_per_agent
+    matrix["cross_domain_results"] = all_x_rows
     _write_atomic(ART_DIR / "competency_matrix_12x12.json", matrix)
     print("COMPETENCY_MATRIX_12x12_SUMMARY:", json.dumps(matrix["global_metrics"], indent=2), flush=True)
     return matrix
@@ -372,13 +446,13 @@ def run_local_cross_domain_eval(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--rotations", type=int, default=2, help="Cross-domain probes per agent (default 2 => 24 probes across all 12 agents)")
+    ap.add_argument("--rotations", type=int, default=2, help="Cross-domain probes per agent (2=24 probes, 11=full 132 off-diagonal)")
+    ap.add_argument("--batch-size", type=int, default=0, help="Max new probes to run in this invocation (0=all remaining)")
     ap.add_argument("--sync-only", action="store_true", help="Only sync cross-agent shared knowledge & rebuild matrix from existing reports")
     args = ap.parse_args(argv)
     if args.sync_only:
         sync_info = sync_cross_agent_shared_knowledge(MEM_DIR)
-        v3_path = ART_DIR / "unseen_v3_report.json"
-        v3 = json.loads(v3_path.read_text(encoding="utf-8")) if v3_path.is_file() else {}
+        v3 = _reconcile_v3_report()
         x_path = ART_DIR / "ckpt_v3_cross_domain_local.json"
         x_rows = (json.loads(x_path.read_text(encoding="utf-8")).get("results") or []) if x_path.is_file() else []
         mat = build_competency_matrix(
@@ -390,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_atomic(ART_DIR / "competency_matrix_12x12.json", mat)
         print(json.dumps({"sync": sync_info, "global_metrics": mat["global_metrics"]}, indent=2))
         return 0
-    run_local_cross_domain_eval(rotations_per_agent=args.rotations)
+    run_local_cross_domain_eval(rotations_per_agent=args.rotations, batch_size=args.batch_size)
     return 0
 
 

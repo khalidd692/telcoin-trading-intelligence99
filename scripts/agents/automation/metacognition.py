@@ -34,7 +34,10 @@ FAILURE_CATEGORIES = (
 )
 
 SECRET_REDACT_PATTERNS = (
-    re.compile(r"(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{16,}|AIza[0-9A-Za-z\-_]{20,})"),
+    re.compile(
+        r"(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9\-_]{16,}|"
+        r"gsk_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z\-_]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
+    ),
     re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?([^\s'\",;]{6,})"),
 )
 

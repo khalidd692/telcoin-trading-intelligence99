@@ -50,10 +50,7 @@ def _now_iso() -> str:
 
 
 def _write_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    local_deterministic_tools.write_json_atomic_locked(path, payload)
 
 
 def _call_groq_safe(model: str, *, system: str, prompt: str, response_format: str | None = None) -> tuple[str, dict]:
@@ -152,6 +149,7 @@ def evaluate_local_phase(tasks: list[dict], *, upgraded: bool, ckpt_path: Path) 
 
         max_att = 3 if upgraded else 1
         attempts_log: list[dict] = []
+        prior_hashes: list[str] = []
         last_out = ""
         prev_out = ""
         last_ver: dict[str, Any] = {"ok": False, "error": "not run", "passed": [], "failed": []}
@@ -225,12 +223,30 @@ def evaluate_local_phase(tasks: list[dict], *, upgraded: bool, ckpt_path: Path) 
                         raw = local_deterministic_tools.extract_clean_json(raw)
                     else:
                         raw = local_deterministic_tools.strip_trailing_example_blocks(ollama_native.extract_code_block(raw))
-                ver = benchmark_unseen_v3.verify_unseen_output(task, raw)
+                    sec_pre = local_deterministic_tools.deterministic_security_gate(raw, kind=task.get("kind", "python"))
+                    if not sec_pre["ok"]:
+                        ver = {"ok": False, "error": "; ".join(sec_pre["issues"]), "passed": [], "failed": ["security_precheck"]}
+                    else:
+                        ver = benchmark_unseen_v3.verify_unseen_output(task, sec_pre["cleaned"])
+                else:
+                    ver = benchmark_unseen_v3.verify_unseen_output(task, raw)
             except Exception as exc:
                 raw = ""
                 ver = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}", "passed": [], "failed": ["infra"]}
 
-            attempts_log.append({"attempt": att, "seconds": round(time.monotonic() - t0, 2), "ok": bool(ver["ok"]), "error": ver.get("error")})
+            fp = smart_repair.code_fingerprint(raw)
+            repeated = smart_repair.detect_repeated_attempt(raw, prior_hashes)
+            prior_hashes.append(fp)
+            if repeated and not ver["ok"]:
+                ver["error"] = f"REPEATED_ATTEMPT: {ver.get('error')}"
+            attempts_log.append({
+                "attempt": att,
+                "seconds": round(time.monotonic() - t0, 2),
+                "ok": bool(ver["ok"]),
+                "repeated": repeated,
+                "code_sha256": fp,
+                "error": ver.get("error"),
+            })
             prev_out = last_out
             last_out = raw
             last_ver = ver
@@ -373,68 +389,138 @@ def evaluate_hybrid_phase(tasks: list[dict], *, ckpt_path: Path) -> dict[str, An
     return _summarize_phase("hybrid_after_transfer", tasks, results, cloud_calls=total_cloud_calls, duration_s=time.monotonic() - t_all)
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--phase", choices=["local_before", "local_after", "hybrid_after", "all"], default="all")
-    ap.add_argument("--per-role", type=int, default=5, help="Tasks per role (default 5 => 60 total)")
-    args = ap.parse_args(argv)
-
-    manifest = benchmark_unseen_v3.unseen_v3_manifest()
-    _write_atomic(ART_DIR / "unseen_v3_manifest_frozen.json", manifest)
-    tasks = benchmark_unseen_v3.get_tasks(per_role_limit=args.per_role)
-
-    report_path = ART_DIR / "unseen_v3_report.json"
-    report: dict[str, Any] = {}
-    if report_path.is_file():
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            report = {}
-    report["schema_version"] = 1
-    report["evaluation_type"] = "INDEPENDENT_UNSEEN_V3_FROZEN_VALIDATION"
-    report["manifest"] = manifest
-    report["updated_at"] = _now_iso()
-
-    if args.phase in ("local_before", "all"):
-        res = evaluate_local_phase(tasks, upgraded=False, ckpt_path=ART_DIR / "ckpt_v3_local_before.json")
-        report["local_before"] = {k: v for k, v in res.items() if k != "results"}
-        report["details_local_before"] = res["results"]
-        _write_atomic(report_path, report)
-
-    if args.phase in ("local_after", "all"):
-        res = evaluate_local_phase(tasks, upgraded=True, ckpt_path=ART_DIR / "ckpt_v3_local_after.json")
-        report["local_after"] = {k: v for k, v in res.items() if k != "results"}
-        report["details_local_after"] = res["results"]
-        _write_atomic(report_path, report)
-
-    if args.phase in ("hybrid_after", "all"):
-        res = evaluate_hybrid_phase(tasks, ckpt_path=ART_DIR / "ckpt_v3_hybrid_after.json")
-        report["hybrid_after"] = {k: v for k, v in res.items() if k != "results"}
-        report["details_hybrid_after"] = res["results"]
-        _write_atomic(report_path, report)
-
-    # Paired Champion-Challenger if both local_before and local_after exist
-    if report.get("details_local_before") and report.get("details_local_after"):
-        b_map = {r["id"]: r for r in report["details_local_before"]}
-        a_map = {r["id"]: r for r in report["details_local_after"]}
-        paired = []
-        for tid in b_map:
-            if tid in a_map:
-                paired.append(improvement.Outcome(task_id=tid, model_id="v3-local-before", success=b_map[tid]["ok"], tokens=0, seconds=b_map[tid]["seconds"], evidence=f"v3/{tid}"))
-                paired.append(improvement.Outcome(task_id=tid, model_id="v3-local-after", success=a_map[tid]["ok"], tokens=0, seconds=a_map[tid]["seconds"], evidence=f"v3/{tid}"))
+def _attach_paired_comparison(report: dict[str, Any], *, art_dir: Path) -> None:
+    """Compute Champion-Challenger paired sign test & security promotion gate when both local phases exist."""
+    if not (report.get("details_local_before") and report.get("details_local_after")):
+        return
+    b_map = {r["id"]: r for r in report["details_local_before"]}
+    a_map = {r["id"]: r for r in report["details_local_after"]}
+    paired = []
+    for tid in b_map:
+        if tid in a_map:
+            paired.append(improvement.Outcome(task_id=tid, model_id="v3-local-before", success=b_map[tid]["ok"], tokens=0, seconds=b_map[tid]["seconds"], evidence=f"v3/{tid}"))
+            paired.append(improvement.Outcome(task_id=tid, model_id="v3-local-after", success=a_map[tid]["ok"], tokens=0, seconds=a_map[tid]["seconds"], evidence=f"v3/{tid}"))
+    if paired:
         report["champion_challenger_local"] = evolution_lab.run_champion_challenger(
             champion_id="v3-local-before",
             challenger_id="v3-local-after",
             champion_profile={"mode": "local_before", "cloud_calls": 0},
             challenger_profile={"mode": "local_after_12_role_skills_rag_tools_repair", "cloud_calls": 0},
             paired_outcomes=paired,
-            store_dir=ART_DIR / "profiles_v3",
+            store_dir=art_dir / "profiles_v3",
             owner_approved=False,
         )
-        report["delta_local_success_rate"] = round(
-            report["local_after"]["success_rate"] - report["local_before"]["success_rate"], 4
-        )
-        _write_atomic(report_path, report)
+        if report.get("local_before") and report.get("local_after"):
+            report["delta_local_success_rate"] = round(
+                report["local_after"]["success_rate"] - report["local_before"]["success_rate"], 4
+            )
+            report["promotion_blocked_security"] = not bool(report["local_after"].get("critical_security_100pct"))
+
+
+def rebuild_unseen_v3_report_from_checkpoints(*, art_dir: Path = ART_DIR, per_role: int = 5) -> dict[str, Any]:
+    """Deterministically reconcile `unseen_v3_report.json` from separate phase checkpoints under a file lock.
+
+    Prevents concurrent phase runs (local_before/local_after/hybrid_after) from ever clobbering each other.
+    """
+    manifest = benchmark_unseen_v3.unseen_v3_manifest()
+    tasks = benchmark_unseen_v3.get_tasks(per_role_limit=per_role)
+    task_ids = {t["id"] for t in tasks}
+    report_path = art_dir / "unseen_v3_report.json"
+
+    def _load_ckpt(fname: str) -> list[dict[str, Any]]:
+        p = art_dir / fname
+        if not p.is_file():
+            return []
+        try:
+            rows = json.loads(p.read_text(encoding="utf-8")).get("results") or []
+            return [r for r in rows if isinstance(r, dict) and r.get("id") in task_ids]
+        except (OSError, ValueError):
+            return []
+
+    lb_rows = _load_ckpt("ckpt_v3_local_before.json")
+    la_rows = _load_ckpt("ckpt_v3_local_after.json")
+    hy_rows = _load_ckpt("ckpt_v3_hybrid_after.json")
+
+    def _merge(current: dict[str, Any]) -> dict[str, Any]:
+        rep = dict(current)
+        rep["schema_version"] = 1
+        rep["evaluation_type"] = "INDEPENDENT_UNSEEN_V3_FROZEN_VALIDATION"
+        rep["manifest"] = manifest
+        rep["updated_at"] = _now_iso()
+
+        if lb_rows and len(lb_rows) >= len(rep.get("details_local_before") or []):
+            dur = sum(float(r.get("seconds") or 0.0) for r in lb_rows)
+            s = _summarize_phase("local_before_baseline", tasks, lb_rows, cloud_calls=0, duration_s=dur)
+            rep["local_before"] = {k: v for k, v in s.items() if k != "results"}
+            rep["details_local_before"] = lb_rows
+        if la_rows and len(la_rows) >= len(rep.get("details_local_after") or []):
+            dur = sum(float(r.get("seconds") or 0.0) for r in la_rows)
+            s = _summarize_phase("local_after_transfer", tasks, la_rows, cloud_calls=0, duration_s=dur)
+            rep["local_after"] = {k: v for k, v in s.items() if k != "results"}
+            rep["details_local_after"] = la_rows
+        if hy_rows and len(hy_rows) >= len(rep.get("details_hybrid_after") or []):
+            dur = sum(float(r.get("seconds") or 0.0) for r in hy_rows)
+            cc = sum(int(r.get("cloud_calls") or 0) for r in hy_rows)
+            s = _summarize_phase("hybrid_after_transfer", tasks, hy_rows, cloud_calls=cc, duration_s=dur)
+            rep["hybrid_after"] = {k: v for k, v in s.items() if k != "results"}
+            rep["details_hybrid_after"] = hy_rows
+
+        _attach_paired_comparison(rep, art_dir=art_dir)
+        return rep
+
+    return local_deterministic_tools.locked_json_update(report_path, _merge)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--phase", choices=["local_before", "local_after", "hybrid_after", "all"], default="all")
+    ap.add_argument("--per-role", type=int, default=5, help="Tasks per role (default 5 => 60 total)")
+    ap.add_argument("--rebuild-report", action="store_true", help="Reconcile unseen_v3_report.json from checkpoints under file lock")
+    args = ap.parse_args(argv)
+
+    manifest = benchmark_unseen_v3.unseen_v3_manifest()
+    _write_atomic(ART_DIR / "unseen_v3_manifest_frozen.json", manifest)
+    tasks = benchmark_unseen_v3.get_tasks(per_role_limit=args.per_role)
+
+    if args.rebuild_report:
+        report = rebuild_unseen_v3_report_from_checkpoints(art_dir=ART_DIR, per_role=args.per_role)
+        print("UNSEEN_V3_REBUILT:", json.dumps({
+            "seal_sha256": manifest["seal_sha256"],
+            "local_before": report.get("local_before"),
+            "local_after": report.get("local_after"),
+            "hybrid_after": report.get("hybrid_after"),
+            "delta_local_success_rate": report.get("delta_local_success_rate"),
+            "promotion_blocked_security": report.get("promotion_blocked_security"),
+        }, indent=2, ensure_ascii=False), flush=True)
+        return 0
+
+    report_path = ART_DIR / "unseen_v3_report.json"
+
+    def _merge_phase(key: str, details_key: str, res: dict[str, Any]) -> dict[str, Any]:
+        def _upd(cur: dict[str, Any]) -> dict[str, Any]:
+            rep = dict(cur)
+            rep["schema_version"] = 1
+            rep["evaluation_type"] = "INDEPENDENT_UNSEEN_V3_FROZEN_VALIDATION"
+            rep["manifest"] = manifest
+            rep["updated_at"] = _now_iso()
+            rep[key] = {k: v for k, v in res.items() if k != "results"}
+            rep[details_key] = res["results"]
+            _attach_paired_comparison(rep, art_dir=ART_DIR)
+            return rep
+        return local_deterministic_tools.locked_json_update(report_path, _upd)
+
+    report: dict[str, Any] = {}
+    if args.phase in ("local_before", "all"):
+        res = evaluate_local_phase(tasks, upgraded=False, ckpt_path=ART_DIR / "ckpt_v3_local_before.json")
+        report = _merge_phase("local_before", "details_local_before", res)
+
+    if args.phase in ("local_after", "all"):
+        res = evaluate_local_phase(tasks, upgraded=True, ckpt_path=ART_DIR / "ckpt_v3_local_after.json")
+        report = _merge_phase("local_after", "details_local_after", res)
+
+    if args.phase in ("hybrid_after", "all"):
+        res = evaluate_hybrid_phase(tasks, ckpt_path=ART_DIR / "ckpt_v3_hybrid_after.json")
+        report = _merge_phase("hybrid_after", "details_hybrid_after", res)
 
     print("UNSEEN_V3_SUMMARY:", json.dumps({
         "seal_sha256": manifest["seal_sha256"],

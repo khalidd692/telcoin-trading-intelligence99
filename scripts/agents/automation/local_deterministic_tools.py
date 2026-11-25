@@ -10,17 +10,31 @@ Addresses verified local 7-9B failure modes diagnosed from Academy & benchmark t
 from __future__ import annotations
 
 import ast
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import re
+import time
 import traceback
-from typing import Any
+from typing import Any, Callable
 
 FORBIDDEN_BUILTINS = frozenset({"eval", "exec", "compile", "__import__"})
 _EXAMPLE_MARKER_RE = re.compile(
     r"^(?:if\s+__name__\s*==\s*['\"]__main__['\"]\s*:|#\s*(?:example|usage|test|demo)\b)",
     re.IGNORECASE,
 )
+_SECRET_TOKEN_RE = re.compile(
+    r"(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9\-_]{16,}|"
+    r"gsk_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z\-_]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
+)
+_PROMPT_INJECTION_RE = re.compile(
+    r"(?i)(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions|"
+    r"disregard\s+system\s+prompt|reveal\s+(?:your\s+)?(?:system\s+prompt|api[_\s]?key|secrets?)|"
+    r"override\s+security\s+(?:policy|guard)|bypass\s+(?:sandbox|guard|verification))"
+)
+_DANGEROUS_OS_CALLS = frozenset({"system", "popen"})
+_DANGEROUS_PICKLE_CALLS = frozenset({"loads", "load"})
 
 
 def strip_trailing_example_blocks(code: str) -> str:
@@ -200,3 +214,177 @@ def causal_slice(values: list[float], idx: int, window: int) -> list[float]:
     require_int(idx, name="idx", min_val=0)
     require_int(window, name="window", min_val=1)
     return values[max(0, idx - window + 1) : idx + 1]
+
+
+def detect_prompt_injection(text: str) -> dict[str, Any]:
+    """Deterministic prompt-injection detector independent of LLM compliance."""
+    raw = str(text or "")
+    matches = [m.group(0)[:80] for m in _PROMPT_INJECTION_RE.finditer(raw)]
+    return {"safe": not matches, "matches": matches}
+
+
+def detect_secret_leak(text: str) -> dict[str, Any]:
+    """Deterministic secret-token leak detector (never echoes matched secrets)."""
+    raw = str(text or "")
+    hits = _SECRET_TOKEN_RE.findall(raw)
+    return {"safe": not hits, "count": len(hits)}
+
+
+def check_cloud_escalation_policy(
+    *,
+    confidential: bool,
+    allow_cloud: bool,
+    prompt_text: str = "",
+) -> dict[str, Any]:
+    """Deterministic guard blocking unauthorized cloud escalations or secret egress."""
+    if not allow_cloud:
+        return {"allowed": False, "reason": "cloud_disabled_local_only"}
+    if confidential:
+        return {"allowed": False, "reason": "confidential_local_only"}
+    if not detect_secret_leak(prompt_text)["safe"]:
+        return {"allowed": False, "reason": "secret_detected_in_outbound_payload"}
+    return {"allowed": True, "reason": "ok"}
+
+
+def deterministic_security_gate(
+    output: str,
+    *,
+    kind: str = "python",
+    allowed_root: str | Path | None = None,
+    target_rel_path: str | None = None,
+    check_secrets: bool = True,
+    check_injection: bool = False,
+) -> dict[str, Any]:
+    """Comprehensive deterministic security gate (independent of model goodwill).
+
+    Checks syntax, forbidden execution primitives, non-loopback binds, unsafe deserialization,
+    secret leakage, optional prompt injection markers, and path confinement within allowed_root.
+    """
+    issues: list[str] = []
+    base = static_security_and_syntax_precheck(output, kind=kind)
+    cleaned = base["cleaned"]
+    if not base["syntax_ok"]:
+        issues.extend(base["issues"])
+    if not base["security_ok"]:
+        issues.extend(base["issues"])
+
+    if check_secrets and not detect_secret_leak(cleaned)["safe"]:
+        issues.append("secret token pattern detected in output")
+    if check_injection and not detect_prompt_injection(cleaned)["safe"]:
+        issues.append("prompt injection override pattern detected")
+
+    if allowed_root is not None and target_rel_path is not None:
+        try:
+            safe_subpath(allowed_root, target_rel_path)
+        except ValueError as exc:
+            issues.append(f"out_of_scope_path: {exc}")
+
+    if kind == "python" and base["syntax_ok"]:
+        tree = ast.parse(cleaned)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                attr = node.func.attr
+                owner = node.func.value.id if isinstance(node.func.value, ast.Name) else ""
+                if owner == "os" and attr in _DANGEROUS_OS_CALLS:
+                    issues.append(f"forbidden os.{attr}() call")
+                if owner == "pickle" and attr in _DANGEROUS_PICKLE_CALLS:
+                    issues.append(f"forbidden unsafe pickle.{attr}() call")
+                if owner == "yaml" and attr == "load":
+                    has_safe_loader = any(
+                        kw.arg == "Loader" and isinstance(kw.value, ast.Attribute) and kw.value.attr == "SafeLoader"
+                        for kw in node.keywords
+                    )
+                    if not has_safe_loader:
+                        issues.append("forbidden unsafe yaml.load() without SafeLoader")
+                if owner == "hmac" and attr == "new" and node.args:
+                    first = node.args[0]
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        issues.append("hmac.new() key literal must be bytes, not str")
+
+    dedup_issues = list(dict.fromkeys(issues))
+    return {
+        "ok": not dedup_issues,
+        "syntax_ok": base["syntax_ok"],
+        "security_ok": not [i for i in dedup_issues if not i.startswith("SyntaxError") and not i.startswith("Invalid JSON")],
+        "cleaned": cleaned,
+        "issues": dedup_issues,
+    }
+
+
+@contextmanager
+def file_lock(lock_path: Path | str, *, timeout_s: float = 15.0, poll_s: float = 0.05):
+    """Cross-platform retrying advisory file lock (Windows msvcrt / POSIX fcntl)."""
+    lp = Path(lock_path)
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(0.1, float(timeout_s))
+    fh = lp.open("a+b")
+    locked = False
+    try:
+        while True:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Could not acquire lock {lp} within {timeout_s}s")
+                time.sleep(poll_s)
+        yield
+    finally:
+        if locked:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
+def write_json_atomic_locked(path: Path | str, payload: dict[str, Any], *, timeout_s: float = 15.0) -> Path:
+    """Write JSON atomically under a retrying file lock with a PID-scoped temp file."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = dest.parent / f"{dest.name}.lock"
+    tmp = dest.parent / f"{dest.name}.{os.getpid()}.tmp"
+    text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    with file_lock(lock_path, timeout_s=timeout_s):
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, dest)
+    return dest
+
+
+def locked_json_update(
+    path: Path | str,
+    updater: Callable[[dict[str, Any]], dict[str, Any]],
+    *,
+    timeout_s: float = 15.0,
+) -> dict[str, Any]:
+    """Read-modify-write a JSON object safely under an exclusive lock (prevents concurrent clobbering)."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = dest.parent / f"{dest.name}.lock"
+    tmp = dest.parent / f"{dest.name}.{os.getpid()}.tmp"
+    with file_lock(lock_path, timeout_s=timeout_s):
+        current: dict[str, Any] = {}
+        if dest.is_file():
+            try:
+                loaded = json.loads(dest.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    current = loaded
+            except (OSError, ValueError):
+                current = {}
+        updated = updater(current)
+        tmp.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, dest)
+    return updated

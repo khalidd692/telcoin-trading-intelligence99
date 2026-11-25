@@ -14,9 +14,77 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
-from scripts.agents.automation import metacognition
+from scripts.agents.automation import local_deterministic_tools, metacognition
+
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _normalize_objective(text: str) -> str:
+    return " ".join(_TOKEN_RE.findall(str(text or "").lower()))
+
+
+def _token_set(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(str(text or "").lower()))
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def get_all_forbidden_eval_ids() -> set[str]:
+    """Return ALL held-out / frozen evaluation task IDs across V1, Academy, V3, and V4."""
+    forbidden: set[str] = set()
+    try:
+        from scripts.agents.automation import benchmark_suite_100
+        forbidden.update(t["id"] for t in benchmark_suite_100.get_split("held_out_final"))
+    except Exception:
+        pass
+    try:
+        from scripts.agents.automation import agent_academy
+        forbidden.update(t["id"] for t in agent_academy.HELD_OUT_EVAL_EXERCISES)
+    except Exception:
+        pass
+    try:
+        from scripts.agents.automation import benchmark_unseen_v3
+        forbidden.update(t["id"] for t in benchmark_unseen_v3.UNSEEN_V3_60)
+    except Exception:
+        pass
+    try:
+        from scripts.agents.automation import benchmark_unseen_v4
+        forbidden.update(t["id"] for t in benchmark_unseen_v4.UNSEEN_V4_60)
+    except Exception:
+        pass
+    return forbidden
+
+
+def get_all_forbidden_eval_objectives() -> list[tuple[str, set[str]]]:
+    """Return normalized objective fingerprints of all frozen/held-out eval suites for leak guarding."""
+    rows: list[tuple[str, set[str]]] = []
+    sources = []
+    for mod_name, attr in (
+        ("benchmark_suite_100", None),
+        ("agent_academy", "HELD_OUT_EVAL_EXERCISES"),
+        ("benchmark_unseen_v3", "UNSEEN_V3_60"),
+        ("benchmark_unseen_v4", "UNSEEN_V4_60"),
+    ):
+        try:
+            mod = __import__(f"scripts.agents.automation.{mod_name}", fromlist=["*"])
+            if mod_name == "benchmark_suite_100":
+                sources.extend(mod.get_split("held_out_final"))
+            else:
+                sources.extend(getattr(mod, attr, ()))
+        except Exception:
+            continue
+    for task in sources:
+        obj = str(task.get("objective") or "")
+        if obj.strip():
+            rows.append((_normalize_objective(obj), _token_set(obj)))
+    return rows
 
 
 def _now_iso() -> str:
@@ -98,14 +166,24 @@ def build_verified_trajectory_corpus(
     output_jsonl: Path | str,
     *,
     excluded_task_ids: set[str] | None = None,
+    near_dup_threshold: float = 0.80,
 ) -> dict[str, Any]:
-    """Build a clean, deduplicated, secret-scrubbed SFT corpus strictly from verified local trajectories."""
-    excluded = set(excluded_task_ids or ())
+    """Build a clean, deduplicated, secret-scrubbed SFT corpus strictly from verified local trajectories.
+
+    Automatically excludes V1 held_out_final, Academy held-out, Unseen V3, and Unseen V4 tasks
+    by both task ID and objective similarity (zero benchmark contamination).
+    Never triggers training automatically.
+    """
+    excluded = get_all_forbidden_eval_ids() | set(excluded_task_ids or ())
+    forbidden_objs = get_all_forbidden_eval_objectives()
     seen_hashes: set[str] = set()
+    kept_token_sets: list[set[str]] = []
     kept: list[dict[str, Any]] = []
     skipped_unverified = 0
     skipped_duplicates = 0
+    skipped_near_duplicates = 0
     skipped_held_out = 0
+    secrets_scrubbed = 0
 
     for tf in trajectory_files:
         p = Path(tf)
@@ -121,19 +199,34 @@ def build_verified_trajectory_corpus(
             if row.get("verdict") != "SUCCESS":
                 skipped_unverified += 1
                 continue
+            if not row.get("project") or not row.get("model"):
+                skipped_unverified += 1
+                continue
             mid = str(row.get("mission_id") or "")
-            if any(mid == ex or mid.endswith(f"-{ex}") for ex in excluded):
+            if any(mid == ex or mid.endswith(f"-{ex}") or (ex and ex in mid) for ex in excluded):
                 skipped_held_out += 1
                 continue
             obj = str(row.get("objective") or "").strip()
             if len(obj) < 20:
                 skipped_unverified += 1
                 continue
-            norm_key = hashlib.sha256(f"{row.get('role','')}|{obj.lower()}".encode("utf-8")).hexdigest()
+            had_secret = not local_deterministic_tools.detect_secret_leak(obj)["safe"]
+            norm_obj = _normalize_objective(obj)
+            toks = _token_set(obj)
+            if any(norm_obj == fo or _jaccard(toks, ft) >= near_dup_threshold for fo, ft in forbidden_objs):
+                skipped_held_out += 1
+                continue
+            norm_key = hashlib.sha256(f"{row.get('role','')}|{norm_obj}".encode("utf-8")).hexdigest()
             if norm_key in seen_hashes:
                 skipped_duplicates += 1
                 continue
+            if any(_jaccard(toks, prev_t) >= near_dup_threshold for prev_t in kept_token_sets):
+                skipped_near_duplicates += 1
+                continue
             seen_hashes.add(norm_key)
+            kept_token_sets.append(toks)
+            if had_secret:
+                secrets_scrubbed += 1
             clean_row = metacognition.scrub_secrets({
                 "id": f"sft-{norm_key[:12]}",
                 "source_project": row.get("project"),
@@ -162,10 +255,14 @@ def build_verified_trajectory_corpus(
         "records_kept": len(kept),
         "skipped_unverified": skipped_unverified,
         "skipped_duplicates": skipped_duplicates,
+        "skipped_near_duplicates": skipped_near_duplicates,
         "skipped_held_out_leak_guard": skipped_held_out,
+        "secrets_scrubbed": secrets_scrubbed,
+        "excluded_eval_ids_count": len(excluded),
+        "auto_training_triggered": False,
         "retraining_recommended_now": len(kept) >= 200,
         "retraining_note": (
-            "Sufficient verified trajectories for candidate SFT evaluation."
+            "Sufficient verified trajectories for candidate SFT evaluation (requires separate owner authorization)."
             if len(kept) >= 200
             else f"Only {len(kept)} unique verified trajectories (< 200 minimum); keep Gemma base + Harness/RAG/Skills as reference until corpus >= 200."
         ),

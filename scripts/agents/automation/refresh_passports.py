@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.agents.automation import evolution_lab
+from scripts.agents.automation import evolution_lab, local_deterministic_tools
 
 AI_RADAR_DIR = Path.home() / "Desktop" / "AI_RADAR"
 GEN_DIR = Path.home() / "Desktop" / "TEL99_GENERALIZATION_CHECK"
@@ -46,7 +46,16 @@ def build_refreshed_passports(
         bench_dir / "artifacts" / "groq_hybrid_benchmark_120_report.json"
     )
     transfer = _load(bench_dir / "artifacts" / "cloud_to_local_transfer_report.json")
-    unseen_v3 = _load(bench_dir / "artifacts" / "unseen_v3_report.json")
+    # Reconcile V3 checkpoints safely if any separate checkpoint files exist
+    try:
+        from scripts.agents.automation import run_unseen_v3_eval
+        if any((bench_dir / "artifacts" / fn).is_file() for fn in ("ckpt_v3_local_before.json", "ckpt_v3_local_after.json", "ckpt_v3_hybrid_after.json")):
+            unseen_v3 = run_unseen_v3_eval.rebuild_unseen_v3_report_from_checkpoints(art_dir=bench_dir / "artifacts")
+        else:
+            unseen_v3 = _load(bench_dir / "artifacts" / "unseen_v3_report.json")
+    except Exception:
+        unseen_v3 = _load(bench_dir / "artifacts" / "unseen_v3_report.json")
+    unseen_v4 = _load(bench_dir / "artifacts" / "unseen_v4_report.json")
     matrix = _load(bench_dir / "artifacts" / "competency_matrix_12x12.json")
 
     ai_statuses = ai_radar.get("runtime_statuses") or {}
@@ -69,8 +78,8 @@ def build_refreshed_passports(
     for row in ho_rows:
         ho_by_role.setdefault(row["role"], []).append(row)
 
-    tr_after_rows = unseen_v3.get("details_local_after") or transfer.get("details_after") or []
-    tr_before_rows = unseen_v3.get("details_local_before") or transfer.get("details_before") or []
+    tr_after_rows = unseen_v4.get("details_local_after") or unseen_v3.get("details_local_after") or transfer.get("details_after") or []
+    tr_before_rows = unseen_v4.get("details_local_before") or unseen_v3.get("details_local_before") or transfer.get("details_before") or []
     tr_after_by_role: dict[str, list[dict[str, Any]]] = {}
     for row in tr_after_rows:
         tr_after_by_role.setdefault(row["role"], []).append(row)
@@ -246,7 +255,7 @@ def build_refreshed_passports(
 
 def main() -> int:
     passports = build_refreshed_passports()
-    dest = evolution_lab.save_agent_passports(AI_RADAR_DIR / "artifacts" / "agent_passports.json", passports)
+    dest = local_deterministic_tools.write_json_atomic_locked(AI_RADAR_DIR / "artifacts" / "agent_passports.json", passports)
     summary = {
         "saved_to": str(dest),
         "version": passports["version"],

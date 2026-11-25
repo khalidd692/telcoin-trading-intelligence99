@@ -108,6 +108,50 @@ def _bound_text(text: str, limit: int) -> str:
     return clean
 
 
+def diagnose_error_pattern(exact_error: str, previous_code: str = "") -> str:
+    """Return a concise, generalizable root-cause repair hint for recurring Python/web error classes."""
+    err = str(exact_error or "")
+    low = err.lower()
+    hints: list[str] = []
+
+    if "expected bytes or bytearray, but got 'str'" in low or ("hmac" in low and "bytes" in low):
+        hints.append(
+            "Encode str inputs to bytes first (e.g. `k = secret.encode('utf-8') if isinstance(secret, str) else secret`) before `hmac.new`/`hashlib`."
+        )
+    if "unboundlocalerror" in low:
+        hints.append(
+            "Initialize local variables before conditional branches (never reference a variable that is only assigned inside an `if` branch)."
+        )
+    if (
+        "true" in low or "false" in low or "assert false" in low
+    ) and (
+        "bool" not in (previous_code or "")
+        or "isinstance(" in (previous_code or "")
+        or "assert false" in low
+    ):
+        if "assert false" in low or ", true)" in low or ", false," in low or "(true," in low or "bool" in low:
+            hints.append(
+                "Python `bool` subclasses `int` (`isinstance(True, int)` is True and `False == 0` is True): ALWAYS check `if isinstance(x, bool):` FIRST before `int`/`float` or `== 0` checks."
+            )
+    if "syntaxerror" in low and any(tok in low for tok in ("never closed", "unterminated", "eof")):
+        hints.append(
+            "Output was truncated or had an unclosed delimiter: remove ALL docstrings, comments, and example blocks and keep the file concise."
+        )
+    if "unbalanced braces" in low:
+        hints.append(
+            "Output had unbalanced CSS/JS braces (likely truncated): remove ALL comments (`/* ... */`, `// ...`) and write compact rules with matching `{` and `}`."
+        )
+    if "repeated_attempt" in low:
+        hints.append(
+            "Your previous attempt produced identical code: change the actual logic causing the failed check rather than re-emitting the same implementation."
+        )
+    if "semver" in low or ("must start with" in low and "valueerror" in low):
+        hints.append(
+            "Check optional prefixes carefully (e.g. `'v?X.Y.Z'` means leading `'v'` is OPTIONAL, not mandatory)."
+        )
+    return " ".join(hints[:2])[:320]
+
+
 def build_smart_repair_prompt(
     *,
     previous_code: str,
@@ -126,6 +170,9 @@ def build_smart_repair_prompt(
         "TARGETED REPAIR REQUIRED (do NOT repeat any previously tried solution):",
         f"Exact verifier error: {_bound_text(exact_error, MAX_ERROR_CHARS)}",
     ]
+    root_hint = diagnose_error_pattern(exact_error, previous_code)
+    if root_hint:
+        parts.append(f"Root-cause diagnostic hint: {root_hint}")
     if passed_checks:
         parts.append("Checks already PASSING (preserve intact): " + ", ".join(str(c) for c in passed_checks[:12]))
     if failed_checks:
