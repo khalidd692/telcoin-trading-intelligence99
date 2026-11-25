@@ -240,7 +240,8 @@
         hdr.append(mk("span", "", "Vous"), mk("span", "", m.created_at || ""));
       } else {
         const who = `${m.label_fr || m.agent_name || "Agent"} (${m.agent_name || m.agent_role || ""})`;
-        const info = `${m.provider_used || "?"} / ${m.model_used || "?"} · ${m.duration_seconds ?? "?"}s · ${m.confidential ? "Local" : "Hybride"}`;
+        const modeLabel = ({fast:"Rapide", auto:"Intelligent", deep:"Approfondi"})[m.response_mode] || "Ancien mode";
+        const info = `${modeLabel} · ${m.provider_used || "?"} / ${m.model_used || "?"} · ${m.duration_seconds ?? "?"}s · ${m.confidential ? "Local" : "Hybride"}`;
         hdr.append(mk("span", "", who));
         const right = mk("div", "row-inline");
         right.append(mk("span", "", info));
@@ -299,6 +300,7 @@
       setChatBanner("Envoi en file sécurisée…", "status-warn", true);
       const job = await apiMutate("POST", `/api/cc/conversations/${encodeURIComponent(state.activeConvId)}/messages`, {
         message: text,
+        response_mode: $("chatResponseMode").value,
         role: $("chatRoleSelect").value,
         team_mode: $("chatTeamToggle").checked,
         confidential: $("chatConfidentialToggle").checked,
