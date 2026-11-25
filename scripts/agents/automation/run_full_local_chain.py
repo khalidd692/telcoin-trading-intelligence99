@@ -293,6 +293,58 @@ def main(argv: list[str] | None = None) -> int:
                 log_path=report_dir / "cloud_to_local_transfer.log",
             )
             _record_step("transfer", res)
+        elif step == "matrix_12x12":
+            res = _run_subprocess(
+                [py, "-B", "-m", "scripts.agents.automation.competency_matrix", "--rotations", "2"],
+                cwd=ROOT,
+                timeout=3600,
+                log_path=report_dir / "matrix_12x12.log",
+            )
+            _record_step("matrix_12x12", res)
+        elif step == "passports":
+            res = _run_subprocess(
+                [py, "-B", "-m", "scripts.agents.automation.refresh_passports"],
+                cwd=ROOT,
+                timeout=120,
+                log_path=report_dir / "passports.log",
+            )
+            _record_step("passports", res)
+        elif step == "publish_github":
+            res = _run_subprocess(
+                [
+                    py, "-B", "-c",
+                    (
+                        "import json, subprocess; from pathlib import Path; "
+                        "from scripts.agents.automation.run_full_local_chain import collect_results_summary; "
+                        "s = collect_results_summary(); "
+                        "v3p = Path.home()/'Desktop'/'TEL99_BENCHMARK_120_STATE'/'artifacts'/'unseen_v3_report.json'; "
+                        "v3 = json.loads(v3p.read_text(encoding='utf-8')) if v3p.is_file() else {}; "
+                        "mp = Path.home()/'Desktop'/'TEL99_BENCHMARK_120_STATE'/'artifacts'/'competency_matrix_12x12.json'; "
+                        "mat = json.loads(mp.read_text(encoding='utf-8')) if mp.is_file() else {}; "
+                        "lb = v3.get('local_before') or {}; la = v3.get('local_after') or {}; hy = v3.get('hybrid_after') or {}; "
+                        "gm = mat.get('global_metrics') or {}; ar = s.get('ai_radar') or {}; en = s.get('endurance') or {}; "
+                        "body = ("
+                        "'## TEL99 — Rapport Autonome LocalChain (détaché, 0 Gemini, 0 $)\\n\\n'"
+                        "+ f'- **UNSEEN_V3 Local Avant (0 cloud)** : {lb.get(\"passed\")}/{lb.get(\"total\")} ({lb.get(\"success_rate\")})\\n'"
+                        "+ f'- **UNSEEN_V3 Local Après (0 cloud)** : {la.get(\"passed\")}/{la.get(\"total\")} ({la.get(\"success_rate\")}), sécurité critique={la.get(\"critical_security_passed\")}/{la.get(\"critical_security_total\")}\\n'"
+                        "+ f'- **UNSEEN_V3 Hybride (0 $)** : {hy.get(\"passed\")}/{hy.get(\"total\")} ({hy.get(\"success_rate\")}), sécurité critique={hy.get(\"critical_security_passed\")}/{hy.get(\"critical_security_total\")}\\n'"
+                        "+ f'- **Matrice 12x12 (0 cloud local)** : primaire={gm.get(\"local_primary_passed\")} ({gm.get(\"local_primary_expertise_rate\")}), croisé={gm.get(\"local_cross_domain_passed\")} ({gm.get(\"local_cross_domain_generalist_rate\")})\\n'"
+                        "+ f'- **AI Radar** : {ar.get(\"accepted\")}/{ar.get(\"total\")} ACCEPTED\\n'"
+                        "+ f'- **Généralisation 100 % local** : all_accepted={s.get(\"generalization\", {}).get(\"all_accepted\")}\\n'"
+                        "+ f'- **Endurance RUN3** : status={en.get(\"status\")}, duration_min={en.get(\"duration_minutes\")}, accepted={en.get(\"missions_accepted\")}/{en.get(\"missions_total\")}\\n'"
+                        "+ f'- **Passeports 12 agents** : {s.get(\"academy_12_agents\", {}).get(\"levels\")}\\n\\n'"
+                        "+ '*(Généré automatiquement par `run_full_local_chain.py` sans intervention Gemini ; aucune fusion `main`, aucune signature propriétaire, aucun ordre.)*'); "
+                        "Path(r'C:\\Users\\sabri\\Desktop\\TEL99_LOCAL_CHAIN_STATE\\final_github_comment.md').write_text(body, encoding='utf-8'); "
+                        "r1 = subprocess.run(['gh', 'issue', 'comment', '214', '--body-file', r'C:\\Users\\sabri\\Desktop\\TEL99_LOCAL_CHAIN_STATE\\final_github_comment.md'], check=False); "
+                        "r2 = subprocess.run(['gh', 'pr', 'comment', '215', '--body-file', r'C:\\Users\\sabri\\Desktop\\TEL99_LOCAL_CHAIN_STATE\\final_github_comment.md'], check=False); "
+                        "print('GH_PUBLISH_RC:', r1.returncode, r2.returncode)"
+                    ),
+                ],
+                cwd=ROOT,
+                timeout=90,
+                log_path=report_dir / "publish_github.log",
+            )
+            _record_step("publish_github", res)
         elif step == "lora_corpus":
             res = _run_subprocess(
                 [
