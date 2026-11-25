@@ -24,6 +24,8 @@ from scripts.agents.automation import (
     evolution_lab,
     ide_coordination,
     improvement_cycle,
+    local_deterministic_tools,
+    mentor_curriculum,
     metacognition,
     ollama_native,
     smart_repair,
@@ -173,7 +175,6 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
             except (OSError, ValueError):
                 pass
 
-        skill_text = (SKILLS_DIR / "tel99-local-precision" / "SKILL.md").read_text(encoding="utf-8")[:1100]
         results = []
         t_all = time.monotonic()
 
@@ -184,13 +185,15 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                 continue
 
             lessons = []
+            role_skill_card = ""
             if use_transfer:
                 hits = context_engine.HybridMemoryIndex(MEM_DIR).search(
-                    "tel99-bench", f"{task['role']} {task['objective']}", limit=3, verified_only=True, role=task["role"]
+                    "tel99-bench", f"{task['role']} {task['objective']}", limit=2, verified_only=True, role=task["role"]
                 )
                 lessons = [f"{h['title']}: {h['body']}" for h in hits]
+                role_skill_card = mentor_curriculum.load_role_skill_card(task["role"], skills_dir=SKILLS_DIR, max_chars=750)
 
-            max_att = 2 if use_transfer else 1
+            max_att = 3 if use_transfer else 1
             attempts_log = []
             last_out = ""
             prev_out = ""
@@ -203,7 +206,7 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                 budget = ollama_native.compute_adaptive_budget(
                     LOCAL_MODEL,
                     task_profile=prof,
-                    estimated_lines=70 if use_transfer else 45,
+                    estimated_lines=60 if use_transfer else 45,
                     available_memory_mib=eng.get("available_memory_mib"),
                     model_is_resident=resident,
                 )
@@ -227,15 +230,19 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                         constraints=[
                             "Python 3.12 stdlib only (or exact JSON object ONLY if JSON requested).",
                             improvement_cycle._role_instruction_hint(task["role"]),
-                            "Write ZERO docstrings and ZERO comments (concise <= 30 lines avoids 8k/CPU token truncation); output ONLY code or JSON.",
+                            "ZERO docstrings, ZERO comments, ZERO if __name__=='__main__' example blocks (<= 30 lines total); output ONLY code or JSON.",
                         ],
                     )
                     usr_p = task["objective"]
+                    if role_skill_card:
+                        usr_p += f"\n\nSpecialized Role Skill (tel99-role-{task['role'].replace('_', '-')}):\n{role_skill_card}"
                     if lessons:
-                        usr_p += "\n\nVerified mentor-distilled rules:\n- " + "\n- ".join(lessons)
-                    usr_p += f"\n\nSkill excerpt (tel99-local-precision):\n{skill_text[:450]}"
+                        usr_p += "\n\nVerified mentor-distilled rules:\n- " + "\n- ".join(lessons[:2])
                 else:
-                    sys_p = "Return ONLY the complete corrected Python 3 stdlib code (or exact JSON object)."
+                    sys_p = (
+                        "Return ONLY the complete corrected Python 3.12 stdlib code (<= 30 lines, ZERO docstrings, "
+                        "ZERO comments, ZERO example blocks) or exact JSON object."
+                    )
                     diff = smart_repair.compute_bounded_diff(prev_out, last_out) if prev_out else ""
                     usr_p = (
                         f"Original specification:\n{task['objective']}\n\n"
@@ -244,15 +251,23 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                             exact_error=str(last_ver.get("error") or ""),
                             passed_checks=last_ver.get("passed", []),
                             failed_checks=last_ver.get("failed", []),
-                            contract_constraints=[improvement_cycle._role_instruction_hint(task["role"])],
+                            contract_constraints=[
+                                improvement_cycle._role_instruction_hint(task["role"]),
+                                "ZERO docstrings, ZERO comments, ZERO example blocks (<= 30 lines).",
+                            ],
                             prior_attempts=attempts_log,
-                            memory_lessons=lessons,
+                            memory_lessons=lessons[:2],
                             previous_diff=diff,
                         )
                     )
                 try:
                     rf = "json" if (use_transfer and task.get("kind") == "json") else None
                     raw = provider.complete(system=sys_p, prompt=usr_p, response_format=rf)
+                    if use_transfer:
+                        if task.get("kind") == "json":
+                            raw = local_deterministic_tools.extract_clean_json(raw)
+                        else:
+                            raw = local_deterministic_tools.strip_trailing_example_blocks(ollama_native.extract_code_block(raw))
                     ver = benchmark_suite_100.verify_task_output(task, raw)
                 except Exception as exc:
                     raw = ""

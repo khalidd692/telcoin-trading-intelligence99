@@ -1049,8 +1049,12 @@ class OpenAICompatFreeCloudAdapter:
                 resp_headers = dict(resp.headers.items())
         except HTTPError as exc:
             if exc.code == 429:
-                retry_hdr = exc.headers.get("Retry-After") or exc.headers.get("x-ratelimit-reset-requests") if exc.headers else None
-                wait_s = _parse_reset_seconds(retry_hdr, default=60.0)
+                retry_hdr = (
+                    (exc.headers.get("Retry-After") or exc.headers.get("x-ratelimit-reset-tokens"))
+                    if exc.headers
+                    else None
+                )
+                wait_s = min(65.0, _parse_reset_seconds(retry_hdr, default=30.0))
                 self.budget.record_rate_limit(self.provider, retry_after_s=wait_s)
                 return self._fallback_to_ollama(
                     system=system, prompt=prompt, reason=f"HTTP 429 cooldown {wait_s:.0f}s", response_format=response_format

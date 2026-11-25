@@ -27,7 +27,9 @@ DEFAULT_REPORT_DIR = Path.home() / "Desktop" / "TEL99_LOCAL_CHAIN_STATE"
 AI_RADAR_DIR = Path.home() / "Desktop" / "AI_RADAR"
 GENERALIZATION_DIR = Path.home() / "Desktop" / "TEL99_GENERALIZATION_CHECK"
 LORA_DIR = Path.home() / "Desktop" / "TEL99-LORA"
-ENDURANCE_DIR = Path.home() / "Desktop" / "TEL99_ENDURANCE_20261125_RUN2"
+ENDURANCE_DIR = Path.home() / "Desktop" / "TEL99_ENDURANCE_20261125_RUN3"
+ENDURANCE_FALLBACK_DIR = Path.home() / "Desktop" / "TEL99_ENDURANCE_20261125_RUN2"
+BENCHMARK_DIR = Path.home() / "Desktop" / "TEL99_BENCHMARK_120_STATE"
 
 
 def _now_iso() -> str:
@@ -98,7 +100,11 @@ def collect_results_summary(report_dir: Path = DEFAULT_REPORT_DIR) -> dict:
     academy = _load(AI_RADAR_DIR / "artifacts" / "academy_12_agents_report.json")
     gen = _load(GENERALIZATION_DIR / "artifacts" / "generalization_report.json")
     lora = _load(LORA_DIR / "ablation_ae_report.json")
-    endurance = _load(ENDURANCE_DIR / "hour_campaign_report.json")
+    endurance = _load(ENDURANCE_DIR / "hour_campaign_report.json") or _load(ENDURANCE_FALLBACK_DIR / "hour_campaign_report.json")
+    bench120 = _load(BENCHMARK_DIR / "artifacts" / "groq_hybrid_benchmark_120_v2_report.json") or _load(
+        BENCHMARK_DIR / "artifacts" / "groq_hybrid_benchmark_120_report.json"
+    )
+    transfer = _load(BENCHMARK_DIR / "artifacts" / "cloud_to_local_transfer_report.json")
     chain = _load(report_dir / "local_chain_report.json")
     engines = ide_coordination.probe_local_engines()
 
@@ -129,6 +135,18 @@ def collect_results_summary(report_dir: Path = DEFAULT_REPORT_DIR) -> dict:
             "missions": (gen or {}).get("missions"),
         },
         "tel99_lora_ablation": (lora or {}).get("summary"),
+        "benchmark_120_held_out": {
+            "passed": ((bench120 or {}).get("held_out_final_hybrid") or (bench120 or {}).get("held_out_final") or {}).get("passed"),
+            "total": ((bench120 or {}).get("held_out_final_hybrid") or (bench120 or {}).get("held_out_final") or {}).get("total"),
+            "success_rate": ((bench120 or {}).get("held_out_final_hybrid") or (bench120 or {}).get("held_out_final") or {}).get("success_rate"),
+            "first_pass_rate": ((bench120 or {}).get("held_out_final_hybrid") or (bench120 or {}).get("held_out_final") or {}).get("first_pass_rate"),
+        },
+        "cloud_to_local_transfer": {
+            "cloud_calls_during_evaluation": (transfer or {}).get("cloud_calls_during_evaluation"),
+            "before_local_rate": ((transfer or {}).get("before_local_baseline") or {}).get("success_rate"),
+            "after_local_rate": ((transfer or {}).get("after_local_only_post_transfer") or {}).get("success_rate"),
+            "delta_success_rate": (transfer or {}).get("delta_success_rate"),
+        },
         "endurance": {
             "status": (endurance or {}).get("status"),
             "duration_minutes": (endurance or {}).get("duration_minutes"),

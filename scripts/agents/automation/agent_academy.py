@@ -411,19 +411,21 @@ def rollback_agent_profile_version(store_dir: Path | str, *, target_version: str
 
 
 def _verify_python_exercise(code: str, test_code: str) -> dict[str, Any]:
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        return {"ok": False, "error": f"SyntaxError line {exc.lineno}: {exc.msg}", "passed": [], "failed": ["syntax"]}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "__import__"}:
-            return {"ok": False, "error": f"Forbidden call {node.func.id}", "passed": ["syntax"], "failed": ["security"]}
+    from scripts.agents.automation import local_deterministic_tools
+
+    pre = local_deterministic_tools.static_security_and_syntax_precheck(code, kind="python")
+    cleaned = pre["cleaned"]
+    if not pre["syntax_ok"]:
+        return {"ok": False, "error": pre["issues"][0], "passed": [], "failed": ["syntax"]}
+    if not pre["security_ok"]:
+        return {"ok": False, "error": "; ".join(pre["issues"]), "passed": ["syntax"], "failed": ["security"]}
     ns: dict[str, Any] = {}
     try:
-        exec(compile(code, "<candidate>", "exec"), ns)
+        exec(compile(cleaned, "<candidate>", "exec"), ns)
         exec(compile(test_code, "<held-out-test>", "exec"), ns)
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "passed": ["syntax", "security"], "failed": ["behavior"]}
+        err_msg = local_deterministic_tools.format_precise_failure_feedback(exc, test_code)
+        return {"ok": False, "error": err_msg, "passed": ["syntax", "security"], "failed": ["behavior"]}
     return {"ok": True, "error": None, "passed": ["syntax", "security", "behavior"], "failed": []}
 
 
@@ -439,7 +441,7 @@ def evaluate_model_on_held_out(
     progress_file: Path | str | None = None,
 ) -> dict[str, Any]:
     """Run held-out exercises in 'baseline' (naive retry, 1024) or 'upgraded' (Context Engine + RAG + Skills + Smart Repair)."""
-    from scripts.agents.automation import context_engine, metacognition
+    from scripts.agents.automation import context_engine, ide_coordination, local_deterministic_tools, mentor_curriculum, metacognition
 
     exs = exercises or HELD_OUT_EVAL_EXERCISES
     results = []
@@ -449,34 +451,48 @@ def evaluate_model_on_held_out(
     cal_observations: list[dict[str, Any]] = []
 
     for ex in exs:
+        eng = ide_coordination.probe_local_engines()
+        resident = model in ((eng.get("ollama") or {}).get("loaded_models") or [])
         profile = "patch" if mode == "baseline" else ex.get("task_profile", "module")
-        budget = ollama_native.compute_adaptive_budget(model, task_profile=profile, estimated_lines=50)
+        budget = ollama_native.compute_adaptive_budget(
+            model,
+            task_profile=profile,
+            estimated_lines=40 if mode == "baseline" else 55,
+            available_memory_mib=eng.get("available_memory_mib"),
+            model_is_resident=resident,
+        )
         provider = ollama_native.OllamaNativeProvider(
             model=model,
             timeout=budget["timeout"],
             max_tokens=budget["max_tokens"],
             keep_alive="120s",
-            task_profile=profile,
+            task_profile=budget["effective_profile"],
             num_ctx=budget["num_ctx"],
             num_thread=budget["num_thread"],
         )
-        # Retrieve verified memory + relevant skills in upgraded mode
+        # Retrieve verified memory + role-specialized Skill in upgraded mode
         mem_lessons: list[str] = []
         skills_used: list[str] = []
+        role_skill_card = ""
         if mode != "baseline":
             if memory_root is not None:
                 hits = context_engine.HybridMemoryIndex(memory_root).search(
-                    "tel99-academy", f"{ex['role']} {ex['objective']}", limit=3, verified_only=True, role=ex["role"]
+                    "tel99-academy", f"{ex['role']} {ex['objective']}", limit=2, verified_only=True, role=ex["role"]
                 )
                 mem_lessons = [f"{h['title']}: {h['body']}" for h in hits]
             if skills_root is not None:
-                sk = context_engine.select_relevant_skills(skills_root, f"{ex['role']} {ex['objective']}", limit=2)
-                skills_used = [s["name"] for s in sk]
+                role_skill_name = f"tel99-role-{ex['role'].replace('_', '-')}"
+                role_skill_card = mentor_curriculum.load_role_skill_card(ex["role"], skills_dir=Path(skills_root), max_chars=750)
+                if (Path(skills_root) / role_skill_name / "SKILL.md").is_file():
+                    skills_used.append(role_skill_name)
+                else:
+                    sk = context_engine.select_relevant_skills(skills_root, f"{ex['role']} {ex['objective']}", limit=1)
+                    skills_used = [s["name"] for s in sk]
 
         conf_est = metacognition.estimate_task_confidence(
-            estimated_lines=50,
+            estimated_lines=45,
             prior_role_success_rate=0.75,
-            has_verified_memory=bool(mem_lessons),
+            has_verified_memory=bool(mem_lessons or role_skill_card),
         )
         prior_hashes: list[str] = []
         attempts_log: list[dict[str, Any]] = []
@@ -491,37 +507,51 @@ def evaluate_model_on_held_out(
                     "Return ONLY clean Python 3 stdlib code implementing the requested function."
                     if mode == "baseline"
                     else smart_repair.build_structured_reasoning_prompt(
-                        role=ex["role"],
+                        role=f"tel99-{ex['role']}",
                         objective=ex["objective"],
                         constraints=[
-                            "Python 3.12 stdlib only",
-                            "No eval/exec/__import__",
-                            "Validate bool separately from int where required",
-                            "Return ONLY valid Python code inside one block",
+                            "Python 3.12 stdlib only; NO eval/exec/__import__",
+                            "ZERO docstrings, ZERO comments, ZERO if __name__=='__main__' or example tests (<= 30 lines total)",
+                            "Validate bool separately from int (`isinstance(x, bool)`) and check exact return keys/types",
+                            "Output ONLY valid Python code inside one fenced code block",
                         ],
                     )
                 )
                 user_prompt = ex["objective"]
+                if mode != "baseline" and role_skill_card:
+                    user_prompt += f"\n\nSpecialized Skill ({skills_used[0] if skills_used else 'role'}):\n{role_skill_card}"
                 if mode != "baseline" and mem_lessons:
-                    user_prompt += "\n\nVerified memory lessons:\n- " + "\n- ".join(mem_lessons)
+                    user_prompt += "\n\nVerified memory lessons:\n- " + "\n- ".join(mem_lessons[:2])
                 if attempt > 1 and mode == "baseline":
                     user_prompt += f"\nPrevious attempt failed: {last_ver.get('error')}"
             else:
-                sys_prompt = "Return ONLY the complete corrected Python 3 stdlib code."
+                sys_prompt = (
+                    "Return ONLY the complete corrected Python 3.12 stdlib code (<= 30 lines, ZERO docstrings, "
+                    "ZERO comments, ZERO example/main blocks)."
+                )
                 diff = smart_repair.compute_bounded_diff(prev_code, last_code) if prev_code else ""
-                user_prompt = smart_repair.build_smart_repair_prompt(
-                    previous_code=last_code,
-                    exact_error=str(last_ver.get("error") or ""),
-                    passed_checks=last_ver.get("passed", []),
-                    failed_checks=last_ver.get("failed", []),
-                    contract_constraints=["Python 3.12 stdlib only", "Preserve exact signature"],
-                    prior_attempts=attempts_log,
-                    memory_lessons=mem_lessons,
-                    previous_diff=diff,
+                user_prompt = (
+                    f"Original specification:\n{ex['objective']}\n\n"
+                    + smart_repair.build_smart_repair_prompt(
+                        previous_code=last_code,
+                        exact_error=str(last_ver.get("error") or ""),
+                        passed_checks=last_ver.get("passed", []),
+                        failed_checks=last_ver.get("failed", []),
+                        contract_constraints=[
+                            "Python 3.12 stdlib only",
+                            "Preserve exact function/class signature and return keys",
+                            "ZERO docstrings, ZERO comments, ZERO example/test blocks (<= 30 lines)",
+                        ],
+                        prior_attempts=attempts_log,
+                        memory_lessons=mem_lessons[:2],
+                        previous_diff=diff,
+                    )
                 )
             try:
                 raw = provider.complete(system=sys_prompt, prompt=user_prompt)
                 code = ollama_native.extract_code_block(raw)
+                if mode != "baseline":
+                    code = local_deterministic_tools.strip_trailing_example_blocks(code)
                 repeated = smart_repair.detect_repeated_attempt(code, prior_hashes)
                 ver = _verify_python_exercise(code, ex["test_code"])
                 fp = smart_repair.code_fingerprint(code)

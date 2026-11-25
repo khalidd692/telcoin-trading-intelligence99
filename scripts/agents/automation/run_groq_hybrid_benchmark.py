@@ -24,6 +24,8 @@ from scripts.agents.automation import (
     context_engine,
     evolution_lab,
     improvement_cycle,
+    local_deterministic_tools,
+    mentor_curriculum,
     metacognition,
     provider_router,
     smart_repair,
@@ -75,10 +77,13 @@ def _call_groq_safe(
         budget_ledger=ledger,
     )
     for retry in range(max_429_retries + 1):
-        # Pace gently if remaining TPM is tight
         st = ledger.status("groq")
         if st["cooldown_remaining_s"] > 0:
-            time.sleep(min(20.0, st["cooldown_remaining_s"] + 1.0))
+            time.sleep(min(90.0, st["cooldown_remaining_s"] + 2.0))
+        else:
+            rem_tok = int(((st.get("last_headers") or {}).get("x-ratelimit-remaining-tokens")) or 8000)
+            if rem_tok < 3000:
+                time.sleep(12.0)
         try:
             out = ad.complete(system=system, prompt=prompt, response_format=response_format)
             return out, dict(ad.last_metadata)
@@ -86,7 +91,8 @@ def _call_groq_safe(
             msg = str(exc)
             if "429" in msg or "cooldown" in msg.lower():
                 if retry < max_429_retries:
-                    time.sleep(10.0)
+                    st2 = ledger.status("groq")
+                    time.sleep(min(90.0, max(15.0, st2["cooldown_remaining_s"] + 2.0)))
                     continue
             raise
     raise RuntimeError("Groq call failed after 429 retries")
@@ -270,21 +276,25 @@ def _evaluate_frozen_held_out_hybrid(
             results.append(done[tid])
             continue
 
-        # Retrieve verified train-only lessons via SQLite FTS5 Hybrid RAG + relevant Skills
+        # Retrieve verified train-only lessons via SQLite FTS5 Hybrid RAG + specialized role Skill
         hits = context_engine.HybridMemoryIndex(MEM_DIR).search(
             "tel99-bench", f"{task['role']} {task['objective']}", limit=3, verified_only=True, role=task["role"]
         )
         mem_lessons = [f"{h['title']}: {h['body']}" for h in hits]
-        sk = context_engine.select_relevant_skills(SKILLS_DIR, f"{task['role']} {task['objective']}", limit=2)
-        skills_used = [s["name"] for s in sk]
+        role_skill_card = mentor_curriculum.load_role_skill_card(task["role"], skills_dir=SKILLS_DIR, max_chars=550)
+        role_skill_name = f"tel99-role-{task['role'].replace('_', '-')}"
+        skills_used = [role_skill_name] if role_skill_card else [
+            s["name"] for s in context_engine.select_relevant_skills(SKILLS_DIR, f"{task['role']} {task['objective']}", limit=2)
+        ]
         conf = metacognition.estimate_task_confidence(
-            estimated_lines=45, prior_role_success_rate=0.92, has_verified_memory=bool(mem_lessons)
+            estimated_lines=45, prior_role_success_rate=0.92, has_verified_memory=bool(mem_lessons or role_skill_card)
         )
 
-        # Empirical routing per role + difficulty escalation chain (max 3 attempts)
+        # Empirical routing per role + 3-mentor complementarity escalation chain (max 3 attempts)
         first_model = expert_model if task["difficulty"] == "hard" else role_routing.get(task["role"], secondary_model)
         alt_model = secondary_model if first_model == expert_model else expert_model
-        model_chain = [first_model, expert_model, alt_model]
+        third_model = "qwen/qwen3.8-27b" if "qwen/qwen3.8-27b" not in (first_model, alt_model) else expert_model
+        model_chain = [first_model, alt_model, third_model]
 
         prior_hashes: list[str] = []
         attempts_log: list[dict] = []
@@ -303,14 +313,16 @@ def _evaluate_frozen_held_out_hybrid(
                         "Python 3.12 stdlib only (or valid JSON object ONLY if JSON requested).",
                         "No eval/exec/__import__/shell=True.",
                         improvement_cycle._role_instruction_hint(task["role"]),
-                        "Output ONLY the final code block or JSON object with zero prose.",
+                        "ZERO docstrings, ZERO comments, ZERO example/main blocks; output ONLY the final code block or JSON object.",
                     ],
                 )
                 usr_p = task["objective"]
+                if role_skill_card:
+                    usr_p += f"\n\nSpecialized Skill ({role_skill_name}):\n{role_skill_card}"
                 if mem_lessons:
-                    usr_p += "\n\nVerified memory lessons:\n- " + "\n- ".join(mem_lessons)
+                    usr_p += "\n\nVerified memory lessons:\n- " + "\n- ".join(mem_lessons[:2])
             else:
-                sys_p = "Return ONLY the complete corrected Python 3 stdlib code (or exact JSON object)."
+                sys_p = "Return ONLY the complete corrected Python 3.12 stdlib code (or exact JSON object) with ZERO prose/docstrings."
                 diff = smart_repair.compute_bounded_diff(prev_out, last_out) if prev_out else ""
                 usr_p = (
                     f"Original specification:\n{task['objective']}\n\n"
@@ -322,15 +334,20 @@ def _evaluate_frozen_held_out_hybrid(
                         contract_constraints=[
                             improvement_cycle._role_instruction_hint(task["role"]),
                             "Preserve exact function/class name, signature, and return types.",
+                            "Re-read every edge case (bool vs int, empty inputs, bounds, exact keys, rounding).",
                         ],
                         prior_attempts=attempts_log,
-                        memory_lessons=mem_lessons,
+                        memory_lessons=mem_lessons[:2],
                         previous_diff=diff,
                     )
                 )
             try:
                 rf = "json" if task.get("kind") == "json" else None
                 raw, meta = _call_groq_safe(mdl, system=sys_p, prompt=usr_p, response_format=rf)
+                if task.get("kind") == "json":
+                    raw = local_deterministic_tools.extract_clean_json(raw)
+                else:
+                    raw = local_deterministic_tools.strip_trailing_example_blocks(raw)
                 ver = benchmark_suite_100.verify_task_output(task, raw)
                 fp = smart_repair.code_fingerprint(raw)
                 rep = smart_repair.detect_repeated_attempt(raw, prior_hashes)
@@ -433,7 +450,11 @@ def _evaluate_frozen_held_out_hybrid(
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--v2", action="store_true", help="Run fresh held-out v2 evaluation using 12 specialized Skills + 3-mentor chain (preserves v1 report)")
+    args = ap.parse_args(argv)
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     ART_DIR.mkdir(parents=True, exist_ok=True)
     MEM_DIR.mkdir(parents=True, exist_ok=True)
@@ -498,12 +519,16 @@ def main() -> int:
     train_summary = _mine_train_mentor_lessons(expert_model, train_tasks, ART_DIR / "ckpt_train_mentor.json")
 
     # 4. Evaluate FROZEN held_out_final (72 unseen tasks!)
+    ckpt_name = "ckpt_heldout_groq_hybrid_v2.json" if args.v2 else "ckpt_heldout_groq_hybrid.json"
+    rep_name = "groq_hybrid_benchmark_120_v2_report.json" if args.v2 else "groq_hybrid_benchmark_120_report.json"
     ho_summary = _evaluate_frozen_held_out_hybrid(
-        role_routing, expert_model, secondary_model, ho_tasks, ART_DIR / "ckpt_heldout_groq_hybrid.json"
+        role_routing, expert_model, secondary_model, ho_tasks, ART_DIR / ckpt_name
     )
 
     report = {
         "schema_version": 1,
+        "evaluation_type": "REGRESSION_TEST_ON_V1_HELDOUT_72" if args.v2 else "FROZEN_V1_HELDOUT_72",
+        "version": "v2-regression-12-skills-3-mentors" if args.v2 else "v1",
         "completed_at": _now_iso(),
         "manifest": manifest,
         "dev_3_model_shootout": {m: {k: v for k, v in d.items() if k != "results"} for m, d in dev_results.items()},
@@ -515,7 +540,7 @@ def main() -> int:
         "groq_budget_after": provider_router.CloudBudgetLedger().status("groq"),
         "held_out_final_details": ho_summary["results"],
     }
-    _write_atomic(ART_DIR / "groq_hybrid_benchmark_120_report.json", report)
+    _write_atomic(ART_DIR / rep_name, report)
     print("GROQ_HYBRID_120_FINAL:", json.dumps({
         "held_out_seal": manifest["seals_sha256"]["held_out_final"],
         "dev_shootout": {m: f"{d['passed']}/{d['total']} ({d['success_rate']:.1%}, {d['avg_seconds']}s)" for m, d in dev_results.items()},
