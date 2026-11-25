@@ -194,27 +194,68 @@ def validate_and_normalize_plan(
             "max_attempts": 4,
         })
 
-    allowed_paths = [m["target_file"] for m in normalized]
-    id_set = {m["id"] for m in normalized}
-
-    # Verify requested deliverable types from goal_text are actually planned (generic completeness gate)
+    # Ensure requested standard deliverable types are present in the DAG (appended as real agent missions if omitted)
     g_low = (goal_text or "").lower()
     if g_low:
-        missing_types: list[str] = []
-        if ("html" in g_low or "interface web" in g_low) and not any(p.endswith(".html") for p in allowed_paths):
-            missing_types.append("web/index.html")
-        if ("styles.css" in g_low or "css" in g_low) and not any(p.endswith(".css") for p in allowed_paths):
-            missing_types.append("web/styles.css")
-        if ("app.js" in g_low or ".js" in g_low) and not any(p.endswith(".js") for p in allowed_paths):
-            missing_types.append("web/app.js")
-        if ("unittest" in g_low or "tests/" in g_low) and not any(p.startswith("tests/test_") and p.endswith(".py") for p in allowed_paths):
-            missing_types.append("tests/test_*.py")
-        if ("readme" in g_low or "documentation" in g_low) and not any(p.lower().endswith("readme.md") for p in allowed_paths):
-            missing_types.append("README.md")
-        if ("start.ps1" in g_low or ".ps1" in g_low) and not any(p.endswith(".ps1") for p in allowed_paths):
-            missing_types.append("start.ps1")
-        if missing_types:
-            raise ValueError(f"coordinator plan omitted requested deliverables: {', '.join(missing_types)}")
+        def _append_std_mission(mid_base: str, spec_name: str, target_file: str, objective: str, req_syms: list[str]) -> None:
+            if target_file in seen_files:
+                return
+            mid = mid_base
+            while mid in seen_ids:
+                mid = f"{mid}-extra"
+            seen_ids.add(mid)
+            seen_files.add(target_file)
+            normalized.append({
+                "id": mid,
+                "specialist": spec_name,
+                "target_file": target_file,
+                "raw_deps": [],
+                "objective": objective,
+                "required_symbols": req_syms,
+                "task_profile": "module",
+                "priority": f"P{min(len(normalized) + 1, 9)}",
+                "max_attempts": 4,
+            })
+
+        if ("html" in g_low or "interface web" in g_low) and not any(m["target_file"].endswith(".html") for m in normalized):
+            _append_std_mission(
+                "ui-html", "tel99-mobile", "web/index.html",
+                f"Create clean responsive French HTML5 UI web/index.html linking /styles.css and /app.js (defer), ZERO inline <script> or onclick/onerror, implementing all forms, tables, filters, and summary displays for {project_slug}.",
+                ["<!doctype", "/styles.css", "/app.js"],
+            )
+        if ("styles.css" in g_low or "css" in g_low) and not any(m["target_file"].endswith(".css") for m in normalized):
+            _append_std_mission(
+                "ui-css", "tel99-mobile", "web/styles.css",
+                f"Create clean responsive CSS stylesheet web/styles.css (ZERO CSS comments, balanced braces, @media mobile breakpoint, >= 400 chars) styling the layout, cards, forms, and tables of {project_slug}.",
+                ["@media"],
+            )
+        if ("app.js" in g_low or ".js" in g_low) and not any(m["target_file"].endswith(".js") for m in normalized):
+            _append_std_mission(
+                "ui-js", "tel99-mobile", "web/app.js",
+                f"Create safe vanilla JS frontend web/app.js wiring the HTML form/buttons to the local HTTP API using fetch, createElement, textContent, and replaceChildren (NEVER innerHTML, eval, or document.write).",
+                ["DOMContentLoaded", "fetch"],
+            )
+        if ("unittest" in g_low or "tests/" in g_low) and not any(m["target_file"].startswith("tests/test_") and m["target_file"].endswith(".py") for m in normalized):
+            _append_std_mission(
+                "unit-tests", "tel99-verifier", "tests/test_app.py",
+                f"Write unittest suite testing core functionality, strict data validation (invalid/bool/negative values), and summary calculations for {project_slug}.",
+                ["unittest"],
+            )
+        if ("readme" in g_low or "documentation" in g_low) and not any(m["target_file"].lower().endswith("readme.md") for m in normalized):
+            _append_std_mission(
+                "project-readme", "tel99-documentation", "README.md",
+                f"Write concise French README.md documenting {project_slug}: features, architecture, startup command (start.ps1), and how to run tests.",
+                [],
+            )
+        if ("start.ps1" in g_low or ".ps1" in g_low) and not any(m["target_file"].endswith(".ps1") for m in normalized):
+            _append_std_mission(
+                "startup-ps1", "tel99-release", "start.ps1",
+                f"Write concise Windows PowerShell startup script start.ps1 launching the local Python loopback server for {project_slug} (127.0.0.1 only, NEVER 0.0.0.0).",
+                [],
+            )
+
+    allowed_paths = [m["target_file"] for m in normalized]
+    id_set = {m["id"] for m in normalized}
 
     # Auto-wire missing dependencies so test/doc/frontend missions always receive prior code AST context
     non_test_py_ids = [
@@ -563,11 +604,10 @@ def generate_plan_with_coordinator(
         '"required_symbols": ["exact_func_or_id"], "objective": "Exact concise contract (interfaces, routes, validation, <=450 chars)"}\n'
         "]}\n"
         "Rules:\n"
-        "- Decompose into 5 to 8 small, self-contained files (each <= 80 lines so local 7-9B models write clean code).\n"
-        "- Python 3.12 stdlib only (sqlite3/json/http.server/unittest); loopback 127.0.0.1 only (NEVER 0.0.0.0).\n"
-        "- Web UI if requested: separate `web/index.html` (NO inline <script>, NO onclick/onerror), `web/styles.css`, `web/app.js` (NO innerHTML, use textContent/createElement).\n"
-        "- MUST include an automated `tests/test_*.py` unittest file testing core logic & validation, a `README.md`, and a Windows `start.ps1` startup script.\n"
-        "- Every mission objective MUST state the EXACT function names, signatures, JSON keys, HTTP routes, and HTML element IDs so dependent files match 100%.\n"
+        "- Keep the JSON ultra-compact: 5 to 7 focused files, each objective <= 220 chars.\n"
+        "- Python 3.12 stdlib only; loopback 127.0.0.1 only (NEVER 0.0.0.0).\n"
+        "- Web UI: separate `web/index.html` (NO inline <script>), `web/styles.css`, `web/app.js` (NO innerHTML).\n"
+        "- Include `tests/test_*.py` unittest file. State exact function names, routes, and HTML IDs.\n"
     )
     existing_files = [
         str(p.relative_to(project_root)).replace("\\", "/")
@@ -593,7 +633,7 @@ def generate_plan_with_coordinator(
             attempt=att,
             role="coordination",
             response_format="json",
-            estimated_lines=95,
+            estimated_lines=65,
         )
         dur = round(time.monotonic() - t0, 2)
         try:
@@ -606,6 +646,7 @@ def generate_plan_with_coordinator(
                 explicit_specialist=explicit_specialist,
                 goal_text=goal_text,
             )
+            print(json.dumps({"coordinator_plan": "ok", "att": att, "missions": len(plan["contracts"]), "s": dur, "model": mdl}), flush=True)
             trace = {
                 "agent": coord.name,
                 "provider": prov,
@@ -617,6 +658,7 @@ def generate_plan_with_coordinator(
             return plan, trace
         except Exception as exc:
             last_err = f"{type(exc).__name__}: {str(exc)[:220]}"
+            print(json.dumps({"coordinator_plan": "retry", "att": att, "s": dur, "err": last_err}), flush=True)
     raise RuntimeError(f"Coordinator failed to produce valid plan after 3 attempts: {last_err}")
 
 
