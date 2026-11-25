@@ -18,6 +18,7 @@ QUESTION = ("Je dispose d'un ordinateur Windows avec 16 Go de RAM, aucun GPU dé
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--mode", choices=("fast", "auto", "deep"), default="deep")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     dest = args.out / "dialogue_report.json"
@@ -34,7 +35,8 @@ def main():
         ]
         return cur
     dt.locked_json_update(svc._conv_path(conv["id"]), seed)
-    job = svc.submit_chat_message(conv_id=conv["id"], message=QUESTION)
+    job = svc.submit_chat_message(conv_id=conv["id"], message=QUESTION, response_mode=args.mode)
+    expected_delegates = cc.plan_dialogue_delegation(QUESTION, mode=args.mode, team_mode=True)
     deadline = time.monotonic() + 1800
     while True:
         job = svc.get_job(job["job_id"])
@@ -49,9 +51,11 @@ def main():
     report = {
         "status": "STRUCTURAL_PASS" if job["status"] == "DONE" and
             coverage.get("requested_sections", 0) >= 10 and not coverage.get("missing_sections") and
-            msg.get("cloud_calls") == 0 and len(msg.get("delegated_specialists") or []) == 2
+            msg.get("cloud_calls") == 0 and len(msg.get("delegated_specialists") or []) == expected_delegates
             else "NOT_VALIDATED",
         "semantic_review_required": True,
+        "response_mode": args.mode,
+        "expected_delegates": expected_delegates,
         "question": QUESTION,
         "job_status": job["status"],
         "error": job.get("error"),
