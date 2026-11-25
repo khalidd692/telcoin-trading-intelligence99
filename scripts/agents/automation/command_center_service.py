@@ -209,7 +209,7 @@ def dialogue_missing(contract: list[tuple[str, str]], reply: str) -> list[str]:
     norm = _normalized_dialogue(reply)
     missing = []
     for _, label in contract:
-        pattern = r"(?m)^\s*(?:[#*]+\s*)?(?:\d+[.)]\s*)?" + re.escape(_normalized_dialogue(label)) + r"\b[^\n]*"
+        pattern = r"(?m)^[ \t]*(?:[#*]+[ \t]*)?(?:\d+[.)][ \t]*)?" + re.escape(_normalized_dialogue(label)) + r"\b[^\n]*"
         match = re.search(pattern, norm)
         if not match:
             missing.append(label)
@@ -220,7 +220,10 @@ def dialogue_missing(contract: list[tuple[str, str]], reply: str) -> list[str]:
         if len(inline) > 1 and len(inline[1].strip(" *#-")) >= 20:
             continue
         subsequent = norm[end:].strip().splitlines()
-        if not subsequent or len(subsequent[0].strip(" *#-")) < 20:
+        if (not subsequent or len(subsequent[0].strip(" *#-")) < 20
+                or re.match(r"^(?:[#*]+[ \t]*)?(?:\d+[.)][ \t]*)?(?:"
+                            + "|".join(re.escape(_normalized_dialogue(l)) for _, l in contract)
+                            + r")\b", subsequent[0].strip())):
             missing.append(label)
     return missing
 
@@ -1181,6 +1184,8 @@ class CommandCenterService:
                         and len(dialogue_missing(contract, candidate)) < len(missing)):
                     reply_text, final_res = candidate, repaired
                     missing = dialogue_missing(contract, reply_text)
+            if cancel_ev and cancel_ev.is_set():
+                raise InterruptedError("cancelled_by_user")
             if missing:
                 reply_text = "Réponse partielle — rubriques non couvertes : " + "; ".join(missing) + ".\n\n" + reply_text
             if not local_deterministic_tools.detect_secret_leak(reply_text)["safe"]:
