@@ -118,13 +118,14 @@ def validate_and_normalize_plan(
     project_root: Path,
     project_slug: str,
     explicit_specialist: str | None = None,
+    goal_text: str = "",
 ) -> dict[str, Any]:
     """Deterministically validate, normalize, and seal a coordinator-generated project plan."""
     if not isinstance(raw_plan, dict):
         raise ValueError("coordinator plan must be a JSON object")
     raw_missions = raw_plan.get("missions")
-    if not isinstance(raw_missions, list) or not 1 <= len(raw_missions) <= 10:
-        raise ValueError("coordinator plan must define 1..10 bounded missions")
+    if not isinstance(raw_missions, list) or not 1 <= len(raw_missions) <= 12:
+        raise ValueError("coordinator plan must define 1..12 bounded missions")
 
     catalog = team_config.role_catalog()
     by_name = {spec.name: spec for spec in catalog.values()}
@@ -196,6 +197,33 @@ def validate_and_normalize_plan(
     allowed_paths = [m["target_file"] for m in normalized]
     id_set = {m["id"] for m in normalized}
 
+    # Verify requested deliverable types from goal_text are actually planned (generic completeness gate)
+    g_low = (goal_text or "").lower()
+    if g_low:
+        missing_types: list[str] = []
+        if ("html" in g_low or "interface web" in g_low) and not any(p.endswith(".html") for p in allowed_paths):
+            missing_types.append("web/index.html")
+        if ("styles.css" in g_low or "css" in g_low) and not any(p.endswith(".css") for p in allowed_paths):
+            missing_types.append("web/styles.css")
+        if ("app.js" in g_low or ".js" in g_low) and not any(p.endswith(".js") for p in allowed_paths):
+            missing_types.append("web/app.js")
+        if ("unittest" in g_low or "tests/" in g_low) and not any(p.startswith("tests/test_") and p.endswith(".py") for p in allowed_paths):
+            missing_types.append("tests/test_*.py")
+        if ("readme" in g_low or "documentation" in g_low) and not any(p.lower().endswith("readme.md") for p in allowed_paths):
+            missing_types.append("README.md")
+        if ("start.ps1" in g_low or ".ps1" in g_low) and not any(p.endswith(".ps1") for p in allowed_paths):
+            missing_types.append("start.ps1")
+        if missing_types:
+            raise ValueError(f"coordinator plan omitted requested deliverables: {', '.join(missing_types)}")
+
+    # Auto-wire missing dependencies so test/doc/frontend missions always receive prior code AST context
+    non_test_py_ids = [
+        m["id"] for m in normalized
+        if m["target_file"].endswith(".py") and not m["target_file"].startswith("tests/")
+    ]
+    web_html_ids = [m["id"] for m in normalized if m["target_file"].endswith(".html")]
+    test_ids = [m["id"] for m in normalized if m["target_file"].startswith("tests/")]
+
     # Resolve dependencies & verify acyclic DAG
     graph: dict[str, list[str]] = {}
     for m in normalized:
@@ -204,6 +232,19 @@ def validate_and_normalize_plan(
             mapped = id_remap.get(str(raw_d), _safe_mission_id(str(raw_d), 0))
             if mapped in id_set and mapped != m["id"] and mapped not in deps:
                 deps.append(mapped)
+        tf = m["target_file"]
+        if tf.startswith("tests/") and tf.endswith(".py"):
+            for pid in non_test_py_ids:
+                if pid != m["id"] and pid not in deps:
+                    deps.append(pid)
+        elif tf.endswith(".js"):
+            for hid in web_html_ids:
+                if hid != m["id"] and hid not in deps:
+                    deps.append(hid)
+        elif tf.lower().endswith("readme.md") or tf.endswith(".ps1"):
+            for tid in (test_ids or non_test_py_ids):
+                if tid != m["id"] and tid not in deps:
+                    deps.append(tid)
         m["dependencies"] = deps
         graph[m["id"]] = deps
 
@@ -298,8 +339,8 @@ def verify_delivered_file(
             return {"ok": False, "security_ok": sec["security_ok"], "error": "; ".join(sec["issues"]), "checks_passed": checks}
         checks.extend(["ast_syntax", "deterministic_security_gate"])
 
-        # Ensure parent package __init__.py exists for app/ or src/ packages
-        if target.parent != project_root.resolve() and target.parent.name in ("app", "src", "tests"):
+        # Ensure parent package __init__.py exists for any Python subpackage inside the project
+        if target.parent != project_root.resolve():
             init_py = target.parent / "__init__.py"
             if not init_py.exists():
                 init_py.write_text("", encoding="utf-8")
@@ -563,6 +604,7 @@ def generate_plan_with_coordinator(
                 project_root=project_root,
                 project_slug=project_slug,
                 explicit_specialist=explicit_specialist,
+                goal_text=goal_text,
             )
             trace = {
                 "agent": coord.name,
@@ -877,20 +919,36 @@ def run_autonomous_project(
         )
         if any(a.get("error") for a in attempts_log):
             first_err = next((str(a["error"]) for a in attempts_log if a.get("error")), "unknown")
-            flib.record_failure(
-                project=slug,
-                mission_id=mid,
-                category=autonomy_runtime.classify_failure(first_err, first_err),
-                context_summary=f"{slug}:{target_rel}",
-                cause=first_err[:240],
-                cause_confirmed=bool(last_ver.get("ok")),
-                evidence=f"attempts={len(attempts_log)} ok={bool(last_ver.get('ok'))}",
-                attempts=attempts_log,
-                validated_solution=f"Repaired on attempt {len(attempts_log)}" if repaired else "",
-                preventive_measure="Use AST dependency context + deterministic verifier feedback",
-                model=last_mdl,
-                role=spec_name,
-            )
+            err_low = first_err.lower()
+            if "security" in err_low or "forbidden" in err_low or "scope" in err_low:
+                meta_cat = "PERMISSION_ERROR"
+            elif "timed out" in err_low or "unavailable" in err_low or "busy" in err_low:
+                meta_cat = "ENGINE_ERROR"
+            elif "unbalanced" in err_low or "never closed" in err_low or "unterminated" in err_low:
+                meta_cat = "TRUNCATED_OUTPUT"
+            elif "repeated_attempt" in err_low:
+                meta_cat = "INEFFECTIVE_REPAIR"
+            elif "unittest" in err_low or "assertion" in err_low or "missing required" in err_low:
+                meta_cat = "VERIFICATION_ERROR"
+            else:
+                meta_cat = "PROGRAMMING_ERROR"
+            try:
+                flib.record_failure(
+                    project=slug,
+                    mission_id=mid,
+                    category=meta_cat,
+                    context_summary=f"{slug}:{target_rel}",
+                    cause=first_err[:240],
+                    cause_confirmed=bool(last_ver.get("ok")),
+                    evidence=f"attempts={len(attempts_log)} ok={bool(last_ver.get('ok'))}",
+                    attempts=attempts_log,
+                    validated_solution=f"Repaired on attempt {len(attempts_log)}" if repaired else "",
+                    preventive_measure="Use AST dependency context + deterministic verifier feedback",
+                    model=last_mdl,
+                    role=spec_name,
+                )
+            except (OSError, ValueError):
+                pass
         if last_ver.get("ok"):
             eid = f"{'fix' if repaired else 'proc'}-{mid}"
             if mem_store.get(slug, eid) is None:

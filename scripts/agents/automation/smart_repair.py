@@ -141,6 +141,10 @@ def diagnose_error_pattern(exact_error: str, previous_code: str = "") -> str:
         hints.append(
             "Output had unbalanced CSS/JS braces (likely truncated): remove ALL comments (`/* ... */`, `// ...`) and write compact rules with matching `{` and `}`."
         )
+    if "innerhtml" in low:
+        hints.append(
+            "NEVER use `.innerHTML` (not even `el.innerHTML = ''`). Clear containers with `el.replaceChildren()` or `while (el.firstChild) el.removeChild(el.firstChild);`, and build DOM with `document.createElement` + `textContent`."
+        )
     if "repeated_attempt" in low:
         hints.append(
             "Your previous attempt produced identical code: change the actual logic causing the failed check rather than re-emitting the same implementation."
