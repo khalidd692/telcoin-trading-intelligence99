@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   Commande PowerShell unique pour piloter l'equipe autonome des 12 agents IA TEL99.
 .EXAMPLE
@@ -13,20 +13,22 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet("Team", "Project", "Ask", "Progress", "Pause", "Resume", "Stop", "Status", "Radar", "Cockpit", "Results")]
-    [string]$Mode = "Team",
+    [ValidateSet("CommandCenter", "Team", "Project", "Ask", "Progress", "Pause", "Resume", "Stop", "Status", "Radar", "Cockpit", "Results")]
+    [string]$Mode = "CommandCenter",
     [string]$Task = "",
     [string]$Role = "",
     [string]$Domain = "",
     [string]$Project = "",
     [string]$WaitForPid = "",
+    [int]$Port = 8765,
     [switch]$Hybrid,
     [switch]$Confidential,
     [switch]$ResumeFailed,
     [switch]$RevisePlan,
     [switch]$Detached,
     [switch]$DryRun,
-    [switch]$OpenBrowser
+    [switch]$OpenBrowser,
+    [switch]$CreateShortcut
 )
 $ErrorActionPreference = "Stop"
 $Repo = $PSScriptRoot
@@ -34,11 +36,50 @@ $Python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
 
 Push-Location -LiteralPath $Repo
 try {
-    # Si -Task et -Project sont fournis avec le Mode par defaut, basculer automatiquement en mode Projet Autonome
-    if ($Mode -eq "Team" -and $Task.Trim()) {
+    if ($CreateShortcut.IsPresent) {
+        & pwsh -NoProfile -File (Join-Path $Repo "scripts\agents\automation\create-desktop-shortcut.ps1")
+    }
+    # Si -Task est fourni avec le Mode par defaut, basculer automatiquement en mode Projet Autonome ou Ask
+    if ($Mode -eq "CommandCenter" -and $Task.Trim()) {
         if ($Project.Trim()) { $Mode = "Project" } else { $Mode = "Ask" }
     }
     switch ($Mode) {
+        "CommandCenter" {
+            $stateDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE"
+            New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+            $url = "http://127.0.0.1:$Port/"
+            $alreadyUp = $false
+            try {
+                $resp = Invoke-WebRequest -Uri ($url + "health") -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($resp.StatusCode -eq 200) { $alreadyUp = $true }
+            } catch { $alreadyUp = $false }
+
+            if (-not $alreadyUp) {
+                $ccArgs = @("-B", "-m", "scripts.agents.automation.multi_cockpit", "--state", $stateDir, "--port", [string]$Port, "--include-providers", "--allow-controls")
+                if ($Detached.IsPresent -or $OpenBrowser.IsPresent) {
+                    $logDir = Join-Path $stateDir "command_center"
+                    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+                    $proc = Start-Process -FilePath $Python -ArgumentList $ccArgs -WorkingDirectory $Repo -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDir "server.log") -RedirectStandardError (Join-Path $logDir "server.err.log")
+                    for ($i = 0; $i -lt 25; $i++) {
+                        Start-Sleep -Milliseconds 250
+                        try {
+                            $r2 = Invoke-WebRequest -Uri ($url + "health") -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+                            if ($r2.StatusCode -eq 200) { break }
+                        } catch {}
+                    }
+                    Write-Host "TEL99 Command Center demarre (PID=$($proc.Id)) : $url" -ForegroundColor Green
+                    if ($OpenBrowser.IsPresent) { Start-Process $url }
+                    exit 0
+                }
+                Write-Host "TEL99 Command Center demarre sur $url" -ForegroundColor Green
+                & $Python @ccArgs
+                exit $LASTEXITCODE
+            } else {
+                Write-Host "TEL99 Command Center deja actif : $url" -ForegroundColor Green
+                if ($OpenBrowser.IsPresent) { Start-Process $url }
+                exit 0
+            }
+        }
         "Team" {
             Write-Host "=== TEL99 — Equipe Autonome des 12 Agents IA ===" -ForegroundColor Cyan
             & $Python -B -m scripts.agents.automation.agent_cli --team

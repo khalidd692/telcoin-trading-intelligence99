@@ -347,13 +347,60 @@ def _exec_python_isolated(
 # Requirements Manifest & Independent Plan Verification
 # ---------------------------------------------------------------------------
 
+# Domain-agnostic business capability extraction rules (goal text -> behavioral requirements)
+_BUSINESS_CAPABILITY_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...] = (
+    (
+        "crud_create",
+        ("création", "creation", "ajouter", "ajout", "create", "add ", "nouvelle", "nouveau", "enregistrer", "crud"),
+        ("create", "add", "insert", "new", "post", "append", "save"),
+        "Create/add domain records with validated fields",
+    ),
+    (
+        "crud_update",
+        ("modification", "modifier", "mise à jour", "mise a jour", "update", "edit", "éditer", "crud"),
+        ("update", "edit", "modify", "patch", "put"),
+        "Modify/update existing domain records safely",
+    ),
+    (
+        "crud_delete",
+        ("suppression", "supprimer", "effacer", "delete", "remove", "crud"),
+        ("delete", "remove", "del_", "pop", "do_delete"),
+        "Delete existing domain records cleanly",
+    ),
+    (
+        "search_filter",
+        ("filtrage", "filtrer", "filtre", "filter", "recherche", "rechercher", "search", "par tag", "par catégorie", "par categorie"),
+        ("filter", "search", "query", "find", "tag", "category", "categorie"),
+        "Search and filter records by criteria/category/tag",
+    ),
+    (
+        "summary_stats",
+        ("synthèse", "synthese", "résumé", "resume", "summary", "solde", "balance", "mensuel", "total", "statistique"),
+        ("summary", "synthese", "balance", "solde", "total", "stats", "monthly", "mensuel"),
+        "Compute accurate domain summaries/totals/balances",
+    ),
+    (
+        "persistence",
+        ("persistance", "persistant", "sauvegarde", "sauvegardé", "sauvegardee", "stockage", "storage", "sqlite", ".json"),
+        ("json.dump", "json.dumps", "json.load", "write_text", "sqlite3", "save", "load", "persist"),
+        "Persist and reload domain data durably across restarts",
+    ),
+    (
+        "input_validation",
+        ("validation", "valider", "rejet", "rejetant", "bool", "invalide", "montant", "date", "vide", "négatif", "negatif"),
+        ("isinstance", "valueerror", "assertraises", "400", "invalid", "bool"),
+        "Reject invalid/empty/bool/out-of-range inputs cleanly (positive + negative tests)",
+    ),
+)
+
+
 def build_requirements_manifest(
     goal_text: str,
     *,
     project_slug: str,
     explicit_specialist: str | None = None,
 ) -> dict[str, Any]:
-    """Deterministically extract a persistent Requirements Manifest BEFORE planning."""
+    """Deterministically extract a persistent technical + business Requirements Manifest BEFORE planning."""
     raw = str(goal_text or "").strip()
     low = raw.lower()
     reqs: list[dict[str, Any]] = []
@@ -394,7 +441,7 @@ def build_requirements_manifest(
             "deliverables": [],
             "expected_kind": "http_server",
             "acceptance_criteria": [
-                "Loopback server starts inside sandbox, answers HTTP 200 on /, serves static assets, and returns 404 on unknown route"
+                "Loopback server starts inside sandbox, answers HTTP 200 on /, serves static assets, answers 200 on GET API routes, 4xx on invalid JSON POST, and 404 on unknown route"
             ],
             "verification_method": "docker_sandbox_http_e2e",
             "status": "PENDING",
@@ -492,7 +539,28 @@ def build_requirements_manifest(
         "evidence": [],
     })
 
-    # Extract explicit named filenames mentioned in the user's goal (e.g. `budget_app.py`, `web/index.html`, `data/budget.json`)
+    # Extract concrete business capability requirements from the natural-language goal
+    for cap_key, trigger_terms, code_tokens, desc in _BUSINESS_CAPABILITY_RULES:
+        if any(term in low for term in trigger_terms):
+            reqs.append({
+                "id": f"REQ-BIZ-{cap_key.upper()}",
+                "source_text": desc,
+                "mandatory": True,
+                "specialist": _spec("development"),
+                "deliverables": [],
+                "expected_kind": "business_capability",
+                "capability": cap_key,
+                "behavior_tokens": list(code_tokens),
+                "requires_negative_test": cap_key == "input_validation",
+                "acceptance_criteria": [
+                    f"Business capability `{cap_key}` is implemented in project code AND covered by executed passing unit tests"
+                ],
+                "verification_method": "behavioral_code_and_test_matrix",
+                "status": "PENDING",
+                "evidence": [],
+            })
+
+    # Extract explicit named filenames mentioned in the user's goal
     explicit_files: list[str] = []
     for m in re.finditer(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.(?:py|html|css|js|ps1|md|json|txt|csv))(?![A-Za-z0-9_-])", raw):
         cand = m.group(1).strip()
@@ -516,7 +584,7 @@ def build_requirements_manifest(
         })
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": _now_iso(),
         "project": project_slug,
         "goal_sha256": _sha256_text(raw),
@@ -900,6 +968,8 @@ def verify_plan_independent(plan: dict[str, Any], manifest: dict[str, Any]) -> d
         elif kind == "explicit_file":
             exp = str(req.get("expected_file") or "")
             matched = [f for f in files if f == exp or f.endswith("/" + exp) or Path(f).name == Path(exp).name]
+        elif kind == "business_capability":
+            matched = [f for f in files if f.endswith(".py") and not f.startswith("tests/")]
         req_mapping[rid] = matched
         if req.get("mandatory") and not matched:
             issues.append(f"mandatory requirement {rid} ({req.get('source_text', '')[:80]}) has no deliverable in plan")
@@ -1335,14 +1405,21 @@ def _run_post_build_verification(
             "    api_results = []\n"
             "    for route in api_routes:\n"
             "        cg = HTTPConnection('127.0.0.1', port, timeout=5); cg.request('GET', route); rg = cg.getresponse(); bg = rg.read(); cg.close()\n"
-            "        api_results.append({'method': 'GET', 'route': route, 'status': rg.status, 'bytes': len(bg)})\n"
-            "        if rg.status >= 500: issues.append(f'GET {route} returned {rg.status}')\n"
+            "        body_str = bg.decode('utf-8', errors='replace').strip()\n"
+            "        json_valid = None\n"
+            "        if rg.status == 200 and (body_str.startswith('{') or body_str.startswith('[')):\n"
+            "            try:\n"
+            "                json.loads(body_str); json_valid = True\n"
+            "            except ValueError:\n"
+            "                json_valid = False; issues.append(f'GET {route} returned invalid JSON')\n"
+            "        api_results.append({'method': 'GET', 'route': route, 'status': rg.status, 'bytes': len(bg), 'json_valid': json_valid})\n"
+            "        if rg.status == 404 or rg.status >= 500: issues.append(f'GET {route} returned {rg.status}')\n"
             "    if api_routes:\n"
             "        cp = HTTPConnection('127.0.0.1', port, timeout=5)\n"
             "        cp.request('POST', api_routes[0], body=b'{invalid', headers={'Content-Type': 'application/json'})\n"
             "        rp = cp.getresponse(); rp.read(); cp.close()\n"
             "        api_results.append({'method': 'POST_INVALID_JSON', 'route': api_routes[0], 'status': rp.status})\n"
-            "        if rp.status >= 500 or rp.status == 200: issues.append(f'invalid JSON POST returned {rp.status}')\n"
+            "        if rp.status not in (400, 405, 415, 422): issues.append(f'invalid JSON POST expected 400/405/422, got {rp.status}')\n"
             "    print(json.dumps({'probed': True, 'ok': not issues, 'http_status': r.status, 'bytes': len(body), 'static_assets': assets, 'negative_404_status': rn.status, 'api_probes': api_results, 'issues': issues}))\n"
             "except Exception as exc:\n"
             "    print(json.dumps({'probed': False, 'ok': False, 'issues': [f'{type(exc).__name__}: {exc}']}))\n"
@@ -1648,16 +1725,54 @@ def _apply_plan_revision(
     return new_plan, {"preserved": preserved, "invalidated": invalidated}
 
 
+def _inspect_behavioral_evidence(
+    project_root: Path,
+    plan: dict[str, Any],
+    post_ver: dict[str, Any],
+) -> dict[str, Any]:
+    """Read delivered app & test code + executed unittest output to verify real business behavior."""
+    app_blob_parts: list[str] = []
+    test_blob_parts: list[str] = []
+    has_negative_assertion = False
+    for c in plan.get("contracts") or []:
+        tf = c["target_file"]
+        p = project_root / tf
+        if not p.is_file():
+            continue
+        txt = p.read_text(encoding="utf-8", errors="replace").lower()
+        if tf.startswith("tests/") and tf.endswith(".py"):
+            test_blob_parts.append(txt)
+            if any(neg in txt for neg in ("assertraises", "400", "404", "422", "valueerror", "invalid")):
+                has_negative_assertion = True
+        elif tf.endswith((".py", ".js", ".html")):
+            app_blob_parts.append(txt)
+    tests_out = str(post_ver.get("tests_output") or "").lower()
+    passing_test_lines = [ln.strip() for ln in tests_out.splitlines() if " ... ok" in ln]
+    return {
+        "app_blob": "\n".join(app_blob_parts),
+        "test_blob": "\n".join(test_blob_parts) + "\n" + tests_out,
+        "passing_tests_count": len(passing_test_lines),
+        "has_negative_assertion": has_negative_assertion,
+    }
+
+
 def _update_manifest_with_results(
     manifest: dict[str, Any],
     plan: dict[str, Any],
     statuses: dict[str, str],
     post_ver: dict[str, Any],
+    *,
+    project_root: Path | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    """Update requirements_manifest.json with objective verification evidence & statuses."""
+    """Update requirements_manifest.json with objective technical + behavioral verification evidence."""
     v_plan = verify_plan_independent(plan, manifest)
     mapping = v_plan.get("requirement_mapping") or {}
     id_by_file = {c["target_file"]: c["id"] for c in plan.get("contracts") or []}
+    beh = (
+        _inspect_behavioral_evidence(project_root, plan, post_ver)
+        if project_root is not None
+        else {"app_blob": "", "test_blob": "", "passing_tests_count": 0, "has_negative_assertion": False}
+    )
     all_mandatory_ok = True
 
     for req in manifest.get("requirements") or []:
@@ -1671,7 +1786,7 @@ def _update_manifest_with_results(
             ok = bool(post_ver.get("tests_ok")) and bool(delivs) and all(
                 statuses.get(id_by_file.get(f, "")) == "ACCEPTED" for f in delivs
             )
-            evidence.append(f"tests_ok={post_ver.get('tests_ok')} sandbox={post_ver.get('tests_sandbox_used')}")
+            evidence.append(f"tests_ok={post_ver.get('tests_ok')} sandbox={post_ver.get('tests_sandbox_used')} passing_cases={beh['passing_tests_count']}")
         elif kind == "http_server":
             ok = bool(post_ver.get("server_e2e_ok")) and bool(delivs) and all(
                 statuses.get(id_by_file.get(f, "")) == "ACCEPTED" for f in delivs
@@ -1681,6 +1796,16 @@ def _update_manifest_with_results(
         elif kind == "security":
             ok = bool(delivs) and all(statuses.get(id_by_file.get(f, "")) == "ACCEPTED" for f in delivs)
             evidence.append(f"accepted_deliverables={sum(1 for f in delivs if statuses.get(id_by_file.get(f, '')) == 'ACCEPTED')}/{len(delivs)}")
+        elif kind == "business_capability":
+            tokens = [str(t).lower() for t in (req.get("behavior_tokens") or [])]
+            code_hits = [t for t in tokens if t in beh["app_blob"]]
+            test_hits = [t for t in tokens if t in beh["test_blob"]]
+            neg_ok = (not req.get("requires_negative_test")) or bool(beh["has_negative_assertion"])
+            files_accepted = bool(delivs) and all(statuses.get(id_by_file.get(f, "")) == "ACCEPTED" for f in delivs)
+            ok = bool(files_accepted and post_ver.get("tests_ok") and code_hits and test_hits and neg_ok)
+            evidence.append(
+                f"code_hits={code_hits[:4]} test_hits={test_hits[:4]} tests_ok={post_ver.get('tests_ok')} neg_test={beh['has_negative_assertion']}"
+            )
         else:
             ok = bool(delivs) and all(statuses.get(id_by_file.get(f, "")) == "ACCEPTED" for f in delivs)
             evidence.extend(f"{f}:{statuses.get(id_by_file.get(f, ''))}" for f in delivs)
@@ -2288,20 +2413,36 @@ def run_autonomous_project(
             deterministic_verifiers_run.update(post_ver.get("verifiers_run") or [])
             tests_ok = bool(post_ver.get("tests_ok"))
             server_e2e_ok = bool(post_ver.get("server_e2e_ok"))
+            manifest, all_mandatory_verified = _update_manifest_with_results(
+                manifest, plan, statuses, post_ver, project_root=kit.root
+            )
 
-            if all_accepted and tests_ok and server_e2e_ok:
+            if all_accepted and tests_ok and server_e2e_ok and all_mandatory_verified:
                 break
-            if not all_accepted or replan_rounds_used >= max(0, int(max_replan_rounds)):
+            if replan_rounds_used >= max(0, int(max_replan_rounds)):
                 break
 
             implicated = _identify_implicated_missions(plan, post_ver)
+            # Also implicate REJECTED/BLOCKED missions or core+test missions when mandatory business capabilities failed
+            failed_reqs = [r for r in manifest.get("requirements") or [] if r.get("mandatory") and r.get("status") != "VERIFIED"]
+            if not all_accepted:
+                for c in contracts:
+                    if statuses.get(c["id"]) in ("REJECTED", "BLOCKED") and c["id"] not in implicated:
+                        implicated.append(c["id"])
+            if failed_reqs and not implicated:
+                for c in contracts:
+                    if c["target_file"].endswith(".py") and c["id"] not in implicated:
+                        implicated.append(c["id"])
+            implicated = implicated[:4]
             if not implicated:
                 break
             replan_rounds_used += 1
+            failed_req_summary = "; ".join(f"{r['id']}({r.get('source_text', '')[:60]})" for r in failed_reqs[:4])
             int_err = (
-                f"Integration verification failed (round {replan_rounds_used}): "
-                f"tests_ok={tests_ok} ({str(post_ver.get('tests_output') or '')[-220:]}); "
-                f"server_e2e_ok={server_e2e_ok} ({json.dumps(post_ver.get('server_probe') or {})[:220]})"
+                f"Integration/business verification failed (round {replan_rounds_used}): "
+                f"tests_ok={tests_ok} ({str(post_ver.get('tests_output') or '')[-180:]}); "
+                f"server_e2e_ok={server_e2e_ok} ({json.dumps(post_ver.get('server_probe') or {})[:180]}); "
+                f"unverified_reqs=[{failed_req_summary}]"
             )
             for mid in implicated:
                 integration_feedback[mid] = int_err
@@ -2309,13 +2450,13 @@ def run_autonomous_project(
             replan_history.append({
                 "round": replan_rounds_used,
                 "implicated_missions": implicated,
+                "failed_requirements": [r["id"] for r in failed_reqs],
                 "reason": int_err[:400],
                 "at": _now_iso(),
             })
             _run_batched_queue()
 
-        # Final requirement coverage check
-        manifest, all_mandatory_verified = _update_manifest_with_results(manifest, plan, statuses, post_ver)
+        # Persist final requirement coverage matrix
         local_deterministic_tools.write_json_atomic_locked(manifest_path, manifest)
 
         overall_ok = bool(all_accepted and tests_ok and server_e2e_ok and all_mandatory_verified)
