@@ -90,7 +90,7 @@ def validate_contract(m,approvals):
     return True
 
 class Runtime(Supervisor):
-    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None):
+    def __init__(self,root,executor=None,verifier=None,*,before_execute=None,legacy_stop=None,shared_memory_root=None,auto_recover_local_crash=False):
         root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
         super().__init__(root)
         self.inbox=Inbox("kilo-windows",store=self.store)
@@ -99,6 +99,8 @@ class Runtime(Supervisor):
         self.verifier=verifier or self.verify_worker
         self.before_execute = before_execute
         self.legacy_stop = legacy_stop
+        self.shared_memory_root = Path(shared_memory_root).resolve() if shared_memory_root is not None else (self.root / "memory")
+        self.auto_recover_local_crash = bool(auto_recover_local_crash)
         self.quota_exhausted = False
     def bind_transport(self, transport):
         """Pin a working ledger to one entry point while allowing same-transport restart."""
@@ -186,23 +188,68 @@ class Runtime(Supervisor):
         if m.get("owner") == "local":
             return [sys.executable, "-I", "-B", str(Path(__file__).with_name("local_codegen.py"))]
         return [sys.executable,"-B",str(Path(__file__).with_name("kilo_executor.py")),"worker"]
+    def _wait_for_ollama_ready(self, *, timeout: float = 20.0) -> None:
+        """Avoid transient llama-server shutdown races between consecutive local missions."""
+        from http.client import HTTPConnection
+        from scripts.agents.automation import local_model_routing
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not self.stopped():
+            avail = local_model_routing.available_memory_mib()
+            models = None
+            conn = HTTPConnection("127.0.0.1", 11434, timeout=1.5)
+            try:
+                conn.request("GET", "/api/ps")
+                resp = conn.getresponse()
+                if resp.status == 200:
+                    payload = json.loads(resp.read(32_768))
+                    models = payload.get("models") if isinstance(payload, dict) else []
+            except (OSError, ValueError):
+                return
+            finally:
+                conn.close()
+            if (models == [] or models is None) and (avail is None or avail >= local_model_routing.AVAILABLE_MEMORY_RESERVE_MIB):
+                return
+            if models and avail is not None and avail >= local_model_routing.AVAILABLE_MEMORY_RESERVE_MIB:
+                return
+            time.sleep(0.75)
+
     def execute_worker(self, m, *, feedback=None, attempt=1, previous=None):
+        if m.get("owner") == "local" and m.get("port") == 11434:
+            self._wait_for_ollama_ready()
         command=self.worker_command(m)
         env={k:v for k,v in os.environ.items() if not k.upper().endswith(("_TOKEN","_KEY","_SECRET","_PASSWORD"))
              and not k.upper().startswith(("OPENAI_","ANTHROPIC_","GH_","GITHUB_","PYTHON"))}
         if m.get("owner") == "local":
-            env = {k: v for k, v in env.items() if k.upper() in
-                   {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
+            allowed_local_env = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}
+            sdk_opt_in = os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk"
+            if sdk_opt_in:
+                allowed_local_env |= {
+                    "TEL99_EXECUTION_BACKEND",
+                    "TEL99_SDK_NO_FALLBACK",
+                    "USERPROFILE",
+                    "LOCALAPPDATA",
+                }
+            env = {k: v for k, v in env.items() if k.upper() in allowed_local_env}
         scoped_retry = m.get("owner") == "local" and m.get("max_attempts", 1) > 1
         name = f"{m['id']}.attempt-{attempt}" if scoped_retry else m["id"]
         output = self.root / f"{name}.worker.json"
         error = self.root / f"{name}.worker.err"
+        lessons = []
+        if m.get("owner") == "local" and self.shared_memory_root.exists():
+            try:
+                from scripts.agents.automation import learning_loop
+                lessons = learning_loop.retrieve_lessons(self.shared_memory_root, m["project"], m)
+            except (OSError, ValueError):
+                lessons = []
         if feedback is None:
             if previous is not None:
                 raise Blocked("previous candidate requires verifier feedback")
-            request = m
+            request = {"mission": m, "lessons": lessons} if lessons else m
         else:
             request = {"mission": m, "feedback": feedback}
+            if lessons:
+                request["lessons"] = lessons
         if previous is not None:
             request["previous"] = previous
         with tempfile.TemporaryFile() as worker_input, output.open("wb") as out, error.open("wb") as err:
@@ -212,7 +259,8 @@ class Runtime(Supervisor):
             try:
                 # Two sequential bounded Ollama calls only in the explicitly
                 # sealed 3-role pilot; legacy single-agent workers keep 100 s.
-                worker_seconds = 160 if m.get("team") else 100
+                sdk_opt_in = os.environ.get("TEL99_EXECUTION_BACKEND", "").strip().lower() == "antigravity_sdk"
+                worker_seconds = 280 if (sdk_opt_in and m.get("team")) else (160 if m.get("team") else 100)
                 deadline=min(time.monotonic()+worker_seconds,self.deadline or float("inf"))
                 while p.poll() is None:
                     if self.stopped() or time.monotonic()>deadline:
@@ -261,12 +309,39 @@ class Runtime(Supervisor):
                         raise ValueError("verified team trace is incomplete")
                     evidence["analyst_sha256"] = analyst["sha256"]
                     evidence["roles"] = m["team"]
-            memory.record(Entry(id=m["id"],project=m["project"],kind="fact",
+            entry = Entry(id=m["id"],project=m["project"],kind="fact",
                 title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
                 body=json.dumps(evidence),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
-                confidence=1.0))
+                confidence=1.0)
+            memory.record(entry)
+            if self.shared_memory_root != self.root / "memory":
+                try:
+                    shared = MemoryStore(self.shared_memory_root)
+                    if shared.get(m["project"], m["id"]) is None:
+                        shared.record(Entry(**entry.to_dict()), actor="runtime-shared-memory")
+                except (OSError, ValueError):
+                    pass
+    def _can_auto_recover_local_crash(self, m, saved) -> tuple[bool, str]:
+        if not self.auto_recover_local_crash:
+            return False, "uncertain worker outcome; never replay"
+        if m.get("owner") != "local":
+            return False, "external worker crash requires human review"
+        if int(saved.get("auto_recovery_count", 0)) >= 1:
+            return False, "auto-recovery limit reached after repeated crash"
+        if self.stopped():
+            return False, "stop marker active during crash recovery"
+        if not self.claim_matches(m) or not self.inbox.seen(m["id"]):
+            return False, "missing claim or ACK receipt prevents safe auto-recovery"
+        if self.store.get(f"kilo-github/outbox/{m['id']}/RESULT") is not None:
+            return False, "irreversible RESULT receipt already recorded"
+        for key in self.store.keys("github-local-code/PR"):
+            rec = self.store.get(key)
+            if key.endswith(f"/{m['id']}") or (isinstance(rec, dict) and rec.get("mission_id") == m["id"]):
+                return False, "irreversible draft PR receipt already recorded"
+        return True, "safe local crash auto-recovery"
+
     def _process(self, m, approvals, *, escalation=None):
         validate_contract(m,approvals)
         saved=self.state(m)
@@ -281,8 +356,18 @@ class Runtime(Supervisor):
                 self.legacy_stop.parent / "state" / f"{m['id']}_state.json").exists():
             raise Blocked("legacy mission checkpoint exists; reconciliation required")
         if saved.get("status")=="RUNNING":
-            self.save(m,"AWAITING_HUMAN",reason="uncertain worker outcome; never replay")
-            return
+            can_recover, reason = self._can_auto_recover_local_crash(m, saved)
+            if not can_recover:
+                self.save(m,"AWAITING_HUMAN",reason=reason)
+                return
+            count = int(saved.get("auto_recovery_count", 0)) + 1
+            history = [*saved.get("recovery_history", ()), {"from": "RUNNING", "to": "ACK", "at": time.time()}]
+            saved = self.save(
+                m, "ACK",
+                auto_recovery_count=count,
+                recovery_history=history,
+                reason="auto-recovered from interrupted local RUNNING checkpoint",
+            )
         maximum = m.get("max_attempts", 1) if m.get("owner") == "local" else 1
         while self._attempt(m, saved, maximum, escalation or {}):
             saved = self.state(m)
@@ -366,9 +451,15 @@ class Runtime(Supervisor):
         retry = number < maximum
         keep_receipt = not retry or (
             feedback["kind"] == "candidate-test" and "candidate_sha256" in feedback)
-        self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
-                  feedback=feedback if retry else None, reason=reason,
-                  result=saved.get("result") if keep_receipt else None, verification=verification)
+        saved_state = self.save(m, "ACK" if retry else "BLOCKED", attempt_history=history,
+                                feedback=feedback if retry else None, reason=reason,
+                                result=saved.get("result") if keep_receipt else None, verification=verification)
+        if not retry and m.get("owner") == "local":
+            try:
+                from scripts.agents.automation import learning_loop
+                learning_loop.record_outcome(self.shared_memory_root, m, saved_state)
+            except (OSError, ValueError):
+                pass
         return True
 
     def _attempt(self, m, saved, maximum, escalation):
@@ -414,7 +505,16 @@ class Runtime(Supervisor):
                 try:
                     if route is None:
                         timings = self.local_generation_times(m)
-                        options = {**escalation, **({"measured_seconds": timings} if timings else {})}
+                        measured_quality = {}
+                        quality_file = self.shared_memory_root.parent / "measured_quality.json"
+                        if quality_file.is_file():
+                            from scripts.agents.intelligence import router as intelligence_router
+                            measured_quality = intelligence_router.load_measured_quality(str(quality_file))
+                        options = {
+                            **escalation,
+                            **({"measured_seconds": timings} if timings else {}),
+                            **({"measured_quality": measured_quality} if measured_quality else {}),
+                        }
                         route = local_codegen.choose_route(m, **options)
                         if route.get("selection") is None:
                             status = "ACK" if escalation else "BLOCKED"
@@ -453,14 +553,27 @@ class Runtime(Supervisor):
             except local_codegen.GenerationBlocked as exc:
                 if self._retry(m, running, maximum, reason=exc.reason, feedback=exc.feedback):
                     return self.state(m)["status"] == "ACK"
-                self.save(m, "BLOCKED", reason=exc.reason)
+                blocked_state = self.save(m, "BLOCKED", reason=exc.reason)
+                if m.get("owner") == "local":
+                    try:
+                        from scripts.agents.automation import learning_loop
+                        learning_loop.record_outcome(self.shared_memory_root, m, blocked_state)
+                    except (OSError, ValueError):
+                        pass
                 return
             except WorkerInterrupted as exc:
                 self.save(m, "AWAITING_HUMAN" if m.get("owner") == "local" else "BLOCKED",
                           reason=str(exc))
                 return
             except Exception as exc:
-                self.save(m,"BLOCKED",reason=type(exc).__name__);return
+                blocked_state = self.save(m,"BLOCKED",reason=type(exc).__name__)
+                if m.get("owner") == "local":
+                    try:
+                        from scripts.agents.automation import learning_loop
+                        learning_loop.record_outcome(self.shared_memory_root, m, blocked_state)
+                    except (OSError, ValueError):
+                        pass
+                return
             saved=self.save(m,"WORKER_EXITED",result=result)
         if self.stopped() or self.expired():
             return
@@ -535,7 +648,13 @@ class Runtime(Supervisor):
             if status == "REJECTED" and saved["attempt"] >= maximum:
                 status = "BLOCKED"
                 details["reason"] = "attempt limit reached without independent verification"
-        self.save(m, status, verification=verified, verdict=verdict, **details)
+        final_state = self.save(m, status, verification=verified, verdict=verdict, **details)
+        if m.get("owner") == "local" and status in ("ACCEPTED", "REJECTED", "BLOCKED"):
+            try:
+                from scripts.agents.automation import learning_loop
+                learning_loop.record_outcome(self.shared_memory_root, m, final_state)
+            except (OSError, ValueError):
+                pass
     def run_queue(self,missions,approvals,max_tasks=20):
         # Shared queue lock also prevents a second watcher declaring a live RUNNING
         # worker orphaned. Per-mission permanent CAS protects independent claimers.

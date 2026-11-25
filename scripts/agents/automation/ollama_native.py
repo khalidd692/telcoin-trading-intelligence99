@@ -18,20 +18,29 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+ALLOWED_KEEP_ALIVE = frozenset({"0s", "60s", "90s", "120s"})
+
+
 class OllamaNativeProvider:
     name = "ollama-native-code"
 
-    def __init__(self, *, model: str, timeout: int = 80, max_tokens: int = 768):
+    def __init__(self, *, model: str, timeout: int = 80, max_tokens: int = 768, keep_alive: str = "0s"):
         approved = [
             spec for spec in catalog.MODEL_CATALOG
             if spec.provider == "ollama" and spec.is_local and spec.is_free
             and model in spec.served_ids
         ]
-        if len(approved) != 1 or not (1 <= max_tokens <= 1024) or not (1 <= timeout <= 90):
+        if (
+            len(approved) != 1
+            or not (1 <= max_tokens <= 1024)
+            or not (1 <= timeout <= 90)
+            or keep_alive not in ALLOWED_KEEP_ALIVE
+        ):
             raise ProviderError("unapproved Ollama model or generation limit")
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
+        self.keep_alive = keep_alive
         self.last_metadata = {}
 
     def complete(self, *, system: str, prompt: str) -> str:
@@ -41,7 +50,7 @@ class OllamaNativeProvider:
             "system": system,
             "prompt": prompt,
             "stream": False,
-            "keep_alive": "0s",
+            "keep_alive": self.keep_alive,
             "options": {
                 "num_ctx": 8192,
                 "num_predict": self.max_tokens,

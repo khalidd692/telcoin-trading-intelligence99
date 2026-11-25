@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - "scripts/agents/automation/**"
+      - "scripts/agents/project_kit.py"
       - "tests/test_github_local_code_campaign.py"
       - "tests/test_github_hour_queue.py"
       - "tests/test_github_multi_mandate_session.py"
       - "tests/test_github_owner_feed.py"
       - "tests/test_local_code_pr_publisher.py"
       - "tests/test_multiagent_pilot.py"
+      - "tests/test_antigravity_v2_architecture.py"
+      - "tests/test_provider_router.py"
+      - "tests/test_autonomous_platform_e2e.py"
       - ".github/workflows/tel99-local-agent-tests.yml"
   workflow_dispatch:
 
@@ -31,7 +35,7 @@ jobs:
           python-version: "3.12"
       - name: Python syntax and imports
         run: |
-          python -m py_compile scripts/agents/automation/github_local_code_campaign.py scripts/agents/automation/local_code_pr.py
+          python -m py_compile scripts/agents/automation/github_local_code_campaign.py scripts/agents/automation/local_code_pr.py scripts/agents/automation/learning_loop.py scripts/agents/automation/env_doctor.py scripts/agents/automation/proposal_builder.py scripts/agents/automation/multi_cockpit.py scripts/agents/automation/provider_router.py scripts/agents/automation/mission_planner.py scripts/agents/automation/recovery_tool.py
       - name: Offline admission, CAS, independent verifier and publisher tests
         run: |
-          python -B -m unittest -v tests.test_github_local_code_campaign tests.test_github_hour_queue tests.test_github_multi_mandate_session tests.test_github_owner_feed tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign
+          python -B -m unittest -v tests.test_github_local_code_campaign tests.test_github_hour_queue tests.test_github_multi_mandate_session tests.test_github_owner_feed tests.test_local_code_pr_publisher tests.test_multiagent_pilot tests.test_evidence_route tests.test_ollama_native_code tests.test_local_codegen tests.test_kilo_github_campaign tests.test_antigravity_v2_architecture tests.test_provider_router tests.test_autonomous_platform_e2e

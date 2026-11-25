@@ -1,0 +1,25 @@
+{
+  "controller_issue": 211,
+  "base_ref": "agents/tel99-code-base-coordination-211",
+  "base_sha": "402d38c81028b6779d59369aaaf57ef5f774af17",
+  "expires_at": "2026-12-09T23:59:59Z",
+  "missions": [
+    {
+      "id": "recette-211-propriete-bail",
+      "issue": 212,
+      "path": "scripts/agents/automation/ide_coordination.py",
+      "function": "release_lease",
+      "objective": "Preserve lease ownership. An active lease may only be released by its actor even with force_expired=True. Keep existing expiry cleanup, atomic CAS and activity recording.",
+      "test": "import ast\nfrom contextlib import nullcontext\nfrom pathlib import Path\nsource = ast.parse(Path('/work/program.py').read_text())\nlease = {'lease_id': 'lease-demo', 'actor': 'antigravity-ide', 'expires_at': 20}\nclass LeaseConflict(RuntimeError): pass\nclass Store:\n    def __init__(self, _): pass\n    def put_cas(self, key, value, previous):\n        writes.append(value['leases'])\n        return True\nwrites = []\nns = dict(Path=Path, _validate_actor=str, _coord_dir=Path, _lease_transaction=lambda _: nullcontext(), _read_raw_leases=lambda _: ([lease], {'leases': [lease]}), _split_leases=lambda raw, ts: ([r for r in raw if r['expires_at'] > ts], sum(r['expires_at'] <= ts for r in raw)), FileStore=Store, LEASES_KEY='leases', LeaseConflict=LeaseConflict, _append_activity_locked=lambda *_: None, _utc_iso=str)\nnode = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == 'release_lease')\nexec(compile(ast.Module(body=[node], type_ignores=[]), '<function>', 'exec'), ns)\nfrom tempfile import TemporaryDirectory\nwith TemporaryDirectory(dir='/scratch') as tmp:\n    (Path(tmp) / 'ledger').mkdir()\n    release = ns['release_lease']\n    try:\n        release(tmp, 'lease-demo', actor='codex-cli', force_expired=True, now=10)\n    except LeaseConflict:\n        pass\n    else:\n        assert False  # case: foreign-active-lease\n    assert writes == []\n    assert release(tmp, 'lease-demo', actor='antigravity-ide', now=10)['released']\n    assert release(tmp, 'lease-demo', actor='codex-cli', force_expired=True, now=30)['expired_purged'] == 1"
+    },
+    {
+      "id": "recette-211-collision-windows",
+      "issue": 213,
+      "dependencies": ["recette-211-propriete-bail"],
+      "path": "scripts/agents/automation/github_multi_mandate_session.py",
+      "function": "detect_campaign_collisions",
+      "objective": "When checking paths claimed by active controllers on the same base branch, fold path case on Windows (sys.platform == 'win32') only. Preserve case-sensitive comparisons on POSIX, active lease checks, and isolation by branch. Change only this function.",
+      "test": "import ast, sys\nfrom pathlib import Path\nfrom types import ModuleType, SimpleNamespace\nfrom tempfile import TemporaryDirectory\nsource = ast.parse(Path('/work/program.py').read_text())\nnode = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == 'detect_campaign_collisions')\nclass Store:\n    def __init__(self, root): self.issue = int(root.parent.name.split('-')[1])\n    def keys(self, prefix): return ['approval']\n    def get(self, key):\n        return {'mission': {'id': 'case', 'path': {300: 'scripts/Example.py', 301: 'scripts/example.py'}[self.issue]}} if key == 'approval' else None\nfor name in ['scripts', 'scripts.agents', 'scripts.agents.protocol', 'scripts.agents.protocol.store']:\n    sys.modules[name] = ModuleType(name)\nsys.modules['scripts.agents.protocol.store'].FileStore = Store\nns = dict(Path=Path, sys=SimpleNamespace(platform='win32'), ide_coordination=SimpleNamespace(check_conflicts=lambda *a, **kw: []))\nexec(compile(ast.Module(body=[node], type_ignores=[]), '<function>', 'exec'), ns)\nwith TemporaryDirectory(dir='/scratch') as tmp:\n    for issue in (300, 301): (Path(tmp) / f'campaign-{issue}' / 'ledger').mkdir(parents=True)\n    specs = [dict(issue=issue, base_ref='agents/test') for issue in (300, 301)]\n    assert set(ns['detect_campaign_collisions'](specs, tmp)) == {301}  # case: windows-alias\n    ns['sys'].platform = 'linux'\n    assert ns['detect_campaign_collisions'](specs, tmp) == {}"
+    }
+  ]
+}

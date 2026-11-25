@@ -34,7 +34,7 @@ try {
     Assert-LauncherExit 0 '"state": "STOP_REQUESTED"' @('-Action', 'STATUS', '-GitHubIssue', '987', '-State', $state)
     Assert-LauncherExit 2 'STOP remains set' @('-Action', 'START', '-GitHubIssue', '987', '-State', $state,
         '-MandateComment', '7100000001', '-MandateSha256', $pin)
-    Assert-LauncherExit 0 '"state": "STOPPED"' @('-Action', 'RUN', '-Registry', $registry, '-RegistrySha256', $sha,
+    Assert-LauncherExit 2 '"state": "STOPPED"' @('-Action', 'RUN', '-Registry', $registry, '-RegistrySha256', $sha,
         '-State', (Join-Path $directory 'local'), '-Once')
     Assert-LauncherExit 1 'Campaign requires' @('-Action', 'START', '-Campaign', '-State', $state)
     Assert-LauncherExit 0 'STOP requested' @('-Action', 'STOP', '-GitHubIssue', '123', '-Campaign',

@@ -194,7 +194,7 @@ def _generation_timing(spec, observations):
     return seconds, "slow"
 
 
-def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seconds=None):
+def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seconds=None, measured_quality=None):
     """Inspect approved bindings and return a route without making a generation call.
 
     ``measured_seconds`` groups recent mean generation times by difficulty and
@@ -254,6 +254,7 @@ def choose(mission, function, *, exclude=(), minimum_memory_mib=0, measured_seco
                 row.update(eligible=False, reason="more than one large llama.cpp model served")
 
     routed = router.route(task, verified_local=tuple(eligible), quota_remaining=mission.get("max_attempts", 1),
+                          measured_quality=measured_quality,
                           approved_models=frozenset(binding["id"] for binding in candidates)).to_dict()
     rejected = {row["id"]: row["reason"] for row in routed["rejected"]}
     routed["rejected"].extend({"id": row["id"], "reason": row["reason"]}
