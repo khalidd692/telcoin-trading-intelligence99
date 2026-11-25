@@ -17,7 +17,8 @@
 param(
     [double]$Minutes = 60,
     [string]$Python = "$env:USERPROFILE\Desktop\TEL99_SDK_TEST\.venv\Scripts\python.exe",
-    [string]$EvidenceDir = "$env:USERPROFILE\Desktop\TEL99_FINAL_EVIDENCE_20261125",
+    [string]$EvidenceDir = "$env:USERPROFILE\Desktop\TEL99_ENDURANCE_20261125_RUN2",
+    [switch]$IncludeSdkWave,
     [switch]$Status,
     [switch]$Stop,
     [switch]$Wait
@@ -27,6 +28,8 @@ $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $PidFile = Join-Path $EvidenceDir "local_autonomy.pid"
 $Log = Join-Path $EvidenceDir "local_autonomy.log"
 $ErrLog = Join-Path $EvidenceDir "local_autonomy.err.log"
+$StateDir = Join-Path $EvidenceDir "hour_campaign"
+$ReportFile = Join-Path $EvidenceDir "hour_campaign_report.json"
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 
 function Get-OwnProcess {
@@ -40,6 +43,12 @@ function Get-OwnProcess {
 if ($Status) {
     $p = Get-OwnProcess
     if ($p) { "RUNNING pid=$($p.ProcessId)" } else { "NOT_RUNNING" }
+    if (Test-Path $ReportFile) {
+        try {
+            $r = Get-Content $ReportFile -Raw | ConvertFrom-Json
+            "REPORT status=$($r.status) elapsed=$($r.duration_minutes)m/$($r.target_minutes)m accepted=$($r.missions_accepted)/$($r.missions_total) waves=$($r.waves_executed) ram_guards=$($r.memory_guard_events)"
+        } catch {}
+    }
     if (Test-Path $Log) { Get-Content $Log -Tail 15 }
     exit 0
 }
@@ -57,15 +66,24 @@ catch { throw "Ollama local indisponible sur 127.0.0.1:11434 : demarrez Ollama p
 docker info --format "{{.ServerVersion}}" 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Docker indisponible : demarrez Docker Desktop puis relancez." }
 
+$pyArgs = @(
+    "-B", "tests\run_hour_autonomy_acceptance.py",
+    "--min-minutes", "$Minutes",
+    "--state-root", $StateDir,
+    "--report", $ReportFile
+)
+if ($IncludeSdkWave) { $pyArgs += "--include-sdk-wave" }
+
 $proc = Start-Process -FilePath $Python `
-    -ArgumentList @("-B", "tests\run_hour_autonomy_acceptance.py", "--min-minutes", "$Minutes") `
+    -ArgumentList $pyArgs `
     -WorkingDirectory $Repo -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $Log -RedirectStandardError $ErrLog
 Set-Content -Path $PidFile -Value $proc.Id
 "TEL99 autonomie locale demarree : pid=$($proc.Id) duree=$Minutes min"
-"Journal : $Log"
-"Rapport : $(Join-Path $EvidenceDir 'hour_campaign_report.json')"
-"Suivi   : powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Status"
+"Evidence : $EvidenceDir"
+"Journal  : $Log"
+"Rapport  : $ReportFile"
+"Suivi    : powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -EvidenceDir `"$EvidenceDir`" -Status"
 if ($Wait) {
     $proc.WaitForExit()
     Remove-Item $PidFile -ErrorAction SilentlyContinue

@@ -16,7 +16,7 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -45,8 +45,12 @@ from scripts.agents.intelligence.memory import MemoryStore
 
 BASE_SHA = "934d9fd8a3fd498c6e3e69226007dd46276aa6da"
 BASE_REF = "agents/tel99-code-base-autofeed-20261124"
-DEFAULT_STATE_ROOT = Path(r"C:\Users\sabri\Desktop\TEL99_FINAL_EVIDENCE_20261125\hour_campaign")
-DEFAULT_REPORT_PATH = Path(r"C:\Users\sabri\Desktop\TEL99_FINAL_EVIDENCE_20261125\hour_campaign_report.json")
+GEMMA4_MODEL = "gemma4:e4b-tel99-8k"
+DEFAULT_MIN_FREE_RAM_MB = 1400.0
+CRITICAL_FREE_RAM_MB = 900.0
+DEFAULT_MAX_RAM_LOAD_PCT = 88
+DEFAULT_STATE_ROOT = Path(r"C:\Users\sabri\Desktop\TEL99_ENDURANCE_20261125_RUN2\hour_campaign")
+DEFAULT_REPORT_PATH = Path(r"C:\Users\sabri\Desktop\TEL99_ENDURANCE_20261125_RUN2\hour_campaign_report.json")
 
 
 class _MemStatus(ctypes.Structure):
@@ -549,129 +553,154 @@ def _enforce_cloud_independence() -> dict:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--min-minutes", type=float, default=60.0)
-    parser.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
-    parser.add_argument("--check-baselines-only", action="store_true")
-    args = parser.parse_args()
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Write JSON atomically via a temporary sibling file + os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
-    if args.check_baselines_only:
-        return _check_all_baselines()
 
-    state_root: Path = args.state_root.resolve()
-    if state_root.exists():
-        shutil.rmtree(state_root)
-    state_root.mkdir(parents=True, exist_ok=True)
-    ts_path = state_root.parent / "hour_timeseries.jsonl"
-    if ts_path.exists():
-        ts_path.unlink()
+def _checkpoint_path(state_root: Path) -> Path:
+    return state_root / "progress_checkpoint.json"
 
-    cloud_independence = _enforce_cloud_independence()
-    started = time.monotonic()
-    active_phase = {"name": "init"}
-    stop_sampler = threading.Event()
 
-    def _sampler():
-        while not stop_sampler.is_set():
-            snap = _snapshot_ram()
-            snap["elapsed_seconds"] = round(time.monotonic() - started, 2)
-            snap["phase"] = active_phase["name"]
-            with ts_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(snap) + "\n")
-            stop_sampler.wait(30.0)
-
-    sampler_thr = threading.Thread(target=_sampler, daemon=True)
-    sampler_thr.start()
-
-    srv = multi_cockpit.make_server(state_root, port=0, allow_controls=True, include_providers=False)
-    srv_thr = threading.Thread(target=srv.serve_forever, daemon=True)
-    srv_thr.start()
-    cockpit_port = srv.server_port
-    cockpit_snapshots = []
-    waves = []
-    repair_proof = None
-    interruption_proof = None
-
+def load_checkpoint(state_root: Path) -> dict | None:
+    cp = _checkpoint_path(state_root)
+    if not cp.is_file():
+        return None
     try:
-        # Wave 1 (270): 3-mission dependent chain (gemma4:e4b-tel99-8k)
-        active_phase["name"] = "wave-1-chain"
-        waves.append(_run_wave(
-            state_root=state_root, controller_issue=270, wave_tag="w1",
-            specs=CATALOG_SPECS[0:3], model_override="gemma4:e4b-tel99-8k",
-        ))
-        cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+        data = json.loads(cp.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
 
-        # Wave 2 (298): Real Docker rejection -> auto-repair -> MemoryStore promotion
-        active_phase["name"] = "wave-2-repair"
-        repair_proof = _run_repair_proof(state_root)
-        cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
 
-        # Wave 3 (299): Controlled STOP + brutal crash -> safe recovery + 0 duplicates
-        active_phase["name"] = "wave-3-recovery"
-        interruption_proof = _run_interruption_and_no_duplicate_proof(state_root)
-        cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+def save_checkpoint(state_root: Path, data: dict) -> None:
+    _atomic_write_json(_checkpoint_path(state_root), data)
 
-        # Wave 4 (271): Opt-in Antigravity SDK backend inside Runtime + Docker
-        if antigravity_sdk_backend.sdk_available():
-            active_phase["name"] = "wave-4-sdk-optin"
-            waves.append(_run_wave(
-                state_root=state_root, controller_issue=271, wave_tag="w4sdk",
-                specs=[CATALOG_SPECS[4]], model_override="gemma4:e4b-tel99-8k", use_sdk_backend=True,
-            ))
-            cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
 
-        # Waves 5..N: Continuous real waves across catalog specs & local models until >= min_minutes
-        wave_idx = 272
-        # Model choice from measured benchmark (benchmark_models_and_backends.json, 2026-11-25):
-        # gemma4:e4b-tel99-8k 2/2 ACCEPTED avg 51.9s; qwen3.5:9b-q4_K_M 1/2 avg 148.9s;
-        # qwen2.5-coder:7b 0/2 -> excluded from the campaign.
-        pool_pairs = [
-            (CATALOG_SPECS[5:7], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[7:9], "gemma4:e4b-tel99-8k"),
-            ([CATALOG_SPECS[9], CATALOG_SPECS[0]], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[1:3], "qwen3.5:9b-q4_K_M"),
-            (CATALOG_SPECS[3:5], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[6:8], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[8:10], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[0:2], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[2:4], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[4:6], "gemma4:e4b-tel99-8k"),
-            (CATALOG_SPECS[7:9], "gemma4:e4b-tel99-8k"),
-            ([CATALOG_SPECS[9], CATALOG_SPECS[5]], "qwen3.5:9b-q4_K_M"),
-        ]
-        p_idx = 0
-        while (time.monotonic() - started) / 60.0 < args.min_minutes:
-            specs_batch, mdl = pool_pairs[p_idx % len(pool_pairs)]
-            active_phase["name"] = f"wave-{wave_idx}-{mdl}"
-            waves.append(_run_wave(
-                state_root=state_root,
-                controller_issue=wave_idx,
-                wave_tag=f"w{wave_idx}",
-                specs=specs_batch,
-                model_override=mdl,
-            ))
-            cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
-            wave_idx += 1
-            p_idx += 1
-            # Safety cap if min_minutes is tiny during smoke runs vs full 60m run
-            if p_idx >= 30:
-                break
+def _unload_ollama_models() -> list[str]:
+    """Ask local Ollama to release loaded model weights (keep_alive=0) to reclaim RAM."""
+    unloaded: list[str] = []
+    conn = HTTPConnection("127.0.0.1", 11434, timeout=4.0)
+    try:
+        conn.request("GET", "/api/ps")
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return unloaded
+        payload = json.loads(resp.read(65536))
+    except (OSError, ValueError):
+        return unloaded
     finally:
-        stop_sampler.set()
-        sampler_thr.join(timeout=5)
-        srv.shutdown()
-        srv_thr.join(timeout=2)
-        srv.server_close()
+        conn.close()
 
-    total_seconds = round(time.monotonic() - started, 2)
+    models = [
+        row.get("name") for row in (payload.get("models") or [])
+        if isinstance(row, dict) and isinstance(row.get("name"), str)
+    ]
+    for model_name in models:
+        c2 = HTTPConnection("127.0.0.1", 11434, timeout=6.0)
+        try:
+            body = json.dumps({"model": model_name, "prompt": "", "keep_alive": 0}).encode("utf-8")
+            c2.request("POST", "/api/generate", body=body, headers={"Content-Type": "application/json"})
+            c2.getresponse().read(4096)
+            unloaded.append(model_name)
+        except (OSError, ValueError):
+            pass
+        finally:
+            c2.close()
+    return unloaded
+
+
+def ensure_memory_headroom(
+    *,
+    min_free_mb: float = DEFAULT_MIN_FREE_RAM_MB,
+    critical_free_mb: float = CRITICAL_FREE_RAM_MB,
+    max_load_pct: int = DEFAULT_MAX_RAM_LOAD_PCT,
+    wait_seconds: float = 45.0,
+    snapshot_fn=_snapshot_ram,
+    unload_fn=_unload_ollama_models,
+    sleep_fn=time.sleep,
+) -> dict:
+    """Guard against RAM saturation before starting a new wave; unload Ollama if pressured."""
+    before = snapshot_fn()
+    free_before = float(before.get("system_ram_free_mb") or 0.0)
+    load_before = int(before.get("system_memory_load_pct") or 0)
+    if free_before >= min_free_mb and load_before < max_load_pct:
+        return {"ok": True, "action": "none", "unloaded_models": [], "before": before, "after": before}
+
+    unloaded = list(unload_fn() or [])
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    after = snapshot_fn()
+    while time.monotonic() < deadline:
+        free_now = float(after.get("system_ram_free_mb") or 0.0)
+        load_now = int(after.get("system_memory_load_pct") or 0)
+        if free_now >= min_free_mb and load_now < max_load_pct:
+            return {"ok": True, "action": "unloaded_and_recovered", "unloaded_models": unloaded, "before": before, "after": after}
+        sleep_fn(3.0)
+        after = snapshot_fn()
+
+    free_final = float(after.get("system_ram_free_mb") or 0.0)
+    ok = free_final >= critical_free_mb
+    return {
+        "ok": ok,
+        "action": "degraded_continue" if ok else "pause_low_memory",
+        "unloaded_models": unloaded,
+        "before": before,
+        "after": after,
+    }
+
+
+def build_endurance_pool() -> list[tuple[list[dict], str]]:
+    """Build the Gemma 4-only local endurance pool (avoids 9B/Gemma double-loading RAM spikes)."""
+    return [
+        (CATALOG_SPECS[5:7], GEMMA4_MODEL),
+        (CATALOG_SPECS[7:9], GEMMA4_MODEL),
+        ([CATALOG_SPECS[9], CATALOG_SPECS[0]], GEMMA4_MODEL),
+        (CATALOG_SPECS[1:3], GEMMA4_MODEL),
+        (CATALOG_SPECS[3:5], GEMMA4_MODEL),
+        (CATALOG_SPECS[6:8], GEMMA4_MODEL),
+        (CATALOG_SPECS[8:10], GEMMA4_MODEL),
+        (CATALOG_SPECS[0:2], GEMMA4_MODEL),
+        (CATALOG_SPECS[2:4], GEMMA4_MODEL),
+        (CATALOG_SPECS[4:6], GEMMA4_MODEL),
+        (CATALOG_SPECS[7:9], GEMMA4_MODEL),
+        ([CATALOG_SPECS[9], CATALOG_SPECS[5]], GEMMA4_MODEL),
+    ]
+
+
+def build_report(
+    *,
+    state_root: Path,
+    ts_path: Path,
+    target_minutes: float,
+    total_seconds: float,
+    waves: list[dict],
+    repair_proof: dict | None,
+    interruption_proof: dict | None,
+    cloud_independence: dict,
+    cockpit_snapshots: list[dict],
+    memory_guards: list[dict],
+    status: str,
+    resumed_from_checkpoint: bool = False,
+) -> dict:
     metrics = learning_loop.sync_measured_quality(state_root)
-    mem_entries = MemoryStore(state_root / "learning" / "memory").all_entries("tel99", include_common=False)
-    ts_rows = [json.loads(line) for line in ts_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    mem_dir = state_root / "learning" / "memory"
+    mem_entries = MemoryStore(mem_dir).all_entries("tel99", include_common=False) if mem_dir.is_dir() else []
+    ts_rows = []
+    if ts_path.is_file():
+        for line in ts_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    ts_rows.append(json.loads(line))
+                except ValueError:
+                    pass
 
     total_missions = sum(w["total_count"] for w in waves) + (1 if repair_proof else 0)
-    total_accepted = sum(w["accepted_count"] for w in waves) + (1 if repair_proof and repair_proof["status"] == "ACCEPTED" else 0)
+    total_accepted = sum(w["accepted_count"] for w in waves) + (
+        1 if repair_proof and repair_proof.get("status") == "ACCEPTED" else 0
+    )
     total_blocked = total_missions - total_accepted
     active_seconds = round(
         sum(float(w.get("duration_seconds") or 0.0) for w in waves)
@@ -683,14 +712,18 @@ def main() -> int:
     skills_dir = ROOT / ".agents" / "skills"
     skills_discovered = sorted(p.parent.name for p in skills_dir.glob("*/SKILL.md")) if skills_dir.is_dir() else []
 
-    report = {
-        "schema_version": 1,
+    return {
+        "schema_version": 2,
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "resumed_from_checkpoint": resumed_from_checkpoint,
         "base_sha": BASE_SHA,
-        "duration_seconds": total_seconds,
+        "primary_model": GEMMA4_MODEL,
+        "duration_seconds": round(total_seconds, 2),
         "active_seconds": active_seconds,
         "wait_seconds": wait_seconds,
         "duration_minutes": round(total_seconds / 60.0, 2),
-        "target_minutes": args.min_minutes,
+        "target_minutes": target_minutes,
         "waves_executed": len(waves),
         "missions_total": total_missions,
         "missions_accepted": total_accepted,
@@ -699,6 +732,8 @@ def main() -> int:
         "cloud_calls": 0,
         "duplicates_count": int((interruption_proof or {}).get("post_crash_replayed_workers") or 0)
         + int((interruption_proof or {}).get("accepted_wave_replayed_workers") or 0),
+        "memory_guard_events": len([g for g in memory_guards if g.get("action") != "none"]),
+        "memory_guards_recent": memory_guards[-5:],
         "skills_discovered": skills_discovered,
         "waves": waves,
         "repair_proof": repair_proof,
@@ -721,17 +756,215 @@ def main() -> int:
         },
         "timeseries_file": str(ts_path),
     }
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    print("HOUR_REPORT_SAVED:", args.report)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--min-minutes", type=float, default=60.0)
+    parser.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
+    parser.add_argument("--min-free-ram-mb", type=float, default=DEFAULT_MIN_FREE_RAM_MB)
+    parser.add_argument("--max-ram-load-pct", type=int, default=DEFAULT_MAX_RAM_LOAD_PCT)
+    parser.add_argument("--include-sdk-wave", action="store_true")
+    parser.add_argument("--check-baselines-only", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.check_baselines_only:
+        return _check_all_baselines()
+
+    state_root: Path = args.state_root.resolve()
+    state_root.mkdir(parents=True, exist_ok=True)
+    ts_path = state_root.parent / "hour_timeseries.jsonl"
+
+    prior = load_checkpoint(state_root)
+    resumed = prior is not None
+    waves: list[dict] = list(prior.get("waves", [])) if prior else []
+    completed_tags: set[str] = set(prior.get("completed_tags", [])) if prior else set()
+    repair_proof: dict | None = prior.get("repair_proof") if prior else None
+    interruption_proof: dict | None = prior.get("interruption_proof") if prior else None
+    memory_guards: list[dict] = list(prior.get("memory_guards", [])) if prior else []
+    wave_idx: int = int(prior.get("next_wave_idx", 272)) if prior else 272
+    p_idx: int = int(prior.get("next_pool_idx", 0)) if prior else 0
+    elapsed_offset: float = float(prior.get("accumulated_elapsed_seconds", 0.0)) if prior else 0.0
+
+    cloud_independence = _enforce_cloud_independence()
+    started = time.monotonic()
+    active_phase = {"name": "resume-init" if resumed else "init"}
+    stop_sampler = threading.Event()
+    stop_requested = threading.Event()
+
+    def _on_signal(_signum, _frame):
+        stop_requested.set()
+
+    for sig in (signal.SIGINT, getattr(signal, "SIGTERM", None)):
+        if sig is not None:
+            try:
+                signal.signal(sig, _on_signal)
+            except (OSError, ValueError):
+                pass
+
+    def _elapsed_total() -> float:
+        return round(elapsed_offset + (time.monotonic() - started), 2)
+
+    def _sampler():
+        while not stop_sampler.is_set():
+            snap = _snapshot_ram()
+            snap["elapsed_seconds"] = _elapsed_total()
+            snap["phase"] = active_phase["name"]
+            with ts_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(snap) + "\n")
+            stop_sampler.wait(30.0)
+
+    sampler_thr = threading.Thread(target=_sampler, daemon=True)
+    sampler_thr.start()
+
+    srv = multi_cockpit.make_server(state_root, port=0, allow_controls=True, include_providers=False)
+    srv_thr = threading.Thread(target=srv.serve_forever, daemon=True)
+    srv_thr.start()
+    cockpit_port = srv.server_port
+    cockpit_snapshots: list[dict] = []
+    final_status = "IN_PROGRESS"
+
+    def _persist_progress(status_label: str) -> dict:
+        elapsed = _elapsed_total()
+        save_checkpoint(state_root, {
+            "schema_version": 2,
+            "status": status_label,
+            "completed_tags": sorted(completed_tags),
+            "waves": waves,
+            "repair_proof": repair_proof,
+            "interruption_proof": interruption_proof,
+            "memory_guards": memory_guards[-20:],
+            "next_wave_idx": wave_idx,
+            "next_pool_idx": p_idx,
+            "accumulated_elapsed_seconds": elapsed,
+        })
+        rep = build_report(
+            state_root=state_root,
+            ts_path=ts_path,
+            target_minutes=args.min_minutes,
+            total_seconds=elapsed,
+            waves=waves,
+            repair_proof=repair_proof,
+            interruption_proof=interruption_proof,
+            cloud_independence=cloud_independence,
+            cockpit_snapshots=cockpit_snapshots,
+            memory_guards=memory_guards,
+            status=status_label,
+            resumed_from_checkpoint=resumed,
+        )
+        _atomic_write_json(args.report, rep)
+        return rep
+
+    def _guard_ram() -> bool:
+        g = ensure_memory_headroom(
+            min_free_mb=args.min_free_ram_mb,
+            max_load_pct=args.max_ram_load_pct,
+        )
+        memory_guards.append(g)
+        return bool(g.get("ok"))
+
+    try:
+        # Wave 1 (270): 3-mission dependent chain (Gemma 4)
+        if "w1" not in completed_tags and not stop_requested.is_set():
+            if not _guard_ram():
+                final_status = "PAUSED_LOW_MEMORY"
+            else:
+                active_phase["name"] = "wave-1-chain"
+                waves.append(_run_wave(
+                    state_root=state_root, controller_issue=270, wave_tag="w1",
+                    specs=CATALOG_SPECS[0:3], model_override=GEMMA4_MODEL,
+                ))
+                completed_tags.add("w1")
+                cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+                _persist_progress("IN_PROGRESS")
+
+        # Wave 2 (298): Real Docker rejection -> auto-repair -> MemoryStore promotion
+        if final_status == "IN_PROGRESS" and "w2-repair" not in completed_tags and not stop_requested.is_set():
+            if not _guard_ram():
+                final_status = "PAUSED_LOW_MEMORY"
+            else:
+                active_phase["name"] = "wave-2-repair"
+                repair_proof = _run_repair_proof(state_root)
+                completed_tags.add("w2-repair")
+                cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+                _persist_progress("IN_PROGRESS")
+
+        # Wave 3 (299): Controlled STOP + brutal crash -> safe recovery + 0 duplicates
+        if final_status == "IN_PROGRESS" and "w3-recovery" not in completed_tags and not stop_requested.is_set():
+            active_phase["name"] = "wave-3-recovery"
+            interruption_proof = _run_interruption_and_no_duplicate_proof(state_root)
+            completed_tags.add("w3-recovery")
+            cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+            _persist_progress("IN_PROGRESS")
+
+        # Wave 4 (271): Optional SDK opt-in wave (explicit --include-sdk-wave only)
+        if (final_status == "IN_PROGRESS" and args.include_sdk_wave
+                and antigravity_sdk_backend.sdk_available()
+                and "w4sdk" not in completed_tags and not stop_requested.is_set()):
+            if not _guard_ram():
+                final_status = "PAUSED_LOW_MEMORY"
+            else:
+                active_phase["name"] = "wave-4-sdk-optin"
+                waves.append(_run_wave(
+                    state_root=state_root, controller_issue=271, wave_tag="w4sdk",
+                    specs=[CATALOG_SPECS[4]], model_override=GEMMA4_MODEL, use_sdk_backend=True,
+                ))
+                completed_tags.add("w4sdk")
+                cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+                _persist_progress("IN_PROGRESS")
+
+        # Waves 5..N: Continuous Gemma 4 local waves with RAM guard & progressive report
+        pool_pairs = build_endurance_pool()
+        while final_status == "IN_PROGRESS" and not stop_requested.is_set() and (_elapsed_total() / 60.0) < args.min_minutes:
+            if not _guard_ram():
+                final_status = "PAUSED_LOW_MEMORY"
+                break
+            specs_batch, mdl = pool_pairs[p_idx % len(pool_pairs)]
+            tag = f"w{wave_idx}"
+            if tag not in completed_tags:
+                active_phase["name"] = f"wave-{wave_idx}-{mdl}"
+                waves.append(_run_wave(
+                    state_root=state_root,
+                    controller_issue=wave_idx,
+                    wave_tag=tag,
+                    specs=specs_batch,
+                    model_override=mdl,
+                ))
+                completed_tags.add(tag)
+                cockpit_snapshots.append(_fetch_cockpit(cockpit_port))
+            wave_idx += 1
+            p_idx += 1
+            _persist_progress("IN_PROGRESS")
+            if p_idx >= 80:
+                break
+
+        if final_status == "IN_PROGRESS":
+            final_status = "INTERRUPTED" if stop_requested.is_set() else "COMPLETED"
+    except BaseException:
+        final_status = "INTERRUPTED"
+        raise
+    finally:
+        stop_sampler.set()
+        sampler_thr.join(timeout=5)
+        try:
+            report = _persist_progress(final_status)
+        finally:
+            srv.shutdown()
+            srv_thr.join(timeout=2)
+            srv.server_close()
+
+    print("HOUR_REPORT_SAVED:", args.report, flush=True)
     print(json.dumps({
+        "status": report["status"],
         "duration_minutes": report["duration_minutes"],
-        "missions_accepted": total_accepted,
-        "missions_total": total_missions,
+        "missions_accepted": report["missions_accepted"],
+        "missions_total": report["missions_total"],
         "memory_entries_count": report["memory_entries_count"],
+        "memory_guard_events": report["memory_guard_events"],
         "measured_quality": report["measured_quality"],
-    }, indent=2))
-    return 0
+    }, indent=2), flush=True)
+    return 0 if report["status"] == "COMPLETED" else 3
 
 
 if __name__ == "__main__":
