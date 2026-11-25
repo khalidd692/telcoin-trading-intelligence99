@@ -1,7 +1,7 @@
 {
-  "generated_at": 1795567527,
-  "observations": 543,
-  "valid_observations": 518,
+  "generated_at": 1795573716,
+  "observations": 544,
+  "valid_observations": 519,
   "latest_decision": "ATTENDRE",
   "latest_valid": "true",
   "horizons": {
@@ -38,8 +38,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 457,
-              "mean_pct": 0.08218
+              "count": 458,
+              "mean_pct": 0.07933
             }
           }
         }
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 189,
-              "mean_pct": 0.32469
+              "count": 196,
+              "mean_pct": 0.42436
             }
           }
         }
@@ -159,18 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795398003,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 reclaim",
-        "\u2212 structure",
-        "\u2212 volume"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795402236,
       "previous_decision": "ATTENDRE",
@@ -269,6 +257,16 @@
         "+ convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795573716,
+      "previous_decision": "ATTENDRE",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "\u2212 convergence"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -288,10 +286,10 @@
         "median_late_minutes": 154.86666666666667
       },
       "3": {
-        "episodes": 9,
+        "episodes": 10,
         "detected": 1,
         "missed": 3,
-        "unknown": 5,
+        "unknown": 6,
         "detection_fraction_known": 0.25,
         "late_alerts": 7,
         "median_lead_minutes": 12.216666666666667,
