@@ -349,34 +349,56 @@ def _default_model_call(
     t0 = time.monotonic()
 
     if use_cloud:
-        if status_cb:
-            status_cb("RUNNING_HYBRID_FREE")
-        mentor = (
+        preferred = (
             "qwen/qwen3.8-27b"
             if role in ("development", "mobile", "market_data")
             else "openai/gpt-oss-120b"
         )
-        ad = provider_router.OpenAICompatFreeCloudAdapter(
-            provider="groq",
-            model=mentor,
-            timeout=60,
-            max_tokens=1400,
-            confidential=False,
-            fallback_ollama_model=LOCAL_MODEL,
-        )
-        reply = ad.complete(system=system, prompt=prompt)
-        meta = dict(ad.last_metadata)
-        prov = str(meta.get("provider_used") or "groq")
-        mdl = str(meta.get("model_used") or mentor)
-        return {
-            "response": reply,
-            "provider_used": prov,
-            "model_used": mdl,
-            "cloud_calls": 1 if prov == "groq" else 0,
-            "cost_usd": 0.0,
-            "duration_seconds": round(time.monotonic() - t0, 2),
-            "cloud_policy_reason": policy["reason"],
-        }
+        ledger = provider_router.CloudBudgetLedger()
+        candidates = [preferred] + [
+            m for m in provider_router.GROQ_MODEL_LIMITS if m != preferred
+        ]
+        for mentor in candidates:
+            if cancel_ev and cancel_ev.is_set():
+                raise InterruptedError("cancelled_by_user")
+            scope = ledger.scope_for_model("groq", mentor)
+            can_call, _reason = ledger.can_call(
+                scope,
+                estimated_tokens=provider_router.estimate_cloud_tokens(system, prompt, 1400),
+                purpose="interactive",
+            )
+            if not can_call:
+                continue
+            if status_cb:
+                status_cb("RUNNING_HYBRID_FREE")
+            ad = provider_router.OpenAICompatFreeCloudAdapter(
+                provider="groq",
+                model=mentor,
+                timeout=60,
+                max_tokens=1400,
+                confidential=False,
+                fallback_ollama_model=None,
+                budget_ledger=ledger,
+                budget_purpose="interactive",
+            )
+            try:
+                reply = ad.complete(system=system, prompt=prompt)
+            except ProviderError:
+                # At most one try per confirmed model; local fallback goes
+                # through the existing owner-priority CAS path below.
+                continue
+            meta = dict(ad.last_metadata)
+            prov = str(meta.get("provider_used") or "groq")
+            mdl = str(meta.get("model_used") or mentor)
+            return {
+                "response": reply,
+                "provider_used": prov,
+                "model_used": mdl,
+                "cloud_calls": 1 if prov == "groq" else 0,
+                "cost_usd": 0.0,
+                "duration_seconds": round(time.monotonic() - t0, 2),
+                "cloud_policy_reason": policy["reason"],
+            }
 
     coord_root = ide_coordination.default_coordination_state_root()
     pri_id = job_id or f"cc-{uuid.uuid4().hex[:8]}"
