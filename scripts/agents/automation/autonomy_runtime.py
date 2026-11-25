@@ -89,7 +89,7 @@ def classify_failure(reason: str | None, error: str | None = None) -> str:
         return "CONTRACT_ERROR"
     if any(k in blob for k in ("quota", "rate_limit", "429", "providererror", "ollama native api unavailable", "http status")):
         return "PROVIDER_ERROR"
-    if any(k in blob for k in ("memory", "ram", "oom", "docker", "sandbox", "timeout", "timed out", "stop marker", "environment")):
+    if any(k in blob for k in ("memory", "ram", "oom", "docker", "sandbox", "timeout", "timed out", "stop marker", "environment", "resourceunavailable", "resourcebusy")):
         return "ENVIRONMENT_ERROR"
     if any(k in blob for k in ("verifier", "assertion", "syntaxerror", "candidate-passes", "candidate-diff", "rejected")):
         return "VERIFICATION_ERROR"

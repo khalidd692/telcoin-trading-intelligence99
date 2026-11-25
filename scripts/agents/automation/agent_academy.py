@@ -109,6 +109,183 @@ HELD_OUT_EVAL_EXERCISES: list[dict[str, Any]] = [
             "    try:\n        classify_freshness(bad); assert False\n    except ValueError:\n        pass\n"
         ),
     },
+    {
+        "id": "eval-quant-no-leak-window",
+        "role": "quant",
+        "difficulty": "hard",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `rolling_causal_mean(values, window)` returning a list of floats of the same length "
+            "where index i is the mean of values[max(0, i-window+1) : i+1] (strictly causal: NEVER uses future elements j > i), "
+            "rounded to 4 decimals. Validate window is int (not bool) >= 1 and values is a non-empty list of int/float (not bool), else raise ValueError."
+        ),
+        "test_code": (
+            "assert rolling_causal_mean([10, 20, 30, 40], 2) == [10.0, 15.0, 25.0, 35.0]\n"
+            "assert rolling_causal_mean([1, 2, 3], 3) == [1.0, 1.5, 2.0]\n"
+            "for bad in (([], 2), ([1, 2], 0), ([1, True], 2), ([1, 2], True)):\n"
+            "    try:\n        rolling_causal_mean(*bad); assert False\n    except ValueError:\n        pass\n"
+        ),
+    },
+    {
+        "id": "eval-quality-verdict-gate",
+        "role": "quality",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `aggregate_verdict(checks)` where checks is a non-empty list of dicts "
+            "{'name': str, 'ok': bool, 'reproducible': bool}. Return dict {'accepted': bool, 'passed': int, 'failed': list[str]}: "
+            "accepted is True ONLY if ALL checks have ok is True AND reproducible is True. Raise ValueError if checks is empty or malformed."
+        ),
+        "test_code": (
+            "assert aggregate_verdict([{'name':'a','ok':True,'reproducible':True}]) == {'accepted': True, 'passed': 1, 'failed': []}\n"
+            "r = aggregate_verdict([{'name':'a','ok':True,'reproducible':True},{'name':'b','ok':True,'reproducible':False}])\n"
+            "assert r == {'accepted': False, 'passed': 1, 'failed': ['b']}\n"
+            "try:\n    aggregate_verdict([]); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
+    {
+        "id": "eval-coord-topo-ready",
+        "role": "coordination",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `select_next_batch(tasks, completed, *, max_parallel=1)` where tasks is list of "
+            "{'id': str, 'priority': int, 'dependencies': list[str]} and completed is set[str]. Return up to max_parallel task IDs "
+            "not in completed whose dependencies are all in completed, sorted by (priority ascending, id ascending). Validate max_parallel >= 1."
+        ),
+        "test_code": (
+            "ts = [{'id':'b','priority':1,'dependencies':['a']},{'id':'a','priority':2,'dependencies':[]},{'id':'c','priority':1,'dependencies':[]}]\n"
+            "assert select_next_batch(ts, set(), max_parallel=1) == ['c']\n"
+            "assert select_next_batch(ts, {'a','c'}, max_parallel=2) == ['b']\n"
+            "try:\n    select_next_batch(ts, set(), max_parallel=0); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
+    {
+        "id": "eval-cloud-workflow-guard",
+        "role": "cloud",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `audit_workflow_permissions(workflow)` where workflow is a dict with optional 'permissions' dict "
+            "and 'on' triggers. Return dict {'safe': bool, 'issues': list[str]}: flag issue 'write_all_forbidden' if permissions == 'write-all' "
+            "or any value is 'write' for key 'contents' on pull_request_target; flag 'missing_timeout' if any job in workflow.get('jobs', {}) lacks positive int 'timeout-minutes'."
+        ),
+        "test_code": (
+            "ok_wf = {'on': ['push'], 'permissions': {'contents': 'read'}, 'jobs': {'ci': {'timeout-minutes': 15}}}\n"
+            "assert audit_workflow_permissions(ok_wf) == {'safe': True, 'issues': []}\n"
+            "bad_wf = {'on': ['pull_request_target'], 'permissions': {'contents': 'write'}, 'jobs': {'ci': {}}}\n"
+            "res = audit_workflow_permissions(bad_wf)\n"
+            "assert res['safe'] is False and 'write_all_forbidden' in res['issues'] and 'missing_timeout' in res['issues']\n"
+        ),
+    },
+    {
+        "id": "eval-mobile-responsive-audit",
+        "role": "mobile",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `audit_mobile_html(html_text)` returning dict {'ok': bool, 'missing': list[str], 'forbidden': list[str]}. "
+            "Check required substrings: '<!doctype html>' (case-insensitive), 'viewport', '<html lang=\"fr\">'. "
+            "Flag forbidden patterns (case-insensitive): '<script>' (inline script tag without src), 'javascript:'."
+        ),
+        "test_code": (
+            "good = '<!doctype html><html lang=\"fr\"><head><meta name=\"viewport\" content=\"width=device-width\"></head><body></body></html>'\n"
+            "assert audit_mobile_html(good) == {'ok': True, 'missing': [], 'forbidden': []}\n"
+            "bad = '<html><body><script>alert(1)</script><a href=\"javascript:void(0)\">x</a></body></html>'\n"
+            "r = audit_mobile_html(bad)\n"
+            "assert r['ok'] is False and len(r['missing']) >= 2 and len(r['forbidden']) == 2\n"
+        ),
+    },
+    {
+        "id": "eval-doc-evidence-lint",
+        "role": "documentation",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `lint_evidence_report(markdown_text)` returning dict {'ok': bool, 'issues': list[str]}. "
+            "Require at least one heading starting with '# ', at least one status label from ('PROVEN', 'PARTIAL', 'BLOCKED', 'INCONCLUSIVE'), "
+            "and reject ungrounded claims containing '100% garanti' or 'profit garanti' (case-insensitive) by adding 'ungrounded_claim' to issues."
+        ),
+        "test_code": (
+            "assert lint_evidence_report('# Rapport\\nStatut: PROVEN\\nPreuve: log.txt')['ok'] is True\n"
+            "r = lint_evidence_report('profit garanti sans test')\n"
+            "assert r['ok'] is False and 'ungrounded_claim' in r['issues']\n"
+        ),
+    },
+    {
+        "id": "eval-market-candle-gaps",
+        "role": "market_data",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `detect_candle_gaps(timestamps_s, interval_s)` where timestamps_s is a sorted list of ints "
+            "and interval_s is positive int. Return dict {'gaps': list[tuple[int, int]], 'duplicates': int, 'non_monotonic': bool}. "
+            "A gap exists when t[i] - t[i-1] > interval_s (append (t[i-1], t[i])); duplicate when t[i] == t[i-1]; non_monotonic if t[i] < t[i-1]. "
+            "Raise ValueError if interval_s <= 0 or bool."
+        ),
+        "test_code": (
+            "assert detect_candle_gaps([0, 60, 120, 240, 240], 60) == {'gaps': [(120, 240)], 'duplicates': 1, 'non_monotonic': False}\n"
+            "assert detect_candle_gaps([120, 60], 60)['non_monotonic'] is True\n"
+            "try:\n    detect_candle_gaps([0, 60], 0); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
+    {
+        "id": "eval-monitor-alert-triage",
+        "role": "monitoring",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `triage_alert(free_ram_mb, error_rate, consecutive_timeouts)` returning dict "
+            "{'severity': str, 'action': str}. Rules: if free_ram_mb < 700 or consecutive_timeouts >= 3 -> severity='CRITICAL', action='pause_and_reclaim'; "
+            "elif free_ram_mb < 1400 or error_rate >= 0.3 -> severity='WARN', action='throttle_profile'; "
+            "else -> severity='OK', action='continue'. Raise ValueError for negative values or error_rate > 1.0."
+        ),
+        "test_code": (
+            "assert triage_alert(3200, 0.05, 0) == {'severity': 'OK', 'action': 'continue'}\n"
+            "assert triage_alert(1100, 0.1, 0) == {'severity': 'WARN', 'action': 'throttle_profile'}\n"
+            "assert triage_alert(500, 0.1, 0) == {'severity': 'CRITICAL', 'action': 'pause_and_reclaim'}\n"
+            "assert triage_alert(4000, 0.0, 3) == {'severity': 'CRITICAL', 'action': 'pause_and_reclaim'}\n"
+            "try:\n    triage_alert(-1, 0.0, 0); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
+    {
+        "id": "eval-release-gate-check",
+        "role": "release",
+        "difficulty": "medium",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python function `evaluate_release_readiness(ci_green, tests_passed, tests_total, *, target_branch, has_owner_approval=False)` "
+            "returning dict {'ready': bool, 'blocked_reasons': list[str]}. Block if not ci_green ('ci_red'), if tests_total <= 0 or tests_passed < tests_total ('tests_incomplete'), "
+            "or if target_branch.strip().lower() in ('main', 'master') and not has_owner_approval ('protected_branch_requires_owner_approval')."
+        ),
+        "test_code": (
+            "assert evaluate_release_readiness(True, 10, 10, target_branch='agents/feat') == {'ready': True, 'blocked_reasons': []}\n"
+            "r = evaluate_release_readiness(True, 10, 10, target_branch='main', has_owner_approval=False)\n"
+            "assert r['ready'] is False and 'protected_branch_requires_owner_approval' in r['blocked_reasons']\n"
+            "r2 = evaluate_release_readiness(False, 8, 10, target_branch='agents/feat')\n"
+            "assert 'ci_red' in r2['blocked_reasons'] and 'tests_incomplete' in r2['blocked_reasons']\n"
+        ),
+    },
+    {
+        "id": "eval-dev-l4-state-machine",
+        "role": "development",
+        "difficulty": "hard",
+        "task_profile": "module",
+        "objective": (
+            "Write a Python class `MissionCheckpointMachine` with methods `transition(mission_id, next_status)` and `status(mission_id)`. "
+            "Allowed transitions: None->'PREPARING', 'PREPARING'->'ACK', 'ACK'->'RUNNING', 'RUNNING'->('WORKER_EXITED','BLOCKED','ACK'), "
+            "'WORKER_EXITED'->('ACCEPTED','REJECTED','ACK'). 'ACCEPTED' is immutable terminal (any transition from 'ACCEPTED' MUST raise ValueError). "
+            "Invalid transitions raise ValueError. Keep a list `history(mission_id)` of recorded statuses."
+        ),
+        "test_code": (
+            "m = MissionCheckpointMachine()\n"
+            "for s in ('PREPARING', 'ACK', 'RUNNING', 'WORKER_EXITED', 'ACCEPTED'):\n"
+            "    m.transition('m1', s)\n"
+            "assert m.status('m1') == 'ACCEPTED' and len(m.history('m1')) == 5\n"
+            "try:\n    m.transition('m1', 'ACK'); assert False\nexcept ValueError:\n    pass\n"
+            "try:\n    m.transition('m2', 'ACCEPTED'); assert False\nexcept ValueError:\n    pass\n"
+        ),
+    },
 ]
 
 
@@ -256,25 +433,55 @@ def evaluate_model_on_held_out(
     mode: str = "upgraded",
     max_attempts: int = 2,
     exercises: list[dict[str, Any]] | None = None,
+    memory_root: Path | str | None = None,
+    skills_root: Path | str | None = None,
+    artifacts_dir: Path | str | None = None,
+    progress_file: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Run held-out exercises in 'baseline' (naive retry, 1024) or 'upgraded' (smart_repair + adaptive budget) mode."""
+    """Run held-out exercises in 'baseline' (naive retry, 1024) or 'upgraded' (Context Engine + RAG + Skills + Smart Repair)."""
+    from scripts.agents.automation import context_engine, metacognition
+
     exs = exercises or HELD_OUT_EVAL_EXERCISES
     results = []
     started = time.monotonic()
+    traj_rec = metacognition.TrajectoryRecorder(artifacts_dir) if artifacts_dir else None
+    flib = metacognition.FailureLibrary(artifacts_dir, memory_root=memory_root) if artifacts_dir else None
+    cal_observations: list[dict[str, Any]] = []
 
     for ex in exs:
         profile = "patch" if mode == "baseline" else ex.get("task_profile", "module")
-        budget = ollama_native.compute_adaptive_budget(model, task_profile=profile, estimated_lines=45)
+        budget = ollama_native.compute_adaptive_budget(model, task_profile=profile, estimated_lines=50)
         provider = ollama_native.OllamaNativeProvider(
             model=model,
             timeout=budget["timeout"],
             max_tokens=budget["max_tokens"],
             keep_alive="120s",
             task_profile=profile,
+            num_ctx=budget["num_ctx"],
+            num_thread=budget["num_thread"],
+        )
+        # Retrieve verified memory + relevant skills in upgraded mode
+        mem_lessons: list[str] = []
+        skills_used: list[str] = []
+        if mode != "baseline":
+            if memory_root is not None:
+                hits = context_engine.HybridMemoryIndex(memory_root).search(
+                    "tel99-academy", f"{ex['role']} {ex['objective']}", limit=3, verified_only=True, role=ex["role"]
+                )
+                mem_lessons = [f"{h['title']}: {h['body']}" for h in hits]
+            if skills_root is not None:
+                sk = context_engine.select_relevant_skills(skills_root, f"{ex['role']} {ex['objective']}", limit=2)
+                skills_used = [s["name"] for s in sk]
+
+        conf_est = metacognition.estimate_task_confidence(
+            estimated_lines=50,
+            prior_role_success_rate=0.75,
+            has_verified_memory=bool(mem_lessons),
         )
         prior_hashes: list[str] = []
         attempts_log: list[dict[str, Any]] = []
         last_code = ""
+        prev_code = ""
         last_ver: dict[str, Any] = {"ok": False, "error": "not run", "passed": [], "failed": []}
 
         for attempt in range(1, max_attempts + 1):
@@ -286,14 +493,22 @@ def evaluate_model_on_held_out(
                     else smart_repair.build_structured_reasoning_prompt(
                         role=ex["role"],
                         objective=ex["objective"],
-                        constraints=["Python 3.12 stdlib only", "No eval/exec", "Handle invalid types cleanly"],
+                        constraints=[
+                            "Python 3.12 stdlib only",
+                            "No eval/exec/__import__",
+                            "Validate bool separately from int where required",
+                            "Return ONLY valid Python code inside one block",
+                        ],
                     )
                 )
                 user_prompt = ex["objective"]
+                if mode != "baseline" and mem_lessons:
+                    user_prompt += "\n\nVerified memory lessons:\n- " + "\n- ".join(mem_lessons)
                 if attempt > 1 and mode == "baseline":
                     user_prompt += f"\nPrevious attempt failed: {last_ver.get('error')}"
             else:
-                sys_prompt = "Return ONLY the complete corrected Python 3 stdlib function."
+                sys_prompt = "Return ONLY the complete corrected Python 3 stdlib code."
+                diff = smart_repair.compute_bounded_diff(prev_code, last_code) if prev_code else ""
                 user_prompt = smart_repair.build_smart_repair_prompt(
                     previous_code=last_code,
                     exact_error=str(last_ver.get("error") or ""),
@@ -301,12 +516,18 @@ def evaluate_model_on_held_out(
                     failed_checks=last_ver.get("failed", []),
                     contract_constraints=["Python 3.12 stdlib only", "Preserve exact signature"],
                     prior_attempts=attempts_log,
+                    memory_lessons=mem_lessons,
+                    previous_diff=diff,
                 )
-            raw = provider.complete(system=sys_prompt, prompt=user_prompt)
-            code = ollama_native.extract_code_block(raw)
-            repeated = smart_repair.detect_repeated_attempt(code, prior_hashes)
-            ver = _verify_python_exercise(code, ex["test_code"])
-            fp = smart_repair.code_fingerprint(code)
+            try:
+                raw = provider.complete(system=sys_prompt, prompt=user_prompt)
+                code = ollama_native.extract_code_block(raw)
+                repeated = smart_repair.detect_repeated_attempt(code, prior_hashes)
+                ver = _verify_python_exercise(code, ex["test_code"])
+                fp = smart_repair.code_fingerprint(code)
+            except ollama_native.ProviderError as exc:
+                code, repeated, fp = "", False, ""
+                ver = {"ok": False, "error": f"ProviderError: {exc}", "passed": [], "failed": ["infra"]}
             prior_hashes.append(fp)
             attempts_log.append({
                 "attempt": attempt,
@@ -316,19 +537,65 @@ def evaluate_model_on_held_out(
                 "code_sha256": fp,
                 "error": ver.get("error"),
             })
+            prev_code = last_code
             last_code = code
             last_ver = ver
             if ver["ok"]:
                 break
 
+        cal_observations.append({"confidence": conf_est["calibrated_confidence"], "success": bool(last_ver["ok"])})
+        repaired = bool(last_ver["ok"] and len(attempts_log) > 1)
+        if traj_rec is not None:
+            traj_rec.record(
+                project="tel99-academy",
+                mission_id=f"{mode}-{ex['id']}",
+                objective=ex["objective"][:400],
+                model=model,
+                role=ex["role"],
+                tools_used=[{"tool": "ollama_native", "mode": mode}],
+                decisions=[f"skills={','.join(skills_used)}", f"mem={len(mem_lessons)}"],
+                errors=[str(a["error"]) for a in attempts_log if a.get("error")],
+                repairs=attempts_log[1:],
+                tests=[{"ok": bool(last_ver["ok"])}],
+                artifacts=[],
+                verdict="SUCCESS" if last_ver["ok"] else "FAILURE",
+                duration_seconds=round(sum(a["seconds"] for a in attempts_log), 2),
+            )
+        if flib is not None and any(a.get("error") for a in attempts_log):
+            first_err = next((str(a["error"]) for a in attempts_log if a.get("error")), "error")
+            flib.record_failure(
+                project="tel99-academy",
+                mission_id=f"{mode}-{ex['id']}",
+                category="ENGINE_ERROR" if "ProviderError" in first_err else "VERIFICATION_ERROR",
+                context_summary=f"Academy {mode} {ex['role']} {ex['id']}",
+                cause=first_err[:240],
+                cause_confirmed=bool(last_ver["ok"]),
+                evidence=f"attempts={len(attempts_log)} ok={bool(last_ver['ok'])}",
+                attempts=attempts_log,
+                validated_solution=("Repaired via smart_repair" if repaired else ""),
+                preventive_measure="Validate types (reject bool for int), bounds, and exact signatures",
+                model=model,
+                role=ex["role"],
+            )
+
         results.append({
             "id": ex["id"],
             "role": ex["role"],
+            "difficulty": ex.get("difficulty", "medium"),
             "ok": bool(last_ver["ok"]),
             "attempts": len(attempts_log),
-            "repaired": bool(last_ver["ok"] and len(attempts_log) > 1),
+            "repaired": repaired,
+            "lessons_used": len(mem_lessons),
+            "skills_used": skills_used,
+            "confidence": conf_est["calibrated_confidence"],
             "attempts_log": attempts_log,
         })
+        if progress_file is not None:
+            pf = Path(progress_file)
+            pf.parent.mkdir(parents=True, exist_ok=True)
+            tmp = pf.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({"mode": mode, "model": model, "completed": len(results), "total": len(exs), "results": results}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(pf)
 
     passed_count = sum(1 for r in results if r["ok"])
     repaired_count = sum(1 for r in results if r["repaired"])
@@ -342,6 +609,7 @@ def evaluate_model_on_held_out(
         "success_rate": round(passed_count / max(1, len(results)), 4),
         "first_pass": sum(1 for r in results if r["ok"] and r["attempts"] == 1),
         "repaired": repaired_count,
+        "calibration": metacognition.compute_calibration_metrics(cal_observations),
         "duration_seconds": round(time.monotonic() - started, 2),
         "results": results,
     }

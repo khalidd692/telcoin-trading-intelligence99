@@ -10,9 +10,105 @@ ROOT = Path(__file__).resolve().parents[3]
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
-from scripts.agents.automation.autonomy_runtime import LEGACY_STOP
+from scripts.agents.automation.autonomy_runtime import LEGACY_STOP, classify_failure
 from scripts.agents.automation.local_codex import exclusive
 from scripts.agents.protocol.store import FileStore
+import time
+
+
+INFRA_RECOVERABLE_CATEGORIES = frozenset({"PROVIDER_ERROR", "ENVIRONMENT_ERROR"})
+MAX_INFRA_RECOVERIES = 2
+
+
+def requeue_infra_failed_mission(
+    campaign_dir: Path | str,
+    mission_id: str,
+    *,
+    reason: str = "infra_ram_or_provider_recovery",
+    max_infra_recoveries: int = MAX_INFRA_RECOVERIES,
+) -> dict:
+    """Safely resume a mission blocked/rejected ONLY by an infrastructure/provider error.
+
+    Invariants:
+    - NEVER replays an ACCEPTED mission.
+    - NEVER deletes or resets any historical ledger entry; archives previous failure into
+      `infra_recovery_history` via CAS.
+    - Refuses to requeue genuine MODEL_ERROR / VERIFICATION_ERROR / CONTRACT_ERROR failures.
+    """
+    cdir = Path(campaign_dir).resolve()
+    ledger_dir = cdir / "ledger"
+    if not ledger_dir.is_dir():
+        return {"ok": False, "mission_id": mission_id, "reason": "ledger directory not found"}
+
+    with exclusive(cdir / "runtime.lock"):
+        store = FileStore(ledger_dir)
+        key = f"kilo-local/{mission_id}"
+        old = store.read(key, default=None)
+        if not isinstance(old, dict):
+            return {"ok": False, "mission_id": mission_id, "reason": "mission checkpoint not found"}
+        status = old.get("status")
+        if status == "ACCEPTED":
+            return {"ok": False, "mission_id": mission_id, "status": status, "reason": "refused: mission already ACCEPTED"}
+        if status not in ("BLOCKED", "REJECTED", "AWAITING_HUMAN"):
+            return {"ok": False, "mission_id": mission_id, "status": status, "reason": "mission not in failed terminal state"}
+
+        prior_count = int(old.get("infra_recovery_count") or 0)
+        if prior_count >= max_infra_recoveries:
+            return {
+                "ok": False,
+                "mission_id": mission_id,
+                "status": status,
+                "reason": f"infra recovery budget exhausted ({prior_count}/{max_infra_recoveries})",
+            }
+
+        # Inspect both checkpoint reason and nested verification/result error
+        res_err = ""
+        if isinstance(old.get("result"), dict):
+            ver = old["result"].get("verification")
+            if isinstance(ver, dict):
+                res_err = str(ver.get("error") or "")
+        ver_err = str((old.get("verification") or {}).get("error") or "") if isinstance(old.get("verification"), dict) else ""
+        combined_err = " ".join(x for x in (str(old.get("error") or ""), res_err, ver_err) if x)
+        category = classify_failure(str(old.get("reason") or ""), combined_err)
+        if category not in INFRA_RECOVERABLE_CATEGORIES:
+            return {
+                "ok": False,
+                "mission_id": mission_id,
+                "status": status,
+                "failure_category": category,
+                "reason": f"refused: failure classified as {category} (not infrastructure error)",
+            }
+
+        history = list(old.get("infra_recovery_history") or [])
+        history.append({
+            "recovered_at": time.time(),
+            "previous_status": status,
+            "previous_reason": old.get("reason"),
+            "previous_error": combined_err[:240],
+            "failure_category": category,
+            "recovery_reason": reason,
+        })
+        updated = {
+            **old,
+            "status": "ACK",
+            "execution_status": "NOT_STARTED",
+            "at": time.time(),
+            "reason": f"requeued after {category}: {reason}",
+            "infra_recovery_count": prior_count + 1,
+            "infra_recovery_history": history,
+        }
+        updated.pop("result", None)
+        updated.pop("verification", None)
+        if not store.put_cas(key, updated, old):
+            return {"ok": False, "mission_id": mission_id, "reason": "CAS conflict during requeue"}
+        return {
+            "ok": True,
+            "mission_id": mission_id,
+            "previous_status": status,
+            "new_status": "ACK",
+            "failure_category": category,
+            "infra_recovery_count": prior_count + 1,
+        }
 
 
 def inspect_state(state_root: Path | str) -> dict:
@@ -120,15 +216,21 @@ def clear_stops(state_root: Path | str) -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("inspect", "clear-stop"))
+    parser.add_argument("action", choices=("inspect", "clear-stop", "requeue-infra"))
     parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--mission-id", default="")
+    parser.add_argument("--reason", default="infra_ram_or_provider_recovery")
     args = parser.parse_args(argv)
     if args.action == "clear-stop":
         report = clear_stops(args.state)
+    elif args.action == "requeue-infra":
+        if not args.mission_id:
+            raise SystemExit("--mission-id is required for requeue-infra")
+        report = requeue_infra_failed_mission(args.state, args.mission_id, reason=args.reason)
     else:
         report = inspect_state(args.state)
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
+    return 0 if report.get("ok", True) else 2
 
 
 if __name__ == "__main__":

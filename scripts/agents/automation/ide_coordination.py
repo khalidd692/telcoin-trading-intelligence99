@@ -32,14 +32,30 @@ SDK_INTERFACE_VERSION = "tel99-coordination-v1"
 LEASES_KEY = "coordination/leases"
 ACTIVITY_KEY = "coordination/activity"
 MAX_ACTIVITY_EVENTS = 100
-ACTOR_RE = re.compile(r"^(antigravity-ide|antigravity-sdk|tel99-cli|codex-cli|subagent:[A-Za-z0-9_.-]{1,48})$")
+ACTOR_RE = re.compile(
+    r"^(antigravity-ide|antigravity-sdk|tel99-cli|codex-cli|"
+    r"subagent:[A-Za-z0-9_.-]{1,48}|engine:[a-z0-9_.-]{1,32})$"
+)
 RESOURCE_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,96}$")
 MAX_TTL_SECONDS = 7200
 DEFAULT_TTL_SECONDS = 1800
 
+LOCAL_INFERENCE_RESOURCE = "inference:local-gpu-ram"
+PRELOAD_MIN_FREE_MIB = 2200
+RESIDENT_MIN_FREE_MIB = 950
+DEFAULT_INFERENCE_TTL_SECONDS = 600
+DEFAULT_INFERENCE_WAIT_SECONDS = 180.0
+ENGINE_NAME_RE = re.compile(r"^[a-z0-9_.-]{1,32}$")
+
 
 class LeaseConflict(RuntimeError):
     """Raised when another actor already holds an active lease on the target scope."""
+
+
+class ResourceBusyError(LeaseConflict):
+    """Raised when local RAM or cross-engine inference capacity is exhausted."""
+
+    error_category = "ENVIRONMENT_ERROR"
 
 
 @contextmanager
@@ -399,12 +415,413 @@ def record_handoff(
     return event
 
 
+def default_coordination_state_root() -> Path:
+    """Resolve the single shared TEL99 coordination state root without creating a second ledger."""
+    env_dir = os.environ.get("TEL99_COORDINATION_STATE", "").strip()
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    cfg_path = HERE / "tel99-config.json"
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            raw = str(cfg.get("state_dir") or "").strip()
+            if raw:
+                if raw.startswith(("~/", "~\\")):
+                    return (Path.home() / raw[2:]).resolve()
+                return Path(raw).expanduser().resolve()
+        except (OSError, ValueError):
+            pass
+    return (Path.home() / "Desktop" / "TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE").resolve()
+
+
+def is_pid_alive(pid: int | None) -> bool:
+    """Return True if a local OS process with `pid` is currently running."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        import ctypes
+
+        process_query_limited = 0x1000
+        still_active = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(process_query_limited, False, pid)
+        if not handle:
+            # Error 5 (ACCESS_DENIED) means process exists but is elevated.
+            return ctypes.get_last_error() == 5 or kernel32.GetLastError() == 5
+        try:
+            code = ctypes.c_ulong(0)
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value == still_active)
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def reclaim_orphan_leases(
+    state_root: Path | str | None = None,
+    *,
+    resource_id: str | None = LOCAL_INFERENCE_RESOURCE,
+    now: float | None = None,
+) -> list[dict]:
+    """Reclaim active CAS leases whose owning PID is confirmed dead (crash recovery)."""
+    root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
+    cdir = _coord_dir(root)
+    if not (cdir / "ledger").is_dir():
+        return []
+    ts = time.time() if now is None else float(now)
+    reclaimed: list[dict] = []
+    with _lease_transaction(cdir):
+        raw, previous = _read_raw_leases(cdir)
+        active, _ = _split_leases(raw, ts)
+        kept: list[dict] = []
+        for row in active:
+            same_res = resource_id is None or row.get("resource_id") == resource_id
+            pid = row.get("pid")
+            if same_res and isinstance(pid, int) and pid > 0 and not is_pid_alive(pid):
+                reclaimed.append(row)
+            else:
+                kept.append(row)
+        if reclaimed or len(kept) != len(raw):
+            store = FileStore(cdir / "ledger")
+            if not store.put_cas(LEASES_KEY, {"version": 1, "leases": kept}, previous):
+                raise CASConflict("orphan lease reclaim CAS conflict")
+            for row in reclaimed:
+                _append_activity_locked(cdir, {
+                    "at": _utc_iso(ts),
+                    "kind": "orphan_lease_reclaimed",
+                    "actor": str(row.get("actor") or ""),
+                    "resource_id": str(row.get("resource_id") or ""),
+                    "lease_id": str(row.get("lease_id") or ""),
+                    "dead_pid": row.get("pid"),
+                })
+    return reclaimed
+
+
+def _loopback_http_json(port: int, path: str, *, method: str = "GET", payload: dict | None = None, timeout: float = 2.0) -> dict | list | None:
+    from http.client import HTTPConnection, HTTPException
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        conn.request(method, path, body=body, headers=headers)
+        resp = conn.getresponse()
+        raw = resp.read(65_536)
+        if resp.status != 200:
+            return None
+        return json.loads(raw.decode("utf-8", errors="replace")) if raw else {}
+    except (OSError, HTTPException, ValueError):
+        return None
+    finally:
+        conn.close()
+
+
+def _find_listening_llama_pid(llama_port: int = 8080) -> int | None:
+    """Locate the PID of a local llama-server listening on `llama_port` without killing anything."""
+    import subprocess
+
+    if sys.platform != "win32":
+        return None
+    try:
+        ns = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, check=False,
+        )
+        candidate_pids: set[int] = set()
+        needle = f"127.0.0.1:{llama_port}"
+        for line in (ns.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[1].endswith(f":{llama_port}") and parts[3].upper() in ("LISTENING", "LISTEN", "ECOUTE", "\ufffdCOUTE"):
+                if needle in parts[1] or parts[1].startswith("0.0.0.0:"):
+                    try:
+                        candidate_pids.add(int(parts[4]))
+                    except ValueError:
+                        pass
+        for pid in sorted(candidate_pids):
+            tl = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, check=False,
+            )
+            if "llama-server" in (tl.stdout or "").lower():
+                return pid
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def probe_local_engines(
+    *,
+    state_root: Path | str | None = None,
+    ollama_port: int = 11434,
+    llama_port: int = 8080,
+) -> dict:
+    """Read-only inspection of all local inference engines (Ollama, llama-server), RAM, and CAS lease."""
+    from scripts.agents.automation import local_model_routing
+
+    root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
+    avail_mib = local_model_routing.available_memory_mib()
+
+    ollama_ps = _loopback_http_json(ollama_port, "/api/ps", timeout=1.5)
+    ollama_loaded: list[str] = []
+    ollama_size_mib = 0.0
+    if isinstance(ollama_ps, dict) and isinstance(ollama_ps.get("models"), list):
+        for row in ollama_ps["models"]:
+            if isinstance(row, dict) and isinstance(row.get("name"), str):
+                ollama_loaded.append(row["name"])
+                sz = row.get("size")
+                if isinstance(sz, (int, float)) and sz > 0:
+                    ollama_size_mib += float(sz) / (1024 * 1024)
+
+    llama_health = _loopback_http_json(llama_port, "/health", timeout=1.5)
+    llama_alive = isinstance(llama_health, dict) and llama_health.get("status") == "ok"
+    llama_processing = False
+    llama_busy_slots = 0
+    if llama_alive:
+        slots = _loopback_http_json(llama_port, "/slots", timeout=1.5)
+        slot_list = slots if isinstance(slots, list) else (slots.get("value") if isinstance(slots, dict) else [])
+        if isinstance(slot_list, list):
+            for s in slot_list:
+                if isinstance(s, dict) and s.get("is_processing"):
+                    llama_processing = True
+                    llama_busy_slots += 1
+
+    leases_info = active_leases(root)
+    inf_leases = [r for r in leases_info["active"] if r.get("resource_id") == LOCAL_INFERENCE_RESOURCE]
+    return {
+        "schema_version": 1,
+        "state_root": str(root),
+        "available_memory_mib": avail_mib,
+        "preload_min_free_mib": PRELOAD_MIN_FREE_MIB,
+        "resident_min_free_mib": RESIDENT_MIN_FREE_MIB,
+        "ollama": {
+            "port": ollama_port,
+            "reachable": ollama_ps is not None,
+            "loaded_models": ollama_loaded,
+            "resident_size_mib": round(ollama_size_mib, 1),
+        },
+        "llama_server": {
+            "port": llama_port,
+            "alive": llama_alive,
+            "processing": llama_processing,
+            "busy_slots": llama_busy_slots,
+            "pid": _find_listening_llama_pid(llama_port) if llama_alive else None,
+        },
+        "active_inference_lease": inf_leases[0] if inf_leases else None,
+        "active_inference_leases_count": len(inf_leases),
+    }
+
+
+def unload_ollama_models(
+    models: list[str] | tuple[str, ...] | None = None,
+    *,
+    ollama_port: int = 11434,
+    timeout: float = 8.0,
+) -> list[str]:
+    """Safely unload resident Ollama models via keep_alive=0 to reclaim host RAM."""
+    if models is None:
+        ps = _loopback_http_json(ollama_port, "/api/ps", timeout=1.5)
+        models = [
+            row["name"]
+            for row in ((ps or {}).get("models") or [])
+            if isinstance(row, dict) and isinstance(row.get("name"), str)
+        ]
+    unloaded: list[str] = []
+    for name in list(models):
+        res = _loopback_http_json(
+            ollama_port,
+            "/api/generate",
+            method="POST",
+            payload={"model": name, "prompt": "", "keep_alive": 0, "stream": False},
+            timeout=timeout,
+        )
+        if res is not None:
+            unloaded.append(name)
+    if unloaded:
+        time.sleep(0.6)
+    return unloaded
+
+
+def stop_idle_llama_server(
+    *,
+    state_root: Path | str | None = None,
+    llama_port: int = 8080,
+) -> dict:
+    """Safely stop an idle llama-server process ONLY when no slot is busy and no CAS lease is held."""
+    import subprocess
+
+    root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
+    status = probe_local_engines(state_root=root, llama_port=llama_port)
+    lease = status.get("active_inference_lease")
+    if lease and str(lease.get("actor") or "") in ("engine:llama-server", "engine:llama-cpp"):
+        return {"stopped": False, "reason": "active CAS lease held by llama-server"}
+    ls = status["llama_server"]
+    if not ls["alive"]:
+        return {"stopped": False, "reason": "llama-server not running"}
+    if ls["processing"]:
+        return {"stopped": False, "reason": "llama-server has active processing slots"}
+    pid = ls.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return {"stopped": False, "reason": "unable to confirm exact llama-server PID"}
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=8, check=False)
+    else:
+        import signal
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    time.sleep(1.0)
+    return {"stopped": True, "pid": pid, "port": llama_port}
+
+
+@contextmanager
+def local_inference_lease(
+    engine: str,
+    *,
+    state_root: Path | str | None = None,
+    model: str = "",
+    required_free_mib: int | None = None,
+    wait_timeout: float = DEFAULT_INFERENCE_WAIT_SECONDS,
+    ttl_seconds: int = DEFAULT_INFERENCE_TTL_SECONDS,
+    poll_interval: float = 0.5,
+    auto_reclaim_idle: bool = True,
+    probe_engines: bool = True,
+    ollama_port: int = 11434,
+    llama_port: int = 8080,
+):
+    """Host-wide exclusive CAS mutex for ALL local inference engines (concurrency = 1).
+
+    Reuses `acquire_lease`/`release_lease` on `LOCAL_INFERENCE_RESOURCE`:
+    - Blocks Ollama when llama-server holds the lease, and blocks llama-server when Ollama holds it.
+    - Reclaims confirmed dead-PID orphan leases automatically.
+    - Distinguishes pre-load RAM headroom vs already-resident model RAM headroom.
+    - Safely frees idle competing engines when switching between Ollama and llama-server.
+    """
+    clean_engine = str(engine or "").strip().lower()
+    if not ENGINE_NAME_RE.fullmatch(clean_engine):
+        raise ValueError(f"invalid local inference engine name: {engine!r}")
+    actor = f"engine:{clean_engine}"
+    root = default_coordination_state_root() if state_root is None else Path(state_root).resolve()
+    deadline = time.monotonic() + max(0.0, float(wait_timeout))
+    lease: dict | None = None
+
+    while True:
+        reclaim_orphan_leases(root, resource_id=LOCAL_INFERENCE_RESOURCE)
+        try:
+            lease = acquire_lease(
+                root,
+                actor=actor,
+                resource_id=LOCAL_INFERENCE_RESOURCE,
+                ttl_seconds=ttl_seconds,
+                note=f"{clean_engine}:{model}"[:180],
+            )
+            break
+        except LeaseConflict as exc:
+            if time.monotonic() >= deadline:
+                raise ResourceBusyError(
+                    f"local inference lease busy for {actor} after {wait_timeout:.1f}s: {exc}"
+                ) from exc
+            time.sleep(min(poll_interval, max(0.05, deadline - time.monotonic())))
+
+    try:
+        model_is_resident = False
+        avail_mib: int | None = None
+        threshold_mib = int(required_free_mib) if required_free_mib is not None else PRELOAD_MIN_FREE_MIB
+        reclaimed_actions: list[str] = []
+
+        if probe_engines:
+            snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+            avail_mib = snap.get("available_memory_mib")
+            ollama_loaded = list((snap.get("ollama") or {}).get("loaded_models") or [])
+            llama_info = snap.get("llama_server") or {}
+
+            if clean_engine in ("ollama", "antigravity-sdk"):
+                model_is_resident = bool(model and model in ollama_loaded)
+                # Wait cleanly if an external llama-server is actively processing (never kill an active run!)
+                while llama_info.get("alive") and llama_info.get("processing"):
+                    if time.monotonic() >= deadline:
+                        raise ResourceBusyError("llama-server is actively processing on port 8080")
+                    time.sleep(min(max(poll_interval, 2.0), max(0.1, deadline - time.monotonic())))
+                    snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+                    avail_mib = snap.get("available_memory_mib")
+                    llama_info = snap.get("llama_server") or {}
+                if llama_info.get("alive") and not llama_info.get("processing") and auto_reclaim_idle:
+                    stopped = stop_idle_llama_server(state_root=root, llama_port=llama_port)
+                    if stopped.get("stopped"):
+                        reclaimed_actions.append(f"stopped_idle_llama_server:pid={stopped.get('pid')}")
+                        snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+                        avail_mib = snap.get("available_memory_mib")
+                # Unload OTHER resident Ollama models if RAM is tight before loading target model.
+                other_models = [m for m in ollama_loaded if m != model]
+                if other_models and auto_reclaim_idle and (avail_mib is None or avail_mib < PRELOAD_MIN_FREE_MIB):
+                    unloaded = unload_ollama_models(other_models, ollama_port=ollama_port)
+                    if unloaded:
+                        reclaimed_actions.append(f"unloaded_ollama:{','.join(unloaded)}")
+                        snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+                        avail_mib = snap.get("available_memory_mib")
+            elif clean_engine in ("llama-server", "llama-cpp"):
+                model_is_resident = bool(llama_info.get("alive"))
+                if ollama_loaded and auto_reclaim_idle:
+                    unloaded = unload_ollama_models(ollama_loaded, ollama_port=ollama_port)
+                    if unloaded:
+                        reclaimed_actions.append(f"unloaded_ollama:{','.join(unloaded)}")
+                        snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+                        avail_mib = snap.get("available_memory_mib")
+
+            if required_free_mib is None:
+                threshold_mib = RESIDENT_MIN_FREE_MIB if model_is_resident else PRELOAD_MIN_FREE_MIB
+
+            while avail_mib is not None and avail_mib < threshold_mib:
+                if time.monotonic() >= deadline:
+                    raise ResourceBusyError(
+                        f"insufficient free RAM for {actor} ({model or 'local'}): "
+                        f"{avail_mib} MiB < {threshold_mib} MiB "
+                        f"({'resident' if model_is_resident else 'pre-load'} threshold)"
+                    )
+                time.sleep(min(max(poll_interval, 1.0), max(0.1, deadline - time.monotonic())))
+                snap = probe_local_engines(state_root=root, ollama_port=ollama_port, llama_port=llama_port)
+                avail_mib = snap.get("available_memory_mib")
+
+        yield {
+            "lease": lease,
+            "engine": clean_engine,
+            "actor": actor,
+            "model": model,
+            "model_is_resident": model_is_resident,
+            "available_memory_mib": avail_mib,
+            "ram_threshold_mib": threshold_mib,
+            "reclaimed_actions": reclaimed_actions,
+        }
+    finally:
+        if lease is not None:
+            try:
+                release_lease(root, lease["lease_id"], actor=actor)
+            except (LeaseConflict, CASConflict, OSError, ValueError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     st = sub.add_parser("status", help="Inspect active coordination leases")
     st.add_argument("--state", type=Path, required=True)
+
+    eng = sub.add_parser("engines", help="Inspect local inference engines, RAM, and active inference lease")
+    eng.add_argument("--state", type=Path, default=None)
+
+    rec = sub.add_parser("reclaim-orphans", help="Reclaim confirmed dead-PID orphan leases")
+    rec.add_argument("--state", type=Path, default=None)
 
     act = sub.add_parser("activity", help="Inspect recent coordination and handoff events")
     act.add_argument("--state", type=Path, required=True)
@@ -437,6 +854,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "status":
             print(json.dumps(active_leases(args.state), indent=2, ensure_ascii=False))
+            return 0
+        if args.cmd == "engines":
+            print(json.dumps(probe_local_engines(state_root=args.state), indent=2, ensure_ascii=False))
+            return 0
+        if args.cmd == "reclaim-orphans":
+            reclaimed = reclaim_orphan_leases(args.state, resource_id=None)
+            print(json.dumps({"reclaimed": reclaimed, "count": len(reclaimed)}, indent=2, ensure_ascii=False))
             return 0
         if args.cmd == "activity":
             print(json.dumps({"events": recent_activity(args.state, limit=args.limit)}, indent=2, ensure_ascii=False))

@@ -87,11 +87,15 @@ def build_code_graph(workspace_root: Path | str, *, max_files: int = 300) -> dic
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                fn_args = [a.arg for a in node.args.args]
+                if node.args.kwonlyargs:
+                    fn_args.append("*")
+                    fn_args.extend(a.arg for a in node.args.kwonlyargs)
                 functions.append({
                     "name": node.name,
                     "lineno": node.lineno,
                     "end_lineno": getattr(node, "end_lineno", node.lineno),
-                    "args": [a.arg for a in node.args.args],
+                    "args": fn_args,
                 })
                 symbol_index.setdefault(node.name, []).append(rel)
             elif isinstance(node, ast.ClassDef):

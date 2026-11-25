@@ -7,11 +7,20 @@ completion; the separate Docker verifier decides whether to accept it.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 import re
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
+from scripts.agents.automation import ide_coordination
 from scripts.agents.intelligence import catalog
 from scripts.agents.native.provider import ProviderError
+
+
+class ResourceUnavailableError(ProviderError):
+    """Infrastructure/RAM/lease contention error (distinct from model logic errors)."""
+
+    error_category = "ENVIRONMENT_ERROR"
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -26,6 +35,13 @@ TASK_PROFILE_LIMITS: dict[str, tuple[int, int]] = {
     "large_module": (4096, 360),
 }
 MAX_RESPONSE_BYTES_CAP = 512 * 1024
+
+
+def optimal_cpu_threads() -> int:
+    """Use physical CPU cores (e.g., 8 on 16-thread Ryzen 7 5700U) to avoid SMT thrashing."""
+    logical = os.cpu_count() or 8
+    physical_est = logical // 2 if logical >= 8 else logical
+    return max(2, min(12, physical_est))
 
 
 def extract_code_block(reply: str) -> str:
@@ -49,23 +65,33 @@ def compute_adaptive_budget(
     estimated_lines: int = 40,
     available_memory_mib: float | None = None,
     measured_tok_per_sec: float | None = None,
+    model_is_resident: bool | None = None,
 ) -> dict:
-    """Compute bounded adaptive max_tokens & timeout from task profile, RAM headroom & speed."""
+    """Compute bounded adaptive max_tokens, num_ctx, threads & timeout.
+
+    Explicitly distinguishes pre-load free RAM (model_is_resident=False) from
+    already-resident model headroom (model_is_resident=True) on 16 GB hosts.
+    """
     if task_profile not in TASK_PROFILE_LIMITS:
         raise ValueError(f"unknown task_profile: {task_profile!r}")
     max_cap, timeout_cap = TASK_PROFILE_LIMITS[task_profile]
     ram_clamped = False
     effective_profile = task_profile
 
-    # Protect 16 GB host without falsely clamping an already-loaded 7.5B model:
-    # - large_module (4096) clamps to module (2048) if free RAM < 2200 MiB.
-    # - module (2048) only clamps to patch (1024) in true OOM danger (< 700 MiB),
-    #   because an already-resident Gemma 4 model legitimately leaves ~1100-1800 MiB free.
-    if effective_profile == "large_module" and available_memory_mib is not None and available_memory_mib < 2200:
+    if model_is_resident is False:
+        large_thresh, mod_thresh, min_safe = 2800.0, 2200.0, 1800.0
+    elif model_is_resident is True:
+        large_thresh, mod_thresh, min_safe = 1800.0, 700.0, 550.0
+    else:
+        # Backward-compatible default when caller does not specify residency
+        large_thresh, mod_thresh, min_safe = 2200.0, 700.0, 550.0
+
+    insufficient_ram = available_memory_mib is not None and available_memory_mib < min_safe
+    if effective_profile == "large_module" and available_memory_mib is not None and available_memory_mib < large_thresh:
         effective_profile = "module"
         max_cap, timeout_cap = TASK_PROFILE_LIMITS[effective_profile]
         ram_clamped = True
-    if effective_profile == "module" and available_memory_mib is not None and available_memory_mib < 700:
+    if effective_profile == "module" and available_memory_mib is not None and available_memory_mib < mod_thresh:
         effective_profile = "patch"
         max_cap, timeout_cap = TASK_PROFILE_LIMITS[effective_profile]
         ram_clamped = True
@@ -81,17 +107,27 @@ def compute_adaptive_budget(
     tok_s = float(measured_tok_per_sec) if (measured_tok_per_sec and measured_tok_per_sec > 0.5) else (
         5.5 if "9b" in model.lower() else 9.5
     )
-    computed_timeout = int(round((chosen_tokens / tok_s) * 1.35 + 30))
+    cold_load_pad = 40 if model_is_resident is False else 0
+    computed_timeout = int(round((chosen_tokens / tok_s) * 1.35 + 35 + cold_load_pad))
     chosen_timeout = max(30, min(timeout_cap, computed_timeout))
+    num_ctx = 4096 if (effective_profile == "patch" and available_memory_mib is not None and available_memory_mib < 1400) else 8192
 
+    ram_state = (
+        "insufficient_ram" if insufficient_ram
+        else ("clamped" if ram_clamped else ("resident_ok" if model_is_resident else "preload_ok"))
+    )
     return {
         "model": model,
         "requested_profile": task_profile,
         "effective_profile": effective_profile,
         "max_tokens": chosen_tokens,
         "timeout": chosen_timeout,
-        "num_ctx": 8192,
+        "num_ctx": num_ctx,
+        "num_thread": optimal_cpu_threads(),
+        "model_is_resident": model_is_resident,
+        "ram_state": ram_state,
         "ram_clamped": ram_clamped,
+        "insufficient_ram": insufficient_ram,
     }
 
 
@@ -106,6 +142,11 @@ class OllamaNativeProvider:
         max_tokens: int = 768,
         keep_alive: str = "0s",
         task_profile: str = "patch",
+        num_ctx: int = 8192,
+        num_thread: int | None = None,
+        coordination_state_root: Path | str | None = None,
+        use_coordination_lease: bool = True,
+        lease_wait_timeout: float = 120.0,
     ):
         approved = [
             spec for spec in catalog.MODEL_CATALOG
@@ -127,10 +168,17 @@ class OllamaNativeProvider:
         self.max_tokens = max_tokens
         self.keep_alive = keep_alive
         self.task_profile = task_profile
+        self.num_ctx = max(2048, min(8192, int(num_ctx)))
+        self.num_thread = optimal_cpu_threads() if num_thread is None else max(2, min(12, int(num_thread)))
+        self.coordination_state_root = coordination_state_root
+        self.use_coordination_lease = bool(use_coordination_lease) and os.environ.get("TEL99_DISABLE_INFERENCE_LEASE", "") != "1"
+        self.lease_wait_timeout = float(lease_wait_timeout)
         self.max_response_bytes = min(MAX_RESPONSE_BYTES_CAP, max(65_536, max_tokens * 32))
         self.last_metadata = {}
 
     def complete(self, *, system: str, prompt: str, response_format: str | dict | None = None) -> str:
+        from contextlib import nullcontext
+
         self.last_metadata = {}
         payload = {
             "model": self.model,
@@ -139,8 +187,9 @@ class OllamaNativeProvider:
             "stream": False,
             "keep_alive": self.keep_alive,
             "options": {
-                "num_ctx": 8192,
+                "num_ctx": self.num_ctx,
                 "num_predict": self.max_tokens,
+                "num_thread": self.num_thread,
                 "temperature": 0,
             },
         }
@@ -161,16 +210,30 @@ class OllamaNativeProvider:
         )
         # Prevent proxy settings or HTTP redirects from changing the destination.
         client = build_opener(ProxyHandler({}), _NoRedirect())
+        lease_cm = (
+            ide_coordination.local_inference_lease(
+                "ollama",
+                state_root=self.coordination_state_root,
+                model=self.model,
+                wait_timeout=self.lease_wait_timeout,
+                ttl_seconds=max(120, self.timeout + 120),
+            )
+            if self.use_coordination_lease
+            else nullcontext(None)
+        )
         try:
-            with client.open(request, timeout=self.timeout) as response:
-                if response.status != 200:
-                    raise ProviderError("Ollama returned a non-success HTTP status")
-                raw = response.read(self.max_response_bytes + 1)
+            with lease_cm:
+                with client.open(request, timeout=self.timeout) as response:
+                    if response.status != 200:
+                        raise ProviderError("Ollama returned a non-success HTTP status")
+                    raw = response.read(self.max_response_bytes + 1)
+        except ide_coordination.LeaseConflict as exc:
+            raise ResourceUnavailableError(f"Local inference resource busy: {exc}") from exc
         except TimeoutError as exc:
-            raise ProviderError("Ollama request timed out") from exc
+            raise ResourceUnavailableError("Ollama request timed out") from exc
         except OSError as exc:
             if isinstance(getattr(exc, "reason", None), TimeoutError) or "timed out" in str(exc).lower():
-                raise ProviderError("Ollama request timed out") from exc
+                raise ResourceUnavailableError("Ollama request timed out") from exc
             raise ProviderError("Ollama native API unavailable") from exc
         if len(raw) > self.max_response_bytes:
             raise ProviderError("Ollama response exceeds limit")
