@@ -192,6 +192,63 @@ class ProviderRouterTests(unittest.TestCase):
             with patch("shutil.which", return_value=None), patch("pathlib.Path.home", return_value=fake_home):
                 self.assertEqual(pr._resolve_agy_cli(), str(agy_bin))
 
+    def test_agy_role_specialization_and_high_effort_gating(self):
+        inv = {
+            "providers": {
+                "agy": {
+                    "provider": "agy",
+                    "installed": True,
+                    "available": True,
+                    "billing_class": pr.BILLING_SUBSCRIPTION_OPT_IN,
+                    "quota_status": "OPT_IN_NO_RPC_QUOTA",
+                    "models": [
+                        {
+                            "id": item["id"],
+                            "served_model": item["model"],
+                            "provider": "agy",
+                            "role_tier": item["role_tier"],
+                            "effort_tier": item["effort_tier"],
+                            "quality_prior": item["quality_prior"],
+                            "latency_tier": item["latency_tier"],
+                            "supports_tools": True,
+                            "context_tokens": 128000,
+                            "confidential_ok": False,
+                        }
+                        for item in pr.SUBSCRIPTION_MODELS["agy"]
+                    ],
+                }
+            }
+        }
+        orch = pr.select_executor(
+            task_kind="orchestration", difficulty="medium", confidential=False,
+            allow_subscription_cli=True, inventory=inv,
+        )
+        self.assertEqual(orch["chosen"]["served_model"], "gemini-4-neon-medium")
+        self.assertTrue(any("difficulty=hard" in r["reason"] for r in orch["rejected"]))
+
+        exe = pr.select_executor(
+            task_kind="code", difficulty="medium", confidential=False,
+            allow_subscription_cli=True, inventory=inv,
+        )
+        self.assertEqual(exe["chosen"]["served_model"], "gemini-4-hydrogen-medium")
+
+        hard = pr.select_executor(
+            task_kind="code", difficulty="hard", confidential=False,
+            allow_subscription_cli=True, inventory=inv,
+        )
+        self.assertEqual(hard["chosen"]["served_model"], "gemini-4-neon-high")
+
+    def test_agy_print_adapter_places_model_before_print_flag(self):
+        with patch("shutil.which", return_value="C:/bin/agy.exe"), patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = '{"status":"SUCCESS","response":"OK","duration_seconds":1.2}'
+            adapter = pr.AgyPrintAdapter("gemini-4-hydrogen-medium")
+            out = adapter.complete(system="Sys", prompt="Hi")
+            self.assertEqual(out, "OK")
+            argv = mock_run.call_args.args[0]
+            self.assertLess(argv.index("--model"), argv.index("--print"))
+            self.assertEqual(adapter.last_metadata.get("status"), "SUCCESS")
+
 
 if __name__ == "__main__":
     unittest.main()

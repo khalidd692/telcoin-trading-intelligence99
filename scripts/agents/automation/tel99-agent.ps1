@@ -1,12 +1,13 @@
 # TEL99 unified PowerShell operator CLI (reads defaults from tel99-config.json).
 [CmdletBinding()]
 param(
-    [ValidateSet("Start", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal", "Specialists", "Leases")]
+    [ValidateSet("Start", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal", "Specialists", "AuditAgents", "Leases")]
     [string]$Mode = "Start",
     [string]$Manifest,
     [switch]$AutoFeed,
     [switch]$Once,
     [switch]$IsolateBlocked,
+    [switch]$ExitWhenDone,
     [switch]$AllowControls,
     [switch]$ClearStop,
     [switch]$VerifyBaseline,
@@ -80,6 +81,7 @@ try {
             if ($Manifest) { $runArgs += @("--manifest", (Resolve-Path -LiteralPath $Manifest).Path) }
             else { $runArgs += "--auto-feed" }
             if ($useIsolate) { $runArgs += "--isolate-blocked" }
+            if ($ExitWhenDone.IsPresent) { $runArgs += "--exit-when-done" }
             if ($Once.IsPresent) { $runArgs += "--once" }
             & $python @runArgs
             $runCode = $LASTEXITCODE
@@ -136,6 +138,10 @@ try {
             & $python -B -m scripts.agents.specialist_dispatch list
             exit $LASTEXITCODE
         }
+        "AuditAgents" {
+            & $python -B -m scripts.agents.specialist_dispatch audit
+            exit $LASTEXITCODE
+        }
         "Leases" {
             & $python -B -m scripts.agents.automation.ide_coordination status --state $StateDir
             exit $LASTEXITCODE
@@ -161,6 +167,7 @@ try {
             if ($Mode -eq "Run") {
                 $argv += @("--seconds", [string]($Minutes * 60), "--poll-interval", [string]$PollInterval)
                 if ($useIsolate) { $argv += "--isolate-blocked" }
+                if ($ExitWhenDone.IsPresent) { $argv += "--exit-when-done" }
                 if ($Once.IsPresent) { $argv += "--once" }
             }
             & $python @argv

@@ -56,7 +56,8 @@ def load_manifest(path):
 def make_campaign(spec, root, deadline):
     runtime = Runtime(root / f"campaign-{spec['issue']}",
                       legacy_stop=LEGACY_STOP,
-                      shared_memory_root=root / "learning" / "memory")
+                      shared_memory_root=root / "learning" / "memory",
+                      auto_recover_local_crash=True)
     runtime.deadline = deadline
     return LocalCodeCampaign(
         runtime, spec["issue"], spec["mandate_comment"],
@@ -141,7 +142,7 @@ def _controller_has_terminal_blocker(campaign) -> bool:
 
 def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
                   once=False, build=make_campaign, sleep=time.sleep, discover=None,
-                  isolate_blocked=False):
+                  isolate_blocked=False, exit_when_done=False):
     """One bounded session; later owner-pinned controllers may be added to manifest.
 
     A change to the pin of an existing controller is rejected by the dedicated
@@ -229,6 +230,8 @@ def run_campaigns(manifest, root, *, seconds=3600, poll_interval=30,
                     pass
             if once:
                 break
+            if exit_when_done and active_campaigns and all(summary.get(spec["issue"]) is True for spec in active_specs):
+                break
             until = min(deadline, time.monotonic() + poll_interval)
             while not (root / "stop.request").exists() and time.monotonic() < until:
                 sleep(min(0.1, max(0, until - time.monotonic())))
@@ -266,6 +269,8 @@ def main(argv=None):
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--isolate-blocked", action="store_true",
                         help="isolate blocked/unapproved controllers without stopping healthy ones")
+    parser.add_argument("--exit-when-done", action="store_true",
+                        help="stop cleanly as soon as all active controllers complete")
     args = parser.parse_args(argv)
     if not 1 <= args.seconds <= 3600 or not 1 <= args.poll_interval <= 3600:
         parser.error("--seconds and --poll-interval must be 1..3600")
@@ -300,7 +305,8 @@ def main(argv=None):
             return 0
         report = run_campaigns(args.manifest, root, seconds=args.seconds,
                                poll_interval=args.poll_interval, once=args.once,
-                               discover=discover, isolate_blocked=args.isolate_blocked)
+                               discover=discover, isolate_blocked=args.isolate_blocked,
+                               exit_when_done=args.exit_when_done)
         print(json.dumps({"results": report, "all_complete": bool(report) and all(report.values()),
                           "bounded_seconds": args.seconds}))
         return 0 if report and all(report.values()) else 2

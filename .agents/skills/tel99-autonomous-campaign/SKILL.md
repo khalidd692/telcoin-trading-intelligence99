@@ -52,8 +52,22 @@ pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Recover -C
 
 ```powershell
 pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Specialists
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode AuditAgents
 python -B -m scripts.agents.specialist_dispatch select --task "security audit and market data freshness" --max 3
 ```
+
+- **Routage des modèles & quotas** (`scripts/agents/automation/provider_router.py`) :
+  - Orchestration / planification : `agy/gemini-4-neon-medium` (si `allow_subscription_cli=True` et non confidentiel) ; exécution : `agy/gemini-4-hydrogen-medium` ; `gemini-4-neon-high` réservé à `difficulty="hard"`.
+  - Tâches confidentielles ou mode local gratuit par défaut (`allow_subscription_cli: false`) : Ollama local (`gemma4:e4b-tel99-8k`) sans coût supplémentaire.
+
+- **Cycle autonome complet et arrêt propre (`-ExitWhenDone`)** :
+
+```powershell
+pwsh -NoProfile -File scripts/agents/automation/tel99-agent.ps1 -Mode Run -AutoFeed -IsolateBlocked -ExitWhenDone -Minutes 60 -PollInterval 15
+```
+
+  - Active la reprise automatique bornée (`auto_recover_local_crash=True`, max 1 reprise locale avant reçu irréversible) et stoppe proprement dès achèvement des contrôleurs actifs.
+  - `learning_loop.py` génère `measured_quality.json`, `learned_procedures.md` et `improvement_proposals.json` (amélioration procédurale uniquement, aucun réentraînement ni relâchement des garde-fous).
 
 - **Coordination sans collision IDE / CLI / Codex** (`scripts/agents/automation/ide_coordination.py`) :
 

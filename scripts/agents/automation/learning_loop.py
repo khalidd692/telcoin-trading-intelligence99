@@ -318,7 +318,69 @@ def sync_measured_quality(state_root: Path | str, output_path: Path | str | None
     if memory_root.is_dir():
         promoted = promote_verified_procedures(memory_root, "tel99")
         report["promoted_procedures"] = promoted
+    report["improvement_proposals"] = propose_skill_improvements(root, report=report)
     return report
+
+
+def propose_skill_improvements(state_root: Path | str, project: str = "tel99",
+                               *, report: dict | None = None) -> dict:
+    """Generate testable Skill/prompt proposals from verified outcomes without touching guardrails."""
+    root = Path(state_root).resolve()
+    metrics = report if isinstance(report, dict) else collect_campaign_metrics(root)
+    measured = metrics.get("measured_quality") or {}
+    mem_root = root / "learning" / "memory"
+    entries = MemoryStore(mem_root).all_entries(project, include_common=True) if mem_root.is_dir() else []
+
+    errors = [e for e in entries if e.kind == "error"]
+    fixes = [e for e in entries if e.kind == "fix" and e.verified]
+    procedures = [e for e in entries if e.kind == "procedure" and e.verified]
+
+    proposals: list[dict] = []
+    for model_id, stats in sorted(measured.items()):
+        failed_checks = stats.get("failed_checks") or {}
+        if failed_checks.get("candidate-passes", 0) > 0:
+            proposals.append({
+                "id": f"skill-edge-cases-{model_id.replace('/', '-')}",
+                "target": "local_team.analyze / tel99-autonomous-campaign",
+                "evidence": f"{model_id}: candidate-passes failed {failed_checks['candidate-passes']} time(s)",
+                "proposal": "Inject verified fix lessons and edge-case checklist before attempt 1; require independent Docker test pass.",
+                "requires_independent_test": True,
+            })
+        if stats.get("repaired_accepted", 0) > 0:
+            proposals.append({
+                "id": f"promote-repair-{model_id.replace('/', '-')}",
+                "target": "learned_procedures.md",
+                "evidence": f"{model_id}: {stats['repaired_accepted']} repaired mission(s) accepted on retry",
+                "proposal": "Keep verified repair pattern in project memory for retrieval on similar functions.",
+                "requires_independent_test": True,
+            })
+    if not proposals and fixes:
+        proposals.append({
+            "id": "reuse-verified-fixes",
+            "target": "learning/learned_procedures.md",
+            "evidence": f"{len(fixes)} verified fix(es) and {len(procedures)} promoted procedure(s)",
+            "proposal": "Continue retrieving up to 3 verified project lessons per mission without altering security guardrails.",
+            "requires_independent_test": True,
+        })
+
+    payload = {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "project": project,
+        "learning_kind": "procedural_memory_and_proposals",
+        "model_retraining": False,
+        "security_guardrails_mutable": False,
+        "counts": {
+            "errors": len(errors),
+            "verified_fixes": len(fixes),
+            "promoted_procedures": len(procedures),
+            "models_measured": len(measured),
+        },
+        "model_comparison": measured,
+        "proposals": proposals,
+    }
+    _atomic_write_json(root / "learning" / "improvement_proposals.json", payload)
+    return payload
 
 
 def promote_verified_procedures(memory_root: Path | str, project: str,

@@ -101,15 +101,15 @@ async function refresh() {
       return box;
     }) : [txt('div','Aucune campagne active dans ce dossier d’état.','label')]));
     const mq = Object.entries(d.learning.measured_quality || {});
-    el('learning').replaceChildren(...(mq.length ? mq.map(([m,s]) => {
-      const box = txt('div','','label'); box.style.marginBottom = '8px';
-      box.textContent = `${m}: ${Math.round(s.success_rate*100)}% (${s.accepted}/${s.tasks}) · avg ${s.avg_generation_seconds}s gen / ${s.avg_verification_seconds}s docker`;
-      return box;
-    }) : [txt('div','Aucune mesure terminale encore enregistrée.','label')]));
+    const learnRows = mq.map(([m,s]) => `${m}: ${Math.round(s.success_rate*100)}% (${s.accepted}/${s.tasks}) · avg ${s.avg_generation_seconds}s gen / ${s.avg_verification_seconds}s docker`);
+    for (const e of (d.memory.recent_entries || []).slice(-4)) learnRows.push(`[${e.kind}] ${e.title}`);
+    for (const p of ((d.learning.improvement_proposals || {}).proposals || []).slice(0, 2)) learnRows.push(`Proposition: ${p.proposal}`);
+    el('learning').replaceChildren(...(learnRows.length ? learnRows.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }) : [txt('div','Aucune mesure terminale encore enregistrée.','label')]));
     const provs = Object.entries(d.providers || {});
     el('providers').replaceChildren(...(provs.length ? provs.map(([name,p]) => {
       const box = txt('div','','label'); box.style.marginBottom = '6px';
-      box.textContent = `${name} [${p.billing_class}] · ${p.quota_status} · ${(p.models||[]).length} modèle(s)`;
+      const qExtra = p.primary_used_percent != null ? ` · P=${p.primary_used_percent}% S=${p.secondary_used_percent}%` : (p.version ? ` · v${p.version}` : '');
+      box.textContent = `${name} [${p.billing_class}] · ${p.quota_status}${qExtra} · ${(p.models||[]).length} modèle(s)`;
       return box;
     }) : [txt('div','Sonde fournisseurs non activée dans ce cliché.','label')]));
     const rec = d.recovery || {};
@@ -127,18 +127,23 @@ async function refresh() {
     const coord = d.coordination || {};
     const coordRows = [
       `Spécialistes: ${team.total ?? 0} total (${team.active_count ?? 0} actifs / ${team.reserved_on_demand_count ?? 0} mobilisables à la demande)`,
+      `Acteurs actifs: ${(coord.actors_active || []).join(', ') || 'aucun'}`,
     ];
     const activeLeases = coord.active || [];
     if (activeLeases.length) {
       for (const l of activeLeases) coordRows.push(`Bail ${l.actor} -> ${l.resource_id} (${(l.paths || []).join(', ') || l.branch || '*'})`);
     } else {
-      coordRows.push('Aucun bail actif entre Antigravity IDE, CLI et Codex.');
+      coordRows.push('Aucun bail actif entre Antigravity IDE, CLI, SDK et Codex.');
+    }
+    for (const ev of (coord.recent_activity || []).slice(-4)) {
+      coordRows.push(`Activité [${ev.kind}] ${ev.actor || ev.from_actor || ''} -> ${ev.resource_id || ''}`);
     }
     el('coordination').replaceChildren(...coordRows.map(line => { const b = txt('div', line, 'label'); b.style.marginBottom = '6px'; return b; }));
     el('missions').replaceChildren(...d.campaigns.flatMap(c => c.missions.map(m => {
       const tr = document.createElement('tr');
-      tr.append(txt('td', m.id), txt('td', `#${c.issue} -> #${m.issue ?? "?"}`), txt('td', m.status, m.status), txt('td', m.model || "?"));
-      tr.append(txt('td', `${m.checks_passed}/${m.checks_total} (att ${m.attempt ?? 1})`));
+      const statusTxt = m.reason ? `${m.status} (${m.reason})` : m.status;
+      tr.append(txt('td', m.id), txt('td', `#${c.issue} -> #${m.issue ?? "?"}`), txt('td', statusTxt, m.status), txt('td', m.model || "?"));
+      tr.append(txt('td', `${m.checks_passed}/${m.checks_total} (att ${m.attempt ?? 1}${m.repaired ? ', réparé' : ''})`));
       const td = document.createElement('td');
       if (m.pull_request_url) { const a = txt('a', 'Draft PR'); a.href = m.pull_request_url; a.target = '_blank'; td.append(a); }
       else { td.textContent = m.result_url ? 'RESULT ok' : 'En attente'; }
@@ -164,16 +169,32 @@ def _safe_checks(verification: dict | None) -> tuple[int, int]:
 def _memory_summary(root: Path) -> dict:
     mem_dir = root / "learning" / "memory"
     if not mem_dir.is_dir():
-        return {"entries_total": 0, "fixes": 0, "errors": 0, "procedures": 0, "has_procedures_doc": False}
+        return {"entries_total": 0, "fixes": 0, "errors": 0, "procedures": 0, "has_procedures_doc": False, "recent_entries": []}
     store = MemoryStore(mem_dir)
     entries = store.all_entries("tel99", include_common=True)
+    recent = [
+        {"id": e.id, "kind": e.kind, "title": e.title, "verified": bool(e.verified), "created_at": e.created_at}
+        for e in entries[-10:]
+    ]
     return {
         "entries_total": len(entries),
         "fixes": sum(1 for e in entries if e.kind == "fix"),
         "errors": sum(1 for e in entries if e.kind == "error"),
         "procedures": sum(1 for e in entries if e.kind == "procedure"),
         "has_procedures_doc": (root / "learning" / "learned_procedures.md").is_file(),
+        "recent_entries": recent,
     }
+
+
+def _improvement_proposals(root: Path) -> dict:
+    path = root / "learning" / "improvement_proposals.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
@@ -212,10 +233,13 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
             out_ack = ledger.get(f"kilo-github/outbox/{mid}/ACK") or {}
             out_evi = ledger.get(f"kilo-github/outbox/{mid}/EVIDENCE") or {}
             out_res = ledger.get(f"kilo-github/outbox/{mid}/RESULT") or {}
+            history = cp.get("attempt_history") if isinstance(cp.get("attempt_history"), list) else []
             missions_out.append({
                 "id": mid,
                 "issue": binding.get("issue"),
                 "status": cp.get("status", "PENDING"),
+                "reason": cp.get("reason"),
+                "repaired": bool(cp.get("status") == "ACCEPTED" and history),
                 "attempt": cp.get("attempt"),
                 "model": ver.get("model") or res.get("model") or mission.get("model"),
                 "generation_seconds": ver.get("generation_seconds") or res.get("generation_seconds"),
@@ -271,6 +295,7 @@ def build_snapshot(state_root: Path | str, *, include_providers: bool = False,
         "campaigns": campaigns,
         "learning": {
             "measured_quality": metrics["measured_quality"],
+            "improvement_proposals": _improvement_proposals(root),
         },
         "memory": _memory_summary(root),
         "recovery": recovery,

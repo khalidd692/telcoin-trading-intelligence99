@@ -38,9 +38,14 @@ PAID_ENV_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET", "_PASSWORD")
 SUBSCRIPTION_MODELS = {
     "agy": (
         {"id": "agy/gemini-4-hydrogen-medium", "model": "gemini-4-hydrogen-medium",
-         "quality_prior": 0.85, "latency_tier": "fast", "supports_tools": True, "context_tokens": 128_000},
+         "role_tier": "executor", "effort_tier": "medium",
+         "quality_prior": 0.86, "latency_tier": "fast", "supports_tools": True, "context_tokens": 128_000},
+        {"id": "agy/gemini-4-neon-medium", "model": "gemini-4-neon-medium",
+         "role_tier": "orchestrator", "effort_tier": "medium",
+         "quality_prior": 0.88, "latency_tier": "medium", "supports_tools": True, "context_tokens": 128_000},
         {"id": "agy/gemini-4-neon-high", "model": "gemini-4-neon-high",
-         "quality_prior": 0.92, "latency_tier": "medium", "supports_tools": True, "context_tokens": 128_000},
+         "role_tier": "hard_only", "effort_tier": "high",
+         "quality_prior": 0.92, "latency_tier": "slow", "supports_tools": True, "context_tokens": 128_000},
     ),
 }
 
@@ -221,6 +226,8 @@ def _probe_agy() -> dict:
                     "id": item["id"],
                     "served_model": item["model"],
                     "provider": "agy",
+                    "role_tier": item.get("role_tier"),
+                    "effort_tier": item.get("effort_tier", "medium"),
                     "quality_prior": item["quality_prior"],
                     "latency_tier": item["latency_tier"],
                     "supports_tools": item["supports_tools"],
@@ -359,6 +366,9 @@ def select_executor(task_kind: str = "code", *, difficulty: str = "medium",
             if mid in excluded or served in excluded:
                 rejected.append({"provider": pname, "id": mid, "reason": "excluded"})
                 continue
+            if model.get("effort_tier") == "high" and difficulty != "hard":
+                rejected.append({"provider": pname, "id": mid, "reason": "high-effort model reserved for difficulty=hard"})
+                continue
             q = _quality_score(model, measured_quality)
             if q < min_quality:
                 rejected.append({"provider": pname, "id": mid, "reason": f"quality {q:.2f} < {min_quality:.2f}"})
@@ -366,7 +376,13 @@ def select_executor(task_kind: str = "code", *, difficulty: str = "medium",
             latency_bonus = {"fast": 0.15, "medium": 0.08, "slow": 0.0}.get(model.get("latency_tier"), 0.0)
             local_bonus = 0.20 if bclass == BILLING_LOCAL_FREE else 0.0
             pref_bonus = 0.25 if (preferred_provider and pname == preferred_provider) else 0.0
-            score = round(3.0 * q + local_bonus + latency_bonus + pref_bonus, 4)
+            role_tier = model.get("role_tier")
+            role_bonus = 0.0
+            if task_kind in ("orchestration", "planning") and role_tier == "orchestrator":
+                role_bonus = 0.18
+            elif task_kind in ("code", "execution") and role_tier == "executor":
+                role_bonus = 0.18
+            score = round(3.0 * q + local_bonus + latency_bonus + pref_bonus + role_bonus, 4)
             candidates.append({
                 **model,
                 "billing_class": bclass,
@@ -374,7 +390,16 @@ def select_executor(task_kind: str = "code", *, difficulty: str = "medium",
                 "score": score,
             })
 
-    candidates.sort(key=lambda row: (-row["score"], row["id"]))
+    # Prioritize high‑effort models when difficulty is "hard"
+    if difficulty == "hard":
+        # Sort: high effort first, then highest score, then id
+        candidates.sort(key=lambda row: (
+            row.get("effort_tier") != "high",  # False (high) comes first
+            -row["score"],
+            row["id"],
+        ))
+    else:
+        candidates.sort(key=lambda row: (-row["score"], row["id"]))
     chosen = candidates[0] if candidates else None
     fallbacks = candidates[1:] if chosen else []
     return {
@@ -407,15 +432,18 @@ class AgyPrintAdapter:
         self.model = model
         self.timeout = timeout
         self.cli = _resolve_agy_cli()
+        self.last_metadata: dict = {}
         if not self.cli:
             raise ProviderError("agy CLI unavailable")
 
     def complete(self, *, system: str, prompt: str) -> str:
+        self.last_metadata = {}
         combined = f"{system.strip()}\n\n{prompt.strip()}"
         proc = subprocess.run(
             [
-                self.cli, "--print", "--model", self.model,
-                "--output-format", "json", "--disable-slash-commands", combined,
+                self.cli, "--model", self.model,
+                "--output-format", "json", "--disable-slash-commands",
+                "--print", combined,
             ],
             capture_output=True, text=True, timeout=self.timeout,
             env=scrubbed_env(), check=False,
@@ -426,6 +454,10 @@ class AgyPrintAdapter:
         try:
             data = json.loads(raw)
             if isinstance(data, dict):
+                self.last_metadata = {
+                    k: data.get(k) for k in ("conversation_id", "status", "duration_seconds", "usage")
+                    if k in data
+                }
                 for key in ("result", "response", "text", "content"):
                     if isinstance(data.get(key), str):
                         return data[key]
