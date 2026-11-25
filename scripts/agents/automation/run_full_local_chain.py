@@ -208,8 +208,10 @@ def main(argv: list[str] | None = None) -> int:
             if eng["llama_server"]["alive"] and not eng["llama_server"]["processing"]:
                 ide_coordination.stop_idle_llama_server()
                 eng = ide_coordination.probe_local_engines()
-            ok = bool(eng["ollama"]["reachable"] and (eng["available_memory_mib"] or 0) >= ide_coordination.PRELOAD_MIN_FREE_MIB)
-            _record_step("preflight", {"ok": ok, "reclaimed_orphans": len(reclaimed), "engines": eng})
+            has_resident = bool((eng.get("ollama") or {}).get("loaded_models"))
+            min_ram = ide_coordination.RESIDENT_MIN_FREE_MIB if has_resident else ide_coordination.PRELOAD_MIN_FREE_MIB
+            ok = bool(eng["ollama"]["reachable"] and (eng["available_memory_mib"] or 0) >= min_ram)
+            _record_step("preflight", {"ok": ok, "reclaimed_orphans": len(reclaimed), "min_ram_mib": min_ram, "resident_model_loaded": has_resident, "engines": eng})
             if not ok:
                 report["status"] = "BLOCKED_PREFLIGHT"
                 report["finished_at"] = _now_iso()

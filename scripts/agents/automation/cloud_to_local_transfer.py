@@ -203,7 +203,7 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                 budget = ollama_native.compute_adaptive_budget(
                     LOCAL_MODEL,
                     task_profile=prof,
-                    estimated_lines=45,
+                    estimated_lines=70 if use_transfer else 45,
                     available_memory_mib=eng.get("available_memory_mib"),
                     model_is_resident=resident,
                 )
@@ -227,7 +227,7 @@ def run_local_transfer_proof(*, tasks_per_role: int = 2) -> dict:
                         constraints=[
                             "Python 3.12 stdlib only (or exact JSON object ONLY if JSON requested).",
                             improvement_cycle._role_instruction_hint(task["role"]),
-                            "Keep code concise (no verbose docstrings); output ONLY code or JSON.",
+                            "Write ZERO docstrings and ZERO comments (concise <= 30 lines avoids 8k/CPU token truncation); output ONLY code or JSON.",
                         ],
                     )
                     usr_p = task["objective"]
