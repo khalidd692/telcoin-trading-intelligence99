@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795706074,
-  "observations": 556,
+  "generated_at": 1795721998,
+  "observations": 557,
   "valid_observations": 527,
-  "latest_decision": "CONFIRMATION TECHNIQUE",
-  "latest_valid": "true",
+  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
+  "latest_valid": "false",
   "horizons": {
     "1h": {
       "count": 20,
@@ -159,14 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795580470,
-      "previous_decision": "ATTENDRE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [],
-      "event": null
-    },
     {
       "observed_at": 1795598010,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -394,6 +386,16 @@
           "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
         ]
       }
+    },
+    {
+      "observed_at": 1795721998,
+      "previous_decision": "CONFIRMATION TECHNIQUE",
+      "decision": "DONN\u00c9ES INSUFFISANTES",
+      "data_valid": false,
+      "changed_factors": [
+        "\u2212 convergence"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -446,8 +448,8 @@
     "false_positives": {
       "count": 27,
       "evaluable": 44,
-      "pending": 1,
-      "unknown": 0,
+      "pending": 0,
+      "unknown": 1,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
   }
