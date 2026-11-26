@@ -691,6 +691,135 @@
       ? `AI Radar est en ligne et vérifié (HTTP ${r.http_status}) sur ${r.url}.`
       : `AI Radar ne répond pas sur ${r.url}. Lancez-le via launch-tel99.ps1 -Mode Radar.`;
     $("radarStatusText").className = r.online ? "status-ok" : "status-warn";
+
+    renderMorningBrief();
+  }
+
+  function renderMorningBrief() {
+    const cc = state.cc || {};
+    const g8 = cc.proactive_g8 || {};
+    const cl = cc.continuous_learning || {};
+    const history = Array.isArray(g8.briefs_history) ? g8.briefs_history : [];
+    const latest = g8.latest_brief || null;
+    if ($("badgeBrief")) $("badgeBrief").textContent = String(history.length);
+
+    if ($("btnToggleLearningPause")) {
+      $("btnToggleLearningPause").textContent = cl.paused ? "Reprendre apprentissage" : "Pause apprentissage";
+    }
+    if ($("btnToggleProactive")) {
+      $("btnToggleProactive").textContent = g8.enabled === false ? "Activer G8" : "Désactiver G8";
+    }
+
+    const actionRow = $("briefActionRow");
+    if (actionRow) {
+      if (latest && latest.brief_id) {
+        actionRow.classList.remove("hidden");
+        $("briefLatestTitle").textContent = `${latest.title || "Brief proactif"} [${latest.status || "PROPOSAL"}]`;
+        $("briefLatestMeta").textContent =
+          `Déclencheur : ${latest.trigger || "?"} · Date : ${latest.generated_at || "?"} · ` +
+          `Durée : ${latest.duration_seconds ?? "?"}s · Feedback : ${latest.owner_feedback || "en attente"}`;
+      } else {
+        actionRow.classList.add("hidden");
+      }
+    }
+
+    const grid = $("briefSectionsGrid");
+    if (grid) {
+      const memVerified = (cc.memory_entries || []).filter((m) => m.verified).slice(0, 4);
+      const pendingProjs = (cc.projects || []).filter((p) => !["COMPLETED", "DELIVERED", "ACCEPTED"].includes(String(p.status || "").toUpperCase()));
+      const sections = [
+        {
+          title: "1. Opportunités détectées",
+          lines: latest
+            ? [latest.title, `Utilité : ${latest.why_useful || "N/A"}`]
+            : ["Aucune nouvelle opportunité non couverte pour le moment (zéro travail artificiel)."],
+        },
+        {
+          title: "2. Travail réellement accompli",
+          lines: latest && latest.deliverable_rel_path
+            ? [`Livrable vérifié : ${latest.deliverable_rel_path} (${latest.deliverable_bytes ?? "?"} octets)`, ...(latest.evidence || [])]
+            : ["Aucun livrable proactif additionnel généré sur ce cycle."],
+        },
+        {
+          title: "3. Problèmes anticipés",
+          lines: (latest && latest.risks && latest.risks.length)
+            ? latest.risks
+            : ["Aucun nouveau risque bloquant détecté dans les sources autorisées."],
+        },
+        {
+          title: "4. Nouvelles connaissances",
+          lines: memVerified.length
+            ? memVerified.map((m) => `[${m.kind}] ${m.title}`)
+            : ["Aucune nouvelle entrée vérifiée récente."],
+        },
+        {
+          title: "5. Améliorations de leurs compétences",
+          lines: [
+            `Apprentissage continu : ${cl.status || "IDLE"} · Exercices : ${cl.exercises_run ?? 0} · Leçons promues : ${cl.verified_lessons_promoted ?? 0}`,
+            `Chaîne G6 vérifiée : ${Boolean(cl.g6_chain_proven || cl.transfer_verified)} · Entraînement LoRA 16 Go : désactivé (Skills/Mémoire/Harness).`,
+          ],
+        },
+        {
+          title: "6. Propositions pour mes futurs projets",
+          lines: pendingProjs.length
+            ? pendingProjs.map((p) => `${p.name} (${p.status}, ${p.missions_accepted}/${p.missions_total} missions)`)
+            : ["Tous les projets suivis sont livrés ou prêts pour une nouvelle mission."],
+        },
+        {
+          title: "7. Décisions nécessitant mon accord",
+          lines: latest && latest.requires_human_approval
+            ? [`Validation propriétaire requise pour : ${latest.title} (aucune approbation auto-générée).`]
+            : ["Aucune décision sensible en attente."],
+        },
+        {
+          title: "8. Programme de travail recommandé",
+          lines: [
+            latest && latest.next_action ? latest.next_action : "Utiliser le Command Center ou laisser le créneau nuit (03h00, sans réveil forcé) préparer le prochain brief.",
+            "Limites : pas d'exécution PC éteint/veille, pas de dépense, pas de fusion main.",
+          ],
+        },
+      ];
+      grid.replaceChildren(
+        ...sections.map((sec) => {
+          const card = mk("div", "card");
+          card.appendChild(mk("h3", "", sec.title));
+          const ul = document.createElement("ul");
+          sec.lines.forEach((line) => ul.appendChild(mk("li", "", line)));
+          card.appendChild(ul);
+          return card;
+        })
+      );
+    }
+
+    const tbody = $("briefHistoryTable");
+    if (tbody) {
+      const rows = history.slice().reverse().map((b) => {
+        const tr = document.createElement("tr");
+        tr.appendChild(mk("td", "", b.generated_at || ""));
+        tr.appendChild(mk("td", "", b.trigger || ""));
+        tr.appendChild(mk("td", statusClass(b.status), b.status || ""));
+        tr.appendChild(mk("td", "", b.title || ""));
+        tr.appendChild(mk("td", "", b.owner_feedback || "—"));
+        return tr;
+      });
+      tbody.replaceChildren(...rows);
+    }
+  }
+
+  async function sendLearningControl(payload, okMsg) {
+    try {
+      await apiMutate("POST", "/api/cc/learning/control", payload);
+      if ($("briefFeedbackBanner")) {
+        $("briefFeedbackBanner").textContent = okMsg;
+        $("briefFeedbackBanner").className = "status-ok";
+      }
+      await refreshAll();
+    } catch (err) {
+      if ($("briefFeedbackBanner")) {
+        $("briefFeedbackBanner").textContent = `Erreur contrôle : ${err.message}`;
+        $("briefFeedbackBanner").className = "status-err";
+      }
+    }
   }
 
   async function refreshAll() {
@@ -797,6 +926,31 @@
     $("btnLaunchProject").addEventListener("click", launchProject);
     $("btnCloseFileViewer").addEventListener("click", () => $("fileViewerCard").classList.add("hidden"));
     $("memFilterInput").addEventListener("input", renderActivitySkillsMemoryResources);
+    if ($("btnToggleLearningPause")) {
+      $("btnToggleLearningPause").addEventListener("click", () => {
+        const paused = Boolean(state.cc && state.cc.continuous_learning && state.cc.continuous_learning.paused);
+        sendLearningControl({ action: paused ? "resume" : "pause" }, paused ? "Apprentissage repris." : "Apprentissage mis en pause.");
+      });
+    }
+    if ($("btnToggleProactive")) {
+      $("btnToggleProactive").addEventListener("click", () => {
+        const enabled = !(state.cc && state.cc.proactive_g8 && state.cc.proactive_g8.enabled === false);
+        sendLearningControl(
+          { action: enabled ? "proactive_disable" : "proactive_enable" },
+          enabled ? "Proactivité G8 désactivée." : "Proactivité G8 activée."
+        );
+      });
+    }
+    [["btnBriefAccept", "accept"], ["btnBriefUseful", "useful"], ["btnBriefReject", "reject"]].forEach(([id, fb]) => {
+      const btn = $(id);
+      if (btn) {
+        btn.addEventListener("click", () => {
+          const latest = state.cc && state.cc.proactive_g8 && state.cc.proactive_g8.latest_brief;
+          if (!latest || !latest.brief_id) return;
+          sendLearningControl({ action: "feedback", brief_id: latest.brief_id, feedback: fb }, `Feedback '${fb}' enregistré et mémorisé.`);
+        });
+      }
+    });
   }
 
   document.addEventListener("DOMContentLoaded", async () => {

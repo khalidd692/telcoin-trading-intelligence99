@@ -559,3 +559,302 @@ def run_red_team_suite() -> dict[str, Any]:
         "all_passed": passed == len(results),
         "results": results,
     }
+
+
+# ---------------------------------------------------------------------------
+# 8. Rejected-Strategy Memory & SkillOpt (Microsoft Research SkillOpt — §5.1)
+# ---------------------------------------------------------------------------
+def _rejected_strategies_path(state_root: Path | str) -> Path:
+    dest = Path(state_root).resolve() / "rejected_strategies.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def record_rejected_strategy(
+    state_root: Path | str,
+    *,
+    kind: str,
+    target: str,
+    candidate_id: str,
+    reason: str,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist rejected candidate strategies with causes so the team never repeats failed mutations."""
+    path = _rejected_strategies_path(state_root)
+    existing: list[dict[str, Any]] = []
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                existing = data
+        except Exception:
+            existing = []
+    entry = {
+        "at": _now_iso(),
+        "kind": str(kind),
+        "target": str(target),
+        "candidate_id": str(candidate_id),
+        "reason": str(reason)[:300],
+        "metrics": metrics or {},
+    }
+    existing.append(entry)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(existing[-200:], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return entry
+
+
+def skillopt_optimize_skill(
+    *,
+    skill_path: Path | str,
+    state_root: Path | str,
+    candidates: Sequence[dict[str, str]],
+    validation_evaluator: Callable[[str], dict[str, Any]],
+    min_gain: float = 0.05,
+) -> dict[str, Any]:
+    """SkillOpt-inspired versioned textual Skill optimizer (NEVER modifies model weights).
+
+    - Evaluates baseline Skill and up to 3 candidate textual Skill mutations on an
+      independent validation split.
+    - Promotes ONLY the best candidate that achieves >= ``min_gain`` with ZERO
+      critical security regression.
+    - Saves a versioned backup for deterministic rollback.
+    - Archives every rejected candidate and its exact cause in ``rejected_strategies.json``.
+    """
+    sp = Path(skill_path).resolve()
+    if not sp.is_file():
+        raise FileNotFoundError(f"Skill file not found: {sp}")
+    st_root = Path(state_root).resolve()
+    backup_dir = st_root / "skill_versions"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    baseline_text = sp.read_text(encoding="utf-8")
+    base_res = validation_evaluator(baseline_text)
+    base_score = float(base_res.get("pass_rate", 0.0))
+    base_sec = float(base_res.get("critical_security_rate", 1.0))
+
+    evaluated: list[dict[str, Any]] = []
+    winner: dict[str, Any] | None = None
+
+    for idx, cand in enumerate(list(candidates)[:3], 1):
+        cid = str(cand.get("id") or f"cand-{idx}")
+        text = str(cand.get("content") or "")
+        res = validation_evaluator(text)
+        score = float(res.get("pass_rate", 0.0))
+        sec = float(res.get("critical_security_rate", 0.0))
+        gain = round(score - base_score, 4)
+        sec_regressed = sec < base_sec
+        admitted = (not sec_regressed) and (gain >= min_gain)
+        row = {
+            "candidate_id": cid,
+            "pass_rate": round(score, 4),
+            "critical_security_rate": round(sec, 4),
+            "gain": gain,
+            "security_regressed": sec_regressed,
+            "admitted": admitted,
+            "reason": (
+                "security_regression_blocked"
+                if sec_regressed
+                else ("admitted" if admitted else f"insufficient_gain_{gain}_lt_{min_gain}")
+            ),
+        }
+        evaluated.append(row)
+        if admitted:
+            if winner is None or (row["pass_rate"], row["critical_security_rate"]) > (
+                winner["pass_rate"],
+                winner["critical_security_rate"],
+            ):
+                winner = {**row, "content": text}
+        else:
+            record_rejected_strategy(
+                st_root,
+                kind="skillopt",
+                target=sp.name,
+                candidate_id=cid,
+                reason=row["reason"],
+                metrics={"pass_rate": row["pass_rate"], "critical_security_rate": row["critical_security_rate"]},
+            )
+
+    backup_path = backup_dir / f"{sp.parent.name}.{hashlib.sha256(baseline_text.encode('utf-8')).hexdigest()[:10]}.bak.md"
+    promoted = False
+    if winner is not None:
+        backup_path.write_text(baseline_text, encoding="utf-8")
+        sp.write_text(winner["content"], encoding="utf-8")
+        promoted = True
+
+    return {
+        "schema_version": 1,
+        "skill_target": sp.parent.name,
+        "weights_modified": False,
+        "baseline": {"pass_rate": round(base_score, 4), "critical_security_rate": round(base_sec, 4)},
+        "candidates_evaluated": evaluated,
+        "promoted": promoted,
+        "promoted_candidate_id": winner["candidate_id"] if winner else None,
+        "rollback_backup_path": str(backup_path) if promoted else None,
+    }
+
+
+def rollback_skill_version(*, skill_path: Path | str, backup_path: Path | str) -> dict[str, Any]:
+    """Deterministically restore a previous Skill version from its verified backup."""
+    sp = Path(skill_path).resolve()
+    bp = Path(backup_path).resolve()
+    if not bp.is_file():
+        raise FileNotFoundError(f"Skill backup not found: {bp}")
+    restored = bp.read_text(encoding="utf-8")
+    sp.write_text(restored, encoding="utf-8")
+    return {"ok": True, "skill_target": sp.parent.name, "restored_bytes": len(restored.encode("utf-8"))}
+
+
+# ---------------------------------------------------------------------------
+# 9. HALO / Agent Improvement Loop (OpenAI — §5.2) & AlphaEvolve (§5.5)
+# ---------------------------------------------------------------------------
+_FORBIDDEN_SELF_MOD_PATTERNS = (
+    "guard.py",
+    "deterministic_security_gate",
+    "allow_paid",
+    "bypass_security",
+    "owner_interactive_priority",
+)
+
+
+def classify_failure_root_cause(trace_text: str) -> str:
+    """Classify a secret-scrubbed failure trace into INFRA / QUOTA / TOOL / CONTEXT / ROUTING / MODEL."""
+    low = str(metacognition.scrub_secrets(trace_text or "")).lower()
+    if any(k in low for k in ("quota", "rate limit", "429", "daily free token budget")):
+        return "QUOTA"
+    if any(k in low for k in ("ram", "memory", "docker", "timeout", "connection refused", "lease")):
+        return "INFRA"
+    if any(k in low for k in ("syntaxerror", "invalid json", "tool", "subprocess", "path")):
+        return "TOOL"
+    if any(k in low for k in ("truncat", "context", "max_tokens", "num_ctx")):
+        return "CONTEXT"
+    if any(k in low for k in ("fallback", "router", "provider unavailable")):
+        return "ROUTING"
+    return "MODEL"
+
+
+def halo_synthesize_regression_and_verify(
+    *,
+    failure_trace: str,
+    target_path: str,
+    regression_test_code: str,
+    candidate_patch_code: str,
+    independent_verifier: Callable[[str, str], tuple[bool, str]],
+) -> dict[str, Any]:
+    """HALO-inspired system improvement gate with fail-closed permission lock."""
+    scrubbed_trace = str(metacognition.scrub_secrets(failure_trace))
+    root_cause = classify_failure_root_cause(scrubbed_trace)
+
+    # Hard security lock: agents can NEVER weaken permissions, security gates, or guards
+    combined = f"{target_path}\n{candidate_patch_code}"
+    for forbidden in _FORBIDDEN_SELF_MOD_PATTERNS:
+        if forbidden in combined:
+            return {
+                "ok": False,
+                "root_cause": root_cause,
+                "blocked": True,
+                "reason": f"permission_lock_refused_modification:{forbidden}",
+            }
+
+    ok, detail = independent_verifier(candidate_patch_code, regression_test_code)
+    return {
+        "ok": bool(ok),
+        "root_cause": root_cause,
+        "blocked": False,
+        "verifier_detail": str(detail)[:240],
+        "regression_test_present": bool(regression_test_code.strip()),
+    }
+
+
+def alpha_evolve_candidates(
+    *,
+    objective: str,
+    candidates: Sequence[dict[str, Any]],
+    evaluator: Callable[[dict[str, Any]], dict[str, Any]],
+    state_root: Path | str,
+    max_branches: int = 3,
+) -> dict[str, Any]:
+    """AlphaEvolve-inspired bounded algorithmic evolution reusing metacognition.explore_approaches."""
+    exp = metacognition.explore_approaches(
+        objective=objective,
+        approaches=list(candidates)[:max_branches],
+        evaluator=evaluator,
+        max_branches=max_branches,
+        early_stop_score=0.98,
+    )
+    for br in exp.get("branches") or []:
+        if not br.get("ok"):
+            record_rejected_strategy(
+                state_root,
+                kind="alpha_evolve",
+                target=objective[:80],
+                candidate_id=str(br.get("id")),
+                reason=str(br.get("evidence") or "failed_objective_check"),
+                metrics={"score": br.get("score")},
+            )
+    return exp
+
+
+# ---------------------------------------------------------------------------
+# 10. Programmatic Tool Calling (Anthropic — §5.3)
+# ---------------------------------------------------------------------------
+def run_programmatic_tool_batch(files: dict[str, str]) -> dict[str, Any]:
+    """Execute bundled deterministic Python inspections in ONE pass (0 LLM calls).
+
+    Combines AST syntax check, secret leak check, non-loopback bind detection,
+    and JSON validity check, returning compact JSON output.
+    """
+    from scripts.agents.automation import local_deterministic_tools
+    import time
+
+    t0 = time.monotonic()
+    findings: list[dict[str, Any]] = []
+    all_ok = True
+    for rel, content in sorted(files.items()):
+        ext = Path(rel).suffix.lower()
+        leak = local_deterministic_tools.detect_secret_leak(content)
+        issues: list[str] = []
+        if not leak.get("safe", False):
+            issues.append("secret_leak_detected")
+        if ext == ".py":
+            gate = local_deterministic_tools.deterministic_security_gate(content, kind="python")
+            if not gate.get("safe", gate.get("ok", True)):
+                issues.extend(str(v) for v in (gate.get("reasons") or gate.get("violations") or ["security_gate_failed"]))
+        elif ext == ".json":
+            try:
+                json.loads(content)
+            except Exception as exc:
+                issues.append(f"invalid_json:{type(exc).__name__}")
+        ok = len(issues) == 0
+        if not ok:
+            all_ok = False
+        findings.append({"file": rel, "ok": ok, "issues": issues[:5]})
+
+    elapsed_ms = round((time.monotonic() - t0) * 1000, 3)
+    return {
+        "schema_version": 1,
+        "all_ok": all_ok,
+        "files_checked": len(findings),
+        "llm_calls": 0,
+        "tokens_used": 0,
+        "elapsed_ms": elapsed_ms,
+        "findings": findings,
+    }
+
+
+def benchmark_programmatic_vs_llm(files: dict[str, str], *, baseline_llm_calls_per_file: int = 1, baseline_ms_per_call: float = 15000.0) -> dict[str, Any]:
+    """Compare bundled Programmatic Tool Calling vs per-file LLM inspection baseline."""
+    ptc = run_programmatic_tool_batch(files)
+    llm_calls_before = len(files) * baseline_llm_calls_per_file
+    llm_calls_after = ptc["llm_calls"]
+    return {
+        "files_checked": ptc["files_checked"],
+        "all_ok": ptc["all_ok"],
+        "before_llm_calls": llm_calls_before,
+        "after_llm_calls": llm_calls_after,
+        "llm_calls_saved": llm_calls_before - llm_calls_after,
+        "before_estimated_ms": round(llm_calls_before * baseline_ms_per_call, 1),
+        "after_measured_ms": ptc["elapsed_ms"],
+        "tokens_after": ptc["tokens_used"],
+        "cost_usd_after": 0.0,
+    }

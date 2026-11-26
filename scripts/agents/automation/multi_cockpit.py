@@ -70,6 +70,7 @@ HTML = r"""<!doctype html>
 
   <nav class="sidebar" aria-label="Navigation principale">
     <button class="nav-btn active" data-view="conversations"><span>Conversations</span><span id="badgeConvs" class="nav-badge">0</span></button>
+    <button class="nav-btn" data-view="brief"><span>Brief du matin (G8)</span><span id="badgeBrief" class="nav-badge">0</span></button>
     <button class="nav-btn" data-view="team"><span>Mon équipe (12)</span><span id="badgeTeam" class="nav-badge">12</span></button>
     <button class="nav-btn" data-view="projects"><span>Projets &amp; Missions</span><span id="badgeProjects" class="nav-badge">0</span></button>
     <button class="nav-btn" data-view="activity"><span>Activité en direct</span></button>
@@ -233,6 +234,37 @@ HTML = r"""<!doctype html>
       <div class="card">
         <p id="radarStatusText" class="muted">Vérification d'AI Radar…</p>
         <a href="http://127.0.0.1:8780/" target="_blank" rel="noopener noreferrer" class="btn primary">Ouvrir AI Radar (http://127.0.0.1:8780/)</a>
+      </div>
+    </section>
+
+    <!-- 10. BRIEF DU MATIN (G8 PROACTIVITE & APPRENTISSAGE) -->
+    <section id="view-brief" class="view-panel">
+      <div class="section-header">
+        <div>
+          <h2>Bonjour, voici ce que nous avons préparé pour toi.</h2>
+          <div id="briefSubtitle" class="muted">Proactivité bornée G8 &amp; Apprentissage continu G5/G6 · Priorité propriétaire absolue</div>
+        </div>
+        <div class="row-inline">
+          <button id="btnToggleLearningPause" class="btn sm">Pause apprentissage</button>
+          <button id="btnToggleProactive" class="btn sm">Désactiver G8</button>
+        </div>
+      </div>
+      <div id="briefFeedbackBanner" class="muted" style="margin-bottom:10px"></div>
+      <div id="briefActionRow" class="card hidden">
+        <div class="section-header">
+          <h3 id="briefLatestTitle">Dernier brief proactif</h3>
+          <div class="row-inline">
+            <button id="btnBriefAccept" class="btn primary sm">Accepter</button>
+            <button id="btnBriefUseful" class="btn sm">Utile</button>
+            <button id="btnBriefReject" class="btn sm">Refuser</button>
+          </div>
+        </div>
+        <div id="briefLatestMeta" class="muted"></div>
+      </div>
+      <div id="briefSectionsGrid" class="grid-2"></div>
+      <div class="card" style="margin-top:12px">
+        <h3>Historique des cycles proactifs (G8)</h3>
+        <table><thead><tr><th>Date</th><th>Déclencheur</th><th>Statut</th><th>Titre</th><th>Feedback</th></tr></thead><tbody id="briefHistoryTable"></tbody></table>
       </div>
     </section>
   </main>
