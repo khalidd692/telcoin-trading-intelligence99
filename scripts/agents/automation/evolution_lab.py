@@ -15,6 +15,7 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import tempfile
@@ -629,9 +630,50 @@ def skillopt_optimize_skill(
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     baseline_text = sp.read_text(encoding="utf-8")
-    base_res = validation_evaluator(baseline_text)
-    base_score = float(base_res.get("pass_rate", 0.0))
-    base_sec = float(base_res.get("critical_security_rate", 1.0))
+
+    def _metric(result: Any, key: str) -> float | None:
+        """Read a bounded evaluator metric; malformed or missing evidence fails closed."""
+        if not isinstance(result, dict) or key not in result:
+            return None
+        try:
+            value = float(result[key])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            return None
+        return value
+
+    try:
+        base_res = validation_evaluator(baseline_text)
+    except Exception as exc:
+        return {
+            "schema_version": 1,
+            "skill_target": sp.parent.name,
+            "weights_modified": False,
+            "baseline": {"pass_rate": None, "critical_security_rate": None},
+            "candidates_evaluated": [],
+            "promoted": False,
+            "promoted_candidate_id": None,
+            "rollback_backup_path": None,
+            "blocked_reason": f"baseline_evaluation_failed:{type(exc).__name__}",
+        }
+    base_score = _metric(base_res, "pass_rate")
+    base_sec = _metric(base_res, "critical_security_rate")
+
+    # Critical safety is an absolute gate. Unknown, partial, or malformed
+    # baseline evidence cannot authorize a textual Skill mutation.
+    if base_score is None or base_sec != 1.0:
+        return {
+            "schema_version": 1,
+            "skill_target": sp.parent.name,
+            "weights_modified": False,
+            "baseline": {"pass_rate": base_score, "critical_security_rate": base_sec},
+            "candidates_evaluated": [],
+            "promoted": False,
+            "promoted_candidate_id": None,
+            "rollback_backup_path": None,
+            "blocked_reason": "baseline_metrics_missing_or_critical_security_below_100_percent",
+        }
 
     evaluated: list[dict[str, Any]] = []
     winner: dict[str, Any] | None = None
@@ -639,12 +681,21 @@ def skillopt_optimize_skill(
     for idx, cand in enumerate(list(candidates)[:3], 1):
         cid = str(cand.get("id") or f"cand-{idx}")
         text = str(cand.get("content") or "")
-        res = validation_evaluator(text)
-        score = float(res.get("pass_rate", 0.0))
-        sec = float(res.get("critical_security_rate", 0.0))
+        try:
+            res = validation_evaluator(text)
+        except Exception as exc:
+            res = {}
+            evaluation_error = type(exc).__name__
+        else:
+            evaluation_error = None
+        score = _metric(res, "pass_rate")
+        sec = _metric(res, "critical_security_rate")
+        metrics_valid = score is not None and sec is not None
+        score = score if score is not None else 0.0
+        sec = sec if sec is not None else 0.0
         gain = round(score - base_score, 4)
-        sec_regressed = sec < base_sec
-        admitted = (not sec_regressed) and (gain >= min_gain)
+        sec_regressed = sec != 1.0
+        admitted = metrics_valid and (not sec_regressed) and (gain >= min_gain)
         row = {
             "candidate_id": cid,
             "pass_rate": round(score, 4),
@@ -653,9 +704,13 @@ def skillopt_optimize_skill(
             "security_regressed": sec_regressed,
             "admitted": admitted,
             "reason": (
+                "candidate_evaluation_failed"
+                if evaluation_error
+                else ("candidate_metrics_missing_or_invalid" if not metrics_valid else (
                 "security_regression_blocked"
                 if sec_regressed
                 else ("admitted" if admitted else f"insufficient_gain_{gain}_lt_{min_gain}")
+                ))
             ),
         }
         evaluated.append(row)
@@ -678,9 +733,19 @@ def skillopt_optimize_skill(
     backup_path = backup_dir / f"{sp.parent.name}.{hashlib.sha256(baseline_text.encode('utf-8')).hexdigest()[:10]}.bak.md"
     promoted = False
     if winner is not None:
-        backup_path.write_text(baseline_text, encoding="utf-8")
-        sp.write_text(winner["content"], encoding="utf-8")
-        promoted = True
+        # Stage both files beside their targets and atomically replace them so
+        # interruption cannot leave a partially written Skill or backup.
+        backup_tmp = backup_path.with_suffix(backup_path.suffix + ".tmp")
+        skill_tmp = sp.with_suffix(sp.suffix + ".skillopt.tmp")
+        try:
+            backup_tmp.write_text(baseline_text, encoding="utf-8")
+            skill_tmp.write_text(winner["content"], encoding="utf-8")
+            backup_tmp.replace(backup_path)
+            skill_tmp.replace(sp)
+            promoted = True
+        finally:
+            backup_tmp.unlink(missing_ok=True)
+            skill_tmp.unlink(missing_ok=True)
 
     return {
         "schema_version": 1,
@@ -691,6 +756,9 @@ def skillopt_optimize_skill(
         "promoted": promoted,
         "promoted_candidate_id": winner["candidate_id"] if winner else None,
         "rollback_backup_path": str(backup_path) if promoted else None,
+        "blocked_reason": None if promoted else (
+            "no_candidate_passed_100_percent_security_and_gain_gate"
+        ),
     }
 
 

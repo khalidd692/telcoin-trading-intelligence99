@@ -61,6 +61,58 @@ class TestEnterpriseEvolutionMethods(unittest.TestCase):
             self.assertTrue(rb["ok"])
             self.assertEqual(skill_file.read_text(encoding="utf-8"), original_text)
 
+    def test_skillopt_fails_closed_without_perfect_security_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            skill = root / "role" / "SKILL.md"
+            skill.parent.mkdir()
+            original = "# Trusted baseline\n"
+            skill.write_text(original, encoding="utf-8")
+
+            for label, security_rate in (
+                ("missing", None),
+                ("partial", 0.999),
+                ("nan", float("nan")),
+                ("out-of-range", 1.1),
+            ):
+                skill.write_text(original, encoding="utf-8")
+                def evaluator(text: str, security_rate=security_rate) -> dict:
+                    result = {"pass_rate": 0.7 if text == original else 0.99}
+                    if security_rate is not None:
+                        result["critical_security_rate"] = security_rate
+                    return result
+
+                result = evolution_lab.skillopt_optimize_skill(
+                    skill_path=skill,
+                    state_root=root / label,
+                    candidates=[{"id": "candidate", "content": "# Candidate\n"}],
+                    validation_evaluator=evaluator,
+                )
+                self.assertFalse(result["promoted"], label)
+                self.assertEqual(skill.read_text(encoding="utf-8"), original, label)
+
+    def test_skillopt_requires_perfect_security_on_baseline_and_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            skill = root / "role" / "SKILL.md"
+            skill.parent.mkdir()
+            original = "# Baseline\n"
+            skill.write_text(original, encoding="utf-8")
+
+            def unsafe_baseline(text: str) -> dict:
+                return {
+                    "pass_rate": 0.7 if text == original else 0.99,
+                    "critical_security_rate": 0.9 if text == original else 1.0,
+                }
+
+            result = evolution_lab.skillopt_optimize_skill(
+                skill_path=skill, state_root=root / "state", candidates=[{"id": "gain", "content": "# Better\n"}],
+                validation_evaluator=unsafe_baseline,
+            )
+            self.assertFalse(result["promoted"])
+            self.assertEqual(skill.read_text(encoding="utf-8"), original)
+            self.assertEqual(result["baseline"]["critical_security_rate"], 0.9)
+
     def test_halo_root_cause_classification_and_permission_lock(self) -> None:
         self.assertEqual(evolution_lab.classify_failure_root_cause("daily free token budget exhausted 429"), "QUOTA")
         self.assertEqual(evolution_lab.classify_failure_root_cause("RAM guard triggered low memory"), "INFRA")
