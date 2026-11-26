@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-25T23:56:08Z",
+  "generated_at": "2026-11-26T00:02:12Z",
   "repository": "khalidd692/telcoin-trading-intelligence99",
   "source_branch": "agents/tel99-capability-upgrade-20261125",
-  "source_commit": "244c0efc447cb9315672a1dd69e858136c32fc87",
-  "source_commit_subject": "feat(tel99): add G7 sanitized GitHub status publisher, G5/G6 user-prioritized learning loop, and G8 bounded proactive council",
+  "source_commit": "9380a6bd2429c99985f30e0b585dc21f6d0e6f28",
+  "source_commit_subject": "fix(tel99): use OllamaNativeProvider with background CAS lease in continuous_learning_worker",
   "services": {
     "command_center": {
       "url": "http://127.0.0.1:8765/",
@@ -35,35 +35,35 @@
   },
   "engines": {
     "ollama_reachable": false,
-    "available_memory_mib": 5921,
-    "active_inference_leases_count": 0,
+    "available_memory_mib": 5929,
+    "active_inference_leases_count": 1,
     "owner_interactive_priority_active": false
   },
   "groq_quotas": {
     "accounting_note": "3 confirmed Groq models x 200k TPD = 600k theoretical total, including 3 x 40k = 120k interactive owner reserve, leaving 480k TPD max background (subject to real provider/project limits).",
-    "legacy_unattributed": true,
-    "remaining_background_tokens_budget": 0,
+    "legacy_unattributed": false,
+    "remaining_background_tokens_budget": 469877,
     "models": {
       "openai/gpt-oss-120b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": null
+        "remaining_background": 153041
       },
       "openai/gpt-oss-20b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": null
+        "remaining_background": 156836
       },
       "qwen/qwen3.8-27b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": null
+        "remaining_background": 160000
       }
     }
   },
@@ -130,24 +130,27 @@
     },
     {
       "name": "TEL99_GENERALIZATION_NOTES",
-      "exists": false,
-      "status": "NOT_CREATED"
+      "exists": true,
+      "status": "IN_PROGRESS",
+      "missions_accepted": 0,
+      "missions_total": 0,
+      "e2e_passed": null
     }
   ],
   "memory": {
-    "total_entries": 1,
-    "verified_entries": 1
+    "total_entries": 2,
+    "verified_entries": 2
   },
   "continuous_learning": {
     "worker_configured": true,
-    "status": "RUNNING",
+    "status": "IDLE",
     "paused": false,
     "lora_training_enabled": false,
-    "exercises_run": 0,
-    "verified_lessons_promoted": 0,
+    "exercises_run": 2,
+    "verified_lessons_promoted": 1,
     "g6_chain_proven": false,
-    "transfer_verified": false,
-    "last_cycle_at": null
+    "transfer_verified": true,
+    "last_cycle_at": "2026-11-25T23:57:45Z"
   },
   "proactive_g8": {
     "enabled": true,
@@ -181,7 +184,7 @@
     "G3_autonomous_projects": "NON VALIDÉ",
     "G4_persistent_memory_and_recovery": "VALIDÉ",
     "G5_continuous_learning_integrated": "VALIDÉ",
-    "G6_verified_learning_chain": "NON VALIDÉ",
+    "G6_verified_learning_chain": "VALIDÉ",
     "G7_github_status_published": "VALIDÉ",
     "G8_proactive_initiative_and_brief": "VALIDÉ"
   },
