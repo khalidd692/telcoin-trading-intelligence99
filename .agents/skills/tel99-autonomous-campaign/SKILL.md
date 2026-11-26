@@ -88,3 +88,13 @@ python -B -m scripts.agents.automation.ide_coordination acquire --state "$HOME\D
   - Utiliser `plan-verification` (`python -IB .agents/skills/plan-verification/scripts/plan_checks.py`) pour planifier les contrôles sous budget avant lancement.
   - Utiliser `scripts/agents/workflows/tel99_validation_workflow.py` avec `run_workflow` pour orchestrer une revue parallèle bornée (<= 3 spécialistes + vérificateur indépendant).
   - Les automatisations `schedule` sont limitées aux vérifications bornées en cours de session ; aucun service permanent Windows ni fusion vers `main` n'est activé sans accord explicite.
+
+## 6. Mise à niveau globale des capacités (Branche `agents/tel99-capability-upgrade-20261125`)
+
+- **Budgets d'inférence adaptatifs (`ollama_native.py`)** : `compute_adaptive_budget()` ajuste `max_tokens`/`timeout` par profil (`patch` 1024/90s, `module` 2048/180s, `large_module` 4096/300s) avec bridage RAM automatique (`< 2500 / 1400 MiB`) + `extract_code_block()` et `complete_with_continuation()`.
+- **Planification dynamique (`mission_planner.py`)** : `assess_and_decompose_mission()` découpe les tâches surdimensionnées en DAG ; `revise_plan_after_failure()` re-planifie uniquement la tâche en échec tout en préservant les `completed_ids`.
+- **Réparation intelligente (`smart_repair.py`)** : `build_smart_repair_prompt()` + `compute_bounded_diff()` + `build_self_critique_checklist()` + `detect_repeated_attempt()` (anti-répétition SHA-256) + `suggest_repair_strategy()`.
+- **Routage par spécialité & repli gratuit (`provider_router.py`)** : `select_executor_for_specialty()` et `select_fallback_model()` basculent vers un autre modèle `LOCAL_FREE` sans jamais basculer sur une API payante.
+- **Contrats natifs multi-projets / multifichiers (`autonomy_runtime.py`)** : `owner="project-file"` valide `workspace_root`, `allowed_paths`, `target_file`, `specialist` (12 rôles), enregistre la mémoire et classe les échecs selon `ERROR_TAXONOMY` (6 catégories).
+- **Mémoire segmentée & vérifiée (`learning_loop.py`)** : `retrieve_scoped_lessons(..., verified_only=True)` sépare mémoire individuelle, projet, collective et procédurale avec déduplication.
+- **Agent Academy & Rollback (`agent_academy.py`)** : séparation stricte calibration vs `HELD_OUT_EVAL_EXERCISES`, porte de promotion `evaluate_improvement_gate()` (`PROMOTE` / `KEEP_BASELINE` / `ROLLBACK`) et instantanés versionnés `snapshot_agent_profile_version()` / `rollback_agent_profile_version()`.

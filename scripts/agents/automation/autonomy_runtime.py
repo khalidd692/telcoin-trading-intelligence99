@@ -62,6 +62,85 @@ def delivered(missions, states):
     return not pending
 
 
+ERROR_TAXONOMY = (
+    "MODEL_ERROR",
+    "PROVIDER_ERROR",
+    "ENVIRONMENT_ERROR",
+    "CONTRACT_ERROR",
+    "VERIFICATION_ERROR",
+    "COORDINATION_ERROR",
+)
+
+PROJECT_FILE_REQUIRED_FIELDS = frozenset({
+    "id", "owner", "project", "specialist", "priority", "dependencies", "objective",
+    "workspace_root", "allowed_paths", "target_file",
+})
+PROJECT_FILE_OPTIONAL_FIELDS = frozenset({
+    "task_profile", "max_attempts", "acceptance_criteria",
+})
+
+
+def classify_failure(reason: str | None, error: str | None = None) -> str:
+    """Classify a failure into the 6 canonical TEL99 diagnostic categories."""
+    blob = f"{reason or ''} {error or ''}".lower()
+    if any(k in blob for k in ("lease", "collision", "casconflict", "conflict", "dependency", "claim")):
+        return "COORDINATION_ERROR"
+    if any(k in blob for k in ("contract", "unapproved", "scope", "traversal", "outside allowed", "invalid mission")):
+        return "CONTRACT_ERROR"
+    if any(k in blob for k in ("quota", "rate_limit", "429", "providererror", "ollama native api unavailable", "http status")):
+        return "PROVIDER_ERROR"
+    if any(k in blob for k in ("memory", "ram", "oom", "docker", "sandbox", "timeout", "timed out", "stop marker", "environment", "resourceunavailable", "resourcebusy")):
+        return "ENVIRONMENT_ERROR"
+    if any(k in blob for k in ("verifier", "assertion", "syntaxerror", "candidate-passes", "candidate-diff", "rejected")):
+        return "VERIFICATION_ERROR"
+    return "MODEL_ERROR"
+
+
+def _safe_rel_path(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip() or len(value) > 240:
+        return False
+    norm = value.replace("\\", "/")
+    if norm.startswith("/") or ":" in norm or norm.startswith("~"):
+        return False
+    parts = norm.split("/")
+    return all(part not in ("", ".", "..") for part in parts)
+
+
+def validate_project_file_contract(m: dict) -> bool:
+    """Validate a bounded multi-project, multi-file contract without weakening TEL99 guards."""
+    keys = set(m.keys())
+    if not PROJECT_FILE_REQUIRED_FIELDS <= keys or (keys - PROJECT_FILE_REQUIRED_FIELDS - PROJECT_FILE_OPTIONAL_FIELDS):
+        raise ValueError("invalid project-file contract fields")
+    project = m.get("project")
+    if not isinstance(project, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,47}", project) or project == "synthetic":
+        raise ValueError("invalid project identifier for project-file contract")
+    from scripts.agents.team_config import role_catalog
+    valid_specialists = {spec.name for spec in role_catalog().values()}
+    if m.get("specialist") not in valid_specialists:
+        raise ValueError("unknown specialist in project-file contract")
+    if not isinstance(m.get("objective"), str) or not 1 <= len(m["objective"]) <= 4000:
+        raise ValueError("invalid project-file objective")
+    deps = m.get("dependencies")
+    if not isinstance(deps, list) or any(not isinstance(d, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,48}", d) for d in deps):
+        raise ValueError("invalid project-file dependencies")
+    ws = m.get("workspace_root")
+    if not isinstance(ws, str) or not ws.strip() or ".." in Path(ws).parts or not Path(ws).is_absolute():
+        raise ValueError("workspace_root must be a clean absolute path without '..'")
+    allowed = m.get("allowed_paths")
+    if not isinstance(allowed, list) or not 1 <= len(allowed) <= 20 or not all(_safe_rel_path(p) for p in allowed):
+        raise ValueError("allowed_paths must contain 1..20 safe relative paths")
+    target = m.get("target_file")
+    if not _safe_rel_path(target) or target.replace("\\", "/") not in {p.replace("\\", "/") for p in allowed}:
+        raise ValueError("target_file must be explicitly listed in allowed_paths")
+    profile = m.get("task_profile", "module")
+    if profile not in ("patch", "module", "large_module"):
+        raise ValueError("invalid task_profile")
+    max_attempts = m.get("max_attempts", 3)
+    if type(max_attempts) is not int or not 1 <= max_attempts <= 4:
+        raise ValueError("project-file max_attempts must be 1..4")
+    return True
+
+
 def validate_contract(m,approvals):
     if not isinstance(m,dict) or not re.fullmatch(r"[a-zA-Z0-9-]{1,48}",str(m.get("id",""))):
         raise ValueError("invalid mission id")
@@ -77,6 +156,8 @@ def validate_contract(m,approvals):
             raise ValueError("invalid local code objective or dependencies")
         local_codegen.validate_scope(m)
         return True
+    if m.get("owner") == "project-file":
+        return validate_project_file_contract(m)
     # Additive owner allowlist for the Hermes failover relay (hermes/relay-github-adapter-20261120).
     # The engine, bus, CAS, ACK and memory paths are unchanged; only the admitted owner set grows.
     if (m.get("project")!="synthetic" or m.get("synthetic_data") is not True
@@ -295,6 +376,7 @@ class Runtime(Supervisor):
         memory=MemoryStore(self.root/"memory")
         if memory.get(m["project"],m["id"]) is None:
             code = m.get("owner") == "local"
+            project_file = m.get("owner") == "project-file"
             evidence = {"contract_sha256": fingerprint(m), "artifact_sha256": saved["result"]["sha256"]}
             if code:
                 evidence.update({key: saved["verification"][key] for key in
@@ -309,8 +391,18 @@ class Runtime(Supervisor):
                         raise ValueError("verified team trace is incomplete")
                     evidence["analyst_sha256"] = analyst["sha256"]
                     evidence["roles"] = m["team"]
+            elif project_file:
+                evidence.update({
+                    "target_file": m["target_file"],
+                    "project": m["project"],
+                    "allowed_paths": list(m["allowed_paths"]),
+                })
+            title_prefix = (
+                "Verified code change " if code
+                else ("Verified project file " if project_file else "Verified synthetic artifact ")
+            )
             entry = Entry(id=m["id"],project=m["project"],kind="fact",
-                title=("Verified code change " if code else "Verified synthetic artifact ")+m["id"],
+                title=title_prefix + m["id"],
                 body=json.dumps(evidence),
                 source="kilo-local/"+m["id"],author=m["specialist"],verified=True,
                 verified_by=(saved.get("verification") or {}).get("verifier") or "independent-verifier",
@@ -600,6 +692,7 @@ class Runtime(Supervisor):
         checks = verified.get("checks")
         artifact = saved["result"].get("artifact") if isinstance(saved["result"], dict) else None
         code = m.get("owner") == "local"
+        project_file = m.get("owner") == "project-file"
         ok = (verified.get("ok") is True and isinstance(checks, list) and bool(checks)
               and all(isinstance(check, dict) and check.get("ok") is True for check in checks)
               and isinstance(verified.get("verifier"), str) and bool(verified["verifier"])
@@ -611,7 +704,11 @@ class Runtime(Supervisor):
                    and (not routed or verified.get("model") == effective["model"] == saved["result"].get("model"))
                    and {c.get("name") for c in checks} == {
                        "bounded-model-receipt", "approved-function-diff", "baseline-fails", "candidate-passes"}
-                   if code else saved["result"].get("sha256") == m["expected_sha256"]))
+                   if code else (
+                       verified.get("target_file") == m["target_file"]
+                       and verified.get("project") == m["project"]
+                       if project_file else saved["result"].get("sha256") == m["expected_sha256"]
+                   )))
         verdict=verify_mission(conversation_finished=True,roles={m["specialist"]:{"reported":True}},
              acceptance_checks=[{"id":"independent-code-contract" if code else "independent-text-contract",
                    "command":"isolated Docker baseline and candidate" if code else "fixed subprocess verifier",
@@ -648,8 +745,13 @@ class Runtime(Supervisor):
             if status == "REJECTED" and saved["attempt"] >= maximum:
                 status = "BLOCKED"
                 details["reason"] = "attempt limit reached without independent verification"
+        if status in ("REJECTED", "BLOCKED"):
+            details["error_class"] = classify_failure(
+                details.get("reason") or status,
+                str(verified.get("error") or ""),
+            )
         final_state = self.save(m, status, verification=verified, verdict=verdict, **details)
-        if m.get("owner") == "local" and status in ("ACCEPTED", "REJECTED", "BLOCKED"):
+        if m.get("owner") in ("local", "project-file") and status in ("ACCEPTED", "REJECTED", "BLOCKED"):
             try:
                 from scripts.agents.automation import learning_loop
                 learning_loop.record_outcome(self.shared_memory_root, m, final_state)

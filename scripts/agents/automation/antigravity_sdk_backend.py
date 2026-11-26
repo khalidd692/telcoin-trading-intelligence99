@@ -20,6 +20,7 @@ import sys
 import time
 from typing import Any, Callable, Sequence
 
+from scripts.agents.automation import ide_coordination
 from scripts.agents.automation.ollama_native import OllamaNativeProvider
 from scripts.agents.native.provider import ProviderError
 
@@ -412,7 +413,16 @@ class AntigravitySDKProvider:
 
         last_err: str | None = None
         for attempt in range(1, self.max_empty_retries + 2):
-            outcome = self._run_async(lambda: adapter.run(prompt))
+            try:
+                with ide_coordination.local_inference_lease(
+                    "antigravity-sdk",
+                    model=self.model,
+                    ttl_seconds=max(120, int(self.timeout) + 120),
+                ):
+                    outcome = self._run_async(lambda: adapter.run(prompt))
+            except ide_coordination.LeaseConflict as exc:
+                last_err = f"resource_lease_busy: {exc}"
+                break
             if outcome.ok and outcome.response_text.strip():
                 self.last_metadata = {
                     "backend": "antigravity-sdk",

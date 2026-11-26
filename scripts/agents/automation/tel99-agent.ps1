@@ -1,9 +1,12 @@
 # TEL99 unified PowerShell operator CLI (reads defaults from tel99-config.json).
 [CmdletBinding()]
 param(
-    [ValidateSet("Start", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal", "Specialists", "AuditAgents", "Leases")]
+    [ValidateSet("Start", "LocalChain", "Engines", "Academy", "Pause", "Resume", "Results", "Doctor", "Providers", "Preflight", "Run", "Status", "Recover", "Learn", "Cockpit", "Stop", "Plan", "DraftProposal", "Specialists", "AuditAgents", "Leases")]
     [string]$Mode = "Start",
     [string]$Manifest,
+    [string]$Steps = "preflight,transfer,ai_radar,generalization,academy,lora_corpus,endurance",
+    [string]$WaitForPid = "",
+    [switch]$Detached,
     [switch]$AutoFeed,
     [switch]$Once,
     [switch]$IsolateBlocked,
@@ -16,11 +19,11 @@ param(
     [string]$OutputPath,
     [string]$StateDir,
     [string]$Python,
-    [ValidateRange(1, 60)]
+    [ValidateRange(0, 180)]
     [int]$Minutes = 0,
-    [ValidateRange(1, 3600)]
+    [ValidateRange(0, 3600)]
     [int]$PollInterval = 0,
-    [ValidateRange(1024, 65535)]
+    [ValidateRange(0, 65535)]
     [int]$Port = 0
 )
 $ErrorActionPreference = "Stop"
@@ -156,6 +159,58 @@ try {
         }
         "Leases" {
             & $python -B -m scripts.agents.automation.ide_coordination status --state $StateDir
+            exit $LASTEXITCODE
+        }
+        "Engines" {
+            & $python -B -m scripts.agents.automation.ide_coordination engines --state $StateDir
+            exit $LASTEXITCODE
+        }
+        "LocalChain" {
+            $chainDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "TEL99_LOCAL_CHAIN_STATE"
+            New-Item -ItemType Directory -Force -Path $chainDir | Out-Null
+            Remove-Item -LiteralPath (Join-Path $chainDir "stop.request") -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $chainDir "pause.request") -ErrorAction SilentlyContinue
+            $argv = @("-B", "-m", "scripts.agents.automation.run_full_local_chain", "--steps", $Steps, "--report-dir", $chainDir, "--endurance-minutes", [string]$Minutes)
+            if ($WaitForPid) {
+                foreach ($tok in ($WaitForPid -split ',')) {
+                    $t = $tok.Trim()
+                    if ($t -match '^\d+$' -and [int]$t -gt 0) { $argv += @("--wait-for-pid", $t) }
+                }
+            }
+            if ($Detached.IsPresent) {
+                $log = Join-Path $chainDir "local_chain.log"
+                $err = Join-Path $chainDir "local_chain.err.log"
+                $proc = Start-Process -FilePath $python -ArgumentList $argv -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
+                Set-Content -Path (Join-Path $chainDir "local_chain.pid") -Value $proc.Id
+                Write-Host "TEL99 LocalChain started detached: pid=$($proc.Id) steps=$Steps"
+                Write-Host "Log: $log"
+                exit 0
+            }
+            & $python @argv
+            exit $LASTEXITCODE
+        }
+        "Academy" {
+            $acadScript = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI_RADAR\run_academy_eval.py"
+            & $python -B $acadScript
+            exit $LASTEXITCODE
+        }
+        "Pause" {
+            $chainDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "TEL99_LOCAL_CHAIN_STATE"
+            New-Item -ItemType Directory -Force -Path $chainDir | Out-Null
+            Set-Content -Path (Join-Path $chainDir "pause.request") -Value (Get-Date -Format o)
+            Write-Host "TEL99 LocalChain pause requested at $chainDir\pause.request"
+            exit 0
+        }
+        "Resume" {
+            $chainDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "TEL99_LOCAL_CHAIN_STATE"
+            Remove-Item -LiteralPath (Join-Path $chainDir "pause.request") -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $chainDir "stop.request") -ErrorAction SilentlyContinue
+            & $python -B -m scripts.agents.automation.recovery_tool clear-stop --state $StateDir
+            Write-Host "TEL99 pause/stop cleared safely."
+            exit $LASTEXITCODE
+        }
+        "Results" {
+            & $python -B -m scripts.agents.automation.run_full_local_chain --results
             exit $LASTEXITCODE
         }
         default {

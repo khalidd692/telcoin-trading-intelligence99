@@ -758,6 +758,28 @@ def build_report(
     }
 
 
+def evaluate_consecutive_failure_breaker(
+    waves: list[dict],
+    *,
+    max_consecutive_failures: int = 3,
+) -> dict:
+    """Smart circuit breaker: stop unproductive campaigns after N consecutive 0-accepted waves."""
+    limit = max(1, int(max_consecutive_failures))
+    streak = 0
+    for w in reversed(waves):
+        if int(w.get("accepted_count") or 0) == 0 and int(w.get("total_count") or 0) > 0:
+            streak += 1
+        else:
+            break
+    triggered = streak >= limit
+    return {
+        "triggered": triggered,
+        "consecutive_zero_accepted_waves": streak,
+        "threshold": limit,
+        "reason": f"consecutive_zero_accepted_waves_{streak}_ge_{limit}" if triggered else None,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--min-minutes", type=float, default=60.0)
@@ -765,6 +787,7 @@ def main(argv=None) -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--min-free-ram-mb", type=float, default=DEFAULT_MIN_FREE_RAM_MB)
     parser.add_argument("--max-ram-load-pct", type=int, default=DEFAULT_MAX_RAM_LOAD_PCT)
+    parser.add_argument("--max-consecutive-failures", type=int, default=3)
     parser.add_argument("--include-sdk-wave", action="store_true")
     parser.add_argument("--check-baselines-only", action="store_true")
     args = parser.parse_args(argv)
@@ -917,6 +940,15 @@ def main(argv=None) -> int:
         # Waves 5..N: Continuous Gemma 4 local waves with RAM guard & progressive report
         pool_pairs = build_endurance_pool()
         while final_status == "IN_PROGRESS" and not stop_requested.is_set() and (_elapsed_total() / 60.0) < args.min_minutes:
+            if (state_root / "stop.request").exists():
+                final_status = "PAUSED_STOP_REQUEST"
+                break
+            cb = evaluate_consecutive_failure_breaker(
+                waves, max_consecutive_failures=args.max_consecutive_failures
+            )
+            if cb["triggered"]:
+                final_status = "BLOCKED_CONSECUTIVE_FAILURES"
+                break
             if not _guard_ram():
                 final_status = "PAUSED_LOW_MEMORY"
                 break

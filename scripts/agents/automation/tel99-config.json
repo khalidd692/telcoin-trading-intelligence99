@@ -7,6 +7,17 @@
   "cockpit_port": 8765,
   "isolate_blocked": true,
   "allow_subscription_cli": false,
+  "hybrid_free_cloud": {
+    "enabled": true,
+    "require_non_confidential": true,
+    "allow_paid_fallback": false,
+    "priority_order": ["groq", "openrouter", "ollama"],
+    "groq_endpoint": "https://api.groq.com/openai/v1",
+    "groq_allowlist": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+    "openrouter_endpoint": "https://openrouter.ai/api/v1",
+    "openrouter_free_suffix_required": ":free",
+    "local_key_file": "~/.tel99/providers.env"
+  },
   "sdk_backend": {
     "enabled": false,
     "fallback_to_ollama_native": true,

@@ -170,6 +170,115 @@ def plan_from_goal(goal_spec: dict, *, state_root: Path | str | None = None,
     return plan
 
 
+def assess_and_decompose_mission(
+    task: dict,
+    *,
+    model_id: str = "local/ollama-gemma4-e4b",
+    max_safe_lines: int = 65,
+    max_functions_per_subtask: int = 2,
+) -> dict:
+    """Detect oversized tasks for a local model and auto-decompose them into a dependent DAG."""
+    if not isinstance(task, dict) or not isinstance(task.get("id"), str) or not task["id"].strip():
+        raise ValueError("task must be a dict with non-empty 'id'")
+    functions = [f for f in (task.get("functions") or []) if isinstance(f, str) and f.strip()]
+    est_lines = int(task.get("estimated_lines") or (len(functions) * 25 if functions else 45))
+    needs_split = len(functions) > max_functions_per_subtask or est_lines > max_safe_lines
+
+    if not needs_split:
+        return {
+            "model_id": model_id,
+            "needs_decomposition": False,
+            "reason": "within safe single-pass local model budget",
+            "recommended_profile": "patch" if est_lines <= 45 else "module",
+            "subtasks": [{**task, "dependencies": list(task.get("dependencies") or [])}],
+        }
+
+    chunks: list[list[str]] = []
+    if functions:
+        for i in range(0, len(functions), max_functions_per_subtask):
+            chunks.append(functions[i : i + max_functions_per_subtask])
+    else:
+        n_parts = max(2, (est_lines + max_safe_lines - 1) // max_safe_lines)
+        chunks = [[f"part_{i + 1}"] for i in range(n_parts)]
+
+    subtasks: list[dict] = []
+    prev_id: str | None = None
+    base_deps = list(task.get("dependencies") or [])
+    for idx, group in enumerate(chunks, 1):
+        sub_id = f"{task['id']}-part-{idx}"[:48]
+        subtasks.append({
+            "id": sub_id,
+            "parent_id": task["id"],
+            "path": task.get("path", ""),
+            "functions": group,
+            "estimated_lines": max(25, est_lines // len(chunks)),
+            "dependencies": list(base_deps) if prev_id is None else [prev_id],
+            "task_profile": "module",
+            "objective": f"Part {idx}/{len(chunks)} of {task['id']} ({', '.join(group)}): {task.get('objective', '')}",
+        })
+        prev_id = sub_id
+
+    return {
+        "model_id": model_id,
+        "needs_decomposition": True,
+        "reason": f"estimated_lines={est_lines} or functions={len(functions)} exceeds safe local pass ({max_safe_lines} lines / {max_functions_per_subtask} functions)",
+        "recommended_profile": "module",
+        "subtasks": subtasks,
+    }
+
+
+def revise_plan_after_failure(
+    subtasks: list[dict],
+    *,
+    failed_id: str,
+    error_class: str,
+    completed_ids: set[str] | list[str] = (),
+) -> dict:
+    """Revise an active plan after a failure while strictly preserving already-completed tasks."""
+    done = set(completed_ids)
+    if failed_id in done:
+        raise ValueError(f"cannot revise already completed task {failed_id!r}")
+    revised: list[dict] = []
+    replacement_tail: str | None = None
+    action = "keep"
+
+    for row in subtasks:
+        tid = row["id"]
+        if tid in done:
+            revised.append(dict(row))
+            continue
+        if tid == failed_id:
+            if error_class in ("MODEL_ERROR", "VERIFICATION_ERROR", "ENVIRONMENT_ERROR"):
+                split = assess_and_decompose_mission(
+                    {**row, "estimated_lines": max(int(row.get("estimated_lines") or 70), 90)},
+                    max_safe_lines=45,
+                    max_functions_per_subtask=1,
+                )
+                parts = split["subtasks"]
+                revised.extend(parts)
+                replacement_tail = parts[-1]["id"]
+                action = "split_failed_task"
+            else:
+                revised.append({**row, "retry_hint": f"address {error_class}"})
+                action = "annotate_retry"
+            continue
+        updated = dict(row)
+        if replacement_tail and failed_id in (updated.get("dependencies") or []):
+            updated["dependencies"] = [
+                replacement_tail if dep == failed_id else dep
+                for dep in updated["dependencies"]
+            ]
+        revised.append(updated)
+
+    return {
+        "action": action,
+        "failed_id": failed_id,
+        "error_class": error_class,
+        "preserved_completed": sorted(done),
+        "subtasks": revised,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
