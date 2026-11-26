@@ -686,7 +686,7 @@ class ContinuousLearningWorker:
         try:
             lock_cm = exclusive(self.learning_dir / "proactive.lock")
         except Exception:
-            lock_cm = None
+            return {"ok": False, "status": "DEFERRED", "reason": "proactive_lock_unavailable"}
 
         def _persist_deferred(reason_str: str, status_str: str) -> dict[str, Any]:
             rec = {
@@ -728,6 +728,13 @@ class ContinuousLearningWorker:
 
         try:
             with lock_cm:
+                # Re-read after acquiring the lock: another scheduler may have
+                # completed this day between the initial read and acquisition.
+                ps = self.load_proactive_state()
+                if not ps.get("enabled", True):
+                    return {"ok": False, "status": "DISABLED", "reason": "proactive_disabled_by_owner"}
+                if day in (ps.get("daily_executed_keys") or []):
+                    return {"ok": True, "status": "NO_USEFUL_TASK", "reason": f"daily_dedup_already_executed:{day}", "trigger": trigger, "daily_key": day, "deduplicated": True}
                 return self._execute_proactive_cycle_locked(
                     ps=ps,
                     authorized_snapshot=authorized_snapshot,
