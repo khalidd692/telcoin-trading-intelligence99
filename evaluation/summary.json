@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795652760,
-  "observations": 551,
-  "valid_observations": 523,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795659230,
+  "observations": 552,
+  "valid_observations": 524,
+  "latest_decision": "CONFIRMATION TECHNIQUE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 407,
-              "mean_pct": 2.0039
+              "count": 408,
+              "mean_pct": 2.03027
             }
           }
         }
@@ -159,16 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795518004,
-      "previous_decision": "ATTENDRE",
-      "decision": "DONN\u00c9ES INSUFFISANTES",
-      "data_valid": false,
-      "changed_factors": [
-        "\u2212 convergence"
-      ],
-      "event": null
-    },
     {
       "observed_at": 1795536888,
       "previous_decision": "DONN\u00c9ES INSUFFISANTES",
@@ -332,6 +322,47 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795659230,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "CONFIRMATION TECHNIQUE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence"
+      ],
+      "event": {
+        "schema_version": 1,
+        "id": "KRAKEN:TELUSD:CONFIRMATION:1795658400",
+        "market": "KRAKEN:TELUSD",
+        "type": "CONFIRMATION",
+        "decision": "CONFIRMATION TECHNIQUE",
+        "confirmed": true,
+        "risk_checked_buy": false,
+        "rule_version": "tel99-radar-v1",
+        "source": "Kraken public REST / OHLC",
+        "price": 0.001847,
+        "price_at": 1795658400,
+        "candle_closed_at": 1795658400,
+        "snapshot_at": 1795659174.940793,
+        "data_valid": true,
+        "watch": {
+          "level": 0.00173,
+          "unit": "4h"
+        },
+        "invalidation": {
+          "level": 0.001631,
+          "unit": "4h"
+        },
+        "scenario_id": "breakout",
+        "technical_condition": "Cl\u00f4ture 4h au-dessus de la r\u00e9sistance des 20 bougies pr\u00e9c\u00e9dant la cassure, puis retest tenu ; volume relatif \u2265 1.",
+        "factors": [
+          "convergence"
+        ],
+        "blockers": [
+          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
+        ]
+      }
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -351,14 +382,14 @@
         "median_late_minutes": 154.86666666666667
       },
       "3": {
-        "episodes": 10,
+        "episodes": 11,
         "detected": 1,
         "missed": 3,
-        "unknown": 6,
+        "unknown": 7,
         "detection_fraction_known": 0.25,
-        "late_alerts": 7,
+        "late_alerts": 8,
         "median_lead_minutes": 12.216666666666667,
-        "median_late_minutes": 154.4
+        "median_late_minutes": 165.94166666666666
       },
       "5": {
         "episodes": 8,
