@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-26T00:38:57Z",
+  "generated_at": "2026-11-26T00:44:34Z",
   "repository": "khalidd692/telcoin-trading-intelligence99",
   "source_branch": "agents/tel99-capability-upgrade-20261125",
-  "source_commit": "4879b0ef2287c39a5e1958ab40d49667a98b2426",
-  "source_commit_subject": "fix(tel99): escape MaxRetries variable before colon in run-proactive-night.ps1",
+  "source_commit": "3d9be65229febcb3b1e4f055255812ae7744513c",
+  "source_commit_subject": "fix(tel99): survive stripped HOME/USERPROFILE in isolated workers (RUN4 root cause) and add smart consecutive-failure circuit breaker + stop.request guard",
   "services": {
     "command_center": {
       "url": "http://127.0.0.1:8765/",
@@ -35,7 +35,7 @@
   },
   "engines": {
     "ollama_reachable": false,
-    "available_memory_mib": 6363,
+    "available_memory_mib": 618,
     "active_inference_leases_count": 0,
     "owner_interactive_priority_active": false
   },
@@ -142,8 +142,8 @@
     }
   ],
   "memory": {
-    "total_entries": 40,
-    "verified_entries": 40
+    "total_entries": 41,
+    "verified_entries": 41
   },
   "continuous_learning": {
     "worker_configured": true,
@@ -167,16 +167,16 @@
       "paid_calls_allowed": false,
       "local_concurrency": 1
     },
-    "briefs_count": 1,
+    "briefs_count": 2,
     "latest_brief": {
-      "brief_id": "brief-2026-11-25-init-quota-21f8ddda",
-      "generated_at": "2026-11-25T23:56:01Z",
-      "trigger": "scheduled_idle",
-      "status": "PROPOSAL",
-      "domain": "quota_and_resource_optimization",
-      "title": "Préparation du basculement propre sur quotas Groq par modèle après 00:00 UTC",
-      "deliverable_rel_path": "learning/briefs/brief-2026-11-25-init-quota-21f8ddda.md",
-      "duration_seconds": 1.53,
+      "brief_id": "brief-2026-11-26-init-proj-e2e2f083",
+      "generated_at": "2026-11-26T00:44:32Z",
+      "trigger": "immediate_owner_launch",
+      "status": "DONE",
+      "domain": "projects_diagnostics",
+      "title": "Diagnostic proactif & plan de déblocage pour TEL99_BUDGET_FAMILIAL_V2 (5/8)",
+      "deliverable_rel_path": "learning/briefs/brief-2026-11-26-init-proj-e2e2f083.md",
+      "duration_seconds": 289.97,
       "requires_human_approval": true,
       "owner_feedback": null
     }
@@ -190,7 +190,7 @@
     "G5_continuous_learning_integrated": "VALIDÉ",
     "G6_verified_learning_chain": "PARTIEL",
     "G7_github_status_published": "VALIDÉ",
-    "G8_proactive_initiative_and_brief": "PARTIEL"
+    "G8_proactive_initiative_and_brief": "VALIDÉ"
   },
   "residual_limits": [
     "No LoRA weight training on 16 GB host (knowledge/memory/procedural learning only).",
