@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-26T00:13:36Z",
+  "generated_at": "2026-11-26T00:19:49Z",
   "repository": "khalidd692/telcoin-trading-intelligence99",
   "source_branch": "agents/tel99-capability-upgrade-20261125",
-  "source_commit": "1874185ea9e720d6d45e97e02337ea209091d94e",
-  "source_commit_subject": "feat(tel99): add G8 Morning Brief UI with feedback controls and SkillOpt, HALO, AlphaEvolve, and Programmatic Tool Calling in evolution_lab",
+  "source_commit": "64ccbfc0b67957525f614ef669f4704d80de609f",
+  "source_commit_subject": "fix(tel99): fix G7 report provenance/verdicts, add G8 3-role council + beyond-TEL99 opportunities + atomic lock + standalone night runner, wire PTC into project runner and HALO allowlist",
   "services": {
     "command_center": {
       "url": "http://127.0.0.1:8765/",
@@ -35,46 +35,46 @@
   },
   "engines": {
     "ollama_reachable": false,
-    "available_memory_mib": 4116,
-    "active_inference_leases_count": 1,
+    "available_memory_mib": 1936,
+    "active_inference_leases_count": 0,
     "owner_interactive_priority_active": false
   },
   "groq_quotas": {
     "accounting_note": "3 confirmed Groq models x 200k TPD = 600k theoretical total, including 3 x 40k = 120k interactive owner reserve, leaving 480k TPD max background (subject to real provider/project limits).",
     "legacy_unattributed": false,
-    "remaining_background_tokens_budget": 459084,
+    "remaining_background_tokens_budget": 426377,
     "models": {
       "openai/gpt-oss-120b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": 149537
+        "remaining_background": 127288
       },
       "openai/gpt-oss-20b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": 153241
+        "remaining_background": 146460
       },
       "qwen/qwen3.8-27b": {
         "confirmed_daily_limit": null,
         "owner_reserve": null,
         "tokens_used": null,
         "remaining_total": null,
-        "remaining_background": 156306
+        "remaining_background": 152629
       }
     }
   },
   "certification": {
     "v3_frozen": {
       "local_after_pass_rate": null,
-      "local_after_passed": null,
-      "local_after_total": null,
+      "local_after_passed": 53,
+      "local_after_total": 60,
       "hybrid_after_pass_rate": null,
-      "hybrid_after_passed": null,
-      "hybrid_after_total": null
+      "hybrid_after_passed": 57,
+      "hybrid_after_total": 60
     },
     "v4_frozen": {
       "local_after_pass_rate": null,
@@ -92,18 +92,19 @@
       }
     },
     "matrix_12x12": {
-      "cells_evaluated": null,
+      "cells_evaluated": 144,
       "cells_total": 144,
-      "cross_domain_evaluated": null,
+      "cross_domain_evaluated": 132,
       "cross_domain_total": 132,
-      "cross_domain_passed": null,
-      "combined_generalist_rate": null,
-      "full_144_covered": false
+      "cross_domain_passed": "127/132",
+      "combined_generalist_rate": 0.9375,
+      "full_144_covered": true
     },
     "phase2_chain_status": "COMPLETED",
     "endurance_latest": {
       "run_label": "TEL99_ENDURANCE_20261125_RUN3",
-      "status": "COMPLETED",
+      "status": "FAILED",
+      "raw_status": "COMPLETED",
       "duration_minutes": 14.55,
       "missions_accepted": 0,
       "missions_blocked": 164,
@@ -116,30 +117,33 @@
   },
   "projects": [
     {
-      "name": "TEL99_AI_RADAR_PROJECT",
-      "exists": false,
-      "status": "NOT_CREATED"
+      "name": "AI_RADAR",
+      "exists": true,
+      "status": "LIVE_APP",
+      "missions_accepted": 0,
+      "missions_total": 0,
+      "e2e_passed": null
     },
     {
       "name": "TEL99_BUDGET_FAMILIAL_V2",
       "exists": true,
-      "status": "IN_PROGRESS",
-      "missions_accepted": 0,
-      "missions_total": 0,
+      "status": "PARTIAL",
+      "missions_accepted": 5,
+      "missions_total": 8,
       "e2e_passed": null
     },
     {
       "name": "TEL99_GENERALIZATION_NOTES",
       "exists": true,
-      "status": "IN_PROGRESS",
-      "missions_accepted": 0,
-      "missions_total": 0,
+      "status": "PARTIAL",
+      "missions_accepted": 8,
+      "missions_total": 8,
       "e2e_passed": null
     }
   ],
   "memory": {
-    "total_entries": 2,
-    "verified_entries": 2
+    "total_entries": 40,
+    "verified_entries": 40
   },
   "continuous_learning": {
     "worker_configured": true,
@@ -184,14 +188,14 @@
     "G3_autonomous_projects": "NON VALIDÉ",
     "G4_persistent_memory_and_recovery": "VALIDÉ",
     "G5_continuous_learning_integrated": "VALIDÉ",
-    "G6_verified_learning_chain": "VALIDÉ",
+    "G6_verified_learning_chain": "PARTIEL",
     "G7_github_status_published": "VALIDÉ",
-    "G8_proactive_initiative_and_brief": "VALIDÉ"
+    "G8_proactive_initiative_and_brief": "PARTIEL"
   },
   "residual_limits": [
     "No LoRA weight training on 16 GB host (knowledge/memory/procedural learning only).",
     "No operation when PC is powered off or asleep (no forced wake; local machine must be awake).",
     "P2 optional ChatGPT->TEL99 direct command channel intentionally deferred until P0/P1 stable.",
-    "60-min endurance status is COMPLETED."
+    "60-min endurance status is FAILED."
   ]
 }
