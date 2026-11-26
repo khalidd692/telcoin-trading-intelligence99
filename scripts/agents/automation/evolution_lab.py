@@ -708,8 +708,17 @@ def rollback_skill_version(*, skill_path: Path | str, backup_path: Path | str) -
 # ---------------------------------------------------------------------------
 # 9. HALO / Agent Improvement Loop (OpenAI — §5.2) & AlphaEvolve (§5.5)
 # ---------------------------------------------------------------------------
+_ALLOWED_HALO_TARGET_PREFIXES = (
+    "scripts/utils/",
+    "scripts/agents/automation/",
+    "tests/",
+)
 _FORBIDDEN_SELF_MOD_PATTERNS = (
     "guard.py",
+    "local_deterministic_tools.py",
+    "provider_router.py",
+    "ide_coordination.py",
+    "policy.py",
     "deterministic_security_gate",
     "allow_paid",
     "bypass_security",
@@ -740,13 +749,23 @@ def halo_synthesize_regression_and_verify(
     regression_test_code: str,
     candidate_patch_code: str,
     independent_verifier: Callable[[str, str], tuple[bool, str]],
+    baseline_code: str | None = None,
 ) -> dict[str, Any]:
-    """HALO-inspired system improvement gate with fail-closed permission lock."""
+    """HALO-inspired system improvement gate with allowlist, permission lock, and baseline-red->candidate-green check."""
     scrubbed_trace = str(metacognition.scrub_secrets(failure_trace))
     root_cause = classify_failure_root_cause(scrubbed_trace)
 
+    norm_target = str(target_path or "").replace("\\", "/").lstrip("./")
+    if not any(norm_target.startswith(pfx) for pfx in _ALLOWED_HALO_TARGET_PREFIXES):
+        return {
+            "ok": False,
+            "root_cause": root_cause,
+            "blocked": True,
+            "reason": f"allowlist_refused_target:{norm_target}",
+        }
+
     # Hard security lock: agents can NEVER weaken permissions, security gates, or guards
-    combined = f"{target_path}\n{candidate_patch_code}"
+    combined = f"{norm_target}\n{candidate_patch_code}"
     for forbidden in _FORBIDDEN_SELF_MOD_PATTERNS:
         if forbidden in combined:
             return {
@@ -756,11 +775,25 @@ def halo_synthesize_regression_and_verify(
                 "reason": f"permission_lock_refused_modification:{forbidden}",
             }
 
+    baseline_red = None
+    if baseline_code is not None:
+        base_ok, _ = independent_verifier(baseline_code, regression_test_code)
+        baseline_red = not base_ok
+        if base_ok:
+            return {
+                "ok": False,
+                "root_cause": root_cause,
+                "blocked": False,
+                "baseline_red": False,
+                "reason": "regression_test_did_not_fail_on_baseline",
+            }
+
     ok, detail = independent_verifier(candidate_patch_code, regression_test_code)
     return {
         "ok": bool(ok),
         "root_cause": root_cause,
         "blocked": False,
+        "baseline_red": baseline_red,
         "verifier_detail": str(detail)[:240],
         "regression_test_present": bool(regression_test_code.strip()),
     }

@@ -152,9 +152,10 @@ def _find_latest_dialogue_report(finalisation_root: Path) -> dict[str, Any]:
 
 def _find_latest_endurance(desktop: Path) -> dict[str, Any]:
     candidates: list[Path] = []
-    run3 = desktop / "TEL99_ENDURANCE_20261125_RUN3" / "hour_campaign_report.json"
-    if run3.is_file():
-        candidates.append(run3)
+    for run_dir in sorted(desktop.glob("TEL99_ENDURANCE_*")):
+        rep = run_dir / "hour_campaign_report.json"
+        if rep.is_file():
+            candidates.append(rep)
     fin = desktop / "TEL99_FINALISATION"
     if fin.is_dir():
         candidates.extend(fin.glob("**/endurance/hour_campaign_report.json"))
@@ -162,38 +163,65 @@ def _find_latest_endurance(desktop: Path) -> dict[str, Any]:
         return {"status": "NOT_RUN"}
     latest = max(candidates, key=lambda p: p.stat().st_mtime)
     data = _read_json_safe(latest) or {}
+    dur = float(data.get("duration_minutes") or 0.0)
+    acc = int(data.get("missions_accepted") or 0)
+    blk = int(data.get("missions_blocked") or 0)
+    raw_status = str(data.get("status") or "UNKNOWN")
+    # Honest business verdict: 0 accepted or < 60 min or blocked > 0 is NEVER a pass
+    if dur >= 60.0 and acc > 0 and blk == 0 and raw_status.upper() in {"PROVEN", "PASSED", "COMPLETED"}:
+        honest_status = "PROVEN"
+    elif raw_status.upper() in {"RUNNING", "IN_PROGRESS"}:
+        honest_status = "RUNNING"
+    else:
+        honest_status = "FAILED"
     return {
         "run_label": latest.parent.name,
-        "status": data.get("status", "UNKNOWN"),
-        "duration_minutes": data.get("duration_minutes"),
-        "missions_accepted": data.get("missions_accepted"),
-        "missions_blocked": data.get("missions_blocked"),
+        "status": honest_status,
+        "raw_status": raw_status,
+        "duration_minutes": round(dur, 2),
+        "missions_accepted": acc,
+        "missions_blocked": blk,
         "missions_total": data.get("missions_total"),
     }
 
 
 def _collect_projects(desktop: Path) -> list[dict[str, Any]]:
-    names = [
-        "TEL99_AI_RADAR_PROJECT",
-        "TEL99_BUDGET_FAMILIAL_V2",
-        "TEL99_GENERALIZATION_NOTES",
+    specs = [
+        ("AI_RADAR", desktop / "AI_RADAR"),
+        ("TEL99_BUDGET_FAMILIAL_V2", desktop / "TEL99_BUDGET_FAMILIAL_V2"),
+        ("TEL99_GENERALIZATION_NOTES", desktop / "TEL99_GENERALIZATION_NOTES"),
     ]
     out: list[dict[str, Any]] = []
-    for name in names:
-        pdir = desktop / name
+    for name, pdir in specs:
         if not pdir.is_dir():
             out.append({"name": name, "exists": False, "status": "NOT_CREATED"})
             continue
-        report = _read_json_safe(pdir / "artifacts" / "autonomous_project_report.json") or {}
+        report = (
+            _read_json_safe(pdir / "artifacts" / "delivery_report.json")
+            or _read_json_safe(pdir / "artifacts" / "agent_campaign_report.json")
+            or _read_json_safe(pdir / "artifacts" / "autonomous_project_report.json")
+            or {}
+        )
+        delivs = report.get("deliverables") if isinstance(report.get("deliverables"), list) else []
         missions = report.get("missions") if isinstance(report.get("missions"), list) else []
-        accepted = sum(1 for m in missions if isinstance(m, dict) and m.get("status") == "ACCEPTED")
+        rows = delivs or missions
+        accepted = report.get("missions_accepted")
+        if accepted is None:
+            accepted = sum(1 for m in rows if isinstance(m, dict) and m.get("status") == "ACCEPTED")
+        total = report.get("missions_total")
+        if total is None:
+            total = len(rows)
+        pbv = report.get("post_build_verification")
+        e2e_ok = pbv.get("ok") if isinstance(pbv, dict) else (
+            (report.get("e2e") or {}).get("ok") if isinstance(report.get("e2e"), dict) else None
+        )
         out.append({
             "name": name,
             "exists": True,
-            "status": report.get("status") or ("IN_PROGRESS" if (pdir / "state").is_dir() else "UNKNOWN"),
-            "missions_accepted": report.get("missions_accepted", accepted),
-            "missions_total": report.get("missions_total", len(missions)),
-            "e2e_passed": bool((report.get("e2e") or {}).get("ok")) if isinstance(report.get("e2e"), dict) else None,
+            "status": report.get("status") or ("LIVE_APP" if name == "AI_RADAR" else "UNKNOWN"),
+            "missions_accepted": accepted,
+            "missions_total": total,
+            "e2e_passed": e2e_ok,
         })
     return out
 
@@ -257,7 +285,7 @@ def build_status_report(
     repo_dir = Path(repo or ROOT).resolve()
     desk_dir = Path(desktop or (Path.home() / "Desktop")).resolve()
     st_root = Path(state_root or (desk_dir / "TEL99_LOCAL_CHAIN_STATE")).resolve()
-    bench_state = desk_dir / "TEL99_BENCHMARK_STATE"
+    bench_state = desk_dir / "TEL99_BENCHMARK_120_STATE"
     chain2_state = desk_dir / "TEL99_LOCAL_CHAIN_STATE_PHASE2"
 
     branch = _git_output(repo_dir, "branch", "--show-current") or "unknown"
@@ -312,12 +340,18 @@ def build_status_report(
     g3_status = "VALIDÉ" if delivered_count == len(projects) else ("PARTIEL" if delivered_count >= 1 else "NON VALIDÉ")
     g4_status = "VALIDÉ" if memory_counts["verified_entries"] > 0 else "PARTIEL"
     g5_status = "VALIDÉ" if learning_state.get("worker_configured") else "PARTIEL"
-    g6_status = "VALIDÉ" if (learning_state.get("g6_chain_proven") or learning_state.get("transfer_verified")) else "NON VALIDÉ"
+    g6_status = (
+        "VALIDÉ"
+        if learning_state.get("g6_chain_proven") is True
+        else ("PARTIEL" if learning_state.get("transfer_verified") is True else "NON VALIDÉ")
+    )
     g7_status = "VALIDÉ"
+    briefs_hist = proactive_state.get("briefs_history") if isinstance(proactive_state.get("briefs_history"), list) else []
+    done_briefs = [b for b in briefs_hist if isinstance(b, dict) and b.get("status") == "DONE"]
     g8_status = (
         "VALIDÉ"
-        if (latest_brief and latest_brief.get("status") in {"DONE", "PROPOSAL", "NO_USEFUL_TASK"})
-        else "PARTIEL"
+        if (len(briefs_hist) >= 2 and len(done_briefs) >= 1)
+        else ("PARTIEL" if (latest_brief and latest_brief.get("status") in {"DONE", "PROPOSAL", "DEFERRED", "NO_USEFUL_TASK"}) else "NON VALIDÉ")
     )
 
     residual_limits: list[str] = [

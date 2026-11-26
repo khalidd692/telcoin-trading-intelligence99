@@ -2470,12 +2470,31 @@ def run_autonomous_project(
                     mem_store.record(entry, actor="autonomous-project-runner-verified")
                     promoted_lessons += 1
 
+        # Programmatic Tool Calling (Anthropic §5.3): 0-LLM deterministic check on generated files
+        ptc_files: dict[str, str] = {}
+        for c in contracts:
+            rel_f = str(c.get("target_file") or "")
+            fp = kit.root / rel_f
+            if rel_f and fp.is_file() and fp.stat().st_size <= 256_000:
+                try:
+                    ptc_files[rel_f] = fp.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+        ptc_ver = None
+        if ptc_files:
+            try:
+                from scripts.agents.automation import evolution_lab as _ev_lab
+                ptc_ver = _ev_lab.run_programmatic_tool_batch(ptc_files)
+            except Exception as exc:
+                ptc_ver = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
         delivery = {
             "schema_version": 2,
             "status": final_status,
             "ok": overall_ok,
             "project": slug,
             "workspace_root": str(kit.root),
+            "ptc_verification": ptc_ver,
             "goal": goal_text,
             "goal_sha256": goal_sha,
             "plan_revision": int(plan.get("plan_revision") or 1),

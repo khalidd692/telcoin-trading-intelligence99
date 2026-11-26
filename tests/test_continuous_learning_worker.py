@@ -141,15 +141,35 @@ class TestContinuousLearningAndProactiveG8(unittest.TestCase):
 
             # 5. Next day with NO actionable signals concludes NO_USEFUL_TASK honestly
             empty_snap = {
-                "projects": [{"name": "TEL99_AI_RADAR_PROJECT", "status": "COMPLETED", "missions_accepted": 5, "missions_total": 5}],
+                "projects": [{"name": "AI_RADAR", "status": "COMPLETED", "missions_accepted": 5, "missions_total": 5}],
                 "certification": {"endurance_latest": {"status": "PROVEN"}},
                 "groq_quotas": {"legacy_unattributed": False},
+                "suppress_beyond_tel99_opportunities": True,
             }
             res_empty = worker.run_proactive_cycle(
                 authorized_snapshot=empty_snap, trigger="scheduled_idle", daily_key="2026-11-27", probe_engines=False
             )
             self.assertTrue(res_empty["ok"])
             self.assertEqual(res_empty["status"], "NO_USEFUL_TASK")
+
+            # 6. Multi-role LLM council produces DONE deliverable with 3 distinct role contributions
+            role_calls: list[str] = []
+
+            def fake_council(role: str, prompt: str) -> str:
+                role_calls.append(role)
+                return f"Contribution vérifiée de {role} : analyse factuelle, risques et plan réversible."
+
+            res_done = worker.run_proactive_cycle(
+                authorized_snapshot={"projects": [], "certification": {}, "groq_quotas": {}},
+                trigger="windows_task_scheduler",
+                daily_key="2026-11-28",
+                model_call=fake_council,
+                probe_engines=False,
+            )
+            self.assertTrue(res_done["ok"])
+            self.assertEqual(res_done["status"], "DONE")
+            self.assertEqual(res_done["distinct_council_calls"], 3)
+            self.assertEqual(len(role_calls), 3)
 
 
 if __name__ == "__main__":

@@ -76,16 +76,18 @@ class TestEnterpriseEvolutionMethods(unittest.TestCase):
         self.assertFalse(blocked["ok"])
         self.assertTrue(blocked["blocked"])
 
-        # Legitimate regression + verified fix passes
+        # Legitimate regression + baseline-red -> candidate-green verified independently
         passed = evolution_lab.halo_synthesize_regression_and_verify(
             failure_trace="ValueError on bool input",
             target_path="scripts/utils/validator.py",
             regression_test_code="assert not accept_bool(True)",
+            baseline_code="def accept_bool(x): return isinstance(x, int)",
             candidate_patch_code="def accept_bool(x): return not isinstance(x, bool)",
-            independent_verifier=lambda p, t: (True, "verified"),
+            independent_verifier=lambda code, t: ("not isinstance(x, bool)" in code, "verified"),
         )
         self.assertTrue(passed["ok"])
         self.assertFalse(passed["blocked"])
+        self.assertTrue(passed["baseline_red"])
         self.assertTrue(passed["regression_test_present"])
 
     def test_recipe_e_programmatic_tool_calling_saves_llm_calls_and_latency(self) -> None:

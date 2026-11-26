@@ -615,6 +615,45 @@ class ContinuousLearningWorker:
                 "reversible": True,
             })
 
+        # 4. Beyond-TEL99 authorized owner opportunities (commercializable low-cost AI services & local tools)
+        if not authorized_snapshot.get("suppress_beyond_tel99_opportunities", False):
+            fp_biz = hashlib.sha256(b"opp:low-cost-ai-services-16gb-v1").hexdigest()[:16]
+            candidates.append({
+                "id": f"init-biz-{fp_biz[:8]}",
+                "fingerprint": fp_biz,
+                "domain": "product_and_business_opportunities",
+                "title": "Étude comparative d'opportunités de services IA à coût faible exploitables sur 16 Go local",
+                "observation": (
+                    f"Équipe de 12 agents locaux opérationnelle sur 16 Go RAM sans GPU dédié et sans budget API payant au {now}."
+                ),
+                "curiosity_question": (
+                    "Quels micro-services B2B ou outils logiciels locaux offrent le meilleur ratio valeur/risque/coût "
+                    "sans prospection automatisée ni dépense externe ?"
+                ),
+                "hypothesis": (
+                    "Des services structurés reproductibles (audit qualité/sécurité statique, générateurs de documentation "
+                    "technique, kits de données synthétiques ou automatisations locales) sont livrables avec 0 € d'API."
+                ),
+                "prediction": (
+                    "Une matrice comparative chiffrée avec hypothèses explicites, risques et plan 14 jours hors production "
+                    "fournira au propriétaire une base de décision immédiatement exploitable au réveil."
+                ),
+                "counterfactual": (
+                    "Sans analyse comparative préalable ni critique contradictoire, le propriétaire risque d'investir du temps "
+                    "sur une niche saturée ou incompatible avec la contrainte 16 Go / 0 €."
+                ),
+                "invalidation_signal": (
+                    "Si les hypothèses de temps d'exécution local dépassent 30 min par livrable client ou exigent un accès "
+                    "temps réel payant non disponible."
+                ),
+                "roles": ["tel99-analyst", "tel99-security", "tel99-coordination"],
+                "impact": 0.88,
+                "urgency": 0.80,
+                "confidence": 0.82,
+                "cost": 0.20,
+                "reversible": True,
+            })
+
         return candidates
 
     def run_proactive_cycle(
@@ -628,11 +667,15 @@ class ContinuousLearningWorker:
     ) -> dict[str, Any]:
         """Run ONE bounded proactive cycle (G8): max 1 substantial initiative + Morning Brief.
 
+        - Atomic lock prevents concurrent double-execution across schedulers.
         - Deduplicates per day (`daily_key`) and per initiative fingerprint.
-        - Yields immediately if paused, disabled, owner priority active, or RAM low.
+        - Yields & persists `DEFERRED` if paused, disabled, owner priority active, or RAM low.
+        - Runs distinct multi-role adaptive council (Analyst -> Challenger -> Coordinator) when LLM active.
         - Honestly returns `NO_USEFUL_TASK` when no useful non-duplicate initiative exists.
         - Never creates human approvals or mutates production.
         """
+        from scripts.agents.automation.local_codex import Blocked, exclusive
+
         t0 = time.monotonic()
         day = daily_key or _today_utc()
         ps = self.load_proactive_state()
@@ -640,9 +683,38 @@ class ContinuousLearningWorker:
         if not ps.get("enabled", True):
             return {"ok": False, "status": "DISABLED", "reason": "proactive_disabled_by_owner"}
 
+        try:
+            lock_cm = exclusive(self.learning_dir / "proactive.lock")
+        except Exception:
+            lock_cm = None
+
+        def _persist_deferred(reason_str: str, status_str: str) -> dict[str, Any]:
+            rec = {
+                "brief_id": f"brief-{day}-deferred",
+                "daily_key": day,
+                "generated_at": _now_iso(),
+                "trigger": trigger,
+                "status": status_str,
+                "domain": "deferred",
+                "title": f"Cycle proactif différé ({reason_str})",
+                "why_useful": "Protection des ressources hôte et priorité absolue au propriétaire.",
+                "deliverable_rel_path": None,
+                "evidence": [f"Motif vérifié : {reason_str}"],
+                "limits": ["Aucun lancement concurrent d'inférence locale."],
+                "risks": [],
+                "next_action": "Reprise automatique au prochain créneau libre sans doublon.",
+                "duration_seconds": round(time.monotonic() - t0, 2),
+                "requires_human_approval": False,
+                "owner_feedback": None,
+            }
+            ps["last_deferred"] = rec
+            self.save_proactive_state(ps)
+            return {"ok": False, "status": status_str, "reason": reason_str, "deferred_record": rec}
+
         allowed, reason = self.can_run_background(probe_engines=probe_engines)
         if not allowed:
-            return {"ok": False, "status": "YIELDED_TO_OWNER" if "owner" in reason else "DEFERRED", "reason": reason}
+            st_code = "YIELDED_TO_OWNER" if "owner" in reason else "DEFERRED"
+            return _persist_deferred(reason, st_code)
 
         if day in (ps.get("daily_executed_keys") or []):
             return {
@@ -654,6 +726,29 @@ class ContinuousLearningWorker:
                 "deduplicated": True,
             }
 
+        try:
+            with lock_cm:
+                return self._execute_proactive_cycle_locked(
+                    ps=ps,
+                    authorized_snapshot=authorized_snapshot,
+                    trigger=trigger,
+                    day=day,
+                    model_call=model_call,
+                    t0=t0,
+                )
+        except Blocked:
+            return _persist_deferred("proactive_lock_busy", "DEFERRED")
+
+    def _execute_proactive_cycle_locked(
+        self,
+        *,
+        ps: dict[str, Any],
+        authorized_snapshot: dict[str, Any],
+        trigger: str,
+        day: str,
+        model_call: Callable[[str, str], str] | None,
+        t0: float,
+    ) -> dict[str, Any]:
         # Observe strictly authorized signals & deduplicate against already-delivered fingerprints
         delivered_fps = set(ps.get("delivered_fingerprints") or [])
         prefs = self.load_preferences()
@@ -712,38 +807,64 @@ class ContinuousLearningWorker:
             return {"ok": True, "status": "NO_USEFUL_TASK", "reason": "no_candidate_passed_threshold", "trigger": trigger}
 
         chosen = next(c for c in candidates if c["id"] == selected_branch["id"])
+        roles_list = list(chosen.get("roles") or ["tel99-analyst", "tel99-security", "tel99-coordination"])
+        analyst_role = roles_list[0]
+        challenger_role = roles_list[1] if len(roles_list) > 1 else "tel99-security"
+        coordinator_role = roles_list[2] if len(roles_list) > 2 else "tel99-coordination"
 
-        # Adaptive council (3 targeted roles, NOT 12 agents): analyst, challenger, specialist -> coordinator synthesis
-        council_notes: dict[str, str] = {}
-        if model_call is not None:
-            council_prompt = (
-                f"Contexte autorisé (lecture seule) : {chosen['observation']}\n"
+        # Real multi-role adaptive council (3 distinct targeted contributions, NOT 1 single call!)
+        council_contributions: dict[str, str] = {}
+        real_llm_council = model_call is not None
+        if real_llm_council:
+            p_analyst = (
+                f"Rôle : {analyst_role} (Analyste).\n"
+                f"Initiative sélectionnée : {chosen['title']}\n"
+                f"Observation autorisée : {chosen['observation']}\n"
                 f"Question de curiosité : {chosen['curiosity_question']}\n"
                 f"Hypothèse : {chosen['hypothesis']}\n"
-                f"Contre-factuel : {chosen['counterfactual']}\n"
-                "En 4 puces concises en français : (1) diagnostic factuel, (2) objection / risque principal, "
-                "(3) action réversible préparée hors production, (4) critère d'invalidation."
+                "Produis une proposition structurée concise en français (max 220 mots) avec : "
+                "1) faits/observations, 2) 3 options ou pistes chiffrées avec hypothèses explicites, "
+                "3) premier livrable concret réversible hors production."
             )
-            synthesis = _sanitize_text(model_call(chosen["roles"][0], council_prompt))
-            council_notes["synthesis"] = synthesis[:1200]
+            analyst_out = _sanitize_text(model_call(analyst_role, p_analyst))[:1400]
+            council_contributions[analyst_role] = analyst_out
+
+            p_challenger = (
+                f"Rôle : {challenger_role} (Contradicteur indépendant).\n"
+                f"Analyse reçue de {analyst_role} :\n{analyst_out}\n\n"
+                f"Contre-factuel initial : {chosen['counterfactual']}\n"
+                "Critique cette proposition sans complaisance en français (max 160 mots) : "
+                "1) angles morts ou hypothèses fragiles, 2) risques techniques/sécurité/coût, "
+                "3) signaux d'invalidation mesurables."
+            )
+            challenger_out = _sanitize_text(model_call(challenger_role, p_challenger))[:1100]
+            council_contributions[challenger_role] = challenger_out
+
+            p_coord = (
+                f"Rôle : {coordinator_role} (Coordinateur — Arbitrage & Synthèse).\n"
+                f"Proposition ({analyst_role}) :\n{analyst_out}\n\n"
+                f"Critique ({challenger_role}) :\n{challenger_out}\n\n"
+                "Synthétise un plan d'action exécutable en français (max 180 mots) en conservant "
+                "les désaccords/incertitudes, la recommandation prioritaire et ce qui nécessite l'accord du propriétaire."
+            )
+            coord_out = _sanitize_text(model_call(coordinator_role, p_coord))[:1200]
+            council_contributions[coordinator_role] = coord_out
         else:
-            council_notes["synthesis"] = (
-                f"- Observation vérifiée : {chosen['observation']}\n"
-                f"- Contre-argument (contradicteur) : {chosen['invalidation_signal']}\n"
-                f"- Prédiction réversible : {chosen['prediction']}\n"
-                f"- Contre-factuel : {chosen['counterfactual']}"
-            )
+            council_contributions[analyst_role] = f"Observation vérifiée : {chosen['observation']}\nPrédiction : {chosen['prediction']}"
+            council_contributions[challenger_role] = f"Critique & invalidation : {chosen['invalidation_signal']}\nContre-factuel : {chosen['counterfactual']}"
+            council_contributions[coordinator_role] = f"Arbitrage prudent : préparer uniquement une proposition réversible hors production pour {chosen['title']}."
 
         # Write real consultable Markdown deliverable in sandboxed briefs_dir (NEVER production)
         brief_id = f"brief-{day}-{chosen['id']}"
         deliverable_name = f"{brief_id}.md"
         deliverable_path = self.briefs_dir / deliverable_name
+        council_status = "DONE" if real_llm_council else "PROPOSAL"
         deliverable_md = (
             f"# Brief Proactif TEL99 — {chosen['title']}\n\n"
             f"- **Date (UTC)** : {_now_iso()}\n"
             f"- **Déclencheur** : `{trigger}` (sans sollicitation manuelle)\n"
-            f"- **Statut** : `PROPOSAL` (aucune écriture production, aucune approbation auto-générée)\n"
-            f"- **Conseil adaptatif sollicité** : {', '.join(chosen['roles'])} ({len(chosen['roles'])} rôles ciblés)\n\n"
+            f"- **Statut** : `{council_status}` (livrable isolé hors production, aucune approbation auto-générée)\n"
+            f"- **Conseil adaptatif sollicité** : {', '.join(roles_list)} ({len(roles_list)} rôles ciblés)\n\n"
             f"## 1. Observation vs Hypothèse vs Prédiction\n"
             f"- **Observation** : {chosen['observation']}\n"
             f"- **Question de curiosité** : {chosen['curiosity_question']}\n"
@@ -751,17 +872,22 @@ class ContinuousLearningWorker:
             f"- **Prédiction** : {chosen['prediction']}\n"
             f"- **Contre-factuel** : {chosen['counterfactual']}\n"
             f"- **Signal d'invalidation** : {chosen['invalidation_signal']}\n\n"
-            f"## 2. Synthèse du Conseil Adaptatif (exploration {exploration['branches_evaluated']} approche(s))\n"
-            f"{council_notes['synthesis']}\n\n"
-            f"## 3. Garde-fous & Limites\n"
+            f"## 2. Contribution Analyste ({analyst_role})\n{council_contributions[analyst_role]}\n\n"
+            f"## 3. Critique Contradicteur ({challenger_role})\n{council_contributions[challenger_role]}\n\n"
+            f"## 4. Arbitrage & Plan Recommandé ({coordinator_role})\n{council_contributions[coordinator_role]}\n\n"
+            f"## 5. Garde-fous & Limites\n"
             f"- Aucune modification de production, aucune fusion `main`, aucune dépense, aucune approbation fabriquée.\n"
-            f"- Accès web externe non simulé ; analyse basée exclusivement sur les rapports locaux autorisés.\n"
+            f"- Accès web externe non simulé ; analyse basée exclusivement sur les sources locales autorisées.\n"
         )
         deliverable_md = _sanitize_text(deliverable_md)
         # Independent deterministic verification of deliverable before saving
         leak = local_deterministic_tools.detect_secret_leak(deliverable_md)
         if not leak.get("safe", False):
             raise RuntimeError("Refusing to write proactive brief: secret leak detected")
+        if _PERSONAL_PATH_RE.search(deliverable_md):
+            raise RuntimeError("Refusing to write proactive brief: personal path detected")
+        if len(deliverable_md.strip()) < 200 or "## 3. Critique Contradicteur" not in deliverable_md:
+            council_status = "PARTIAL"
         deliverable_path.write_text(deliverable_md, encoding="utf-8")
 
         duration_s = round(time.monotonic() - t0, 2)
@@ -770,11 +896,12 @@ class ContinuousLearningWorker:
             "daily_key": day,
             "generated_at": _now_iso(),
             "trigger": trigger,
-            "status": "PROPOSAL",
+            "status": council_status,
             "domain": chosen["domain"],
             "title": chosen["title"],
             "why_useful": chosen["prediction"],
-            "council_roles": chosen["roles"],
+            "council_roles": roles_list,
+            "distinct_council_calls": len(council_contributions) if real_llm_council else 0,
             "branches_evaluated": exploration["branches_evaluated"],
             "deliverable_rel_path": f"learning/briefs/{deliverable_name}",
             "deliverable_bytes": len(deliverable_md.encode("utf-8")),
@@ -850,10 +977,12 @@ def main(argv: list[str] | None = None) -> int:
         default="status",
     )
     parser.add_argument("--trigger", default="scheduled_idle")
+    parser.add_argument("--daily-key", default=None)
     parser.add_argument("--brief-id", default="")
     parser.add_argument("--feedback", default="")
     parser.add_argument("--model", default="gemma4:e4b-tel99-8k")
     parser.add_argument("--no-llm", action="store_true", help="Run proactive diagnostic without LLM synthesis.")
+    parser.add_argument("--publish-g7", action="store_true", help="Automatically publish updated G7 status report.")
     args = parser.parse_args(argv)
 
     worker = ContinuousLearningWorker(args.state_root)
@@ -879,9 +1008,16 @@ def main(argv: list[str] | None = None) -> int:
         res = worker.run_proactive_cycle(
             authorized_snapshot=snap,
             trigger=args.trigger,
+            daily_key=args.daily_key,
             model_call=None if args.no_llm else (lambda role, prompt: _ollama_model_call(role, prompt, model=args.model)),
             probe_engines=True,
         )
+        if args.publish_g7:
+            try:
+                updated_snap = psr.build_status_report(probe_live=True)
+                res["g7_publish"] = psr.publish_status_to_branch(updated_snap, push=True)
+            except Exception as exc:
+                res["g7_publish"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return 0 if res.get("ok") else 1
 
