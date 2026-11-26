@@ -61,7 +61,7 @@ class TestEnterpriseEvolutionMethods(unittest.TestCase):
             self.assertTrue(rb["ok"])
             self.assertEqual(skill_file.read_text(encoding="utf-8"), original_text)
 
-    def test_skillopt_fails_closed_without_perfect_security_evidence(self) -> None:
+    def test_skillopt_fails_closed_without_perfect_candidate_security_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             skill = root / "role" / "SKILL.md"
@@ -74,11 +74,14 @@ class TestEnterpriseEvolutionMethods(unittest.TestCase):
                 ("partial", 0.999),
                 ("nan", float("nan")),
                 ("out-of-range", 1.1),
+                ("boolean", True),
             ):
                 skill.write_text(original, encoding="utf-8")
                 def evaluator(text: str, security_rate=security_rate) -> dict:
                     result = {"pass_rate": 0.7 if text == original else 0.99}
-                    if security_rate is not None:
+                    if text == original:
+                        result["critical_security_rate"] = 1.0
+                    elif security_rate is not None:
                         result["critical_security_rate"] = security_rate
                     return result
 
@@ -112,6 +115,28 @@ class TestEnterpriseEvolutionMethods(unittest.TestCase):
             self.assertFalse(result["promoted"])
             self.assertEqual(skill.read_text(encoding="utf-8"), original)
             self.assertEqual(result["baseline"]["critical_security_rate"], 0.9)
+
+    def test_skillopt_missing_baseline_security_measurement_blocks_all_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            skill = root / "role" / "SKILL.md"
+            skill.parent.mkdir()
+            original = "# Baseline\n"
+            skill.write_text(original, encoding="utf-8")
+
+            def missing_baseline(text: str) -> dict:
+                return {"pass_rate": 0.7} if text == original else {
+                    "pass_rate": 0.99, "critical_security_rate": 1.0,
+                }
+
+            result = evolution_lab.skillopt_optimize_skill(
+                skill_path=skill, state_root=root / "state",
+                candidates=[{"id": "gain", "content": "# Better\n"}],
+                validation_evaluator=missing_baseline,
+            )
+            self.assertFalse(result["promoted"])
+            self.assertEqual(result["blocked_reason"], "baseline_metrics_missing_or_critical_security_below_100_percent")
+            self.assertEqual(skill.read_text(encoding="utf-8"), original)
 
     def test_halo_root_cause_classification_and_permission_lock(self) -> None:
         self.assertEqual(evolution_lab.classify_failure_root_cause("daily free token budget exhausted 429"), "QUOTA")

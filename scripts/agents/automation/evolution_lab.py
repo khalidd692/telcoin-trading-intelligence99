@@ -635,6 +635,8 @@ def skillopt_optimize_skill(
         """Read a bounded evaluator metric; malformed or missing evidence fails closed."""
         if not isinstance(result, dict) or key not in result:
             return None
+        if isinstance(result[key], bool):
+            return None
         try:
             value = float(result[key])
         except (TypeError, ValueError, OverflowError):
