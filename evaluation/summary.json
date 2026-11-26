@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795721998,
-  "observations": 557,
-  "valid_observations": 527,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795722838,
+  "observations": 558,
+  "valid_observations": 528,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 459,
-              "mean_pct": 0.27737
+              "count": 460,
+              "mean_pct": 0.28786
             }
           }
         }
@@ -109,8 +109,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 409,
-              "mean_pct": 2.07761
+              "count": 410,
+              "mean_pct": 2.14059
             }
           }
         }
@@ -159,14 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795598010,
-      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
-      "decision": "ATTENDRE",
-      "data_valid": true,
-      "changed_factors": [],
-      "event": null
-    },
     {
       "observed_at": 1795611256,
       "previous_decision": "ATTENDRE",
@@ -396,6 +388,16 @@
         "\u2212 convergence"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795722838,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ zone"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -447,9 +449,9 @@
     },
     "false_positives": {
       "count": 27,
-      "evaluable": 44,
+      "evaluable": 45,
       "pending": 0,
-      "unknown": 1,
+      "unknown": 0,
       "definition": "Alerte pr\u00e9coce sans cl\u00f4ture +5% en 24 h; variation de prix, pas r\u00e9sultat de trade."
     }
   }
