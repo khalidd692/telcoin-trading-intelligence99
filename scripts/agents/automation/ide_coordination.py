@@ -415,11 +415,28 @@ def record_handoff(
     return event
 
 
+def _safe_user_home() -> Path:
+    """Resolve user home safely even in stripped minimal-env sandboxed worker subprocesses."""
+    try:
+        return Path.home()
+    except RuntimeError:
+        for var in ("USERPROFILE", "HOME"):
+            val = os.environ.get(var, "").strip()
+            if val:
+                return Path(val)
+        # Deterministic fallback relative to repo root (e.g. Desktop/repo -> Desktop)
+        return ROOT.parent.parent if ROOT.parent.name.lower() == "desktop" else ROOT.parent
+
+
 def default_coordination_state_root() -> Path:
     """Resolve the single shared TEL99 coordination state root without creating a second ledger."""
     env_dir = os.environ.get("TEL99_COORDINATION_STATE", "").strip()
     if env_dir:
-        return Path(env_dir).expanduser().resolve()
+        try:
+            return Path(env_dir).expanduser().resolve()
+        except RuntimeError:
+            return Path(env_dir).resolve()
+    home = _safe_user_home()
     cfg_path = HERE / "tel99-config.json"
     if cfg_path.is_file():
         try:
@@ -427,11 +444,11 @@ def default_coordination_state_root() -> Path:
             raw = str(cfg.get("state_dir") or "").strip()
             if raw:
                 if raw.startswith(("~/", "~\\")):
-                    return (Path.home() / raw[2:]).resolve()
-                return Path(raw).expanduser().resolve()
+                    return (home / raw[2:]).resolve()
+                return Path(raw).resolve()
         except (OSError, ValueError):
             pass
-    return (Path.home() / "Desktop" / "TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE").resolve()
+    return (home / "Desktop" / "TEL99_ANTIGRAVITY_AUTOFEED_20261124_STATE").resolve()
 
 
 def is_pid_alive(pid: int | None) -> bool:
