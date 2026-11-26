@@ -678,63 +678,58 @@ class ContinuousLearningWorker:
 
         t0 = time.monotonic()
         day = daily_key or _today_utc()
-        ps = self.load_proactive_state()
-
-        if not ps.get("enabled", True):
-            return {"ok": False, "status": "DISABLED", "reason": "proactive_disabled_by_owner"}
-
         try:
-            lock_cm = exclusive(self.learning_dir / "proactive.lock")
-        except Exception:
-            return {"ok": False, "status": "DEFERRED", "reason": "proactive_lock_unavailable"}
+            # The same interprocess lock protects state reads, daily dedup,
+            # execution, and every state write. A losing contender must never
+            # persist a stale snapshot over the winner's completed brief.
+            with exclusive(self.learning_dir / "proactive.lock"):
+                ps = self.load_proactive_state()
 
-        def _persist_deferred(reason_str: str, status_str: str) -> dict[str, Any]:
-            rec = {
-                "brief_id": f"brief-{day}-deferred",
-                "daily_key": day,
-                "generated_at": _now_iso(),
-                "trigger": trigger,
-                "status": status_str,
-                "domain": "deferred",
-                "title": f"Cycle proactif différé ({reason_str})",
-                "why_useful": "Protection des ressources hôte et priorité absolue au propriétaire.",
-                "deliverable_rel_path": None,
-                "evidence": [f"Motif vérifié : {reason_str}"],
-                "limits": ["Aucun lancement concurrent d'inférence locale."],
-                "risks": [],
-                "next_action": "Reprise automatique au prochain créneau libre sans doublon.",
-                "duration_seconds": round(time.monotonic() - t0, 2),
-                "requires_human_approval": False,
-                "owner_feedback": None,
-            }
-            ps["last_deferred"] = rec
-            self.save_proactive_state(ps)
-            return {"ok": False, "status": status_str, "reason": reason_str, "deferred_record": rec}
+                if not ps.get("enabled", True):
+                    return {"ok": False, "status": "DISABLED", "reason": "proactive_disabled_by_owner"}
 
-        allowed, reason = self.can_run_background(probe_engines=probe_engines)
-        if not allowed:
-            st_code = "YIELDED_TO_OWNER" if "owner" in reason else "DEFERRED"
-            return _persist_deferred(reason, st_code)
+                def _persist_deferred(reason_str: str, status_str: str) -> dict[str, Any]:
+                    rec = {
+                        "brief_id": f"brief-{day}-deferred",
+                        "daily_key": day,
+                        "generated_at": _now_iso(),
+                        "trigger": trigger,
+                        "status": status_str,
+                        "domain": "deferred",
+                        "title": f"Cycle proactif différé ({reason_str})",
+                        "why_useful": "Protection des ressources hôte et priorité absolue au propriétaire.",
+                        "deliverable_rel_path": None,
+                        "evidence": [f"Motif vérifié : {reason_str}"],
+                        "limits": ["Aucun lancement concurrent d'inférence locale."],
+                        "risks": [],
+                        "next_action": "Reprise automatique au prochain créneau libre sans doublon.",
+                        "duration_seconds": round(time.monotonic() - t0, 2),
+                        "requires_human_approval": False,
+                        "owner_feedback": None,
+                    }
+                    ps["last_deferred"] = rec
+                    self.save_proactive_state(ps)
+                    return {"ok": False, "status": status_str, "reason": reason_str, "deferred_record": rec}
 
-        if day in (ps.get("daily_executed_keys") or []):
-            return {
-                "ok": True,
-                "status": "NO_USEFUL_TASK",
-                "reason": f"daily_dedup_already_executed:{day}",
-                "trigger": trigger,
-                "daily_key": day,
-                "deduplicated": True,
-            }
+                allowed, reason = self.can_run_background(probe_engines=probe_engines)
+                if not allowed:
+                    st_code = "YIELDED_TO_OWNER" if "owner" in reason else "DEFERRED"
+                    return _persist_deferred(reason, st_code)
 
-        try:
-            with lock_cm:
-                # Re-read after acquiring the lock: another scheduler may have
-                # completed this day between the initial read and acquisition.
+                # Re-read under lock, after all preflight probes, since another
+                # scheduler may have completed this daily key in the meantime.
                 ps = self.load_proactive_state()
                 if not ps.get("enabled", True):
                     return {"ok": False, "status": "DISABLED", "reason": "proactive_disabled_by_owner"}
                 if day in (ps.get("daily_executed_keys") or []):
-                    return {"ok": True, "status": "NO_USEFUL_TASK", "reason": f"daily_dedup_already_executed:{day}", "trigger": trigger, "daily_key": day, "deduplicated": True}
+                    return {
+                        "ok": True,
+                        "status": "NO_USEFUL_TASK",
+                        "reason": f"daily_dedup_already_executed:{day}",
+                        "trigger": trigger,
+                        "daily_key": day,
+                        "deduplicated": True,
+                    }
                 return self._execute_proactive_cycle_locked(
                     ps=ps,
                     authorized_snapshot=authorized_snapshot,
@@ -744,8 +739,21 @@ class ContinuousLearningWorker:
                     t0=t0,
                 )
         except Blocked:
-            return _persist_deferred("proactive_lock_busy", "DEFERRED")
-
+            return {
+                "ok": False,
+                "status": "DEFERRED",
+                "reason": "proactive_lock_busy",
+                "daily_key": day,
+                "state_persisted": False,
+            }
+        except OSError:
+            return {
+                "ok": False,
+                "status": "DEFERRED",
+                "reason": "proactive_lock_unavailable",
+                "daily_key": day,
+                "state_persisted": False,
+            }
     def _execute_proactive_cycle_locked(
         self,
         *,
