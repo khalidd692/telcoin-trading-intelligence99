@@ -62,7 +62,7 @@ try {
             if ($attempt -lt $MaxRetries) { Start-Sleep -Seconds $RetryWaitSeconds; continue }
             break
         }
-        Log-Night "Attempt $attempt/$MaxRetries: executing TEL99 autonomous 3-role G8 cycle (continuous_learning_worker --action run-proactive-live --publish-g7)..."
+        Log-Night "Attempt $attempt/${MaxRetries}: executing TEL99 autonomous 3-role G8 cycle (continuous_learning_worker --action run-proactive-live --publish-g7)..."
         $out = & $PyExe -B -m scripts.agents.automation.continuous_learning_worker --action run-proactive-live --trigger $Trigger --publish-g7 2>&1
         $rc = $LASTEXITCODE
         $out | Out-File -FilePath $Log -Append -Encoding utf8
