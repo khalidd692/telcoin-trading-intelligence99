@@ -824,15 +824,21 @@ class ContinuousLearningWorker:
 
 
 def _ollama_model_call(role: str, prompt: str, *, model: str = "gemma4:e4b-tel99-8k") -> str:
-    res = ollama_native.generate(
+    provider = ollama_native.OllamaNativeProvider(
         model=model,
-        prompt=prompt,
-        system=f"You are {role}. Be concise, factual, and strictly accurate.",
-        temperature=0.1,
-        num_predict=650,
+        max_tokens=768,
         timeout=180,
+        keep_alive="60s",
+        task_profile="module",
+        priority="background",
     )
-    return str(res.get("response") or "")
+    return str(
+        provider.complete(
+            system=f"You are {role}, a strict Python engineer. Return only clean Python code.",
+            prompt=prompt,
+        )
+        or ""
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
