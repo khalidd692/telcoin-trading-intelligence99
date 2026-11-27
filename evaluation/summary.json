@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795782710,
-  "observations": 564,
-  "valid_observations": 532,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795805965,
+  "observations": 565,
+  "valid_observations": 533,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -149,8 +149,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 210,
-              "mean_pct": 1.42436
+              "count": 211,
+              "mean_pct": 1.68334
             }
           }
         }
@@ -159,47 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795659230,
-      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ convergence"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1795658400",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001847,
-        "price_at": 1795658400,
-        "candle_closed_at": 1795658400,
-        "snapshot_at": 1795659174.940793,
-        "data_valid": true,
-        "watch": {
-          "level": 0.00173,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001631,
-          "unit": "4h"
-        },
-        "scenario_id": "breakout",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de la r\u00e9sistance des 20 bougies pr\u00e9c\u00e9dant la cassure, puis retest tenu ; volume relatif \u2265 1.",
-        "factors": [
-          "convergence"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1795669424,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -390,6 +349,14 @@
       "changed_factors": [
         "\u2212 convergence"
       ],
+      "event": null
+    },
+    {
+      "observed_at": 1795805965,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [],
       "event": null
     }
   ],
