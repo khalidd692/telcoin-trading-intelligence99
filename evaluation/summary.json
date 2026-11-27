@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795748017,
-  "observations": 561,
-  "valid_observations": 530,
-  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
-  "latest_valid": "false",
+  "generated_at": 1795768187,
+  "observations": 562,
+  "valid_observations": 531,
+  "latest_decision": "ATTENDRE",
+  "latest_valid": "true",
   "horizons": {
     "1h": {
       "count": 20,
@@ -69,8 +69,8 @@
         "observation_time_v3": {
           "by_rsi_method": {
             "wilder_rma_14_sma_seed": {
-              "count": 460,
-              "mean_pct": 0.28786
+              "count": 461,
+              "mean_pct": 0.29454
             }
           }
         }
@@ -159,47 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795645944,
-      "previous_decision": "ALERTE PR\u00c9COCE",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "\u2212 structure"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1795645800",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.001752,
-        "price_at": 1795645800,
-        "candle_closed_at": 1795645800,
-        "snapshot_at": 1795645892.05945,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001595,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001498,
-          "unit": "4h"
-        },
-        "scenario_id": "reversal",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de l\u2019EMA20, puis retest tenu sur la cl\u00f4ture suivante ; RSI4h > 50, MACD en am\u00e9lioration, 1h > EMA20.",
-        "factors": [
-          "convergence"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1795652760,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -422,6 +381,16 @@
         "\u2212 volume"
       ],
       "event": null
+    },
+    {
+      "observed_at": 1795768187,
+      "previous_decision": "DONN\u00c9ES INSUFFISANTES",
+      "decision": "ATTENDRE",
+      "data_valid": true,
+      "changed_factors": [
+        "+ convergence"
+      ],
+      "event": null
     }
   ],
   "outcome_method": "closed_candle_time_v2 for legacy; observation_time_v3 for new observations; original records preserved",
@@ -431,10 +400,10 @@
     "start_at": 1794591900,
     "thresholds": {
       "2": {
-        "episodes": 12,
+        "episodes": 13,
         "detected": 2,
         "missed": 2,
-        "unknown": 8,
+        "unknown": 9,
         "detection_fraction_known": 0.5,
         "late_alerts": 6,
         "median_lead_minutes": 42.1,
@@ -451,10 +420,10 @@
         "median_late_minutes": 165.94166666666666
       },
       "5": {
-        "episodes": 9,
+        "episodes": 10,
         "detected": 0,
         "missed": 3,
-        "unknown": 6,
+        "unknown": 7,
         "detection_fraction_known": 0.0,
         "late_alerts": 5,
         "median_lead_minutes": null,
