@@ -1,9 +1,9 @@
 {
-  "generated_at": 1795832634,
-  "observations": 569,
+  "generated_at": 1795838207,
+  "observations": 570,
   "valid_observations": 536,
-  "latest_decision": "ATTENDRE",
-  "latest_valid": "true",
+  "latest_decision": "DONN\u00c9ES INSUFFISANTES",
+  "latest_valid": "false",
   "horizons": {
     "1h": {
       "count": 20,
@@ -159,47 +159,6 @@
   },
   "disclaimer": "Observational price changes only; NOT simulated trades, executed orders, strategy validation, or profitability.",
   "recent_decisions": [
-    {
-      "observed_at": 1795706074,
-      "previous_decision": "ATTENDRE",
-      "decision": "CONFIRMATION TECHNIQUE",
-      "data_valid": true,
-      "changed_factors": [
-        "+ convergence"
-      ],
-      "event": {
-        "schema_version": 1,
-        "id": "KRAKEN:TELUSD:CONFIRMATION:1795705200",
-        "market": "KRAKEN:TELUSD",
-        "type": "CONFIRMATION",
-        "decision": "CONFIRMATION TECHNIQUE",
-        "confirmed": true,
-        "risk_checked_buy": false,
-        "rule_version": "tel99-radar-v1",
-        "source": "Kraken public REST / OHLC",
-        "price": 0.002076,
-        "price_at": 1795705200,
-        "candle_closed_at": 1795705200,
-        "snapshot_at": 1795706028.115511,
-        "data_valid": true,
-        "watch": {
-          "level": 0.001974,
-          "unit": "4h"
-        },
-        "invalidation": {
-          "level": 0.001849,
-          "unit": "4h"
-        },
-        "scenario_id": "breakout",
-        "technical_condition": "Cl\u00f4ture 4h au-dessus de la r\u00e9sistance des 20 bougies pr\u00e9c\u00e9dant la cassure, puis retest tenu ; volume relatif \u2265 1.",
-        "factors": [
-          "convergence"
-        ],
-        "blockers": [
-          "Confirmation technique uniquement : frais personnels, spread, liquidit\u00e9 et RR net restent \u00e0 v\u00e9rifier."
-        ]
-      }
-    },
     {
       "observed_at": 1795721998,
       "previous_decision": "CONFIRMATION TECHNIQUE",
@@ -358,6 +317,18 @@
         "+ reclaim",
         "+ rsi",
         "+ volume"
+      ],
+      "event": null
+    },
+    {
+      "observed_at": 1795838207,
+      "previous_decision": "ATTENDRE",
+      "decision": "DONN\u00c9ES INSUFFISANTES",
+      "data_valid": false,
+      "changed_factors": [
+        "\u2212 reclaim",
+        "\u2212 rsi",
+        "\u2212 volume"
       ],
       "event": null
     }
